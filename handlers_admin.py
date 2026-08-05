@@ -1,0 +1,630 @@
+# -*- coding: utf-8 -*-
+"""
+هندلرهای پنل مدیریت
+"""
+
+from aiogram import Router, F, Bot
+from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.filters import Command
+
+import database as db
+import keyboards as kb
+from states import (
+    AdminAddCategory,
+    AdminAddProduct,
+    AdminAddConfigs,
+    AdminAddTestConfigs,
+    AdminEditButton,
+    AdminSetCard,
+    AdminBroadcast,
+    AdminAddAdmin,
+    AdminRemoveAdmin,
+    AdminEditWelcome,
+    AdminReplyFlow,
+)
+
+router = Router()
+
+
+def admin_only(user_id: int) -> bool:
+    return db.is_admin(user_id)
+
+
+# ---------------------------------------------------------------------------
+# ورود به پنل
+# ---------------------------------------------------------------------------
+
+@router.message(F.text.func(lambda t: t == db.get_setting("btn_admin_panel")))
+async def open_admin_panel(message: Message, state: FSMContext):
+    if not admin_only(message.from_user.id):
+        return
+    await state.clear()
+    await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb())
+
+
+@router.callback_query(F.data == "adm_back_panel")
+async def cb_back_panel(call: CallbackQuery, state: FSMContext):
+    if not admin_only(call.from_user.id):
+        await call.answer()
+        return
+    await state.clear()
+    await call.message.edit_text("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb())
+    await call.answer()
+
+
+@router.callback_query(F.data == "noop")
+async def cb_noop(call: CallbackQuery):
+    await call.answer()
+
+
+# ---------------------------------------------------------------------------
+# مدیریت دسته‌بندی‌ها
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "adm_categories")
+async def cb_admin_categories(call: CallbackQuery):
+    if not admin_only(call.from_user.id):
+        return await call.answer()
+    categories = db.get_categories(active_only=False)
+    await call.message.edit_text("📂 مدیریت دسته‌بندی‌ها:", reply_markup=kb.admin_categories_kb(categories))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm_cat_toggle:"))
+async def cb_admin_cat_toggle(call: CallbackQuery):
+    cat_id = int(call.data.split(":")[1])
+    db.toggle_category(cat_id)
+    categories = db.get_categories(active_only=False)
+    await call.message.edit_text("📂 مدیریت دسته‌بندی‌ها:", reply_markup=kb.admin_categories_kb(categories))
+    await call.answer("وضعیت تغییر کرد.")
+
+
+@router.callback_query(F.data.startswith("adm_cat_del:"))
+async def cb_admin_cat_del(call: CallbackQuery):
+    cat_id = int(call.data.split(":")[1])
+    db.delete_category(cat_id)
+    categories = db.get_categories(active_only=False)
+    await call.message.edit_text("📂 مدیریت دسته‌بندی‌ها:", reply_markup=kb.admin_categories_kb(categories))
+    await call.answer("دسته‌بندی حذف شد.")
+
+
+@router.callback_query(F.data == "adm_cat_add")
+async def cb_admin_cat_add(call: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminAddCategory.waiting_name)
+    await call.message.edit_text("نام دسته‌بندی جدید را ارسال کنید:", reply_markup=kb.admin_back_kb())
+    await call.answer()
+
+
+@router.message(AdminAddCategory.waiting_name)
+async def process_add_category(message: Message, state: FSMContext):
+    if not admin_only(message.from_user.id):
+        return
+    db.add_category(message.text.strip())
+    await state.clear()
+    await message.answer("✅ دسته‌بندی اضافه شد.", reply_markup=kb.admin_panel_kb())
+
+
+# ---------------------------------------------------------------------------
+# مدیریت محصولات
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "adm_products")
+async def cb_admin_products(call: CallbackQuery):
+    if not admin_only(call.from_user.id):
+        return await call.answer()
+    categories = db.get_categories(active_only=False)
+    await call.message.edit_text(
+        "📦 مدیریت محصولات - ابتدا دسته‌بندی را انتخاب کنید:",
+        reply_markup=kb.admin_products_categories_kb(categories),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm_prod_cat:"))
+async def cb_admin_prod_cat(call: CallbackQuery):
+    cat_id = int(call.data.split(":")[1])
+    products = db.get_products(cat_id, active_only=False)
+    if not products:
+        await call.answer("محصولی در این دسته وجود ندارد.", show_alert=True)
+        return
+    await call.message.edit_text("لیست محصولات این دسته‌بندی:", reply_markup=kb.admin_products_list_kb(products))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm_prod_toggle:"))
+async def cb_admin_prod_toggle(call: CallbackQuery):
+    product_id = int(call.data.split(":")[1])
+    db.toggle_product(product_id)
+    product = db.get_product(product_id)
+    products = db.get_products(product["category_id"], active_only=False)
+    await call.message.edit_text("لیست محصولات این دسته‌بندی:", reply_markup=kb.admin_products_list_kb(products))
+    await call.answer("وضعیت تغییر کرد.")
+
+
+@router.callback_query(F.data.startswith("adm_prod_del:"))
+async def cb_admin_prod_del(call: CallbackQuery):
+    product_id = int(call.data.split(":")[1])
+    product = db.get_product(product_id)
+    cat_id = product["category_id"] if product else None
+    db.delete_product(product_id)
+    if cat_id:
+        products = db.get_products(cat_id, active_only=False)
+        await call.message.edit_text("لیست محصولات این دسته‌بندی:", reply_markup=kb.admin_products_list_kb(products))
+    await call.answer("محصول حذف شد.")
+
+
+@router.callback_query(F.data == "adm_prod_add")
+async def cb_admin_prod_add(call: CallbackQuery, state: FSMContext):
+    categories = db.get_categories(active_only=True)
+    if not categories:
+        await call.answer("ابتدا باید حداقل یک دسته‌بندی فعال بسازید.", show_alert=True)
+        return
+    await state.set_state(AdminAddProduct.waiting_category)
+    await call.message.edit_text(
+        "محصول جدید در کدام دسته‌بندی اضافه شود؟",
+        reply_markup=kb.admin_pick_category_kb(categories, "adm_newprod_cat"),
+    )
+    await call.answer()
+
+
+@router.callback_query(AdminAddProduct.waiting_category, F.data.startswith("adm_newprod_cat:"))
+async def cb_pick_category_for_new_product(call: CallbackQuery, state: FSMContext):
+    cat_id = int(call.data.split(":")[1])
+    await state.update_data(category_id=cat_id)
+    await state.set_state(AdminAddProduct.waiting_name)
+    await call.message.edit_text("نام محصول را ارسال کنید:", reply_markup=kb.admin_back_kb())
+    await call.answer()
+
+
+@router.message(AdminAddProduct.waiting_name)
+async def process_product_name(message: Message, state: FSMContext):
+    await state.update_data(name=message.text.strip())
+    await state.set_state(AdminAddProduct.waiting_price)
+    await message.answer("قیمت محصول را به تومان و فقط عدد وارد کنید (مثال: 150000):")
+
+
+@router.message(AdminAddProduct.waiting_price)
+async def process_product_price(message: Message, state: FSMContext):
+    text = message.text.strip().replace(",", "")
+    if not text.isdigit():
+        await message.answer("لطفاً فقط عدد وارد کنید. مثال: 150000")
+        return
+    await state.update_data(price=int(text))
+    await state.set_state(AdminAddProduct.waiting_desc)
+    await message.answer("توضیحات محصول را وارد کنید (یا برای رد شدن بنویسید: -)")
+
+
+@router.message(AdminAddProduct.waiting_desc)
+async def process_product_desc(message: Message, state: FSMContext):
+    desc = "" if message.text.strip() == "-" else message.text.strip()
+    data = await state.get_data()
+    db.add_product(data["category_id"], data["name"], data["price"], desc)
+    await state.clear()
+    await message.answer("✅ محصول با موفقیت اضافه شد.", reply_markup=kb.admin_panel_kb())
+
+
+# ---------------------------------------------------------------------------
+# افزودن کانفیگ (بانک لینک) به محصول
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "adm_add_configs")
+async def cb_admin_add_configs(call: CallbackQuery, state: FSMContext):
+    products = db.get_all_products()
+    if not products:
+        await call.answer("ابتدا باید یک محصول بسازید.", show_alert=True)
+        return
+    await state.set_state(AdminAddConfigs.waiting_product)
+    await call.message.edit_text(
+        "افزودن کانفیگ به کدام محصول؟", reply_markup=kb.admin_pick_product_kb(products, "adm_addcfg_prod")
+    )
+    await call.answer()
+
+
+@router.callback_query(AdminAddConfigs.waiting_product, F.data.startswith("adm_addcfg_prod:"))
+async def cb_pick_product_for_configs(call: CallbackQuery, state: FSMContext):
+    product_id = int(call.data.split(":")[1])
+    await state.update_data(product_id=product_id)
+    await state.set_state(AdminAddConfigs.waiting_links)
+    await call.message.edit_text(
+        "لینک‌های کانفیگ را ارسال کنید (هر لینک در یک خط جداگانه). می‌توانید چند لینک را با هم در یک پیام بفرستید:",
+        reply_markup=kb.admin_back_kb(),
+    )
+    await call.answer()
+
+
+@router.message(AdminAddConfigs.waiting_links)
+async def process_add_configs(message: Message, state: FSMContext):
+    data = await state.get_data()
+    product_id = data["product_id"]
+    links = [line for line in message.text.splitlines() if line.strip()]
+    db.add_configs(product_id, links)
+    await state.clear()
+    stock = db.count_available_configs(product_id)
+    await message.answer(
+        f"✅ {len(links)} لینک اضافه شد.\n📊 موجودی فعلی این محصول: {stock} عدد",
+        reply_markup=kb.admin_panel_kb(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# مدیریت کانفیگ تست
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "adm_test_menu")
+async def cb_admin_test_menu(call: CallbackQuery):
+    await call.message.edit_text("🧪 مدیریت کانفیگ تست:", reply_markup=kb.admin_test_menu_kb())
+    await call.answer()
+
+
+@router.callback_query(F.data == "adm_test_toggle")
+async def cb_admin_test_toggle(call: CallbackQuery):
+    current = db.get_setting("test_enabled", "1")
+    db.set_setting("test_enabled", "0" if current == "1" else "1")
+    await call.message.edit_text("🧪 مدیریت کانفیگ تست:", reply_markup=kb.admin_test_menu_kb())
+    await call.answer("وضعیت کانفیگ تست تغییر کرد.")
+
+
+@router.callback_query(F.data == "adm_test_add")
+async def cb_admin_test_add(call: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminAddTestConfigs.waiting_links)
+    await call.message.edit_text(
+        "لینک‌های کانفیگ تست را ارسال کنید (هر لینک در یک خط):", reply_markup=kb.admin_back_kb()
+    )
+    await call.answer()
+
+
+@router.message(AdminAddTestConfigs.waiting_links)
+async def process_add_test_configs(message: Message, state: FSMContext):
+    links = [line for line in message.text.splitlines() if line.strip()]
+    db.add_test_configs(links)
+    await state.clear()
+    await message.answer(f"✅ {len(links)} لینک تست اضافه شد.", reply_markup=kb.admin_panel_kb())
+
+
+# ---------------------------------------------------------------------------
+# سفارش‌های در انتظار
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "adm_pending_orders")
+async def cb_admin_pending_orders(call: CallbackQuery):
+    orders = db.get_pending_orders()
+    if not orders:
+        await call.answer("سفارش در انتظاری وجود ندارد.", show_alert=True)
+        return
+    await call.message.edit_text("🧾 سفارش‌های در انتظار بررسی:", reply_markup=kb.pending_orders_kb(orders))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("view_order:"))
+async def cb_view_order(call: CallbackQuery, bot: Bot):
+    order_id = int(call.data.split(":")[1])
+    order = db.get_order(order_id)
+    if not order:
+        await call.answer("سفارش یافت نشد.", show_alert=True)
+        return
+    product = db.get_product(order["product_id"])
+    caption = (
+        f"سفارش #{order_id}\n"
+        f"کاربر: {order['user_id']}\n"
+        f"محصول: {product['name'] if product else '---'}"
+    )
+    if order["receipt_file_id"]:
+        await bot.send_photo(call.from_user.id, order["receipt_file_id"], caption=caption, reply_markup=kb.order_review_kb(order_id))
+    else:
+        await call.message.answer(caption, reply_markup=kb.order_review_kb(order_id))
+    await call.answer()
+
+
+# تایید سفارش: کانفیگ از مخزن به کاربر اختصاص و ارسال می‌شود
+@router.callback_query(F.data.startswith("order_approve:"))
+async def cb_order_approve(call: CallbackQuery, bot: Bot):
+    if not admin_only(call.from_user.id):
+        return await call.answer()
+
+    order_id = int(call.data.split(":")[1])
+    order = db.get_order(order_id)
+    if not order:
+        await call.answer("سفارش یافت نشد.", show_alert=True)
+        return
+    if order["status"] != "pending":
+        await call.answer("این سفارش قبلاً بررسی شده است.", show_alert=True)
+        return
+
+    product = db.get_product(order["product_id"])
+    result = db.take_unused_config(order["product_id"], order["user_id"])
+    if not result:
+        await call.answer("⛔️ موجودی این محصول تمام شده! ابتدا لینک جدید اضافه کنید.", show_alert=True)
+        return
+
+    db.approve_order(order_id, result["id"])
+
+    try:
+        await bot.send_message(
+            order["user_id"],
+            f"✅ خرید شما تایید شد!\n📦 محصول: {product['name']}\n\n🔗 کانفیگ شما:\n`{result['link']}`",
+            parse_mode="Markdown",
+        )
+    except Exception:
+        pass
+
+    try:
+        await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد و کانفیگ ارسال شد.")
+    except Exception:
+        try:
+            await call.message.edit_text((call.message.text or "") + "\n\n✅ تایید شد و کانفیگ ارسال شد.")
+        except Exception:
+            pass
+    await call.answer("سفارش تایید و کانفیگ برای کاربر ارسال شد.")
+
+
+@router.callback_query(F.data.startswith("order_reject:"))
+async def cb_order_reject(call: CallbackQuery, bot: Bot):
+    if not admin_only(call.from_user.id):
+        return await call.answer()
+
+    order_id = int(call.data.split(":")[1])
+    order = db.get_order(order_id)
+    if not order:
+        await call.answer("سفارش یافت نشد.", show_alert=True)
+        return
+    if order["status"] != "pending":
+        await call.answer("این سفارش قبلاً بررسی شده است.", show_alert=True)
+        return
+
+    db.reject_order(order_id)
+    try:
+        await bot.send_message(
+            order["user_id"],
+            "❌ متاسفانه رسید ارسالی شما تایید نشد. در صورت اشتباه لطفاً با پشتیبانی در ارتباط باشید.",
+        )
+    except Exception:
+        pass
+
+    try:
+        await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n❌ رد شد.")
+    except Exception:
+        try:
+            await call.message.edit_text((call.message.text or "") + "\n\n❌ رد شد.")
+        except Exception:
+            pass
+    await call.answer("سفارش رد شد.")
+
+
+# ---------------------------------------------------------------------------
+# ویرایش متن دکمه‌ها
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "adm_edit_buttons")
+async def cb_admin_edit_buttons(call: CallbackQuery):
+    await call.message.edit_text("کدام دکمه ویرایش شود؟", reply_markup=kb.admin_edit_buttons_kb())
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm_btn_edit:"))
+async def cb_admin_btn_edit(call: CallbackQuery, state: FSMContext):
+    key = call.data.split(":")[1]
+    await state.update_data(setting_key=key)
+    await state.set_state(AdminEditButton.waiting_text)
+    current = db.get_setting(key)
+    await call.message.edit_text(
+        f"متن فعلی: {current}\n\nمتن جدید را ارسال کنید (می‌توانید ایموجی هم اضافه کنید):",
+        reply_markup=kb.admin_back_kb(),
+    )
+    await call.answer()
+
+
+@router.message(AdminEditButton.waiting_text)
+async def process_edit_button(message: Message, state: FSMContext):
+    data = await state.get_data()
+    key = data["setting_key"]
+    db.set_setting(key, message.text.strip())
+    await state.clear()
+    await message.answer("✅ متن دکمه به‌روزرسانی شد.", reply_markup=kb.admin_panel_kb())
+
+
+# --- انتخاب رنگ دکمه (ویژگی style در Bot API 9.4 به بعد) ---
+
+@router.callback_query(F.data.startswith("adm_btn_color_menu:"))
+async def cb_admin_btn_color_menu(call: CallbackQuery):
+    key = call.data.split(":")[1]
+    label = kb.BUTTON_LABELS.get(key, key)
+    await call.message.edit_text(
+        f"رنگ «{label}» را انتخاب کنید:", reply_markup=kb.admin_color_picker_kb(key)
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm_btn_color_set:"))
+async def cb_admin_btn_color_set(call: CallbackQuery):
+    _, key, style = call.data.split(":")
+    db.set_setting(f"{key}_style", "" if style == "none" else style)
+    await call.message.edit_text("کدام دکمه ویرایش شود؟", reply_markup=kb.admin_edit_buttons_kb())
+    await call.answer("✅ رنگ دکمه به‌روزرسانی شد. دفعه بعد که منو ارسال شود رنگ جدید نمایش داده می‌شود.")
+
+
+# ---------------------------------------------------------------------------
+# تنظیم شماره کارت
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "adm_set_card")
+async def cb_admin_set_card(call: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminSetCard.waiting_number)
+    await call.message.edit_text("شماره کارت جدید را ارسال کنید:", reply_markup=kb.admin_back_kb())
+    await call.answer()
+
+
+@router.message(AdminSetCard.waiting_number)
+async def process_set_card_number(message: Message, state: FSMContext):
+    await state.update_data(card_number=message.text.strip())
+    await state.set_state(AdminSetCard.waiting_holder)
+    await message.answer("نام صاحب حساب را ارسال کنید:")
+
+
+@router.message(AdminSetCard.waiting_holder)
+async def process_set_card_holder(message: Message, state: FSMContext):
+    data = await state.get_data()
+    db.set_setting("card_number", data["card_number"])
+    db.set_setting("card_holder", message.text.strip())
+    await state.clear()
+    await message.answer("✅ اطلاعات کارت به‌روزرسانی شد.", reply_markup=kb.admin_panel_kb())
+
+
+# ---------------------------------------------------------------------------
+# ویرایش پیام خوش‌آمد
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "adm_edit_welcome")
+async def cb_admin_edit_welcome(call: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminEditWelcome.waiting_text)
+    current = db.get_setting("welcome_text")
+    await call.message.edit_text(f"متن فعلی:\n{current}\n\nمتن جدید را ارسال کنید:", reply_markup=kb.admin_back_kb())
+    await call.answer()
+
+
+@router.message(AdminEditWelcome.waiting_text)
+async def process_edit_welcome(message: Message, state: FSMContext):
+    db.set_setting("welcome_text", message.text)
+    await state.clear()
+    await message.answer("✅ پیام خوش‌آمد به‌روزرسانی شد.", reply_markup=kb.admin_panel_kb())
+
+
+# ---------------------------------------------------------------------------
+# مدیریت ادمین‌ها
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "adm_admins_menu")
+async def cb_admin_admins_menu(call: CallbackQuery):
+    await call.message.edit_text("👤 مدیریت ادمین‌ها:", reply_markup=kb.admin_admins_menu_kb())
+    await call.answer()
+
+
+@router.callback_query(F.data == "adm_admins_list")
+async def cb_admin_admins_list(call: CallbackQuery):
+    admins = db.list_admins()
+    text = "لیست ادمین‌ها:\n" + "\n".join([f"- `{a}`" for a in admins])
+    await call.message.edit_text(text, parse_mode="Markdown", reply_markup=kb.admin_back_kb("adm_admins_menu"))
+    await call.answer()
+
+
+@router.callback_query(F.data == "adm_admin_add")
+async def cb_admin_admin_add(call: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminAddAdmin.waiting_id)
+    await call.message.edit_text("آیدی عددی کاربر جدید برای افزودن به ادمین‌ها را ارسال کنید:", reply_markup=kb.admin_back_kb("adm_admins_menu"))
+    await call.answer()
+
+
+@router.message(AdminAddAdmin.waiting_id)
+async def process_add_admin(message: Message, state: FSMContext):
+    if not message.text.strip().isdigit():
+        await message.answer("لطفاً فقط آیدی عددی ارسال کنید.")
+        return
+    db.add_admin(int(message.text.strip()))
+    await state.clear()
+    await message.answer("✅ ادمین جدید اضافه شد.", reply_markup=kb.admin_panel_kb())
+
+
+@router.callback_query(F.data == "adm_admin_remove")
+async def cb_admin_admin_remove(call: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminRemoveAdmin.waiting_id)
+    await call.message.edit_text("آیدی عددی ادمینی که باید حذف شود را ارسال کنید:", reply_markup=kb.admin_back_kb("adm_admins_menu"))
+    await call.answer()
+
+
+@router.message(AdminRemoveAdmin.waiting_id)
+async def process_remove_admin(message: Message, state: FSMContext):
+    if not message.text.strip().isdigit():
+        await message.answer("لطفاً فقط آیدی عددی ارسال کنید.")
+        return
+    ok = db.remove_admin(int(message.text.strip()))
+    await state.clear()
+    if ok:
+        await message.answer("✅ ادمین حذف شد.", reply_markup=kb.admin_panel_kb())
+    else:
+        await message.answer("⛔️ مالک اصلی بات قابل حذف نیست.", reply_markup=kb.admin_panel_kb())
+
+
+# ---------------------------------------------------------------------------
+# پیام همگانی (Broadcast)
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "adm_broadcast")
+async def cb_admin_broadcast(call: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminBroadcast.waiting_message)
+    await call.message.edit_text("متن پیام همگانی را ارسال کنید (برای همه کاربران ارسال می‌شود):", reply_markup=kb.admin_back_kb())
+    await call.answer()
+
+
+@router.message(AdminBroadcast.waiting_message)
+async def process_broadcast(message: Message, state: FSMContext, bot: Bot):
+    user_ids = db.get_all_user_ids()
+    success, failed = 0, 0
+    for uid in user_ids:
+        try:
+            await message.copy_to(uid)
+            success += 1
+        except Exception:
+            failed += 1
+    await state.clear()
+    await message.answer(
+        f"📢 پیام همگانی ارسال شد.\n✅ موفق: {success}\n❌ ناموفق: {failed}", reply_markup=kb.admin_panel_kb()
+    )
+
+
+# ---------------------------------------------------------------------------
+# پاسخ به پیام پشتیبانی کاربر
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data.startswith("reply_user:"))
+async def cb_reply_user(call: CallbackQuery, state: FSMContext):
+    user_id = int(call.data.split(":")[1])
+    await state.update_data(reply_to_user=user_id)
+    await state.set_state(AdminReplyFlow.waiting_reply)
+    await call.message.answer(f"متن پاسخ برای کاربر {user_id} را ارسال کنید:")
+    await call.answer()
+
+
+@router.message(AdminReplyFlow.waiting_reply)
+async def process_reply_to_user(message: Message, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    user_id = data.get("reply_to_user")
+    if not user_id:
+        await state.clear()
+        return
+    try:
+        await bot.send_message(user_id, f"📩 پاسخ پشتیبانی:\n\n{message.text}")
+        await message.answer("✅ پاسخ ارسال شد.", reply_markup=kb.admin_panel_kb())
+    except Exception:
+        await message.answer("⛔️ ارسال پیام به کاربر با خطا مواجه شد.", reply_markup=kb.admin_panel_kb())
+    await state.clear()
+
+
+# ---------------------------------------------------------------------------
+# آمار فروش
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "adm_stats")
+async def cb_admin_stats(call: CallbackQuery):
+    stats = db.get_stats()
+    text = (
+        "📊 آمار فروشگاه:\n\n"
+        f"👥 تعداد کاربران: {stats['users']}\n"
+        f"⏳ سفارش‌های در انتظار: {stats['pending']}\n"
+        f"✅ سفارش‌های تایید شده: {stats['approved']}\n"
+        f"❌ سفارش‌های رد شده: {stats['rejected']}\n"
+        f"💰 مجموع فروش: {stats['revenue']:,} تومان"
+    )
+    await call.message.edit_text(text, reply_markup=kb.admin_back_kb())
+    await call.answer()
+
+
+# ---------------------------------------------------------------------------
+# دستور متنی برای دسترسی سریع (اختیاری)
+# ---------------------------------------------------------------------------
+
+@router.message(Command("admin"))
+async def cmd_admin(message: Message, state: FSMContext):
+    if not admin_only(message.from_user.id):
+        return
+    await state.clear()
+    await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb())
