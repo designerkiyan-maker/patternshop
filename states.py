@@ -6,10 +6,6 @@ class BuyFlow(StatesGroup):
     waiting_receipt = State()
 
 
-class DiscountEntry(StatesGroup):
-    waiting_code = State()
-
-
 class ContactFlow(StatesGroup):
     waiting_message = State()
 
@@ -61,13 +57,3 @@ class AdminRemoveAdmin(StatesGroup):
 
 class AdminEditWelcome(StatesGroup):
     waiting_text = State()
-
-
-class AdminCreateDiscount(StatesGroup):
-    waiting_code = State()
-    waiting_type_value = State()
-    waiting_maxuses = State()
-
-
-class AdminReferralPercent(StatesGroup):
-    waiting_value = State()

@@ -22,8 +22,6 @@ from states import (
     AdminRemoveAdmin,
     AdminEditWelcome,
     AdminReplyFlow,
-    AdminCreateDiscount,
-    AdminReferralPercent,
 )
 
 router = Router()
@@ -341,19 +339,6 @@ async def cb_order_approve(call: CallbackQuery, bot: Bot):
 
     db.approve_order(order_id, result["id"])
 
-    # پورسانت زیرمجموعه‌گیری: اگر این اولین خرید تاییدشده‌ی این کاربر باشد و او زیرمجموعه‌ی کسی باشد
-    reward_info = db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or product["price"])
-    if reward_info:
-        reward_amount, referrer_id = reward_info
-        try:
-            await bot.send_message(
-                referrer_id,
-                f"🤝 تبریک! یکی از زیرمجموعه‌های شما اولین خرید خود را انجام داد.\n"
-                f"💰 {reward_amount:,} تومان به کیف پول شما اضافه شد.",
-            )
-        except Exception:
-            pass
-
     try:
         await bot.send_message(
             order["user_id"],
@@ -404,129 +389,6 @@ async def cb_order_reject(call: CallbackQuery, bot: Bot):
         except Exception:
             pass
     await call.answer("سفارش رد شد.")
-
-
-# ---------------------------------------------------------------------------
-# مدیریت کدهای تخفیف
-# ---------------------------------------------------------------------------
-
-@router.callback_query(F.data == "adm_discounts_menu")
-async def cb_admin_discounts_menu(call: CallbackQuery):
-    codes = db.list_discount_codes()
-    await call.message.edit_text("🎟 مدیریت کدهای تخفیف:", reply_markup=kb.discount_codes_kb(codes))
-    await call.answer()
-
-
-@router.callback_query(F.data.startswith("adm_disc_toggle:"))
-async def cb_admin_disc_toggle(call: CallbackQuery):
-    code_id = int(call.data.split(":")[1])
-    db.toggle_discount_code(code_id)
-    codes = db.list_discount_codes()
-    await call.message.edit_text("🎟 مدیریت کدهای تخفیف:", reply_markup=kb.discount_codes_kb(codes))
-    await call.answer("وضعیت تغییر کرد.")
-
-
-@router.callback_query(F.data.startswith("adm_disc_del:"))
-async def cb_admin_disc_del(call: CallbackQuery):
-    code_id = int(call.data.split(":")[1])
-    db.delete_discount_code(code_id)
-    codes = db.list_discount_codes()
-    await call.message.edit_text("🎟 مدیریت کدهای تخفیف:", reply_markup=kb.discount_codes_kb(codes))
-    await call.answer("کد حذف شد.")
-
-
-@router.callback_query(F.data == "adm_disc_add")
-async def cb_admin_disc_add(call: CallbackQuery, state: FSMContext):
-    await state.set_state(AdminCreateDiscount.waiting_code)
-    await call.message.edit_text(
-        "نام کد تخفیف را ارسال کنید (مثلاً WELCOME20، بدون فاصله):", reply_markup=kb.admin_back_kb()
-    )
-    await call.answer()
-
-
-@router.message(AdminCreateDiscount.waiting_code)
-async def process_disc_code(message: Message, state: FSMContext):
-    code = message.text.strip()
-    if db.get_discount_code(code):
-        await message.answer("⛔️ این کد از قبل وجود دارد. یک نام دیگر ارسال کنید:")
-        return
-    await state.update_data(disc_code=code)
-    await state.set_state(AdminCreateDiscount.waiting_type_value)
-    await message.answer(
-        "نوع و مقدار تخفیف را به یکی از این دو شکل ارسال کنید:\n\n"
-        "برای تخفیف درصدی: `percent 20`\n"
-        "برای تخفیف مبلغ ثابت: `fixed 50000`",
-        parse_mode="Markdown",
-    )
-
-
-@router.message(AdminCreateDiscount.waiting_type_value)
-async def process_disc_type_value(message: Message, state: FSMContext):
-    parts = message.text.strip().split()
-    if len(parts) != 2 or parts[0].lower() not in ("percent", "fixed") or not parts[1].isdigit():
-        await message.answer("فرمت اشتباه است. مثال درست: `percent 20` یا `fixed 50000`", parse_mode="Markdown")
-        return
-
-    kind, value = parts[0].lower(), int(parts[1])
-    if kind == "percent":
-        await state.update_data(disc_percent=value, disc_fixed=None)
-    else:
-        await state.update_data(disc_percent=None, disc_fixed=value)
-
-    await state.set_state(AdminCreateDiscount.waiting_maxuses)
-    await message.answer("سقف تعداد استفاده از این کد چند بار باشد؟ (برای نامحدود عدد 0 را بفرست)")
-
-
-@router.message(AdminCreateDiscount.waiting_maxuses)
-async def process_disc_maxuses(message: Message, state: FSMContext):
-    if not message.text.strip().isdigit():
-        await message.answer("لطفاً فقط عدد ارسال کنید (0 برای نامحدود).")
-        return
-    max_uses = int(message.text.strip())
-    data = await state.get_data()
-    db.create_discount_code(
-        data["disc_code"], percent=data.get("disc_percent"), fixed_amount=data.get("disc_fixed"), max_uses=max_uses
-    )
-    await state.clear()
-    await message.answer(f"✅ کد تخفیف «{data['disc_code']}» ساخته شد.", reply_markup=kb.admin_panel_kb())
-
-
-# ---------------------------------------------------------------------------
-# تنظیمات زیرمجموعه‌گیری
-# ---------------------------------------------------------------------------
-
-@router.callback_query(F.data == "adm_referral_settings")
-async def cb_admin_referral_settings(call: CallbackQuery):
-    await call.message.edit_text("🤝 تنظیمات زیرمجموعه‌گیری:", reply_markup=kb.referral_settings_kb())
-    await call.answer()
-
-
-@router.callback_query(F.data == "adm_referral_toggle")
-async def cb_admin_referral_toggle(call: CallbackQuery):
-    current = db.get_setting("referral_enabled", "1")
-    db.set_setting("referral_enabled", "0" if current == "1" else "1")
-    await call.message.edit_text("🤝 تنظیمات زیرمجموعه‌گیری:", reply_markup=kb.referral_settings_kb())
-    await call.answer("وضعیت تغییر کرد.")
-
-
-@router.callback_query(F.data == "adm_referral_percent_edit")
-async def cb_admin_referral_percent_edit(call: CallbackQuery, state: FSMContext):
-    await state.set_state(AdminReferralPercent.waiting_value)
-    await call.message.edit_text(
-        "درصد پورسانت جدید را وارد کنید (عددی بین 0 تا 100):", reply_markup=kb.admin_back_kb()
-    )
-    await call.answer()
-
-
-@router.message(AdminReferralPercent.waiting_value)
-async def process_referral_percent(message: Message, state: FSMContext):
-    text = message.text.strip()
-    if not text.isdigit() or not (0 <= int(text) <= 100):
-        await message.answer("لطفاً یک عدد بین 0 تا 100 ارسال کنید.")
-        return
-    db.set_setting("referral_percent", text)
-    await state.clear()
-    await message.answer(f"✅ درصد پورسانت زیرمجموعه‌گیری روی {text}٪ تنظیم شد.", reply_markup=kb.admin_panel_kb())
 
 
 # ---------------------------------------------------------------------------
