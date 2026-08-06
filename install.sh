@@ -10,11 +10,6 @@
 
 set -e
 
-# جلوگیری از گیر کردن apt پشت پنجره‌های تعاملی (مثل پرسش needrestart برای ری‌استارت سرویس‌ها)
-export DEBIAN_FRONTEND=noninteractive
-export NEEDRESTART_MODE=a
-export NEEDRESTART_SUSPEND=1
-
 # ============================================================================
 # تنظیمات - این خط را با آدرس مخزن گیت‌هاب خودت جایگزین کن
 # ============================================================================
@@ -29,8 +24,8 @@ echo "────────────────────────�
 # ۱. نصب پیش‌نیازهای سیستمی
 # ----------------------------------------------------------------------------
 echo "📦 بررسی و نصب پیش‌نیازها (git, python3, pip, venv)..."
-sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
-timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get install -y -qq git python3 python3-pip python3-venv > /dev/null
+sudo apt update -qq
+timeout 90 sudo apt install -y -qq git python3 python3-pip python3-venv > /dev/null
 
 # ----------------------------------------------------------------------------
 # ۲. دریافت یا آپدیت کد از گیت‌هاب
