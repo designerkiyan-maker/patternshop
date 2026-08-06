@@ -36,6 +36,14 @@ def main_menu_kb(is_admin: bool) -> ReplyKeyboardMarkup:
     rows.append(
         [_styled_button(settings.get("btn_my_orders", "📦 سفارش‌های من"), settings.get("btn_my_orders_style", ""))]
     )
+    if settings.get("referral_enabled", "1") == "1":
+        rows.append(
+            [
+                _styled_button(
+                    settings.get("btn_referral", "🤝 زیرمجموعه‌گیری من"), settings.get("btn_referral_style", "")
+                )
+            ]
+        )
     rows.append(
         [_styled_button(settings.get("btn_contact", "📞 ارتباط با پشتیبانی"), settings.get("btn_contact_style", ""))]
     )
@@ -81,7 +89,8 @@ def products_kb(products, category_id) -> InlineKeyboardMarkup:
 
 def product_confirm_kb(product_id) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="✅ خرید و ارسال رسید", callback_data=f"buy_confirm:{product_id}")],
+        [InlineKeyboardButton(text="✅ ادامه و ارسال رسید", callback_data=f"buy_start:{product_id}")],
+        [InlineKeyboardButton(text="🎟 وارد کردن کد تخفیف", callback_data=f"enter_code:{product_id}")],
         [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="back_categories")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -124,6 +133,8 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔗 افزودن کانفیگ به محصول", callback_data="adm_add_configs")],
         [InlineKeyboardButton(text="🧪 مدیریت کانفیگ تست", callback_data="adm_test_menu")],
         [InlineKeyboardButton(text="🧾 سفارش‌های در انتظار", callback_data="adm_pending_orders")],
+        [InlineKeyboardButton(text="🎟 مدیریت کدهای تخفیف", callback_data="adm_discounts_menu")],
+        [InlineKeyboardButton(text="🤝 تنظیمات زیرمجموعه‌گیری", callback_data="adm_referral_settings")],
         [InlineKeyboardButton(text="✏️ ویرایش متن دکمه‌ها", callback_data="adm_edit_buttons")],
         [InlineKeyboardButton(text="💳 تنظیم شماره کارت", callback_data="adm_set_card")],
         [InlineKeyboardButton(text="📝 ویرایش پیام خوش‌آمد", callback_data="adm_edit_welcome")],
@@ -222,6 +233,7 @@ BUTTON_LABELS = {
     "btn_test": "دکمه کانفیگ تست",
     "btn_contact": "دکمه ارتباط با پشتیبانی",
     "btn_my_orders": "دکمه سفارش‌های من",
+    "btn_referral": "دکمه زیرمجموعه‌گیری",
     "btn_admin_panel": "دکمه پنل مدیریت",
 }
 
@@ -274,4 +286,52 @@ def pending_orders_kb(orders) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text=f"سفارش #{o['id']} - کاربر {o['user_id']}", callback_data=f"view_order:{o['id']}")]
         )
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ---------------------------------------------------------------------------
+# مدیریت کدهای تخفیف
+# ---------------------------------------------------------------------------
+
+def discount_codes_kb(codes) -> InlineKeyboardMarkup:
+    rows = []
+    for c in codes:
+        state_icon = "🟢" if c["is_active"] else "🔴"
+        if c["percent"]:
+            value_txt = f"{c['percent']}%"
+        else:
+            value_txt = f"{c['fixed_amount']:,}ت"
+        usage_txt = f"{c['used_count']}/{c['max_uses'] if c['max_uses'] else '∞'}"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{state_icon} {c['code']} | {value_txt} | استفاده: {usage_txt}", callback_data="noop"
+                )
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(text="تغییر وضعیت", callback_data=f"adm_disc_toggle:{c['id']}"),
+                InlineKeyboardButton(text="🗑حذف", callback_data=f"adm_disc_del:{c['id']}"),
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="➕ ساخت کد تخفیف جدید", callback_data="adm_disc_add")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ---------------------------------------------------------------------------
+# تنظیمات زیرمجموعه‌گیری
+# ---------------------------------------------------------------------------
+
+def referral_settings_kb() -> InlineKeyboardMarkup:
+    enabled = db.get_setting("referral_enabled", "1") == "1"
+    toggle_text = "🔴 غیرفعال کردن زیرمجموعه‌گیری" if enabled else "🟢 فعال کردن زیرمجموعه‌گیری"
+    percent = db.get_setting("referral_percent", "10")
+    rows = [
+        [InlineKeyboardButton(text=f"درصد پورسانت فعلی: {percent}%", callback_data="noop")],
+        [InlineKeyboardButton(text=toggle_text, callback_data="adm_referral_toggle")],
+        [InlineKeyboardButton(text="✏️ تغییر درصد پورسانت", callback_data="adm_referral_percent_edit")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+    ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
