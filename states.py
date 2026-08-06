@@ -10,6 +10,11 @@ class DiscountEntry(StatesGroup):
     waiting_code = State()
 
 
+class WalletTopup(StatesGroup):
+    waiting_amount = State()
+    waiting_receipt = State()
+
+
 class ContactFlow(StatesGroup):
     waiting_message = State()
 

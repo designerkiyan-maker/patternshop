@@ -318,6 +318,106 @@ async def cb_view_order(call: CallbackQuery, bot: Bot):
     await call.answer()
 
 
+# ---------------------------------------------------------------------------
+# درخواست‌های شارژ کیف پول
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "adm_pending_topups")
+async def cb_admin_pending_topups(call: CallbackQuery):
+    topups = db.get_pending_topups()
+    if not topups:
+        await call.answer("درخواست شارژ در انتظاری وجود ندارد.", show_alert=True)
+        return
+    await call.message.edit_text("👛 درخواست‌های شارژ کیف پول در انتظار:", reply_markup=kb.pending_topups_kb(topups))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("view_topup:"))
+async def cb_view_topup(call: CallbackQuery, bot: Bot):
+    topup_id = int(call.data.split(":")[1])
+    topup = db.get_topup(topup_id)
+    if not topup:
+        await call.answer("درخواست یافت نشد.", show_alert=True)
+        return
+    caption = f"شارژ کیف پول #{topup_id}\nکاربر: {topup['user_id']}\nمبلغ: {topup['amount']:,} تومان"
+    if topup["receipt_file_id"]:
+        await bot.send_photo(
+            call.from_user.id, topup["receipt_file_id"], caption=caption, reply_markup=kb.topup_review_kb(topup_id)
+        )
+    else:
+        await call.message.answer(caption, reply_markup=kb.topup_review_kb(topup_id))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("topup_approve:"))
+async def cb_topup_approve(call: CallbackQuery, bot: Bot):
+    if not admin_only(call.from_user.id):
+        return await call.answer()
+
+    topup_id = int(call.data.split(":")[1])
+    topup = db.get_topup(topup_id)
+    if not topup:
+        await call.answer("درخواست یافت نشد.", show_alert=True)
+        return
+    if topup["status"] != "pending":
+        await call.answer("این درخواست قبلاً بررسی شده است.", show_alert=True)
+        return
+
+    db.approve_topup(topup_id)
+    new_balance = db.get_wallet_credit(topup["user_id"])
+
+    try:
+        await bot.send_message(
+            topup["user_id"],
+            f"✅ شارژ کیف پول شما تایید شد!\n💰 مبلغ {topup['amount']:,} تومان اضافه شد.\n"
+            f"👛 موجودی فعلی کیف پول شما: {new_balance:,} تومان",
+        )
+    except Exception:
+        pass
+
+    try:
+        await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید و شارژ شد.")
+    except Exception:
+        try:
+            await call.message.edit_text((call.message.text or "") + "\n\n✅ تایید و شارژ شد.")
+        except Exception:
+            pass
+    await call.answer("شارژ کیف پول تایید شد.")
+
+
+@router.callback_query(F.data.startswith("topup_reject:"))
+async def cb_topup_reject(call: CallbackQuery, bot: Bot):
+    if not admin_only(call.from_user.id):
+        return await call.answer()
+
+    topup_id = int(call.data.split(":")[1])
+    topup = db.get_topup(topup_id)
+    if not topup:
+        await call.answer("درخواست یافت نشد.", show_alert=True)
+        return
+    if topup["status"] != "pending":
+        await call.answer("این درخواست قبلاً بررسی شده است.", show_alert=True)
+        return
+
+    db.reject_topup(topup_id)
+    try:
+        await bot.send_message(
+            topup["user_id"],
+            "❌ متاسفانه درخواست شارژ کیف پول شما تایید نشد. در صورت اشتباه با پشتیبانی تماس بگیرید.",
+        )
+    except Exception:
+        pass
+
+    try:
+        await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n❌ رد شد.")
+    except Exception:
+        try:
+            await call.message.edit_text((call.message.text or "") + "\n\n❌ رد شد.")
+        except Exception:
+            pass
+    await call.answer("درخواست رد شد.")
+
+
 # تایید سفارش: کانفیگ از مخزن به کاربر اختصاص و ارسال می‌شود
 @router.callback_query(F.data.startswith("order_approve:"))
 async def cb_order_approve(call: CallbackQuery, bot: Bot):

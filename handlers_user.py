@@ -10,7 +10,7 @@ from aiogram.fsm.context import FSMContext
 
 import database as db
 import keyboards as kb
-from states import BuyFlow, ContactFlow, DiscountEntry
+from states import BuyFlow, ContactFlow, DiscountEntry, WalletTopup
 from config import MAX_TEST_PER_USER
 
 router = Router()
@@ -346,9 +346,84 @@ async def referral_menu(message: Message, bot: Bot):
         f"هر کاربری که با این لینک وارد بات شود و اولین خریدش تایید شود، {percent}٪ از مبلغ پرداختی او "
         f"به‌صورت اعتبار کیف پول به شما تعلق می‌گیرد و به‌طور خودکار در خرید بعدی‌تان کسر می‌شود.\n\n"
         f"👥 تعداد زیرمجموعه‌های شما: {stats['count']}\n"
-        f"👛 موجودی کیف پول شما: {stats['credit']:,} تومان"
+        f"👛 موجودی کیف پول شما: {stats['credit']:,} تومان\n\n"
+        "می‌توانید کیف پول خود را هم مستقیماً شارژ کنید:"
     )
-    await message.answer(text)
+    await message.answer(text, reply_markup=kb.wallet_menu_kb())
+
+
+@router.callback_query(F.data == "start_topup")
+async def cb_start_topup(call: CallbackQuery, state: FSMContext):
+    await state.set_state(WalletTopup.waiting_amount)
+    await call.message.edit_text(
+        "💰 چه مبلغی (به تومان) می‌خواهید به کیف پول خود شارژ کنید؟ فقط عدد ارسال کنید (مثال: 100000):",
+        reply_markup=kb.cancel_kb(),
+    )
+    await call.answer()
+
+
+@router.message(WalletTopup.waiting_amount)
+async def process_topup_amount(message: Message, state: FSMContext):
+    text = message.text.strip().replace(",", "")
+    if not text.isdigit() or int(text) < 1000:
+        await message.answer("لطفاً یک عدد معتبر و حداقل 1000 تومان ارسال کنید.")
+        return
+
+    amount = int(text)
+    await state.update_data(topup_amount=amount)
+    await state.set_state(WalletTopup.waiting_receipt)
+
+    card_number = db.get_setting("card_number")
+    card_holder = db.get_setting("card_holder")
+
+    text = (
+        f"مبلغ {amount:,} تومان را به شماره کارت زیر واریز کرده و سپس عکس رسید را ارسال کنید:\n\n"
+        f"💳 شماره کارت: `{card_number}`\n"
+        f"👤 به نام: {card_holder}\n"
+    )
+    await message.answer(text, parse_mode="Markdown", reply_markup=kb.cancel_kb())
+
+
+@router.message(WalletTopup.waiting_receipt, F.photo)
+async def receive_topup_receipt(message: Message, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    amount = data.get("topup_amount")
+    if not amount:
+        await message.answer("درخواست معتبر یافت نشد. لطفاً دوباره از منو شروع کنید.")
+        await state.clear()
+        return
+
+    file_id = message.photo[-1].file_id
+    topup_id = db.create_topup(message.from_user.id, amount)
+    db.set_topup_receipt(topup_id, file_id)
+
+    user_row = db.get_user(message.from_user.id)
+    caption = (
+        f"👛 درخواست شارژ کیف پول #{topup_id}\n"
+        f"👤 کاربر: {user_row['first_name'] or ''} (@{user_row['username'] or '---'})\n"
+        f"🆔 آیدی عددی: `{message.from_user.id}`\n"
+        f"💰 مبلغ: {amount:,} تومان"
+    )
+    for admin_id in db.list_admins():
+        try:
+            sent = await bot.send_photo(
+                admin_id, file_id, caption=caption, parse_mode="Markdown",
+                reply_markup=kb.topup_review_kb(topup_id),
+            )
+            db.set_topup_admin_message(topup_id, admin_id, sent.message_id)
+        except Exception:
+            pass
+
+    await message.answer(
+        "✅ درخواست شارژ کیف پول شما برای بررسی ارسال شد. پس از تایید ادمین، مبلغ به کیف پول شما اضافه می‌شود.",
+        reply_markup=kb.main_menu_kb(db.is_admin(message.from_user.id)),
+    )
+    await state.clear()
+
+
+@router.message(WalletTopup.waiting_receipt)
+async def topup_receipt_wrong_type(message: Message):
+    await message.answer("لطفاً فقط عکس رسید پرداخت را ارسال کنید.")
 
 
 # ---------------------------------------------------------------------------

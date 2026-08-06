@@ -133,6 +133,7 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔗 افزودن کانفیگ به محصول", callback_data="adm_add_configs")],
         [InlineKeyboardButton(text="🧪 مدیریت کانفیگ تست", callback_data="adm_test_menu")],
         [InlineKeyboardButton(text="🧾 سفارش‌های در انتظار", callback_data="adm_pending_orders")],
+        [InlineKeyboardButton(text="👛 درخواست‌های شارژ کیف پول", callback_data="adm_pending_topups")],
         [InlineKeyboardButton(text="🎟 مدیریت کدهای تخفیف", callback_data="adm_discounts_menu")],
         [InlineKeyboardButton(text="🤝 تنظیمات زیرمجموعه‌گیری", callback_data="adm_referral_settings")],
         [InlineKeyboardButton(text="✏️ ویرایش متن دکمه‌ها", callback_data="adm_edit_buttons")],
@@ -289,6 +290,21 @@ def pending_orders_kb(orders) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def pending_topups_kb(topups) -> InlineKeyboardMarkup:
+    rows = []
+    for t in topups:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"شارژ #{t['id']} - کاربر {t['user_id']} - {t['amount']:,} تومان",
+                    callback_data=f"view_topup:{t['id']}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 # ---------------------------------------------------------------------------
 # مدیریت کدهای تخفیف
 # ---------------------------------------------------------------------------
@@ -333,5 +349,25 @@ def referral_settings_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_referral_toggle")],
         [InlineKeyboardButton(text="✏️ تغییر درصد پورسانت", callback_data="adm_referral_percent_edit")],
         [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ---------------------------------------------------------------------------
+# کیف پول
+# ---------------------------------------------------------------------------
+
+def wallet_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="➕ شارژ کیف پول", callback_data="start_topup")]]
+    )
+
+
+def topup_review_kb(topup_id) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(text="✅ تایید و شارژ کیف پول", callback_data=f"topup_approve:{topup_id}"),
+            InlineKeyboardButton(text="❌ رد کردن", callback_data=f"topup_reject:{topup_id}"),
+        ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)

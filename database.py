@@ -140,6 +140,18 @@ def init_db():
                 is_active INTEGER DEFAULT 1,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS wallet_topups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                amount INTEGER NOT NULL,
+                status TEXT DEFAULT 'pending',
+                receipt_file_id TEXT,
+                admin_chat_id INTEGER,
+                admin_message_id INTEGER,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT
+            );
             """
         )
 
@@ -702,3 +714,60 @@ def compute_discount_amount(row, price: int) -> int:
     if row["fixed_amount"]:
         return min(row["fixed_amount"], price)
     return 0
+
+
+# ---------------------------------------------------------------------------
+# شارژ کیف پول (توسط خود کاربر، با تایید ادمین)
+# ---------------------------------------------------------------------------
+
+def create_topup(user_tg_id: int, amount: int) -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO wallet_topups (user_id, amount, status) VALUES (?, ?, 'pending')",
+            (user_tg_id, amount),
+        )
+        return cur.lastrowid
+
+
+def set_topup_receipt(topup_id: int, file_id: str):
+    with get_conn() as conn:
+        conn.execute("UPDATE wallet_topups SET receipt_file_id=? WHERE id=?", (file_id, topup_id))
+
+
+def set_topup_admin_message(topup_id: int, admin_chat_id: int, admin_message_id: int):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE wallet_topups SET admin_chat_id=?, admin_message_id=? WHERE id=?",
+            (admin_chat_id, admin_message_id, topup_id),
+        )
+
+
+def get_topup(topup_id: int):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM wallet_topups WHERE id=?", (topup_id,)).fetchone()
+
+
+def approve_topup(topup_id: int) -> bool:
+    topup = get_topup(topup_id)
+    if not topup or topup["status"] != "pending":
+        return False
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE wallet_topups SET status='approved', updated_at=? WHERE id=?",
+            (datetime.utcnow().isoformat(), topup_id),
+        )
+    add_wallet_credit(topup["user_id"], topup["amount"])
+    return True
+
+
+def reject_topup(topup_id: int):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE wallet_topups SET status='rejected', updated_at=? WHERE id=?",
+            (datetime.utcnow().isoformat(), topup_id),
+        )
+
+
+def get_pending_topups():
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM wallet_topups WHERE status='pending' ORDER BY id").fetchall()
