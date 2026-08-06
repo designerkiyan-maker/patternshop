@@ -18,6 +18,11 @@ SERVICE_NAME="v2raybot"
 BRAND_NAME="VPN HUNTER"
 VERSION="v1.0"
 
+# جلوگیری از گیر کردن apt پشت پنجره‌های تعاملی (مثل پرسش needrestart برای ری‌استارت سرویس‌ها)
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+
 # ---------------------------------------------------------------------------
 # رنگ‌ها
 # ---------------------------------------------------------------------------
@@ -37,8 +42,8 @@ RESET='\033[0m'
 ensure_figlet() {
     if ! command -v figlet &> /dev/null; then
         echo -e "${CYAN}🔤 در حال آماده‌سازی فونت نمایش (فقط بار اول، چند ثانیه طول می‌کشد)...${RESET}"
-        sudo apt update -qq
-        timeout 30 sudo apt install -y figlet -qq
+        sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
+        timeout 60 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get install -y -qq figlet
         if ! command -v figlet &> /dev/null; then
             echo -e "${YELLOW}⚠️ نصب figlet انجام نشد، بنر ساده نمایش داده می‌شود.${RESET}"
             sleep 1
@@ -80,8 +85,8 @@ pause() {
 # ---------------------------------------------------------------------------
 install_bot() {
     echo -e "${CYAN}📦 بررسی و نصب پیش‌نیازها (git, python3, pip, venv, figlet)...${RESET}"
-    sudo apt update -qq
-    timeout 90 sudo apt install -y -qq git python3 python3-pip python3-venv figlet > /dev/null
+    sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
+    timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get install -y -qq git python3 python3-pip python3-venv figlet > /dev/null
 
     if [ -d "$INSTALL_DIR/.git" ]; then
         echo -e "${YELLOW}⚠️ پروژه از قبل نصب شده است. در حال دریافت آخرین نسخه...${RESET}"
