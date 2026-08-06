@@ -32,6 +32,7 @@ DEFAULT_SETTINGS = {
     "btn_test": "🧪 کانفیگ تست رایگان",
     "btn_contact": "📞 ارتباط با پشتیبانی",
     "btn_my_orders": "📦 سفارش‌های من",
+    "btn_referral": "🤝 زیرمجموعه‌گیری من",
     "btn_admin_panel": "⚙️ پنل مدیریت",
     "test_enabled": "1",
     "card_number": "0000-0000-0000-0000",
@@ -44,7 +45,11 @@ DEFAULT_SETTINGS = {
     "btn_test_style": "success",
     "btn_contact_style": "",
     "btn_my_orders_style": "",
+    "btn_referral_style": "",
     "btn_admin_panel_style": "danger",
+    # سیستم زیرمجموعه‌گیری
+    "referral_enabled": "1",
+    "referral_percent": "10",  # درصدی که به دعوت‌کننده به‌عنوان اعتبار کیف پول تعلق می‌گیرد
 }
 
 
@@ -111,6 +116,11 @@ def init_db():
                 config_id INTEGER,
                 admin_chat_id INTEGER,
                 admin_message_id INTEGER,
+                base_price INTEGER,
+                wallet_used INTEGER DEFAULT 0,
+                discount_code_id INTEGER,
+                discount_amount INTEGER DEFAULT 0,
+                final_price INTEGER,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT
             );
@@ -118,6 +128,17 @@ def init_db():
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS discount_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT UNIQUE NOT NULL,
+                percent INTEGER,
+                fixed_amount INTEGER,
+                max_uses INTEGER DEFAULT 0,
+                used_count INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
             """
         )
@@ -128,6 +149,30 @@ def init_db():
         # تنظیمات پیش‌فرض
         for k, v in DEFAULT_SETTINGS.items():
             c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
+
+        # مهاجرت ستون‌های جدید برای دیتابیس‌هایی که قبلاً ساخته شده‌اند
+        _migrate_columns(conn)
+
+
+def _column_exists(conn, table: str, column: str) -> bool:
+    cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+    return column in cols
+
+
+def _migrate_columns(conn):
+    migrations = [
+        ("users", "referred_by", "INTEGER"),
+        ("users", "referral_credit", "INTEGER DEFAULT 0"),
+        ("users", "referral_first_purchase_rewarded", "INTEGER DEFAULT 0"),
+        ("orders", "base_price", "INTEGER"),
+        ("orders", "wallet_used", "INTEGER DEFAULT 0"),
+        ("orders", "discount_code_id", "INTEGER"),
+        ("orders", "discount_amount", "INTEGER DEFAULT 0"),
+        ("orders", "final_price", "INTEGER"),
+    ]
+    for table, col, coltype in migrations:
+        if not _column_exists(conn, table, col):
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
 
 
 # ---------------------------------------------------------------------------
@@ -407,11 +452,23 @@ def take_unused_test_config(user_tg_id: int):
 # سفارش‌ها
 # ---------------------------------------------------------------------------
 
-def create_order(user_tg_id: int, product_id: int) -> int:
+def create_order(
+    user_tg_id: int,
+    product_id: int,
+    base_price: int,
+    wallet_used: int = 0,
+    discount_code_id: int = None,
+    discount_amount: int = 0,
+) -> int:
+    """سفارش جدید می‌سازد. مبلغ کیف پول و کد تخفیف در همین لحظه رزرو/کسر می‌شوند
+    (نه در زمان تایید ادمین) تا در حین بررسی رسید توسط کاربر دیگری قابل استفاده مجدد نباشند.
+    اگر سفارش بعداً رد شود، این مقادیر خودکار توسط reject_order برگردانده می‌شوند."""
+    final_price = max(base_price - wallet_used - discount_amount, 0)
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO orders (user_id, product_id, status) VALUES (?, ?, 'pending')",
-            (user_tg_id, product_id),
+            "INSERT INTO orders (user_id, product_id, status, base_price, wallet_used, "
+            "discount_code_id, discount_amount, final_price) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?)",
+            (user_tg_id, product_id, base_price, wallet_used, discount_code_id, discount_amount, final_price),
         )
         return cur.lastrowid
 
@@ -443,11 +500,18 @@ def approve_order(order_id: int, config_id: int):
 
 
 def reject_order(order_id: int):
+    """سفارش را رد می‌کند و در صورت استفاده از کیف پول یا کد تخفیف، آن‌ها را برمی‌گرداند."""
+    order = get_order(order_id)
     with get_conn() as conn:
         conn.execute(
             "UPDATE orders SET status='rejected', updated_at=? WHERE id=?",
             (datetime.utcnow().isoformat(), order_id),
         )
+    if order:
+        if order["wallet_used"]:
+            add_wallet_credit(order["user_id"], order["wallet_used"])
+        if order["discount_code_id"]:
+            decrement_discount_usage(order["discount_code_id"])
 
 
 def get_pending_orders():
@@ -475,7 +539,7 @@ def get_stats():
         approved_c = conn.execute("SELECT COUNT(*) c FROM orders WHERE status='approved'").fetchone()["c"]
         rejected_c = conn.execute("SELECT COUNT(*) c FROM orders WHERE status='rejected'").fetchone()["c"]
         revenue = conn.execute(
-            "SELECT COALESCE(SUM(p.price),0) s FROM orders o "
+            "SELECT COALESCE(SUM(COALESCE(o.final_price, p.price)),0) s FROM orders o "
             "JOIN products p ON o.product_id=p.id WHERE o.status='approved'"
         ).fetchone()["s"]
         return {
@@ -485,3 +549,156 @@ def get_stats():
             "rejected": rejected_c,
             "revenue": revenue,
         }
+
+
+# ---------------------------------------------------------------------------
+# سیستم زیرمجموعه‌گیری (رفرال) و کیف پول اعتباری
+# ---------------------------------------------------------------------------
+
+def set_referred_by(user_tg_id: int, referrer_tg_id: int):
+    """کاربر جدید را زیرمجموعه‌ی یک دعوت‌کننده ثبت می‌کند (فقط یک‌بار و فقط اگر قبلاً ثبت نشده باشد)."""
+    if user_tg_id == referrer_tg_id:
+        return
+    with get_conn() as conn:
+        row = conn.execute("SELECT referred_by FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
+        if row and row["referred_by"] is None:
+            referrer_exists = conn.execute(
+                "SELECT 1 FROM users WHERE telegram_id=?", (referrer_tg_id,)
+            ).fetchone()
+            if referrer_exists:
+                conn.execute(
+                    "UPDATE users SET referred_by=? WHERE telegram_id=?", (referrer_tg_id, user_tg_id)
+                )
+
+
+def get_referral_stats(user_tg_id: int) -> dict:
+    with get_conn() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) c FROM users WHERE referred_by=?", (user_tg_id,)
+        ).fetchone()["c"]
+        row = conn.execute(
+            "SELECT referral_credit FROM users WHERE telegram_id=?", (user_tg_id,)
+        ).fetchone()
+        credit = row["referral_credit"] if row else 0
+        return {"count": count, "credit": credit}
+
+
+def get_wallet_credit(user_tg_id: int) -> int:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT referral_credit FROM users WHERE telegram_id=?", (user_tg_id,)
+        ).fetchone()
+        return row["referral_credit"] if row else 0
+
+
+def add_wallet_credit(user_tg_id: int, delta: int):
+    """مقدار دلخواه (مثبت یا منفی) به اعتبار کیف پول کاربر اضافه می‌کند، هرگز منفی نمی‌شود."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET referral_credit = MAX(referral_credit + ?, 0) WHERE telegram_id=?",
+            (delta, user_tg_id),
+        )
+
+
+def reward_referrer_if_first_purchase(referred_user_tg_id: int, paid_amount: int):
+    """وقتی خرید یک کاربر تایید می‌شود، اگر این اولین خرید تاییدشده‌ی او باشد و او زیرمجموعه‌ی
+    کسی باشد، درصدی از مبلغ به‌عنوان اعتبار کیف پول به دعوت‌کننده تعلق می‌گیرد.
+    خروجی: (مبلغ پاداش, آیدی دعوت‌کننده) یا None اگر پاداشی تعلق نگرفت."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT referred_by, referral_first_purchase_rewarded FROM users WHERE telegram_id=?",
+            (referred_user_tg_id,),
+        ).fetchone()
+        if not row or not row["referred_by"] or row["referral_first_purchase_rewarded"]:
+            return None
+
+        conn.execute(
+            "UPDATE users SET referral_first_purchase_rewarded=1 WHERE telegram_id=?",
+            (referred_user_tg_id,),
+        )
+        referrer_id = row["referred_by"]
+
+    if get_setting("referral_enabled", "1") != "1":
+        return None
+
+    percent = int(get_setting("referral_percent", "10") or 0)
+    reward = (paid_amount * percent) // 100
+    if reward > 0:
+        add_wallet_credit(referrer_id, reward)
+        return reward, referrer_id
+    return None
+
+
+# ---------------------------------------------------------------------------
+# کدهای تخفیف
+# ---------------------------------------------------------------------------
+
+def create_discount_code(code: str, percent: int = None, fixed_amount: int = None, max_uses: int = 0) -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO discount_codes (code, percent, fixed_amount, max_uses) VALUES (?, ?, ?, ?)",
+            (code.strip().upper(), percent, fixed_amount, max_uses),
+        )
+        return cur.lastrowid
+
+
+def get_discount_code(code: str):
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM discount_codes WHERE code=?", (code.strip().upper(),)
+        ).fetchone()
+
+
+def get_discount_code_by_id(code_id: int):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM discount_codes WHERE id=?", (code_id,)).fetchone()
+
+
+def list_discount_codes():
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM discount_codes ORDER BY id DESC").fetchall()
+
+
+def toggle_discount_code(code_id: int):
+    with get_conn() as conn:
+        row = conn.execute("SELECT is_active FROM discount_codes WHERE id=?", (code_id,)).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE discount_codes SET is_active=? WHERE id=?",
+                (0 if row["is_active"] else 1, code_id),
+            )
+
+
+def delete_discount_code(code_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM discount_codes WHERE id=?", (code_id,))
+
+
+def increment_discount_usage(code_id: int):
+    with get_conn() as conn:
+        conn.execute("UPDATE discount_codes SET used_count = used_count + 1 WHERE id=?", (code_id,))
+
+
+def decrement_discount_usage(code_id: int):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE discount_codes SET used_count = MAX(used_count - 1, 0) WHERE id=?", (code_id,)
+        )
+
+
+def is_discount_code_valid(row) -> bool:
+    if not row:
+        return False
+    if not row["is_active"]:
+        return False
+    if row["max_uses"] and row["used_count"] >= row["max_uses"]:
+        return False
+    return True
+
+
+def compute_discount_amount(row, price: int) -> int:
+    if row["percent"]:
+        return min((price * row["percent"]) // 100, price)
+    if row["fixed_amount"]:
+        return min(row["fixed_amount"], price)
+    return 0
