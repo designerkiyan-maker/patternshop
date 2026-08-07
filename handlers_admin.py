@@ -24,6 +24,7 @@ from states import (
     AdminReplyFlow,
     AdminCreateDiscount,
     AdminReferralPercent,
+    AdminAddReseller,
 )
 
 router = Router()
@@ -31,6 +32,30 @@ router = Router()
 
 def admin_only(user_id: int) -> bool:
     return db.is_admin(user_id)
+
+
+def get_actor_scope(user_id: int):
+    """مشخص می‌کند کاربر با چه نقشی وارد پنل شده:
+    (None, 'owner') برای مالک بات - همه چیز مربوط به فروشگاه اصلی
+    (telegram_id, 'reseller') برای یک نماینده فعال - فقط منابع خودش
+    (None, 'denied') برای هرکس دیگر"""
+    if db.is_admin(user_id):
+        return None, "owner"
+    reseller = db.get_reseller(user_id)
+    if reseller and reseller["is_active"]:
+        return user_id, "reseller"
+    return None, "denied"
+
+
+def back_to_panel_kb(role: str):
+    return kb.reseller_panel_kb() if role == "reseller" else kb.admin_panel_kb()
+
+
+def can_manage_order(user_id: int, order) -> bool:
+    if db.is_admin(user_id):
+        return True
+    product_reseller_id = db.get_product_reseller_id(order["product_id"])
+    return product_reseller_id is not None and product_reseller_id == user_id and db.is_reseller(user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -45,13 +70,25 @@ async def open_admin_panel(message: Message, state: FSMContext):
     await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb())
 
 
+@router.message(F.text.func(lambda t: t == db.get_setting("btn_reseller_panel")))
+async def open_reseller_panel(message: Message, state: FSMContext):
+    if not db.is_reseller(message.from_user.id) or db.is_admin(message.from_user.id):
+        return
+    await state.clear()
+    await message.answer("🏪 پنل نمایندگی شما:", reply_markup=kb.reseller_panel_kb())
+
+
 @router.callback_query(F.data == "adm_back_panel")
 async def cb_back_panel(call: CallbackQuery, state: FSMContext):
-    if not admin_only(call.from_user.id):
+    reseller_id, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
         await call.answer()
         return
     await state.clear()
-    await call.message.edit_text("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb())
+    if role == "owner":
+        await call.message.edit_text("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb())
+    else:
+        await call.message.edit_text("🏪 پنل نمایندگی شما:", reply_markup=kb.reseller_panel_kb())
     await call.answer()
 
 
@@ -66,33 +103,49 @@ async def cb_noop(call: CallbackQuery):
 
 @router.callback_query(F.data == "adm_categories")
 async def cb_admin_categories(call: CallbackQuery):
-    if not admin_only(call.from_user.id):
+    reseller_id, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
         return await call.answer()
-    categories = db.get_categories(active_only=False)
+    categories = db.get_categories(reseller_id=reseller_id, active_only=False)
     await call.message.edit_text("📂 مدیریت دسته‌بندی‌ها:", reply_markup=kb.admin_categories_kb(categories))
     await call.answer()
 
 
 @router.callback_query(F.data.startswith("adm_cat_toggle:"))
 async def cb_admin_cat_toggle(call: CallbackQuery):
+    reseller_id, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
+        return await call.answer()
     cat_id = int(call.data.split(":")[1])
+    category = db.get_category(cat_id)
+    if not category or category["reseller_id"] != reseller_id:
+        return await call.answer("دسترسی ندارید.", show_alert=True)
     db.toggle_category(cat_id)
-    categories = db.get_categories(active_only=False)
+    categories = db.get_categories(reseller_id=reseller_id, active_only=False)
     await call.message.edit_text("📂 مدیریت دسته‌بندی‌ها:", reply_markup=kb.admin_categories_kb(categories))
     await call.answer("وضعیت تغییر کرد.")
 
 
 @router.callback_query(F.data.startswith("adm_cat_del:"))
 async def cb_admin_cat_del(call: CallbackQuery):
+    reseller_id, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
+        return await call.answer()
     cat_id = int(call.data.split(":")[1])
+    category = db.get_category(cat_id)
+    if not category or category["reseller_id"] != reseller_id:
+        return await call.answer("دسترسی ندارید.", show_alert=True)
     db.delete_category(cat_id)
-    categories = db.get_categories(active_only=False)
+    categories = db.get_categories(reseller_id=reseller_id, active_only=False)
     await call.message.edit_text("📂 مدیریت دسته‌بندی‌ها:", reply_markup=kb.admin_categories_kb(categories))
     await call.answer("دسته‌بندی حذف شد.")
 
 
 @router.callback_query(F.data == "adm_cat_add")
 async def cb_admin_cat_add(call: CallbackQuery, state: FSMContext):
+    _, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
+        return await call.answer()
     await state.set_state(AdminAddCategory.waiting_name)
     await call.message.edit_text("نام دسته‌بندی جدید را ارسال کنید:", reply_markup=kb.admin_back_kb())
     await call.answer()
@@ -100,11 +153,13 @@ async def cb_admin_cat_add(call: CallbackQuery, state: FSMContext):
 
 @router.message(AdminAddCategory.waiting_name)
 async def process_add_category(message: Message, state: FSMContext):
-    if not admin_only(message.from_user.id):
+    reseller_id, role = get_actor_scope(message.from_user.id)
+    if role == "denied":
+        await state.clear()
         return
-    db.add_category(message.text.strip())
+    db.add_category(message.text.strip(), reseller_id=reseller_id)
     await state.clear()
-    await message.answer("✅ دسته‌بندی اضافه شد.", reply_markup=kb.admin_panel_kb())
+    await message.answer("✅ دسته‌بندی اضافه شد.", reply_markup=back_to_panel_kb(role))
 
 
 # ---------------------------------------------------------------------------
@@ -113,9 +168,10 @@ async def process_add_category(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "adm_products")
 async def cb_admin_products(call: CallbackQuery):
-    if not admin_only(call.from_user.id):
+    reseller_id, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
         return await call.answer()
-    categories = db.get_categories(active_only=False)
+    categories = db.get_categories(reseller_id=reseller_id, active_only=False)
     await call.message.edit_text(
         "📦 مدیریت محصولات - ابتدا دسته‌بندی را انتخاب کنید:",
         reply_markup=kb.admin_products_categories_kb(categories),
@@ -125,7 +181,13 @@ async def cb_admin_products(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("adm_prod_cat:"))
 async def cb_admin_prod_cat(call: CallbackQuery):
+    reseller_id, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
+        return await call.answer()
     cat_id = int(call.data.split(":")[1])
+    category = db.get_category(cat_id)
+    if not category or category["reseller_id"] != reseller_id:
+        return await call.answer("دسترسی ندارید.", show_alert=True)
     products = db.get_products(cat_id, active_only=False)
     if not products:
         await call.answer("محصولی در این دسته وجود ندارد.", show_alert=True)
@@ -136,9 +198,14 @@ async def cb_admin_prod_cat(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("adm_prod_toggle:"))
 async def cb_admin_prod_toggle(call: CallbackQuery):
+    reseller_id, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
+        return await call.answer()
     product_id = int(call.data.split(":")[1])
-    db.toggle_product(product_id)
     product = db.get_product(product_id)
+    if not product or db.get_product_reseller_id(product_id) != reseller_id:
+        return await call.answer("دسترسی ندارید.", show_alert=True)
+    db.toggle_product(product_id)
     products = db.get_products(product["category_id"], active_only=False)
     await call.message.edit_text("لیست محصولات این دسته‌بندی:", reply_markup=kb.admin_products_list_kb(products))
     await call.answer("وضعیت تغییر کرد.")
@@ -146,19 +213,26 @@ async def cb_admin_prod_toggle(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("adm_prod_del:"))
 async def cb_admin_prod_del(call: CallbackQuery):
+    reseller_id, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
+        return await call.answer()
     product_id = int(call.data.split(":")[1])
     product = db.get_product(product_id)
-    cat_id = product["category_id"] if product else None
+    if not product or db.get_product_reseller_id(product_id) != reseller_id:
+        return await call.answer("دسترسی ندارید.", show_alert=True)
+    cat_id = product["category_id"]
     db.delete_product(product_id)
-    if cat_id:
-        products = db.get_products(cat_id, active_only=False)
-        await call.message.edit_text("لیست محصولات این دسته‌بندی:", reply_markup=kb.admin_products_list_kb(products))
+    products = db.get_products(cat_id, active_only=False)
+    await call.message.edit_text("لیست محصولات این دسته‌بندی:", reply_markup=kb.admin_products_list_kb(products))
     await call.answer("محصول حذف شد.")
 
 
 @router.callback_query(F.data == "adm_prod_add")
 async def cb_admin_prod_add(call: CallbackQuery, state: FSMContext):
-    categories = db.get_categories(active_only=True)
+    reseller_id, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
+        return await call.answer()
+    categories = db.get_categories(reseller_id=reseller_id, active_only=True)
     if not categories:
         await call.answer("ابتدا باید حداقل یک دسته‌بندی فعال بسازید.", show_alert=True)
         return
@@ -172,7 +246,13 @@ async def cb_admin_prod_add(call: CallbackQuery, state: FSMContext):
 
 @router.callback_query(AdminAddProduct.waiting_category, F.data.startswith("adm_newprod_cat:"))
 async def cb_pick_category_for_new_product(call: CallbackQuery, state: FSMContext):
+    reseller_id, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
+        return await call.answer()
     cat_id = int(call.data.split(":")[1])
+    category = db.get_category(cat_id)
+    if not category or category["reseller_id"] != reseller_id:
+        return await call.answer("دسترسی ندارید.", show_alert=True)
     await state.update_data(category_id=cat_id)
     await state.set_state(AdminAddProduct.waiting_name)
     await call.message.edit_text("نام محصول را ارسال کنید:", reply_markup=kb.admin_back_kb())
@@ -199,11 +279,12 @@ async def process_product_price(message: Message, state: FSMContext):
 
 @router.message(AdminAddProduct.waiting_desc)
 async def process_product_desc(message: Message, state: FSMContext):
+    _, role = get_actor_scope(message.from_user.id)
     desc = "" if message.text.strip() == "-" else message.text.strip()
     data = await state.get_data()
     db.add_product(data["category_id"], data["name"], data["price"], desc)
     await state.clear()
-    await message.answer("✅ محصول با موفقیت اضافه شد.", reply_markup=kb.admin_panel_kb())
+    await message.answer("✅ محصول با موفقیت اضافه شد.", reply_markup=back_to_panel_kb(role))
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +293,10 @@ async def process_product_desc(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "adm_add_configs")
 async def cb_admin_add_configs(call: CallbackQuery, state: FSMContext):
-    products = db.get_all_products()
+    reseller_id, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
+        return await call.answer()
+    products = db.get_all_products(reseller_id=reseller_id)
     if not products:
         await call.answer("ابتدا باید یک محصول بسازید.", show_alert=True)
         return
@@ -225,7 +309,12 @@ async def cb_admin_add_configs(call: CallbackQuery, state: FSMContext):
 
 @router.callback_query(AdminAddConfigs.waiting_product, F.data.startswith("adm_addcfg_prod:"))
 async def cb_pick_product_for_configs(call: CallbackQuery, state: FSMContext):
+    reseller_id, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
+        return await call.answer()
     product_id = int(call.data.split(":")[1])
+    if db.get_product_reseller_id(product_id) != reseller_id:
+        return await call.answer("دسترسی ندارید.", show_alert=True)
     await state.update_data(product_id=product_id)
     await state.set_state(AdminAddConfigs.waiting_links)
     await call.message.edit_text(
@@ -237,6 +326,7 @@ async def cb_pick_product_for_configs(call: CallbackQuery, state: FSMContext):
 
 @router.message(AdminAddConfigs.waiting_links)
 async def process_add_configs(message: Message, state: FSMContext):
+    _, role = get_actor_scope(message.from_user.id)
     data = await state.get_data()
     product_id = data["product_id"]
     links = [line for line in message.text.splitlines() if line.strip()]
@@ -245,7 +335,7 @@ async def process_add_configs(message: Message, state: FSMContext):
     stock = db.count_available_configs(product_id)
     await message.answer(
         f"✅ {len(links)} لینک اضافه شد.\n📊 موجودی فعلی این محصول: {stock} عدد",
-        reply_markup=kb.admin_panel_kb(),
+        reply_markup=back_to_panel_kb(role),
     )
 
 
@@ -290,7 +380,10 @@ async def process_add_test_configs(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "adm_pending_orders")
 async def cb_admin_pending_orders(call: CallbackQuery):
-    orders = db.get_pending_orders()
+    reseller_id, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
+        return await call.answer()
+    orders = db.get_pending_orders(reseller_id=reseller_id)
     if not orders:
         await call.answer("سفارش در انتظاری وجود ندارد.", show_alert=True)
         return
@@ -305,6 +398,8 @@ async def cb_view_order(call: CallbackQuery, bot: Bot):
     if not order:
         await call.answer("سفارش یافت نشد.", show_alert=True)
         return
+    if not can_manage_order(call.from_user.id, order):
+        return await call.answer("دسترسی ندارید.", show_alert=True)
     product = db.get_product(order["product_id"])
     caption = (
         f"سفارش #{order_id}\n"
@@ -421,14 +516,13 @@ async def cb_topup_reject(call: CallbackQuery, bot: Bot):
 # تایید سفارش: کانفیگ از مخزن به کاربر اختصاص و ارسال می‌شود
 @router.callback_query(F.data.startswith("order_approve:"))
 async def cb_order_approve(call: CallbackQuery, bot: Bot):
-    if not admin_only(call.from_user.id):
-        return await call.answer()
-
     order_id = int(call.data.split(":")[1])
     order = db.get_order(order_id)
     if not order:
         await call.answer("سفارش یافت نشد.", show_alert=True)
         return
+    if not can_manage_order(call.from_user.id, order):
+        return await call.answer("دسترسی ندارید.", show_alert=True)
     if order["status"] != "pending":
         await call.answer("این سفارش قبلاً بررسی شده است.", show_alert=True)
         return
@@ -475,14 +569,13 @@ async def cb_order_approve(call: CallbackQuery, bot: Bot):
 
 @router.callback_query(F.data.startswith("order_reject:"))
 async def cb_order_reject(call: CallbackQuery, bot: Bot):
-    if not admin_only(call.from_user.id):
-        return await call.answer()
-
     order_id = int(call.data.split(":")[1])
     order = db.get_order(order_id)
     if not order:
         await call.answer("سفارش یافت نشد.", show_alert=True)
         return
+    if not can_manage_order(call.from_user.id, order):
+        return await call.answer("دسترسی ندارید.", show_alert=True)
     if order["status"] != "pending":
         await call.answer("این سفارش قبلاً بررسی شده است.", show_alert=True)
         return
@@ -630,6 +723,126 @@ async def process_referral_percent(message: Message, state: FSMContext):
 
 
 # ---------------------------------------------------------------------------
+# مدیریت نمایندگان (فقط مالک بات)
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "adm_resellers_menu")
+async def cb_admin_resellers_menu(call: CallbackQuery):
+    if not admin_only(call.from_user.id):
+        return await call.answer()
+    resellers = db.list_resellers()
+    await call.message.edit_text("🏪 مدیریت نمایندگان:", reply_markup=kb.resellers_kb(resellers))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm_reseller_toggle:"))
+async def cb_admin_reseller_toggle(call: CallbackQuery):
+    if not admin_only(call.from_user.id):
+        return await call.answer()
+    reseller_tg_id = int(call.data.split(":")[1])
+    db.toggle_reseller(reseller_tg_id)
+    resellers = db.list_resellers()
+    await call.message.edit_text("🏪 مدیریت نمایندگان:", reply_markup=kb.resellers_kb(resellers))
+    await call.answer("وضعیت تغییر کرد.")
+
+
+@router.callback_query(F.data.startswith("adm_reseller_del:"))
+async def cb_admin_reseller_del(call: CallbackQuery):
+    if not admin_only(call.from_user.id):
+        return await call.answer()
+    reseller_tg_id = int(call.data.split(":")[1])
+    db.delete_reseller(reseller_tg_id)
+    resellers = db.list_resellers()
+    await call.message.edit_text(
+        "🏪 مدیریت نمایندگان:\n\n(توجه: دسته‌بندی/محصول/کانفیگ‌های این نماینده هم حذف شدند)",
+        reply_markup=kb.resellers_kb(resellers),
+    )
+    await call.answer("نماینده حذف شد.")
+
+
+@router.callback_query(F.data.startswith("adm_reseller_link:"))
+async def cb_admin_reseller_link(call: CallbackQuery, bot: Bot):
+    if not admin_only(call.from_user.id):
+        return await call.answer()
+    reseller_tg_id = int(call.data.split(":")[1])
+    me = await bot.get_me()
+    link = f"https://t.me/{me.username}?start=agent{reseller_tg_id}"
+    await call.answer()
+    await call.message.answer(
+        f"🔗 لینک فروشگاه این نماینده (برای اشتراک‌گذاری با مشتریانش):\n{link}\n\n"
+        f"همچنین خودِ نماینده با ارسال /start در بات، دکمه‌ی «پنل نمایندگی» را در منوی خودش می‌بیند."
+    )
+
+
+@router.callback_query(F.data == "adm_reseller_add")
+async def cb_admin_reseller_add(call: CallbackQuery, state: FSMContext):
+    if not admin_only(call.from_user.id):
+        return await call.answer()
+    await state.set_state(AdminAddReseller.waiting_id)
+    await call.message.edit_text(
+        "آیدی عددی تلگرام نماینده‌ی جدید را ارسال کنید (نماینده باید قبلاً یک‌بار /start را به بات زده باشد):",
+        reply_markup=kb.admin_back_kb(),
+    )
+    await call.answer()
+
+
+@router.message(AdminAddReseller.waiting_id)
+async def process_reseller_id(message: Message, state: FSMContext):
+    if not message.text.strip().isdigit():
+        await message.answer("لطفاً فقط آیدی عددی ارسال کنید.")
+        return
+    tg_id = int(message.text.strip())
+    if not db.get_user(tg_id):
+        await message.answer(
+            "⛔️ این کاربر هنوز /start را به بات نزده. از او بخواهید ابتدا بات را استارت کند، سپس دوباره تلاش کنید."
+        )
+        return
+    if db.get_reseller(tg_id):
+        await message.answer("⛔️ این کاربر از قبل نماینده است.")
+        return
+    await state.update_data(reseller_tg_id=tg_id)
+    await state.set_state(AdminAddReseller.waiting_name)
+    await message.answer("یک نام برای این نماینده وارد کنید (برای نمایش در لیست شما):")
+
+
+@router.message(AdminAddReseller.waiting_name)
+async def process_reseller_name(message: Message, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    tg_id = data["reseller_tg_id"]
+    name = message.text.strip()
+    db.create_reseller(tg_id, name)
+    await state.clear()
+
+    me = await bot.get_me()
+    link = f"https://t.me/{me.username}?start=agent{tg_id}"
+
+    await message.answer(
+        f"✅ نماینده «{name}» اضافه شد.\n\n"
+        f"🔗 لینک فروشگاه این نماینده برای مشتریانش:\n{link}",
+        reply_markup=kb.admin_panel_kb(),
+    )
+    try:
+        await bot.send_message(
+            tg_id,
+            "🎉 شما به‌عنوان نماینده به این بات اضافه شدید!\n"
+            "برای مشاهده‌ی پنل نمایندگی خودتان، یک‌بار /start را بزنید و از منو وارد «🏪 پنل نمایندگی» شوید.\n"
+            "از آنجا می‌توانید دسته‌بندی، محصول، کانفیگ و شماره کارت اختصاصی خودتان را تنظیم کنید.",
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data == "reseller_get_link")
+async def cb_reseller_get_link(call: CallbackQuery, bot: Bot):
+    if not db.is_reseller(call.from_user.id):
+        return await call.answer("شما نماینده نیستید.", show_alert=True)
+    me = await bot.get_me()
+    link = f"https://t.me/{me.username}?start=agent{call.from_user.id}"
+    await call.answer()
+    await call.message.answer(f"🔗 لینک فروشگاه اختصاصی شما (برای اشتراک‌گذاری با مشتریانتان):\n{link}")
+
+
+# ---------------------------------------------------------------------------
 # ویرایش متن دکمه‌ها
 # ---------------------------------------------------------------------------
 
@@ -662,11 +875,25 @@ async def process_edit_button(message: Message, state: FSMContext):
 
 
 # --- انتخاب رنگ دکمه (ویژگی style در Bot API 9.4 به بعد) ---
+# این دو هندلر برای هر دو نوع دکمه مشترک است: هم دکمه‌های منوی اصلی (Reply) و هم دکمه‌های شیشه‌ای پنل مدیریت
+
+def _lookup_button_label(key: str) -> str:
+    if key in kb.BUTTON_LABELS:
+        return kb.BUTTON_LABELS[key]
+    for item_key, label, _ in kb.ADMIN_PANEL_ITEMS:
+        if item_key == key:
+            return label
+    return key
+
+
+def _is_panel_item_key(key: str) -> bool:
+    return any(item_key == key for item_key, _, _ in kb.ADMIN_PANEL_ITEMS)
+
 
 @router.callback_query(F.data.startswith("adm_btn_color_menu:"))
 async def cb_admin_btn_color_menu(call: CallbackQuery):
     key = call.data.split(":")[1]
-    label = kb.BUTTON_LABELS.get(key, key)
+    label = _lookup_button_label(key)
     await call.message.edit_text(
         f"رنگ «{label}» را انتخاب کنید:", reply_markup=kb.admin_color_picker_kb(key)
     )
@@ -677,8 +904,17 @@ async def cb_admin_btn_color_menu(call: CallbackQuery):
 async def cb_admin_btn_color_set(call: CallbackQuery):
     _, key, style = call.data.split(":")
     db.set_setting(f"{key}_style", "" if style == "none" else style)
-    await call.message.edit_text("کدام دکمه ویرایش شود؟", reply_markup=kb.admin_edit_buttons_kb())
+    if _is_panel_item_key(key):
+        await call.message.edit_text("🎨 رنگ‌آمیزی دکمه‌های پنل مدیریت:", reply_markup=kb.admin_panel_colors_kb())
+    else:
+        await call.message.edit_text("کدام دکمه ویرایش شود؟", reply_markup=kb.admin_edit_buttons_kb())
     await call.answer("✅ رنگ دکمه به‌روزرسانی شد. دفعه بعد که منو ارسال شود رنگ جدید نمایش داده می‌شود.")
+
+
+@router.callback_query(F.data == "adm_panel_colors_menu")
+async def cb_admin_panel_colors_menu(call: CallbackQuery):
+    await call.message.edit_text("🎨 رنگ‌آمیزی دکمه‌های پنل مدیریت:", reply_markup=kb.admin_panel_colors_kb())
+    await call.answer()
 
 
 # ---------------------------------------------------------------------------
@@ -687,6 +923,9 @@ async def cb_admin_btn_color_set(call: CallbackQuery):
 
 @router.callback_query(F.data == "adm_set_card")
 async def cb_admin_set_card(call: CallbackQuery, state: FSMContext):
+    _, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
+        return await call.answer()
     await state.set_state(AdminSetCard.waiting_number)
     await call.message.edit_text("شماره کارت جدید را ارسال کنید:", reply_markup=kb.admin_back_kb())
     await call.answer()
@@ -701,11 +940,16 @@ async def process_set_card_number(message: Message, state: FSMContext):
 
 @router.message(AdminSetCard.waiting_holder)
 async def process_set_card_holder(message: Message, state: FSMContext):
+    reseller_id, role = get_actor_scope(message.from_user.id)
     data = await state.get_data()
-    db.set_setting("card_number", data["card_number"])
-    db.set_setting("card_holder", message.text.strip())
+    card_holder = message.text.strip()
+    if role == "reseller":
+        db.set_reseller_card(reseller_id, data["card_number"], card_holder)
+    else:
+        db.set_setting("card_number", data["card_number"])
+        db.set_setting("card_holder", card_holder)
     await state.clear()
-    await message.answer("✅ اطلاعات کارت به‌روزرسانی شد.", reply_markup=kb.admin_panel_kb())
+    await message.answer("✅ اطلاعات کارت به‌روزرسانی شد.", reply_markup=back_to_panel_kb(role))
 
 
 # ---------------------------------------------------------------------------
@@ -843,10 +1087,14 @@ async def process_reply_to_user(message: Message, state: FSMContext, bot: Bot):
 
 @router.callback_query(F.data == "adm_stats")
 async def cb_admin_stats(call: CallbackQuery):
-    stats = db.get_stats()
-    text = (
-        "📊 آمار فروشگاه:\n\n"
-        f"👥 تعداد کاربران: {stats['users']}\n"
+    reseller_id, role = get_actor_scope(call.from_user.id)
+    if role == "denied":
+        return await call.answer()
+    stats = db.get_stats(reseller_id=reseller_id)
+    text = "📊 آمار فروش:\n\n"
+    if stats["users"] is not None:
+        text += f"👥 تعداد کاربران: {stats['users']}\n"
+    text += (
         f"⏳ سفارش‌های در انتظار: {stats['pending']}\n"
         f"✅ سفارش‌های تایید شده: {stats['approved']}\n"
         f"❌ سفارش‌های رد شده: {stats['rejected']}\n"
@@ -866,3 +1114,21 @@ async def cmd_admin(message: Message, state: FSMContext):
         return
     await state.clear()
     await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb())
+
+
+# ---------------------------------------------------------------------------
+# لینک فروشگاه خودِ نماینده (از داخل پنل نمایندگی)
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "reseller_get_link")
+async def cb_reseller_get_link(call: CallbackQuery, bot: Bot):
+    if not db.is_reseller(call.from_user.id):
+        return await call.answer("دسترسی ندارید.", show_alert=True)
+    me = await bot.get_me()
+    link = f"https://t.me/{me.username}?start=agent{call.from_user.id}"
+    await call.answer()
+    await call.message.answer(
+        f"🔗 لینک اختصاصی فروشگاه شما:\n{link}\n\n"
+        f"این لینک را در اختیار مشتری‌های خودتان بگذارید. هر کسی که با این لینک وارد بات شود، "
+        f"فقط دسته‌بندی‌ها و محصولات شما را می‌بیند و رسیدهایش مستقیم برای خود شما ارسال می‌شود."
+    )

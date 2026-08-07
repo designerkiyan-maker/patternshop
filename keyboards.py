@@ -24,7 +24,7 @@ def _styled_button(text: str, style_value: str) -> KeyboardButton:
     return KeyboardButton(text=text, style=style)
 
 
-def main_menu_kb(is_admin: bool) -> ReplyKeyboardMarkup:
+def main_menu_kb(is_admin: bool, is_reseller: bool = False) -> ReplyKeyboardMarkup:
     settings = db.get_all_settings()
     rows = [
         [_styled_button(settings.get("btn_buy", "🛒 خرید کانفیگ"), settings.get("btn_buy_style", ""))],
@@ -35,6 +35,9 @@ def main_menu_kb(is_admin: bool) -> ReplyKeyboardMarkup:
         )
     rows.append(
         [_styled_button(settings.get("btn_my_orders", "📦 سفارش‌های من"), settings.get("btn_my_orders_style", ""))]
+    )
+    rows.append(
+        [_styled_button(settings.get("btn_wallet", "👛 کیف پول من"), settings.get("btn_wallet_style", ""))]
     )
     if settings.get("referral_enabled", "1") == "1":
         rows.append(
@@ -47,6 +50,14 @@ def main_menu_kb(is_admin: bool) -> ReplyKeyboardMarkup:
     rows.append(
         [_styled_button(settings.get("btn_contact", "📞 ارتباط با پشتیبانی"), settings.get("btn_contact_style", ""))]
     )
+    if is_reseller and not is_admin:
+        rows.append(
+            [
+                _styled_button(
+                    settings.get("btn_reseller_panel", "🏪 پنل نمایندگی"), settings.get("btn_reseller_panel_style", "")
+                )
+            ]
+        )
     if is_admin:
         rows.append(
             [
@@ -56,6 +67,11 @@ def main_menu_kb(is_admin: bool) -> ReplyKeyboardMarkup:
             ]
         )
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
+
+def menu_for_user(user_tg_id: int) -> ReplyKeyboardMarkup:
+    """کیبورد اصلی متناسب با نقش کاربر (عادی/نماینده/ادمین) را می‌سازد."""
+    return main_menu_kb(db.is_admin(user_tg_id), db.is_reseller(user_tg_id))
 
 
 # ---------------------------------------------------------------------------
@@ -126,23 +142,53 @@ def contact_reply_kb(user_tg_id) -> InlineKeyboardMarkup:
 # پنل مدیریت
 # ---------------------------------------------------------------------------
 
+# لیست دکمه‌های پنل مدیریت: (کلید تنظیمات رنگ, متن, callback_data)
+# کلید رنگ هر دکمه در تنظیمات به شکل "{کلید}_style" ذخیره می‌شود
+ADMIN_PANEL_ITEMS = [
+    ("adm_categories", "📂 مدیریت دسته‌بندی‌ها", "adm_categories"),
+    ("adm_products", "📦 مدیریت محصولات", "adm_products"),
+    ("adm_add_configs", "🔗 افزودن کانفیگ به محصول", "adm_add_configs"),
+    ("adm_test_menu", "🧪 مدیریت کانفیگ تست", "adm_test_menu"),
+    ("adm_pending_orders", "🧾 سفارش‌های در انتظار", "adm_pending_orders"),
+    ("adm_pending_topups", "👛 درخواست‌های شارژ کیف پول", "adm_pending_topups"),
+    ("adm_discounts_menu", "🎟 مدیریت کدهای تخفیف", "adm_discounts_menu"),
+    ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
+    ("adm_resellers_menu", "🏪 مدیریت نمایندگان", "adm_resellers_menu"),
+    ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
+    ("adm_set_card", "💳 تنظیم شماره کارت", "adm_set_card"),
+    ("adm_edit_welcome", "📝 ویرایش پیام خوش‌آمد", "adm_edit_welcome"),
+    ("adm_admins_menu", "👤 مدیریت ادمین‌ها", "adm_admins_menu"),
+    ("adm_broadcast", "📢 پیام همگانی", "adm_broadcast"),
+    ("adm_stats", "📊 آمار فروش", "adm_stats"),
+]
+
+
+def _styled_inline(text: str, callback_data: str, style_key: str) -> InlineKeyboardButton:
+    style_value = db.get_setting(style_key, "")
+    style = style_value if style_value in ("primary", "success", "danger") else None
+    return InlineKeyboardButton(text=text, callback_data=callback_data, style=style)
+
+
 def admin_panel_kb() -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text="📂 مدیریت دسته‌بندی‌ها", callback_data="adm_categories")],
-        [InlineKeyboardButton(text="📦 مدیریت محصولات", callback_data="adm_products")],
-        [InlineKeyboardButton(text="🔗 افزودن کانفیگ به محصول", callback_data="adm_add_configs")],
-        [InlineKeyboardButton(text="🧪 مدیریت کانفیگ تست", callback_data="adm_test_menu")],
-        [InlineKeyboardButton(text="🧾 سفارش‌های در انتظار", callback_data="adm_pending_orders")],
-        [InlineKeyboardButton(text="👛 درخواست‌های شارژ کیف پول", callback_data="adm_pending_topups")],
-        [InlineKeyboardButton(text="🎟 مدیریت کدهای تخفیف", callback_data="adm_discounts_menu")],
-        [InlineKeyboardButton(text="🤝 تنظیمات زیرمجموعه‌گیری", callback_data="adm_referral_settings")],
-        [InlineKeyboardButton(text="✏️ ویرایش متن دکمه‌ها", callback_data="adm_edit_buttons")],
-        [InlineKeyboardButton(text="💳 تنظیم شماره کارت", callback_data="adm_set_card")],
-        [InlineKeyboardButton(text="📝 ویرایش پیام خوش‌آمد", callback_data="adm_edit_welcome")],
-        [InlineKeyboardButton(text="👤 مدیریت ادمین‌ها", callback_data="adm_admins_menu")],
-        [InlineKeyboardButton(text="📢 پیام همگانی", callback_data="adm_broadcast")],
-        [InlineKeyboardButton(text="📊 آمار فروش", callback_data="adm_stats")],
-    ]
+    rows = []
+    for key, label, callback_data in ADMIN_PANEL_ITEMS:
+        rows.append([_styled_inline(label, callback_data, f"{key}_style")])
+    rows.append([InlineKeyboardButton(text="🎨 رنگ‌آمیزی دکمه‌های پنل", callback_data="adm_panel_colors_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_panel_colors_kb() -> InlineKeyboardMarkup:
+    rows = []
+    for key, label, _ in ADMIN_PANEL_ITEMS:
+        current_style = db.get_setting(f"{key}_style", "")
+        style_icon = {"primary": "🔵", "success": "🟢", "danger": "🔴", "": "⚪️"}.get(current_style, "⚪️")
+        rows.append(
+            [
+                InlineKeyboardButton(text=f"{style_icon} {label}", callback_data="noop"),
+                InlineKeyboardButton(text="🎨 تغییر رنگ", callback_data=f"adm_btn_color_menu:{key}"),
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -235,6 +281,8 @@ BUTTON_LABELS = {
     "btn_contact": "دکمه ارتباط با پشتیبانی",
     "btn_my_orders": "دکمه سفارش‌های من",
     "btn_referral": "دکمه زیرمجموعه‌گیری",
+    "btn_wallet": "دکمه کیف پول",
+    "btn_reseller_panel": "دکمه پنل نمایندگی",
     "btn_admin_panel": "دکمه پنل مدیریت",
 }
 
@@ -370,4 +418,49 @@ def topup_review_kb(topup_id) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="❌ رد کردن", callback_data=f"topup_reject:{topup_id}"),
         ]
     ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ---------------------------------------------------------------------------
+# پنل نمایندگی (برای خود نماینده - نسخه‌ی کوچک‌شده‌ی پنل مدیریت)
+# ---------------------------------------------------------------------------
+
+def reseller_panel_kb() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="📂 دسته‌بندی‌های من", callback_data="adm_categories")],
+        [InlineKeyboardButton(text="📦 محصولات من", callback_data="adm_products")],
+        [InlineKeyboardButton(text="🔗 افزودن کانفیگ به محصول", callback_data="adm_add_configs")],
+        [InlineKeyboardButton(text="🧾 سفارش‌های در انتظار من", callback_data="adm_pending_orders")],
+        [InlineKeyboardButton(text="💳 تنظیم شماره کارت من", callback_data="adm_set_card")],
+        [InlineKeyboardButton(text="📊 آمار فروش من", callback_data="adm_stats")],
+        [InlineKeyboardButton(text="🔗 لینک فروشگاه من", callback_data="reseller_get_link")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ---------------------------------------------------------------------------
+# مدیریت نمایندگان (فقط مالک بات)
+# ---------------------------------------------------------------------------
+
+def resellers_kb(resellers) -> InlineKeyboardMarkup:
+    rows = []
+    for r in resellers:
+        state_icon = "🟢" if r["is_active"] else "🔴"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{state_icon} {r['name'] or r['telegram_id']} ({r['telegram_id']})",
+                    callback_data="noop",
+                )
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(text="تغییر وضعیت", callback_data=f"adm_reseller_toggle:{r['telegram_id']}"),
+                InlineKeyboardButton(text="🗑حذف", callback_data=f"adm_reseller_del:{r['telegram_id']}"),
+                InlineKeyboardButton(text="🔗 لینک", callback_data=f"adm_reseller_link:{r['telegram_id']}"),
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="➕ افزودن نماینده جدید", callback_data="adm_reseller_add")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

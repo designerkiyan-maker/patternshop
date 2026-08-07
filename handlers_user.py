@@ -27,15 +27,27 @@ async def cmd_start(message: Message, state: FSMContext):
         message.from_user.id, message.from_user.username or "", message.from_user.first_name or ""
     )
 
-    # پردازش لینک دعوت (زیرمجموعه‌گیری): /start ref123456789
     parts = (message.text or "").split(maxsplit=1)
-    if len(parts) > 1 and parts[1].startswith("ref"):
-        ref_part = parts[1][3:]
-        if ref_part.isdigit():
-            db.set_referred_by(message.from_user.id, int(ref_part))
+    shop_notice = ""
+    if len(parts) > 1:
+        payload = parts[1]
+        # لینک دعوت (زیرمجموعه‌گیری): /start ref123456789
+        if payload.startswith("ref"):
+            ref_part = payload[3:]
+            if ref_part.isdigit():
+                db.set_referred_by(message.from_user.id, int(ref_part))
+        # لینک فروشگاه یک نماینده: /start agent123456789
+        elif payload.startswith("agent"):
+            agent_part = payload[5:]
+            if agent_part.isdigit():
+                agent_id = int(agent_part)
+                reseller = db.get_reseller(agent_id)
+                if reseller and reseller["is_active"]:
+                    db.set_active_reseller(message.from_user.id, agent_id)
+                    shop_notice = f"\n\n🏪 شما وارد فروشگاه «{reseller['name']}» شدید."
 
     welcome = db.get_setting("welcome_text")
-    await message.answer(welcome, reply_markup=kb.main_menu_kb(db.is_admin(message.from_user.id)))
+    await message.answer(welcome + shop_notice, reply_markup=kb.menu_for_user(message.from_user.id))
 
 
 def _is_button(message: Message, key: str) -> bool:
@@ -49,7 +61,8 @@ def _is_button(message: Message, key: str) -> bool:
 @router.message(F.text.func(lambda t: t == db.get_setting("btn_buy")))
 async def show_categories(message: Message, state: FSMContext):
     await state.clear()
-    categories = db.get_categories(active_only=True)
+    active_reseller = db.get_active_reseller(message.from_user.id)
+    categories = db.get_categories(reseller_id=active_reseller, active_only=True)
     if not categories:
         await message.answer("در حال حاضر دسته‌بندی فعالی وجود ندارد.")
         return
@@ -65,7 +78,8 @@ async def cb_back_main(call: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "back_categories")
 async def cb_back_categories(call: CallbackQuery):
-    categories = db.get_categories(active_only=True)
+    active_reseller = db.get_active_reseller(call.from_user.id)
+    categories = db.get_categories(reseller_id=active_reseller, active_only=True)
     await call.message.edit_text("یک دسته‌بندی را انتخاب کنید:", reply_markup=kb.categories_kb(categories))
     await call.answer()
 
@@ -178,7 +192,11 @@ async def _notify_admins_of_order(bot: Bot, order_id: int, receipt_file_id: str 
         caption += f"👛 استفاده از کیف پول: {order['wallet_used']:,} تومان\n"
     caption += f"💵 مبلغ قابل پرداخت: {order['final_price']:,} تومان"
 
-    for admin_id in db.list_admins():
+    # مسیریابی: اگر محصول متعلق به یک نماینده باشد، رسید فقط برای خودِ همان نماینده ارسال می‌شود
+    reseller_id = db.get_product_reseller_id(order["product_id"])
+    targets = [reseller_id] if reseller_id else db.list_admins()
+
+    for admin_id in targets:
         try:
             if receipt_file_id:
                 sent = await bot.send_photo(
@@ -242,8 +260,14 @@ async def cb_buy_start(call: CallbackQuery, state: FSMContext, bot: Bot):
 
     await state.set_state(BuyFlow.waiting_receipt)
 
-    card_number = db.get_setting("card_number")
-    card_holder = db.get_setting("card_holder")
+    reseller_id = db.get_product_reseller_id(product_id)
+    if reseller_id:
+        reseller = db.get_reseller(reseller_id)
+        card_number = reseller["card_number"] or "تنظیم نشده - با پشتیبانی تماس بگیرید"
+        card_holder = reseller["card_holder"] or "---"
+    else:
+        card_number = db.get_setting("card_number")
+        card_holder = db.get_setting("card_holder")
     after_buy_text = db.get_setting("after_buy_text")
 
     text = f"{after_buy_text}\n\n"
@@ -291,7 +315,7 @@ async def receive_receipt(message: Message, state: FSMContext, bot: Bot):
 
     await message.answer(
         "✅ رسید شما برای بررسی ارسال شد. پس از تایید ادمین، کانفیگ برای شما ارسال خواهد شد.",
-        reply_markup=kb.main_menu_kb(db.is_admin(message.from_user.id)),
+        reply_markup=kb.menu_for_user(message.from_user.id),
     )
     await state.clear()
 
@@ -346,8 +370,22 @@ async def referral_menu(message: Message, bot: Bot):
         f"هر کاربری که با این لینک وارد بات شود و اولین خریدش تایید شود، {percent}٪ از مبلغ پرداختی او "
         f"به‌صورت اعتبار کیف پول به شما تعلق می‌گیرد و به‌طور خودکار در خرید بعدی‌تان کسر می‌شود.\n\n"
         f"👥 تعداد زیرمجموعه‌های شما: {stats['count']}\n"
-        f"👛 موجودی کیف پول شما: {stats['credit']:,} تومان\n\n"
-        "می‌توانید کیف پول خود را هم مستقیماً شارژ کنید:"
+        f"👛 موجودی کیف پول شما: {stats['credit']:,} تومان"
+    )
+    await message.answer(text)
+
+
+# ---------------------------------------------------------------------------
+# کیف پول (جدا از زیرمجموعه‌گیری)
+# ---------------------------------------------------------------------------
+
+@router.message(F.text.func(lambda t: t == db.get_setting("btn_wallet")))
+async def wallet_menu(message: Message):
+    balance = db.get_wallet_credit(message.from_user.id)
+    text = (
+        "👛 کیف پول شما\n\n"
+        f"موجودی فعلی: {balance:,} تومان\n\n"
+        "این موجودی (چه از شارژ دستی، چه از پورسانت زیرمجموعه‌گیری) به‌صورت خودکار در خرید بعدی شما کسر می‌شود."
     )
     await message.answer(text, reply_markup=kb.wallet_menu_kb())
 
@@ -416,7 +454,7 @@ async def receive_topup_receipt(message: Message, state: FSMContext, bot: Bot):
 
     await message.answer(
         "✅ درخواست شارژ کیف پول شما برای بررسی ارسال شد. پس از تایید ادمین، مبلغ به کیف پول شما اضافه می‌شود.",
-        reply_markup=kb.main_menu_kb(db.is_admin(message.from_user.id)),
+        reply_markup=kb.menu_for_user(message.from_user.id),
     )
     await state.clear()
 
@@ -475,5 +513,5 @@ async def contact_receive(message: Message, state: FSMContext, bot: Bot):
             await bot.send_message(admin_id, text, parse_mode="Markdown", reply_markup=kb.contact_reply_kb(user.id))
         except Exception:
             pass
-    await message.answer("پیام شما برای پشتیبانی ارسال شد. به زودی پاسخ داده می‌شود.", reply_markup=kb.main_menu_kb(db.is_admin(user.id)))
+    await message.answer("پیام شما برای پشتیبانی ارسال شد. به زودی پاسخ داده می‌شود.", reply_markup=kb.menu_for_user(user.id))
     await state.clear()

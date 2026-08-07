@@ -33,6 +33,8 @@ DEFAULT_SETTINGS = {
     "btn_contact": "📞 ارتباط با پشتیبانی",
     "btn_my_orders": "📦 سفارش‌های من",
     "btn_referral": "🤝 زیرمجموعه‌گیری من",
+    "btn_wallet": "👛 کیف پول من",
+    "btn_reseller_panel": "🏪 پنل نمایندگی",
     "btn_admin_panel": "⚙️ پنل مدیریت",
     "test_enabled": "1",
     "card_number": "0000-0000-0000-0000",
@@ -46,10 +48,28 @@ DEFAULT_SETTINGS = {
     "btn_contact_style": "",
     "btn_my_orders_style": "",
     "btn_referral_style": "",
+    "btn_wallet_style": "success",
+    "btn_reseller_panel_style": "primary",
     "btn_admin_panel_style": "danger",
     # سیستم زیرمجموعه‌گیری
     "referral_enabled": "1",
     "referral_percent": "10",  # درصدی که به دعوت‌کننده به‌عنوان اعتبار کیف پول تعلق می‌گیرد
+    # رنگ دکمه‌های شیشه‌ای داخل پنل مدیریت (همان‌ها که در تصویر دیده می‌شوند)
+    "adm_categories_style": "",
+    "adm_products_style": "",
+    "adm_add_configs_style": "",
+    "adm_test_menu_style": "",
+    "adm_pending_orders_style": "primary",
+    "adm_pending_topups_style": "primary",
+    "adm_discounts_menu_style": "",
+    "adm_referral_settings_style": "",
+    "adm_resellers_menu_style": "success",
+    "adm_edit_buttons_style": "",
+    "adm_set_card_style": "",
+    "adm_edit_welcome_style": "",
+    "adm_admins_menu_style": "",
+    "adm_broadcast_style": "",
+    "adm_stats_style": "success",
 }
 
 
@@ -76,7 +96,17 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 is_active INTEGER DEFAULT 1,
-                sort_order INTEGER DEFAULT 0
+                sort_order INTEGER DEFAULT 0,
+                reseller_id INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS resellers (
+                telegram_id INTEGER PRIMARY KEY,
+                name TEXT,
+                card_number TEXT DEFAULT '',
+                card_holder TEXT DEFAULT '',
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS products (
@@ -176,11 +206,13 @@ def _migrate_columns(conn):
         ("users", "referred_by", "INTEGER"),
         ("users", "referral_credit", "INTEGER DEFAULT 0"),
         ("users", "referral_first_purchase_rewarded", "INTEGER DEFAULT 0"),
+        ("users", "active_reseller_id", "INTEGER"),
         ("orders", "base_price", "INTEGER"),
         ("orders", "wallet_used", "INTEGER DEFAULT 0"),
         ("orders", "discount_code_id", "INTEGER"),
         ("orders", "discount_amount", "INTEGER DEFAULT 0"),
         ("orders", "final_price", "INTEGER"),
+        ("categories", "reseller_id", "INTEGER"),
     ]
     for table, col, coltype in migrations:
         if not _column_exists(conn, table, col):
@@ -290,20 +322,26 @@ def list_admins():
 # دسته‌بندی‌ها
 # ---------------------------------------------------------------------------
 
-def add_category(name: str) -> int:
+def add_category(name: str, reseller_id: int = None) -> int:
     with get_conn() as conn:
-        cur = conn.execute("INSERT INTO categories (name) VALUES (?)", (name,))
+        cur = conn.execute(
+            "INSERT INTO categories (name, reseller_id) VALUES (?, ?)", (name, reseller_id)
+        )
         return cur.lastrowid
 
 
-def get_categories(active_only=True):
+def get_categories(reseller_id: int = None, active_only=True):
+    """reseller_id=None یعنی دسته‌بندی‌های فروشگاه اصلی (مالک بات)؛ عدد یعنی دسته‌بندی‌های همان نماینده."""
     with get_conn() as conn:
         if active_only:
             rows = conn.execute(
-                "SELECT * FROM categories WHERE is_active=1 ORDER BY sort_order, id"
+                "SELECT * FROM categories WHERE reseller_id IS ? AND is_active=1 ORDER BY sort_order, id",
+                (reseller_id,),
             ).fetchall()
         else:
-            rows = conn.execute("SELECT * FROM categories ORDER BY sort_order, id").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM categories WHERE reseller_id IS ? ORDER BY sort_order, id", (reseller_id,)
+            ).fetchall()
         return rows
 
 
@@ -352,17 +390,31 @@ def get_products(category_id: int, active_only=True):
         return rows
 
 
-def get_all_products():
+def get_all_products(reseller_id: int = None):
+    """لیست محصولات محدود به فروشگاه اصلی (reseller_id=None) یا یک نماینده‌ی خاص."""
     with get_conn() as conn:
         return conn.execute(
             "SELECT p.*, c.name as category_name FROM products p "
-            "JOIN categories c ON p.category_id=c.id ORDER BY c.sort_order, p.id"
+            "JOIN categories c ON p.category_id=c.id WHERE c.reseller_id IS ? "
+            "ORDER BY c.sort_order, p.id",
+            (reseller_id,),
         ).fetchall()
 
 
 def get_product(product_id: int):
     with get_conn() as conn:
         return conn.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
+
+
+def get_product_reseller_id(product_id: int):
+    """مالک محصول را برمی‌گرداند: None برای فروشگاه اصلی، یا آیدی نماینده."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT c.reseller_id as reseller_id FROM products p "
+            "JOIN categories c ON p.category_id=c.id WHERE p.id=?",
+            (product_id,),
+        ).fetchone()
+        return row["reseller_id"] if row else None
 
 
 def toggle_product(product_id: int):
@@ -526,10 +578,14 @@ def reject_order(order_id: int):
             decrement_discount_usage(order["discount_code_id"])
 
 
-def get_pending_orders():
+def get_pending_orders(reseller_id: int = None):
+    """reseller_id=None یعنی فقط سفارش‌های محصولات فروشگاه اصلی؛ عدد یعنی فقط سفارش‌های آن نماینده."""
     with get_conn() as conn:
         return conn.execute(
-            "SELECT * FROM orders WHERE status='pending' ORDER BY id"
+            "SELECT o.* FROM orders o JOIN products p ON o.product_id=p.id "
+            "JOIN categories c ON p.category_id=c.id "
+            "WHERE o.status='pending' AND c.reseller_id IS ? ORDER BY o.id",
+            (reseller_id,),
         ).fetchall()
 
 
@@ -544,15 +600,30 @@ def get_user_orders(user_tg_id: int):
 # آمار
 # ---------------------------------------------------------------------------
 
-def get_stats():
+def get_stats(reseller_id: int = None):
+    """reseller_id=None یعنی آمار فروشگاه اصلی؛ عدد یعنی آمار همان نماینده."""
     with get_conn() as conn:
-        users_c = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
-        pending_c = conn.execute("SELECT COUNT(*) c FROM orders WHERE status='pending'").fetchone()["c"]
-        approved_c = conn.execute("SELECT COUNT(*) c FROM orders WHERE status='approved'").fetchone()["c"]
-        rejected_c = conn.execute("SELECT COUNT(*) c FROM orders WHERE status='rejected'").fetchone()["c"]
+        if reseller_id is None:
+            users_c = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
+        else:
+            users_c = None  # آمار کاربران کل فقط برای مالک بات معنا دارد
+
+        base_query = (
+            "FROM orders o JOIN products p ON o.product_id=p.id "
+            "JOIN categories c ON p.category_id=c.id WHERE c.reseller_id IS ? "
+        )
+        pending_c = conn.execute(
+            f"SELECT COUNT(*) c {base_query} AND o.status='pending'", (reseller_id,)
+        ).fetchone()["c"]
+        approved_c = conn.execute(
+            f"SELECT COUNT(*) c {base_query} AND o.status='approved'", (reseller_id,)
+        ).fetchone()["c"]
+        rejected_c = conn.execute(
+            f"SELECT COUNT(*) c {base_query} AND o.status='rejected'", (reseller_id,)
+        ).fetchone()["c"]
         revenue = conn.execute(
-            "SELECT COALESCE(SUM(COALESCE(o.final_price, p.price)),0) s FROM orders o "
-            "JOIN products p ON o.product_id=p.id WHERE o.status='approved'"
+            f"SELECT COALESCE(SUM(COALESCE(o.final_price, p.price)),0) s {base_query} AND o.status='approved'",
+            (reseller_id,),
         ).fetchone()["s"]
         return {
             "users": users_c,
@@ -771,3 +842,79 @@ def reject_topup(topup_id: int):
 def get_pending_topups():
     with get_conn() as conn:
         return conn.execute("SELECT * FROM wallet_topups WHERE status='pending' ORDER BY id").fetchall()
+
+
+# ---------------------------------------------------------------------------
+# نمایندگی (ریسلر)
+# ---------------------------------------------------------------------------
+
+def create_reseller(telegram_id: int, name: str, card_number: str = "", card_holder: str = "") -> bool:
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM resellers WHERE telegram_id=?", (telegram_id,)
+        ).fetchone()
+        if existing:
+            return False
+        conn.execute(
+            "INSERT INTO resellers (telegram_id, name, card_number, card_holder) VALUES (?, ?, ?, ?)",
+            (telegram_id, name, card_number, card_holder),
+        )
+        return True
+
+
+def get_reseller(telegram_id: int):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM resellers WHERE telegram_id=?", (telegram_id,)).fetchone()
+
+
+def list_resellers():
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM resellers ORDER BY created_at DESC").fetchall()
+
+
+def toggle_reseller(telegram_id: int):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT is_active FROM resellers WHERE telegram_id=?", (telegram_id,)
+        ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE resellers SET is_active=? WHERE telegram_id=?",
+                (0 if row["is_active"] else 1, telegram_id),
+            )
+
+
+def delete_reseller(telegram_id: int):
+    with get_conn() as conn:
+        # دسته‌بندی‌های این نماینده (و محصولات/کانفیگ‌های داخلشان با CASCADE) هم حذف می‌شوند
+        conn.execute("DELETE FROM categories WHERE reseller_id=?", (telegram_id,))
+        conn.execute("DELETE FROM resellers WHERE telegram_id=?", (telegram_id,))
+
+
+def is_reseller(telegram_id: int) -> bool:
+    row = get_reseller(telegram_id)
+    return bool(row and row["is_active"])
+
+
+def set_reseller_card(telegram_id: int, card_number: str, card_holder: str):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE resellers SET card_number=?, card_holder=? WHERE telegram_id=?",
+            (card_number, card_holder, telegram_id),
+        )
+
+
+def set_active_reseller(user_tg_id: int, reseller_id: int):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET active_reseller_id=? WHERE telegram_id=?", (reseller_id, user_tg_id)
+        )
+
+
+def get_active_reseller(user_tg_id: int):
+    """آیدی نماینده‌ای که کاربر در حال حاضر از فروشگاهش خرید می‌کند؛ None یعنی فروشگاه اصلی."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT active_reseller_id FROM users WHERE telegram_id=?", (user_tg_id,)
+        ).fetchone()
+        return row["active_reseller_id"] if row else None

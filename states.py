@@ -76,3 +76,8 @@ class AdminCreateDiscount(StatesGroup):
 
 class AdminReferralPercent(StatesGroup):
     waiting_value = State()
+
+
+class AdminAddReseller(StatesGroup):
+    waiting_id = State()
+    waiting_name = State()
