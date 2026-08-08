@@ -67,7 +67,7 @@ def api_orders(x_init_data: str = Header(...)):
             "product_name": product["name"] if product else "نامشخص",
             "status": o["status"],
             "final_price": o["final_price"],
-            "expires_at": o["expires_at"],
+            "expires_at": cfg["expires_at"] if cfg else None,
             "link": cfg["link"] if cfg else None,
         })
     return result
