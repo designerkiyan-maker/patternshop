@@ -82,3 +82,10 @@ class AdminAddResellerBot(StatesGroup):
     waiting_token = State()
     waiting_owner_id = State()
     waiting_owner_name = State()
+
+
+class AdminWheelSettings(StatesGroup):
+    waiting_win_percent = State()
+    waiting_prizes = State()
+    waiting_expiry = State()
+    waiting_cooldown = State()

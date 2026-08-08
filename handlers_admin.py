@@ -32,6 +32,7 @@ from states import (
     AdminCreateDiscount,
     AdminReferralPercent,
     AdminAddResellerBot,
+    AdminWheelSettings,
 )
 
 
@@ -628,6 +629,107 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         db.set_setting("referral_percent", text)
         await state.clear()
         await message.answer(f"✅ درصد پورسانت زیرمجموعه‌گیری روی {text}٪ تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    # -------------------------------------------------------------------
+    # مدیریت گردونه شانس
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_wheel_settings")
+    async def cb_admin_wheel_settings(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        await call.message.edit_text("🎡 مدیریت گردونه شانس:", reply_markup=kb.wheel_settings_kb(db))
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_wheel_toggle")
+    async def cb_admin_wheel_toggle(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        current = db.get_setting("wheel_enabled", "1")
+        db.set_setting("wheel_enabled", "0" if current == "1" else "1")
+        await call.message.edit_text("🎡 مدیریت گردونه شانس:", reply_markup=kb.wheel_settings_kb(db))
+        await call.answer("وضعیت تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_wheel_edit_percent")
+    async def cb_admin_wheel_edit_percent(call: CallbackQuery, state: FSMContext):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        await state.set_state(AdminWheelSettings.waiting_win_percent)
+        await call.message.edit_text(
+            "درصد احتمال برد را وارد کنید (عددی بین 0 تا 100، مثلاً 10):", reply_markup=kb.admin_back_kb()
+        )
+        await call.answer()
+
+    @router.message(AdminWheelSettings.waiting_win_percent)
+    async def process_wheel_percent(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or not (0 <= int(text) <= 100):
+            await message.answer("لطفاً یک عدد بین 0 تا 100 ارسال کنید.")
+            return
+        db.set_setting("wheel_win_percent", text)
+        await state.clear()
+        await message.answer(f"✅ احتمال برد گردونه روی {text}٪ تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    @router.callback_query(F.data == "adm_wheel_edit_prizes")
+    async def cb_admin_wheel_edit_prizes(call: CallbackQuery, state: FSMContext):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        await state.set_state(AdminWheelSettings.waiting_prizes)
+        await call.message.edit_text(
+            "درصدهای تخفیف ممکن را با کاما جدا کرده و ارسال کنید (مثلاً: 10,20,30,50):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminWheelSettings.waiting_prizes)
+    async def process_wheel_prizes(message: Message, state: FSMContext):
+        parts = [p.strip() for p in message.text.split(",")]
+        if not all(p.isdigit() and 0 < int(p) <= 100 for p in parts) or not parts:
+            await message.answer("فرمت اشتباه است. مثال درست: 10,20,30,50")
+            return
+        db.set_wheel_prizes([int(p) for p in parts])
+        await state.clear()
+        await message.answer("✅ لیست جوایز گردونه به‌روزرسانی شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    @router.callback_query(F.data == "adm_wheel_edit_expiry")
+    async def cb_admin_wheel_edit_expiry(call: CallbackQuery, state: FSMContext):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        await state.set_state(AdminWheelSettings.waiting_expiry)
+        await call.message.edit_text(
+            "کد جایزه چند ساعت اعتبار داشته باشد؟ (فقط عدد، مثلاً 24):", reply_markup=kb.admin_back_kb()
+        )
+        await call.answer()
+
+    @router.message(AdminWheelSettings.waiting_expiry)
+    async def process_wheel_expiry(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
+            return
+        db.set_setting("wheel_code_expiry_hours", text)
+        await state.clear()
+        await message.answer(f"✅ اعتبار کد جایزه روی {text} ساعت تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    @router.callback_query(F.data == "adm_wheel_edit_cooldown")
+    async def cb_admin_wheel_edit_cooldown(call: CallbackQuery, state: FSMContext):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        await state.set_state(AdminWheelSettings.waiting_cooldown)
+        await call.message.edit_text(
+            "فاصله مجاز بین دو چرخش هر کاربر چند ساعت باشد؟ (فقط عدد، مثلاً 24):", reply_markup=kb.admin_back_kb()
+        )
+        await call.answer()
+
+    @router.message(AdminWheelSettings.waiting_cooldown)
+    async def process_wheel_cooldown(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
+            return
+        db.set_setting("wheel_cooldown_hours", text)
+        await state.clear()
+        await message.answer(f"✅ فاصله بین دو چرخش روی {text} ساعت تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
     # -------------------------------------------------------------------
     # مدیریت بات‌های نمایندگی (فقط در بات اصلی)

@@ -49,6 +49,10 @@ def main_menu_kb(db, is_admin: bool) -> ReplyKeyboardMarkup:
                 )
             ]
         )
+    if settings.get("wheel_enabled", "1") == "1":
+        rows.append(
+            [_styled_button(settings.get("btn_wheel", "🎡 گردونه شانس"), settings.get("btn_wheel_style", ""))]
+        )
     rows.append(
         [_styled_button(settings.get("btn_contact", "📞 ارتباط با پشتیبانی"), settings.get("btn_contact_style", ""))]
     )
@@ -144,6 +148,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_pending_orders", "🧾 سفارش‌های در انتظار", "adm_pending_orders"),
     ("adm_pending_topups", "👛 درخواست‌های شارژ کیف پول", "adm_pending_topups"),
     ("adm_discounts_menu", "🎟 مدیریت کدهای تخفیف", "adm_discounts_menu"),
+    ("adm_wheel_settings", "🎡 مدیریت گردونه شانس", "adm_wheel_settings"),
     ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
     ("adm_resellers_menu", "🏪 مدیریت بات‌های نمایندگی", "adm_resellers_menu"),
     ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
@@ -279,6 +284,7 @@ BUTTON_LABELS = {
     "btn_my_orders": "دکمه سفارش‌های من",
     "btn_referral": "دکمه زیرمجموعه‌گیری",
     "btn_wallet": "دکمه کیف پول",
+    "btn_wheel": "دکمه گردونه شانس",
     "btn_admin_panel": "دکمه پنل مدیریت",
 }
 
@@ -380,6 +386,29 @@ def referral_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=f"درصد پورسانت فعلی: {percent}%", callback_data="noop")],
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_referral_toggle")],
         [InlineKeyboardButton(text="✏️ تغییر درصد پورسانت", callback_data="adm_referral_percent_edit")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ---------------------------------------------------------------------------
+# گردونه شانس
+# ---------------------------------------------------------------------------
+
+def wheel_settings_kb(db) -> InlineKeyboardMarkup:
+    s = db.get_wheel_settings()
+    toggle_text = "🔴 غیرفعال کردن گردونه" if s["enabled"] else "🟢 فعال کردن گردونه"
+    prizes_txt = "، ".join(f"{p}%" for p in s["prizes"]) or "---"
+    rows = [
+        [InlineKeyboardButton(text=f"احتمال برد: {s['win_percent']}%", callback_data="noop")],
+        [InlineKeyboardButton(text=f"جوایز ممکن: {prizes_txt}", callback_data="noop")],
+        [InlineKeyboardButton(text=f"اعتبار کد جایزه: {s['expiry_hours']} ساعت", callback_data="noop")],
+        [InlineKeyboardButton(text=f"فاصله بین دو چرخش: {s['cooldown_hours']} ساعت", callback_data="noop")],
+        [InlineKeyboardButton(text=toggle_text, callback_data="adm_wheel_toggle")],
+        [InlineKeyboardButton(text="✏️ تغییر درصد برد", callback_data="adm_wheel_edit_percent")],
+        [InlineKeyboardButton(text="✏️ تغییر لیست جوایز", callback_data="adm_wheel_edit_prizes")],
+        [InlineKeyboardButton(text="✏️ تغییر اعتبار کد", callback_data="adm_wheel_edit_expiry")],
+        [InlineKeyboardButton(text="✏️ تغییر فاصله چرخش", callback_data="adm_wheel_edit_cooldown")],
         [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)

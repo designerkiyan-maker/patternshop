@@ -8,6 +8,9 @@ Router تازه می‌سازد که به همان یک db گره خورده؛ �
 برای بات اصلی و هر بات نمایندگی، مستقل و کامل اجرا می‌شود.
 """
 
+import random
+import asyncio
+
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
@@ -371,6 +374,47 @@ def create_user_router(db) -> Router:
             "این موجودی (چه از شارژ دستی، چه از پورسانت زیرمجموعه‌گیری) به‌صورت خودکار در خرید بعدی شما کسر می‌شود."
         )
         await message.answer(text, reply_markup=kb.wallet_menu_kb())
+
+    # -----------------------------------------------------------------------
+    # گردونه شانس
+    # -----------------------------------------------------------------------
+
+    @router.message(F.text.func(lambda t: t == db.get_setting("btn_wheel")))
+    async def wheel_of_fortune(message: Message, bot: Bot):
+        if db.get_setting("wheel_enabled", "1") != "1":
+            await message.answer("در حال حاضر گردونه شانس غیرفعال است.")
+            return
+
+        can_spin, remaining_hours = db.can_spin_wheel(message.from_user.id)
+        if not can_spin:
+            hours = int(remaining_hours) + 1
+            await message.answer(f"⏳ فردا دوباره امتحان کن! حدود {hours} ساعت دیگر می‌توانی دوباره گردونه را بچرخانی.")
+            return
+
+        # افکت چرخش: انیمیشن اسلات‌ماشین بومی تلگرام
+        try:
+            await bot.send_dice(message.chat.id, emoji="🎰")
+        except Exception:
+            await message.answer("🎡 در حال چرخش گردونه...")
+        await asyncio.sleep(2.5)
+
+        db.record_wheel_spin(message.from_user.id)
+
+        settings = db.get_wheel_settings()
+        won = random.randint(1, 100) <= settings["win_percent"]
+
+        if won and settings["prizes"]:
+            percent = random.choice(settings["prizes"])
+            code, expires_at = db.generate_wheel_prize_code(message.from_user.id, percent)
+            await message.answer(
+                f"🎉 تبریک! برنده شدی!\n\n"
+                f"🎟 کد تخفیف {percent}٪ شما:\n`{code}`\n\n"
+                f"⏳ اعتبار: تا {settings['expiry_hours']} ساعت آینده\n"
+                f"این کد یکبارمصرف است و در خرید بعدی‌ات قابل استفاده است.",
+                parse_mode="Markdown",
+            )
+        else:
+            await message.answer("😔 امروز شانس با تو نبود! فردا دوباره امتحان کن.")
 
     @router.callback_query(F.data == "start_topup")
     async def cb_start_topup(call: CallbackQuery, state: FSMContext):

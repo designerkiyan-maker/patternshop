@@ -11,7 +11,8 @@
 """
 
 import sqlite3
-from datetime import datetime
+import secrets
+from datetime import datetime, timedelta
 from contextlib import contextmanager
 
 
@@ -57,6 +58,15 @@ DEFAULT_SETTINGS = {
     "adm_admins_menu_style": "",
     "adm_broadcast_style": "",
     "adm_stats_style": "success",
+    "adm_wheel_settings_style": "success",
+    # گردونه شانس
+    "wheel_enabled": "1",
+    "wheel_win_percent": "10",  # درصد احتمال برد از هر چرخش
+    "wheel_prizes": "10,20,30,50",  # درصدهای تخفیف ممکن؛ در صورت برد یکی تصادفی انتخاب می‌شود
+    "wheel_code_expiry_hours": "24",  # اعتبار کد جایزه پس از برد (ساعت)
+    "wheel_cooldown_hours": "24",  # فاصله مجاز بین دو چرخش هر کاربر
+    "btn_wheel": "🎡 گردونه شانس",
+    "btn_wheel_style": "success",
 }
 
 
@@ -218,6 +228,9 @@ class Database:
             ("orders", "discount_code_id", "INTEGER"),
             ("orders", "discount_amount", "INTEGER DEFAULT 0"),
             ("orders", "final_price", "INTEGER"),
+            ("users", "last_wheel_spin_at", "TEXT"),
+            ("discount_codes", "expires_at", "TEXT"),
+            ("discount_codes", "source", "TEXT"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -623,11 +636,15 @@ class Database:
     # کدهای تخفیف
     # -----------------------------------------------------------------------
 
-    def create_discount_code(self, code: str, percent: int = None, fixed_amount: int = None, max_uses: int = 0) -> int:
+    def create_discount_code(
+        self, code: str, percent: int = None, fixed_amount: int = None, max_uses: int = 0,
+        expires_at: str = None, source: str = "admin",
+    ) -> int:
         with self._get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO discount_codes (code, percent, fixed_amount, max_uses) VALUES (?, ?, ?, ?)",
-                (code.strip().upper(), percent, fixed_amount, max_uses),
+                "INSERT INTO discount_codes (code, percent, fixed_amount, max_uses, expires_at, source) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (code.strip().upper(), percent, fixed_amount, max_uses, expires_at, source),
             )
             return cur.lastrowid
 
@@ -674,6 +691,9 @@ class Database:
         if not row["is_active"]:
             return False
         if row["max_uses"] and row["used_count"] >= row["max_uses"]:
+            return False
+        expires_at = row["expires_at"] if "expires_at" in row.keys() else None
+        if expires_at and datetime.utcnow().isoformat() > expires_at:
             return False
         return True
 
@@ -768,3 +788,52 @@ class Database:
     def delete_reseller_bot(self, bot_id: int):
         with self._get_conn() as conn:
             conn.execute("DELETE FROM reseller_bots WHERE id=?", (bot_id,))
+
+    # -----------------------------------------------------------------------
+    # گردونه شانس
+    # -----------------------------------------------------------------------
+
+    def get_wheel_settings(self) -> dict:
+        return {
+            "enabled": self.get_setting("wheel_enabled", "1") == "1",
+            "win_percent": int(self.get_setting("wheel_win_percent", "10") or 0),
+            "prizes": [int(p) for p in self.get_setting("wheel_prizes", "10,20,30,50").split(",") if p.strip().isdigit()],
+            "expiry_hours": int(self.get_setting("wheel_code_expiry_hours", "24") or 24),
+            "cooldown_hours": int(self.get_setting("wheel_cooldown_hours", "24") or 24),
+        }
+
+    def set_wheel_prizes(self, prizes: list):
+        self.set_setting("wheel_prizes", ",".join(str(p) for p in prizes))
+
+    def can_spin_wheel(self, user_tg_id: int):
+        """برمی‌گرداند (True, None) اگر مجاز به چرخش باشد، وگرنه (False, ساعات باقی‌مانده)."""
+        cooldown_hours = int(self.get_setting("wheel_cooldown_hours", "24") or 24)
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT last_wheel_spin_at FROM users WHERE telegram_id=?", (user_tg_id,)
+            ).fetchone()
+        if not row or not row["last_wheel_spin_at"]:
+            return True, None
+        last_spin = datetime.fromisoformat(row["last_wheel_spin_at"])
+        elapsed = datetime.utcnow() - last_spin
+        remaining = cooldown_hours - (elapsed.total_seconds() / 3600)
+        if remaining <= 0:
+            return True, None
+        return False, remaining
+
+    def record_wheel_spin(self, user_tg_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET last_wheel_spin_at=? WHERE telegram_id=?",
+                (datetime.utcnow().isoformat(), user_tg_id),
+            )
+
+    def generate_wheel_prize_code(self, user_tg_id: int, percent: int) -> tuple:
+        """یک کد تخفیف یکبارمصرف با تاریخ انقضا برای برنده‌ی گردونه می‌سازد و برمی‌گرداند (code, expires_at)."""
+        settings = self.get_wheel_settings()
+        expires_at = (datetime.utcnow() + timedelta(hours=settings["expiry_hours"])).isoformat()
+        code = f"LUCKY{user_tg_id}{secrets.randbelow(9000) + 1000}"
+        self.create_discount_code(
+            code, percent=percent, max_uses=1, expires_at=expires_at, source="wheel"
+        )
+        return code, expires_at
