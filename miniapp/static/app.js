@@ -1,10 +1,16 @@
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
+try { tg.setHeaderColor("#0a0e17"); tg.setBackgroundColor("#0a0e17"); } catch (e) {}
 
 const initData = tg.initData; // برای هدر X-Init-Data به بک‌اند فرستاده می‌شود
 const content = document.getElementById("content");
 const greeting = document.getElementById("greeting");
+
+function notify(message) {
+  if (tg.showAlert) tg.showAlert(message);
+  else alert(message);
+}
 
 async function api(path, options = {}) {
   const res = await fetch(path, {
@@ -22,11 +28,19 @@ function fmt(n) {
   return Number(n).toLocaleString("fa-IR");
 }
 
+function skeleton(rows = 3) {
+  return `<div class="skeleton-block">${'<div class="skel"></div>'.repeat(rows)}</div>`;
+}
+
+function errorState(message) {
+  return `<div class="state-msg error"><span class="ic">⚠</span>${message}</div>`;
+}
+
 // ---------------------------------------------------------------------------
 // تب خانه
 // ---------------------------------------------------------------------------
 async function renderHome() {
-  content.innerHTML = "<p>در حال بارگذاری...</p>";
+  content.innerHTML = skeleton(3);
   try {
     const me = await api("/api/me");
     greeting.textContent = `سلام ${me.first_name} 👋`;
@@ -34,30 +48,37 @@ async function renderHome() {
     const active = orders.filter((o) => o.status === "approved");
 
     content.innerHTML = `
+      <div class="eyebrow">وضعیت حساب</div>
       <div class="card">
-        <h3>وضعیت حساب</h3>
+        <h3><span class="ic">◆</span>خلاصه</h3>
         <div class="stat-row"><span>👛 موجودی کیف پول</span><b>${fmt(me.wallet_credit)} تومان</b></div>
         <div class="stat-row"><span>👥 زیرمجموعه‌ها</span><b>${fmt(me.referral_count)}</b></div>
         <div class="stat-row"><span>📦 تعداد سفارش</span><b>${fmt(me.orders_count)}</b></div>
       </div>
+
+      <div class="eyebrow">سرویس‌های فعال</div>
       <div class="card">
-        <h3>سرویس‌های فعال</h3>
-        ${active.length === 0 ? "<p>سرویس فعالی ندارید.</p>" : active.map(orderCard).join("")}
+        ${active.length === 0
+          ? `<div class="state-msg"><span class="ic">◌</span>سرویس فعالی ندارید.</div>`
+          : active.map(orderCard).join("")}
       </div>
     `;
   } catch (e) {
-    content.innerHTML = `<p>خطا: ${e.message}</p>`;
+    content.innerHTML = errorState(e.message);
   }
 }
 
 function orderCard(o) {
   const exp = o.expires_at ? o.expires_at.slice(0, 10) : "نامحدود";
   return `
-    <div style="margin-bottom:14px">
+    <div class="order-block">
       <div class="stat-row"><span>${o.product_name}</span><span class="badge approved">فعال تا ${exp}</span></div>
-      ${o.link ? `<div class="link-box">${o.link}</div>
-      <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(o.link)}" width="120" />
-      <button class="btn" onclick="navigator.clipboard.writeText('${o.link}');tg.HapticFeedback.notificationOccurred('success')">📋 کپی لینک</button>` : ""}
+      ${o.link ? `
+      <div class="link-box">${o.link}</div>
+      <div class="qr-row">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(o.link)}" width="96" height="96" alt="QR" />
+        <button class="btn small outline" onclick="navigator.clipboard.writeText('${o.link}');tg.HapticFeedback.notificationOccurred('success')">📋 کپی لینک</button>
+      </div>` : ""}
     </div>
   `;
 }
@@ -66,19 +87,23 @@ function orderCard(o) {
 // تب فروشگاه
 // ---------------------------------------------------------------------------
 async function renderStore() {
-  content.innerHTML = "<p>در حال بارگذاری...</p>";
+  content.innerHTML = skeleton(4);
   try {
     const categories = await api("/api/catalog");
+    if (categories.length === 0) {
+      content.innerHTML = `<div class="state-msg"><span class="ic">◌</span>در حال حاضر محصولی موجود نیست.</div>`;
+      return;
+    }
     content.innerHTML = categories.map((c) => `
       <div class="card">
-        <h3>📁 ${c.name}</h3>
+        <h3><span class="ic">▣</span>${c.name}</h3>
         ${c.products.map((p) => `
           <div class="product">
             <div>
-              <div>${p.name}</div>
+              <div class="product-name">${p.name}</div>
               <div class="price">${fmt(p.price)} تومان</div>
             </div>
-            <button class="btn" style="width:auto" ${p.stock <= 0 ? "disabled" : ""}
+            <button class="btn small" ${p.stock <= 0 ? "disabled" : ""}
               onclick="buyProduct(${p.id}, ${p.price})">
               ${p.stock <= 0 ? "ناموجود" : "خرید"}
             </button>
@@ -87,7 +112,7 @@ async function renderStore() {
       </div>
     `).join("");
   } catch (e) {
-    content.innerHTML = `<p>خطا: ${e.message}</p>`;
+    content.innerHTML = errorState(e.message);
   }
 }
 
@@ -100,13 +125,13 @@ async function buyProduct(productId) {
     });
     if (result.status === "approved") {
       tg.HapticFeedback.notificationOccurred("success");
-      alert("✅ خرید تایید شد! از تب خانه لینک را ببینید.");
+      notify("✅ خرید تایید شد! از تب خانه لینک را ببینید.");
       switchTab("home");
     } else {
-      alert(`مبلغ باقی‌مانده: ${fmt(result.final_price)} تومان.\nبرای پرداخت به بات مراجعه کنید و رسید بفرستید.`);
+      notify(`مبلغ باقی‌مانده: ${fmt(result.final_price)} تومان.\nبرای پرداخت به بات مراجعه کنید و رسید بفرستید.`);
     }
   } catch (e) {
-    alert("خطا: " + e.message);
+    notify("خطا: " + e.message);
   }
 }
 
@@ -114,18 +139,18 @@ async function buyProduct(productId) {
 // تب گردونه (با انیمیشن واقعی چرخش روی canvas)
 // ---------------------------------------------------------------------------
 async function renderWheel() {
-  content.innerHTML = "<p>در حال بارگذاری...</p>";
+  content.innerHTML = skeleton(1);
   try {
     const status = await api("/api/wheel");
     currentPrizes = status.prizes || [];
     if (!status.enabled) {
-      content.innerHTML = "<p>گردونه شانس غیرفعال است.</p>";
+      content.innerHTML = `<div class="state-msg"><span class="ic">◌</span>گردونه شانس غیرفعال است.</div>`;
       return;
     }
     content.innerHTML = `
       <div class="card" style="text-align:center">
-        <canvas id="wheel-canvas" width="260" height="260"></canvas>
-        <button class="btn" id="spin-btn" ${status.can_spin ? "" : "disabled"}>
+        <div class="wheel-frame"><canvas id="wheel-canvas" width="260" height="260"></canvas></div>
+        <button class="btn violet" id="spin-btn" ${status.can_spin ? "" : "disabled"}>
           ${status.can_spin ? "🎡 بچرخان!" : `⏳ ${status.remaining_hours} ساعت دیگر`}
         </button>
       </div>
@@ -135,7 +160,7 @@ async function renderWheel() {
       document.getElementById("spin-btn").onclick = spinWheel;
     }
   } catch (e) {
-    content.innerHTML = `<p>خطا: ${e.message}</p>`;
+    content.innerHTML = errorState(e.message);
   }
 }
 let currentPrizes = [];
@@ -144,7 +169,7 @@ function drawWheel(prizes, rotation = 0) {
   const canvas = document.getElementById("wheel-canvas");
   const ctx = canvas.getContext("2d");
   const cx = 130, cy = 130, r = 120;
-  const colors = ["#e74c3c", "#3498db", "#2ecc71", "#f1c40f", "#9b59b6", "#1abc9c"];
+  const colors = ["#22e6c5", "#8b7fff", "#fbbf24", "#fb7185", "#34d399", "#4ea1ff"];
   const n = prizes.length || 1;
   ctx.clearRect(0, 0, 260, 260);
   ctx.save();
@@ -158,21 +183,29 @@ function drawWheel(prizes, rotation = 0) {
     ctx.arc(0, 0, r, a0, a1);
     ctx.fillStyle = colors[i % colors.length];
     ctx.fill();
+    ctx.strokeStyle = "#0a0e17";
+    ctx.lineWidth = 2;
+    ctx.stroke();
     ctx.save();
     ctx.rotate((a0 + a1) / 2);
     ctx.textAlign = "right";
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 16px sans-serif";
+    ctx.fillStyle = "#04211c";
+    ctx.font = "bold 16px 'JetBrains Mono', sans-serif";
     ctx.fillText(`${prizes[i]}%`, r - 15, 5);
     ctx.restore();
   }
   ctx.restore();
+  // مرکز
+  ctx.beginPath();
+  ctx.arc(cx, cy, 10, 0, 2 * Math.PI);
+  ctx.fillStyle = "#0a0e17";
+  ctx.fill();
   // فلش نشانگر
   ctx.beginPath();
   ctx.moveTo(cx - 10, 5);
   ctx.lineTo(cx + 10, 5);
   ctx.lineTo(cx, 25);
-  ctx.fillStyle = "#000";
+  ctx.fillStyle = "#edf1f9";
   ctx.fill();
 }
 
@@ -191,15 +224,15 @@ async function spinWheel() {
       clearInterval(spinInterval);
       tg.HapticFeedback.notificationOccurred(result.won ? "success" : "error");
       if (result.won) {
-        alert(`🎉 تبریک! کد تخفیف ${result.percent}٪ شما:\n${result.code}\n(اعتبار محدود دارد)`);
+        notify(`🎉 تبریک! کد تخفیف ${result.percent}٪ شما:\n${result.code}\n(اعتبار محدود دارد)`);
       } else {
-        alert("😔 امروز شانس نبود، فردا دوباره امتحان کن!");
+        notify("😔 امروز شانس نبود، فردا دوباره امتحان کن!");
       }
       renderWheel();
     }, 2500);
   } catch (e) {
     clearInterval(spinInterval);
-    alert("خطا: " + e.message);
+    notify("خطا: " + e.message);
     btn.disabled = false;
   }
 }
@@ -208,32 +241,33 @@ async function spinWheel() {
 // تب کیف پول
 // ---------------------------------------------------------------------------
 async function renderWallet() {
-  content.innerHTML = "<p>در حال بارگذاری...</p>";
+  content.innerHTML = skeleton(2);
   try {
     const me = await api("/api/me");
     content.innerHTML = `
+      <div class="eyebrow">کیف پول</div>
       <div class="card">
-        <h3>👛 موجودی فعلی</h3>
-        <div class="stat-row"><b>${fmt(me.wallet_credit)} تومان</b></div>
+        <h3><span class="ic">👛</span>موجودی فعلی</h3>
+        <div class="stat-row"><span>قابل استفاده برای خرید</span><b>${fmt(me.wallet_credit)} تومان</b></div>
       </div>
       <div class="card">
-        <h3>➕ شارژ کیف پول</h3>
-        <input id="topup-amount" type="number" placeholder="مبلغ به تومان" style="width:100%;padding:10px;border-radius:8px;border:1px solid #ccc" />
+        <h3><span class="ic">＋</span>شارژ کیف پول</h3>
+        <input id="topup-amount" class="input" type="number" placeholder="مبلغ به تومان" />
         <button class="btn" id="topup-btn">ثبت درخواست شارژ</button>
       </div>
     `;
     document.getElementById("topup-btn").onclick = async () => {
       const amount = parseInt(document.getElementById("topup-amount").value, 10);
-      if (!amount || amount < 1000) return alert("حداقل مبلغ ۱۰۰۰ تومان است.");
+      if (!amount || amount < 1000) return notify("حداقل مبلغ ۱۰۰۰ تومان است.");
       try {
         const r = await api("/api/wallet/topup-request", { method: "POST", body: JSON.stringify({ amount }) });
-        alert(`مبلغ را به کارت زیر واریز کنید و رسید را در خود بات (نه اینجا) بفرستید:\n\n${r.card_number}\n${r.card_holder}`);
+        notify(`مبلغ را به کارت زیر واریز کنید و رسید را در خود بات (نه اینجا) بفرستید:\n\n${r.card_number}\n${r.card_holder}`);
       } catch (e) {
-        alert("خطا: " + e.message);
+        notify("خطا: " + e.message);
       }
     };
   } catch (e) {
-    content.innerHTML = `<p>خطا: ${e.message}</p>`;
+    content.innerHTML = errorState(e.message);
   }
 }
 
