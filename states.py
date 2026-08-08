@@ -32,7 +32,6 @@ class AdminAddProduct(StatesGroup):
     waiting_name = State()
     waiting_price = State()
     waiting_desc = State()
-    waiting_duration = State()
 
 
 class AdminAddConfigs(StatesGroup):
@@ -79,20 +78,6 @@ class AdminReferralPercent(StatesGroup):
     waiting_value = State()
 
 
-class AdminAddResellerBot(StatesGroup):
-    waiting_token = State()
-    waiting_owner_id = State()
-    waiting_owner_name = State()
-
-
-class AdminWheelSettings(StatesGroup):
-    waiting_win_percent = State()
-    waiting_prizes = State()
-    waiting_expiry = State()
-    waiting_cooldown = State()
-
-
-class AdminRenewalSettings(StatesGroup):
-    waiting_days_before = State()
-    waiting_percent = State()
-    waiting_expiry_hours = State()
+class AdminAddReseller(StatesGroup):
+    waiting_id = State()
+    waiting_name = State()
