@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 
-from config import BOT_TOKEN, DB_PATH
+from config import BOT_TOKEN, DB_PATH, MAX_TEST_PER_USER
 from database import Database
 from miniapp.auth import validate_init_data
 
@@ -30,6 +30,24 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 db = Database(DB_PATH)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+_bot_username_cache: Optional[str] = None
+
+
+async def get_bot_username() -> str:
+    """یوزرنیم بات را (برای ساخت لینک دعوت زیرمجموعه‌گیری) از تلگرام می‌گیرد و کش می‌کند."""
+    global _bot_username_cache
+    if _bot_username_cache:
+        return _bot_username_cache
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe") as resp:
+                data = await resp.json()
+                if data.get("ok"):
+                    _bot_username_cache = data["result"]["username"]
+    except Exception:
+        pass
+    return _bot_username_cache or ""
 
 
 def get_asset_version() -> str:
@@ -119,6 +137,49 @@ def api_catalog(x_init_data: str = Header(...)):
             ],
         })
     return result
+
+
+@app.get("/api/test-config")
+def api_test_config_status(x_init_data: str = Header(...)):
+    tg_id = get_verified_user(x_init_data)
+    user = db.get_user(tg_id)
+    return {
+        "enabled": db.get_setting("test_enabled", "1") == "1",
+        "used": bool(user and user["test_used"] >= MAX_TEST_PER_USER),
+        "available": db.count_available_test_configs(),
+    }
+
+
+@app.post("/api/test-config/claim")
+def api_test_config_claim(x_init_data: str = Header(...)):
+    tg_id = get_verified_user(x_init_data)
+    if db.get_setting("test_enabled", "1") != "1":
+        raise HTTPException(status_code=400, detail="در حال حاضر امکان دریافت کانفیگ تست غیرفعال است.")
+    user = db.get_user(tg_id)
+    if user and user["test_used"] >= MAX_TEST_PER_USER:
+        raise HTTPException(status_code=400, detail="شما قبلاً کانفیگ تست خود را دریافت کرده‌اید.")
+    result = db.take_unused_test_config(tg_id)
+    if not result:
+        raise HTTPException(status_code=400, detail="متاسفانه موجودی کانفیگ تست تمام شده است.")
+    db.mark_test_used(tg_id)
+    return {"link": result["link"]}
+
+
+@app.get("/api/referral")
+async def api_referral(x_init_data: str = Header(...)):
+    tg_id = get_verified_user(x_init_data)
+    if db.get_setting("referral_enabled", "1") != "1":
+        return {"enabled": False}
+    username = await get_bot_username()
+    link = f"https://t.me/{username}?start=ref{tg_id}" if username else None
+    stats = db.get_referral_stats(tg_id)
+    return {
+        "enabled": True,
+        "link": link,
+        "count": stats["count"],
+        "credit": stats["credit"],
+        "percent": db.get_setting("referral_percent", "10"),
+    }
 
 
 async def send_photo_to_admins(caption: str, reply_markup: str, photo_bytes: bytes, filename: str, content_type: str):
