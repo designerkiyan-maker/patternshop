@@ -386,6 +386,7 @@ main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 }
 
 .receipt-upload {
+  display: block; width: 100%; box-sizing: border-box;
   border: 1.5px dashed var(--border);
   border-radius: var(--radius-md);
   padding: 16px;

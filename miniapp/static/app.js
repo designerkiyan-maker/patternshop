@@ -148,7 +148,7 @@ function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, s
     const file = fileInput.files[0];
     if (!file) return;
     drop.classList.add("has-file");
-    box.querySelector("#receipt-label").textContent = file.name;
+    box.querySelector("#receipt-label").textContent = "✅ عکس رسید انتخاب شد";
     preview.src = URL.createObjectURL(file);
     preview.style.display = "block";
     sendBtn.disabled = false;
