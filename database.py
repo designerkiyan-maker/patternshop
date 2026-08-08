@@ -229,6 +229,7 @@ class Database:
             ("users", "referred_by", "INTEGER"),
             ("users", "referral_credit", "INTEGER DEFAULT 0"),
             ("users", "referral_first_purchase_rewarded", "INTEGER DEFAULT 0"),
+            ("orders", "status", "TEXT DEFAULT 'pending'"),
             ("orders", "base_price", "INTEGER"),
             ("orders", "wallet_used", "INTEGER DEFAULT 0"),
             ("orders", "discount_code_id", "INTEGER"),
