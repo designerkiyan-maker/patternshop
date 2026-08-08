@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>VPN Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#070b14;
+  --bg2:#0c1424;
+  --card:#101a2e;
+  --card2:#0d1626;
+  --line:rgba(255,255,255,.08);
+  --cyan:#33e0ff;
+  --violet:#7c5cff;
+  --pink:#ff5cb3;
+  --txt:#eaf2ff;
+  --sub:#7c8aa8;
+  --green:#3ddc84;
+  --amber:#ffb84d;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+body{
+  font-family:'Vazirmatn',sans-serif;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(124,92,255,.25), transparent 60%),
+    radial-gradient(900px 500px at -10% 20%, rgba(51,224,255,.15), transparent 60%),
+    var(--bg);
+  color:var(--txt);
+  min-height:100vh;
+  display:flex;
+  justify-content:center;
+}
+.app{
+  width:100%;
+  max-width:430px;
+  min-height:100vh;
+  position:relative;
+  padding-bottom:86px;
+  overflow-x:hidden;
+}
+/* ---- topbar ---- */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:18px 18px 10px;
+}
+.brand{display:flex;align-items:center;gap:10px;}
+.brand .logo{
+  width:38px;height:38px;border-radius:12px;
+  background:linear-gradient(135deg,var(--cyan),var(--violet));
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;box-shadow:0 0 24px rgba(51,224,255,.45);
+}
+.brand .name{font-weight:800;font-size:16px;}
+.brand .sub{font-size:11px;color:var(--sub);}
+.wallet-chip{
+  background:var(--card);border:1px solid var(--line);
+  border-radius:20px;padding:7px 12px;font-size:12px;
+  display:flex;align-items:center;gap:6px;font-weight:600;
+}
+.wallet-chip b{color:var(--green);font-weight:800;}
+
+/* ---- balance hero ---- */
+.hero{
+  margin:6px 18px 14px;
+  border-radius:22px;
+  padding:20px;
+  position:relative;
+  overflow:hidden;
+  background:linear-gradient(135deg, #12203c 0%, #0d1730 60%, #170f2e 100%);
+  border:1px solid var(--line);
+}
+.hero:before{
+  content:"";position:absolute;inset:0;
+  background:
+    repeating-linear-gradient(115deg, rgba(255,255,255,.035) 0 2px, transparent 2px 26px);
+  pointer-events:none;
+}
+.hero .label{font-size:12px;color:var(--sub);}
+.hero .amount{font-size:30px;font-weight:800;margin-top:4px;letter-spacing:.5px;}
+.hero .amount span{font-size:14px;color:var(--sub);font-weight:500;}
+.hero .row{display:flex;gap:10px;margin-top:16px;}
+.hero .row button{
+  flex:1;border:none;border-radius:14px;padding:11px 8px;
+  font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;
+}
+.btn-primary{background:linear-gradient(135deg,var(--cyan),var(--violet));color:#04101f;}
+.btn-ghost{background:rgba(255,255,255,.06);color:var(--txt);border:1px solid var(--line) !important;}
+
+/* ---- section title ---- */
+.sec-title{
+  display:flex;align-items:center;justify-content:space-between;
+  margin:22px 18px 10px;
+}
+.sec-title h3{font-size:14px;font-weight:700;}
+.sec-title a{font-size:11px;color:var(--cyan);text-decoration:none;}
+
+/* ---- quick grid ---- */
+.quick-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);
+  gap:10px;margin:0 18px;
+}
+.quick-item{
+  background:var(--card);border:1px solid var(--line);
+  border-radius:16px;padding:12px 6px;text-align:center;
+  cursor:pointer;transition:.15s;
+}
+.quick-item:active{transform:scale(.94);}
+.quick-item .ic{font-size:20px;margin-bottom:6px;}
+.quick-item .lb{font-size:10.5px;color:var(--sub);font-weight:600;}
+
+/* ---- plans (buy) ---- */
+.plan-scroll{
+  display:flex;gap:12px;overflow-x:auto;padding:2px 18px 6px;
+  scroll-snap-type:x mandatory;
+}
+.plan-scroll::-webkit-scrollbar{display:none;}
+.plan-card{
+  min-width:150px;scroll-snap-align:start;
+  background:var(--card);border:1px solid var(--line);
+  border-radius:18px;padding:16px;position:relative;overflow:hidden;
+}
+.plan-card.pop{border:1px solid rgba(124,92,255,.6);box-shadow:0 0 30px rgba(124,92,255,.25);}
+.plan-card .tag{
+  position:absolute;top:10px;left:10px;background:var(--pink);
+  color:#fff;font-size:9px;padding:3px 8px;border-radius:20px;font-weight:700;
+}
+.plan-card .vol{font-size:20px;font-weight:800;margin-top:14px;}
+.plan-card .days{font-size:11px;color:var(--sub);margin-top:2px;}
+.plan-card .price{font-size:15px;font-weight:800;color:var(--cyan);margin-top:14px;}
+.plan-card .old{font-size:10px;color:var(--sub);text-decoration:line-through;}
+
+/* ---- configs list ---- */
+.cfg-card{
+  margin:12px 18px;background:var(--card);border:1px solid var(--line);
+  border-radius:18px;overflow:hidden;
+}
+.cfg-head{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:14px 16px;background:linear-gradient(90deg, rgba(51,224,255,.08), rgba(124,92,255,.08));
+}
+.cfg-head .t{font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px;}
+.cfg-head .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);}
+.cfg-head .days-left{font-size:11px;color:var(--sub);}
+.cfg-body{padding:14px 16px;}
+.usage-bar{height:7px;border-radius:6px;background:rgba(255,255,255,.06);overflow:hidden;margin-top:6px;}
+.usage-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--cyan),var(--violet));}
+.usage-lbl{display:flex;justify-content:space-between;font-size:10.5px;color:var(--sub);margin-top:6px;}
+.single-configs{margin-top:14px;display:flex;flex-direction:column;gap:8px;}
+.single-cfg{
+  display:flex;align-items:center;justify-content:space-between;
+  background:var(--card2);border:1px solid var(--line);
+  border-radius:12px;padding:10px 12px;font-size:11.5px;
+}
+.single-cfg .flag{font-size:16px;}
+.single-cfg .info{display:flex;align-items:center;gap:8px;}
+.single-cfg .name{font-weight:700;}
+.single-cfg .ping{color:var(--green);font-size:10px;}
+.single-cfg .acts{display:flex;gap:6px;}
+.icon-btn{
+  width:30px;height:30px;border-radius:9px;background:rgba(255,255,255,.06);
+  border:1px solid var(--line);display:flex;align-items:center;justify-content:center;
+  font-size:13px;cursor:pointer;color:var(--txt);
+}
+.cfg-actions{display:flex;gap:8px;margin-top:14px;}
+.cfg-actions button{
+  flex:1;padding:10px;border-radius:12px;border:1px solid var(--line);
+  background:rgba(255,255,255,.05);color:var(--txt);font-family:inherit;
+  font-size:12px;font-weight:700;cursor:pointer;
+}
+.cfg-actions button.qr{background:linear-gradient(135deg,var(--cyan),var(--violet));color:#04101f;border:none;}
+
+/* ---- wheel ---- */
+.wheel-wrap{margin:10px 18px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:20px;text-align:center;}
+.wheel-outer{
+  width:220px;height:220px;border-radius:50%;margin:10px auto;position:relative;
+  background:conic-gradient(
+    #33e0ff 0deg 45deg, #7c5cff 45deg 90deg, #ff5cb3 90deg 135deg,
+    #3ddc84 135deg 180deg, #ffb84d 180deg 225deg, #33e0ff 225deg 270deg,
+    #7c5cff 270deg 315deg, #ff5cb3 315deg 360deg);
+  border:6px solid #0d1626;
+  box-shadow:0 0 40px rgba(124,92,255,.35), inset 0 0 20px rgba(0,0,0,.4);
+  transition:transform 3.5s cubic-bezier(.17,.89,.32,1.28);
+}
+.wheel-outer .center-pin{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:44px;height:44px;border-radius:50%;background:var(--bg2);
+  border:2px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:18px;
+}
+.wheel-pointer{
+  width:0;height:0;margin:0 auto;
+  border-left:10px solid transparent;border-right:10px solid transparent;
+  border-top:16px solid var(--amber);
+  filter:drop-shadow(0 0 6px rgba(255,184,77,.7));
+}
+.spin-btn{
+  margin-top:14px;border:none;border-radius:14px;padding:12px 30px;
+  background:linear-gradient(135deg,var(--amber),var(--pink));
+  color:#1a0a12;font-weight:800;font-family:inherit;cursor:pointer;font-size:13px;
+}
+.spin-hint{font-size:11px;color:var(--sub);margin-top:8px;}
+
+/* ---- referral ---- */
+.ref-card{margin:10px 18px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:18px;}
+.ref-stats{display:flex;gap:10px;margin-top:14px;}
+.ref-stat{flex:1;background:var(--card2);border-radius:14px;padding:12px;text-align:center;border:1px solid var(--line);}
+.ref-stat b{font-size:17px;display:block;color:var(--cyan);}
+.ref-stat span{font-size:10.5px;color:var(--sub);}
+.ref-link{
+  margin-top:14px;display:flex;align-items:center;gap:8px;
+  background:var(--card2);border:1px dashed rgba(255,255,255,.2);
+  border-radius:12px;padding:10px 12px;font-size:11px;color:var(--sub);
+}
+.ref-link span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--txt);}
+
+/* ---- payment ---- */
+.pay-card{margin:10px 18px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:18px;}
+.card-visual{
+  border-radius:16px;padding:18px;height:120px;position:relative;overflow:hidden;
+  background:linear-gradient(135deg,#1b2c52,#0d1730);
+  display:flex;flex-direction:column;justify-content:space-between;
+  border:1px solid var(--line);
+}
+.card-visual .num{font-size:17px;letter-spacing:2px;font-weight:700;direction:ltr;text-align:right;}
+.card-visual .meta{display:flex;justify-content:space-between;font-size:11px;color:var(--sub);}
+.copy-row{
+  display:flex;align-items:center;justify-content:space-between;
+  background:var(--card2);border:1px solid var(--line);border-radius:12px;
+  padding:10px 12px;margin-top:12px;font-size:12px;
+}
+.upload-box{
+  margin-top:14px;border:1.5px dashed rgba(255,255,255,.2);border-radius:14px;
+  padding:22px;text-align:center;color:var(--sub);font-size:12px;cursor:pointer;
+}
+.upload-box .ic{font-size:24px;margin-bottom:6px;}
+
+/* ---- bottom nav ---- */
+.bottomnav{
+  position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+  width:100%;max-width:430px;
+  background:rgba(10,15,26,.85);backdrop-filter:blur(16px);
+  border-top:1px solid var(--line);
+  display:flex;justify-content:space-around;padding:10px 6px 14px;
+  z-index:50;
+}
+.nav-item{
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  color:var(--sub);font-size:10px;cursor:pointer;font-weight:600;
+  width:60px;
+}
+.nav-item .ic{font-size:19px;}
+.nav-item.active{color:var(--cyan);}
+
+.tabpage{display:none;}
+.tabpage.active{display:block;animation:fade .25s ease;}
+@keyframes fade{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+.toast{
+  position:fixed;bottom:100px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:#12203c;border:1px solid var(--line);color:var(--txt);
+  padding:10px 18px;border-radius:30px;font-size:12px;z-index:99;
+  opacity:0;transition:.3s;pointer-events:none;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+.test-badge{
+  display:inline-flex;align-items:center;gap:5px;background:rgba(61,220,132,.12);
+  color:var(--green);border:1px solid rgba(61,220,132,.3);
+  font-size:10.5px;padding:5px 10px;border-radius:20px;font-weight:700;margin:10px 18px 0;
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">⚡</div>
+      <div>
+        <div class="name">NovaVPN</div>
+        <div class="sub">اتصال پایدار، بدون قطعی</div>
+      </div>
+    </div>
+    <div class="wallet-chip">💰 <b>128,000</b> ت</div>
+  </div>
+
+  <!-- ============ HOME ============ -->
+  <div class="tabpage active" id="page-home">
+    <div class="hero">
+      <div class="label">موجودی کیف پول</div>
+      <div class="amount">128,000 <span>تومان</span></div>
+      <div class="row">
+        <button class="btn-primary" onclick="showTab('buy')">🛒 خرید سرویس</button>
+        <button class="btn-ghost" onclick="showTab('pay')">➕ افزایش موجودی</button>
+      </div>
+    </div>
+
+    <div class="test-badge">🎁 یک کانفیگ تست رایگان (یک‌بار مصرف) داری</div>
+
+    <div class="sec-title"><h3>دسترسی سریع</h3></div>
+    <div class="quick-grid">
+      <div class="quick-item" onclick="showTab('buy')"><div class="ic">🛒</div><div class="lb">خرید</div></div>
+      <div class="quick-item" onclick="showTab('configs')"><div class="ic">📦</div><div class="lb">سفارش‌ها</div></div>
+      <div class="quick-item" onclick="showTab('wheel')"><div class="ic">🎡</div><div class="lb">گردونه</div></div>
+      <div class="quick-item" onclick="showTab('ref')"><div class="ic">🤝</div><div class="lb">زیرمجموعه</div></div>
+    </div>
+
+    <div class="sec-title"><h3>آخرین سفارش</h3><a onclick="showTab('configs')">مشاهده همه</a></div>
+    <div class="cfg-card">
+      <div class="cfg-head">
+        <div class="t"><span class="dot"></span> سفارش #۱۰۴۲ — پلن ۵۰ گیگ ماهانه</div>
+        <div class="days-left">✅ تایید شده</div>
+      </div>
+      <div class="cfg-body">
+        <div class="copy-row"><span>مبلغ پرداخت‌شده</span><span>108,000 ت</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ BUY ============ -->
+  <div class="tabpage" id="page-buy">
+    <div class="sec-title"><h3>دسته‌بندی</h3></div>
+    <div class="plan-scroll" style="padding-bottom:2px;">
+      <div class="plan-card pop" style="min-width:auto;padding:10px 18px;text-align:center;">آلمان 🇩🇪</div>
+      <div class="plan-card" style="min-width:auto;padding:10px 18px;text-align:center;">فرانسه 🇫🇷</div>
+      <div class="plan-card" style="min-width:auto;padding:10px 18px;text-align:center;">ترکیه 🇹🇷</div>
+    </div>
+
+    <div class="sec-title"><h3>محصولات این دسته</h3></div>
+    <div class="plan-scroll">
+      <div class="plan-card">
+        <div class="vol">10 گیگ / ۳۰ روزه</div>
+        <div class="days">موجودی: ۱۸ عدد</div>
+        <div class="price">45,000 ت</div>
+      </div>
+      <div class="plan-card pop">
+        <div class="tag">پرفروش</div>
+        <div class="vol">50 گیگ / ۳۰ روزه</div>
+        <div class="days">موجودی: ۴۲ عدد</div>
+        <div class="price">120,000 ت</div>
+      </div>
+      <div class="plan-card">
+        <div class="vol">100 گیگ / ۳۰ روزه</div>
+        <div class="days">موجودی: ۷ عدد</div>
+        <div class="price">210,000 ت</div>
+      </div>
+      <div class="plan-card">
+        <div class="vol">نامحدود / ۳۰ روزه</div>
+        <div class="days">موجودی: ۳ عدد</div>
+        <div class="price">340,000 ت</div>
+      </div>
+    </div>
+
+    <div class="sec-title"><h3>کد تخفیف</h3></div>
+    <div class="ref-link" style="margin:0 18px;">
+      <span id="discount-input" contenteditable="true" style="color:var(--sub);">کد تخفیف را وارد کنید</span>
+      <button class="icon-btn" onclick="toast('کد اعمال شد ✅')">✔</button>
+    </div>
+
+    <div class="sec-title"><h3>خلاصه سفارش</h3></div>
+    <div class="pay-card" style="margin-top:0;">
+      <div class="copy-row"><span>پلن ۵۰ گیگ / ۳۰ روزه</span><span>120,000 ت</span></div>
+      <div class="copy-row"><span>تخفیف</span><span style="color:var(--green)">-12,000 ت</span></div>
+      <div class="copy-row" style="border-top:1px solid var(--line);margin-top:8px;padding-top:12px;">
+        <span style="font-weight:800;">مبلغ نهایی</span><span style="font-weight:800;color:var(--cyan)">108,000 ت</span>
+      </div>
+      <button class="btn-primary" style="width:100%;border:none;border-radius:14px;padding:13px;margin-top:14px;font-family:inherit;font-weight:800;cursor:pointer;" onclick="toast('پرداخت از کیف پول انجام شد 🎉')">پرداخت از کیف پول</button>
+      <button class="btn-ghost" style="width:100%;border-radius:14px;padding:12px;margin-top:8px;font-family:inherit;font-weight:700;cursor:pointer;" onclick="showTab('pay')">پرداخت کارت به کارت</button>
+    </div>
+  </div>
+
+  <!-- ============ CONFIGS ============ -->
+  <div class="tabpage" id="page-configs">
+    <div class="sec-title"><h3>سفارش‌های من</h3></div>
+
+    <div class="cfg-card">
+      <div class="cfg-head">
+        <div class="t"><span class="dot"></span> #۱۰۴۲ — پلن ۵۰ گیگ ماهانه</div>
+        <div class="days-left">✅ تایید شده</div>
+      </div>
+      <div class="cfg-body">
+        <div class="sec-title" style="margin:0 0 0;"><h3 style="font-size:12px;">لینک کانفیگ اختصاصی شما</h3><a onclick="toast('لینک کپی شد')">کپی لینک</a></div>
+        <div class="copy-row"><span style="direction:ltr;font-size:10px;color:var(--sub);">vless://8f21ac...novavpn.io:443</span><span>📋</span></div>
+        <div class="cfg-actions">
+          <button class="qr" onclick="toast('QR کد نمایش داده شد')">نمایش QR</button>
+          <button onclick="toast('لینک برای اپلیکیشن V2Ray کپی شد')">اتصال با اپلیکیشن</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="cfg-card">
+      <div class="cfg-head">
+        <div class="t"><span style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></span> #۱۰۳۸ — پلن ۱۰ گیگ</div>
+        <div class="days-left" style="color:var(--amber);">⏳ در انتظار تایید ادمین</div>
+      </div>
+    </div>
+
+    <div class="cfg-card">
+      <div class="cfg-head">
+        <div class="t"><span style="width:8px;height:8px;border-radius:50%;background:#ff5c5c;display:inline-block;"></span> #۱۰۲۱ — پلن ۱۰۰ گیگ</div>
+        <div class="days-left" style="color:#ff5c5c;">❌ رد شده</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ WHEEL ============ -->
+  <div class="tabpage" id="page-wheel">
+    <div class="sec-title"><h3>گردونه شانس روزانه</h3></div>
+    <div class="wheel-wrap">
+      <div class="wheel-outer" id="wheel">
+        <div class="center-pin">🎯</div>
+      </div>
+      <div class="wheel-pointer"></div>
+      <button class="spin-btn" onclick="spinWheel()">چرخوندن گردونه</button>
+      <div class="spin-hint">هر ۲۴ ساعت یک چرخش رایگان داری</div>
+    </div>
+  </div>
+
+  <!-- ============ REFERRAL ============ -->
+  <div class="tabpage" id="page-ref">
+    <div class="sec-title"><h3>زیرمجموعه‌گیری</h3></div>
+    <div class="ref-card">
+      <div style="font-size:13px;color:var(--sub);">با لینک اختصاصی‌ات دوستاتو دعوت کن؛ به‌محض اولین خرید هرکدوم، پورسانت به کیف پولت اضافه میشه</div>
+      <div class="ref-stats">
+        <div class="ref-stat"><b>۱۲</b><span>دعوت‌شده</span></div>
+        <div class="ref-stat"><b>۳۸,۰۰۰</b><span>موجودی کیف پول (ت)</span></div>
+        <div class="ref-stat"><b>%۱۰</b><span>پورسانت</span></div>
+      </div>
+      <div class="ref-link"><span>t.me/NovaVpnBot?start=ref123456789</span><div class="icon-btn" onclick="toast('لینک دعوت کپی شد')">📋</div></div>
+    </div>
+  </div>
+
+  <!-- ============ PAY ============ -->
+  <div class="tabpage" id="page-pay">
+    <div class="sec-title"><h3>افزایش موجودی / کارت به کارت</h3></div>
+    <div class="pay-card">
+      <div class="card-visual">
+        <div class="num">6219 8619 4412 7734</div>
+        <div class="meta"><span>بانک ملت</span><span>علی رضایی</span></div>
+      </div>
+      <div class="copy-row"><span>مبلغ واریزی خود را وارد کنید</span></div>
+      <div class="ref-link"><span contenteditable="true" style="color:var(--sub);">مثلا 100,000</span></div>
+      <div class="upload-box" onclick="toast('گالری باز شد')">
+        <div class="ic">📎</div>
+        ارسال عکس رسید پرداخت
+      </div>
+      <button class="btn-primary" style="width:100%;border:none;border-radius:14px;padding:13px;margin-top:14px;font-family:inherit;font-weight:800;cursor:pointer;" onclick="toast('رسید برای ادمین ارسال شد ✅')">ارسال رسید برای بررسی</button>
+    </div>
+  </div>
+
+  <div class="bottomnav">
+    <div class="nav-item active" data-tab="home" onclick="showTab('home')"><div class="ic">🏠</div>خانه</div>
+    <div class="nav-item" data-tab="buy" onclick="showTab('buy')"><div class="ic">🛒</div>خرید</div>
+    <div class="nav-item" data-tab="configs" onclick="showTab('configs')"><div class="ic">📡</div>کانفیگ</div>
+    <div class="nav-item" data-tab="wheel" onclick="showTab('wheel')"><div class="ic">🎡</div>گردونه</div>
+    <div class="nav-item" data-tab="ref" onclick="showTab('ref')"><div class="ic">🤝</div>زیرمجموعه</div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+function showTab(name){
+  document.querySelectorAll('.tabpage').forEach(p=>p.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  const nav = document.querySelector('.nav-item[data-tab="'+name+'"]');
+  if(nav) nav.classList.add('active');
+  window.scrollTo(0,0);
+}
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg;
+  t.classList.add('show');
+  clearTimeout(window._tt);
+  window._tt=setTimeout(()=>t.classList.remove('show'),1800);
+}
+let spinning=false;
+function spinWheel(){
+  if(spinning) return;
+  spinning=true;
+  const wheel=document.getElementById('wheel');
+  const rand = 1800 + Math.floor(Math.random()*360);
+  wheel.style.transform = 'rotate('+rand+'deg)';
+  setTimeout(()=>{
+    spinning=false;
+    toast('🎉 تبریک! کد تخفیف ۲۰٪ گرفتی');
+  },3600);
+}
+</script>
+</body>
+</html>
