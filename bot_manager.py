@@ -1,0 +1,85 @@
+# -*- coding: utf-8 -*-
+"""
+مدیریت چند بات هم‌زمان (بات اصلی + هر بات نمایندگی).
+
+هر بات یک Bot و Dispatcher مستقل خودش را دارد و روی یک asyncio task جداگانه
+در حال polling است؛ اضافه/حذف‌کردن یک بات نمایندگی نیازی به ری‌استارت کل
+پروسه ندارد.
+"""
+
+import asyncio
+import logging
+
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
+
+from database import Database
+from handlers_user import create_user_router
+from handlers_admin import create_admin_router
+
+logger = logging.getLogger(__name__)
+
+
+class BotManager:
+    def __init__(self):
+        self.instances = {}  # token -> {"bot": Bot, "dp": Dispatcher, "task": asyncio.Task, "db_path": str}
+
+    async def start_bot(self, token: str, db_path: str, owner_id: int, is_main_bot: bool = False) -> bool:
+        """یک بات جدید (اصلی یا نمایندگی) را با دیتابیس مستقل خودش راه‌اندازی می‌کند.
+        اگر توکن از قبل در حال اجرا باشد، کاری نمی‌کند و False برمی‌گرداند."""
+        if token in self.instances:
+            return False
+
+        db = Database(db_path)
+        db.init_db(owner_id=owner_id)
+
+        bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        dp = Dispatcher(storage=MemoryStorage())
+
+        dp.include_router(create_admin_router(db, is_main_bot=is_main_bot, bot_manager=self))
+        dp.include_router(create_user_router(db))
+
+        await bot.delete_webhook(drop_pending_updates=True)
+        task = asyncio.create_task(dp.start_polling(bot))
+
+        self.instances[token] = {"bot": bot, "dp": dp, "task": task, "db_path": db_path}
+        logger.info("بات با db_path=%s راه‌اندازی شد.", db_path)
+        return True
+
+    async def stop_bot(self, token: str) -> bool:
+        inst = self.instances.pop(token, None)
+        if not inst:
+            return False
+        inst["task"].cancel()
+        try:
+            await inst["task"]
+        except Exception:
+            pass
+        try:
+            await inst["bot"].session.close()
+        except Exception:
+            pass
+        logger.info("بات با db_path=%s متوقف شد.", inst["db_path"])
+        return True
+
+    async def stop_all(self):
+        for token in list(self.instances.keys()):
+            await self.stop_bot(token)
+
+    def is_running(self, token: str) -> bool:
+        return token in self.instances
+
+    async def wait_all(self):
+        """تا وقتی حداقل یک بات در حال اجراست، برنامه را زنده نگه می‌دارد."""
+        while True:
+            tasks = [inst["task"] for inst in self.instances.values()]
+            if not tasks:
+                await asyncio.sleep(1)
+                continue
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+            for d in done:
+                exc = d.exception()
+                if exc and not isinstance(exc, asyncio.CancelledError):
+                    logger.error("یکی از بات‌ها با خطا متوقف شد: %s", exc)

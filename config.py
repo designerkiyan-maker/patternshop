@@ -30,8 +30,11 @@ if not OWNER_ID_RAW or not OWNER_ID_RAW.strip().lstrip("-").isdigit():
 
 OWNER_ID = int(OWNER_ID_RAW)
 
-# مسیر فایل دیتابیس
+# مسیر فایل دیتابیس بات اصلی
 DB_PATH = "bot_database.db"
+
+# پوشه‌ای که دیتابیس هر بات نمایندگی داخلش ذخیره می‌شود
+RESELLER_DBS_DIR = "reseller_dbs"
 
 # حداکثر تعداد کانفیگ تست مجاز برای هر کاربر
 MAX_TEST_PER_USER = 1
