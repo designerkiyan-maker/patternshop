@@ -1,44 +1,48 @@
 # -*- coding: utf-8 -*-
 """
-نقطه ورود بات - اجرا با: python main.py
+نقطه ورود - اجرا با: python main.py
+
+این فایل بات اصلی را با توکن داخل .env راه‌اندازی می‌کند و سپس تمام
+بات‌های نمایندگی که قبلاً از پنل مدیریت ثبت و فعال شده‌اند را هم به‌صورت
+هم‌زمان (هرکدام با دیتابیس کاملاً مستقل خودشان) اجرا می‌کند.
 """
 
 import asyncio
 import logging
 
-from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
-
-from config import BOT_TOKEN
-import database as db
-import handlers_user
-import handlers_admin
+from config import BOT_TOKEN, OWNER_ID, DB_PATH
+from database import Database
+from bot_manager import BotManager
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 async def main():
-    db.init_db()
+    manager = BotManager()
 
-    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher(storage=MemoryStorage())
+    # ۱. بات اصلی
+    await manager.start_bot(BOT_TOKEN, DB_PATH, OWNER_ID, is_main_bot=True)
+    logger.info("بات اصلی راه‌اندازی شد.")
 
-    # ترتیب مهم است: هندلرهای ادمین ابتدا (برای اولویت روی دکمه پنل مدیریت) سپس کاربر عادی
-    dp.include_router(handlers_admin.router)
-    dp.include_router(handlers_user.router)
+    # ۲. تمام بات‌های نمایندگیِ فعال (ثبت‌شده از پنل مدیریت بات اصلی)
+    main_db = Database(DB_PATH)
+    reseller_bots = main_db.list_reseller_bots(active_only=True)
+    for rb in reseller_bots:
+        started = await manager.start_bot(
+            rb["bot_token"], rb["db_path"], rb["owner_telegram_id"], is_main_bot=False
+        )
+        if started:
+            logger.info("بات نمایندگی @%s راه‌اندازی شد.", rb["bot_username"])
 
     try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot)
+        await manager.wait_all()
     finally:
-        # بستن تمیز session برای جلوگیری از هشدار "Unclosed client session"
-        await bot.session.close()
+        await manager.stop_all()
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\nبات با Ctrl+C متوقف شد.")
+        print("\nبرنامه با Ctrl+C متوقف شد.")
