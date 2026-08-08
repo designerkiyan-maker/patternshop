@@ -12,7 +12,10 @@ from aiogram.types import (
     KeyboardButton,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
+    WebAppInfo,
 )
+
+from config import MINIAPP_URL
 
 
 # ---------------------------------------------------------------------------
@@ -28,9 +31,12 @@ def _styled_button(text: str, style_value: str) -> KeyboardButton:
 
 def main_menu_kb(db, is_admin: bool) -> ReplyKeyboardMarkup:
     settings = db.get_all_settings()
-    rows = [
-        [_styled_button(settings.get("btn_buy", "🛒 خرید کانفیگ"), settings.get("btn_buy_style", ""))],
-    ]
+    rows = []
+    if MINIAPP_URL:
+        rows.append([KeyboardButton(text="✨ مینی‌اپ فروشگاه", web_app=WebAppInfo(url=MINIAPP_URL))])
+    rows.append(
+        [_styled_button(settings.get("btn_buy", "🛒 خرید کانفیگ"), settings.get("btn_buy_style", ""))]
+    )
     if settings.get("test_enabled", "1") == "1":
         rows.append(
             [_styled_button(settings.get("btn_test", "🧪 کانفیگ تست رایگان"), settings.get("btn_test_style", ""))]
