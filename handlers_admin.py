@@ -881,7 +881,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_edit_buttons(call: CallbackQuery):
         if not admin_only(call.from_user.id):
             return await call.answer()
-        await call.message.edit_text("کدام دکمه ویرایش شود؟", reply_markup=kb.admin_edit_buttons_kb())
+        await call.message.edit_text("کدام دکمه ویرایش شود؟", reply_markup=kb.admin_edit_buttons_kb(db))
         await call.answer()
 
     @router.callback_query(F.data.startswith("adm_btn_edit:"))
@@ -919,7 +919,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_btn_color_menu(call: CallbackQuery):
         key = call.data.split(":")[1]
         label = _lookup_button_label(key)
-        await call.message.edit_text(f"رنگ «{label}» را انتخاب کنید:", reply_markup=kb.admin_color_picker_kb(key))
+        back_callback = "adm_panel_colors_menu" if _is_panel_item_key(key) else "adm_edit_buttons"
+        await call.message.edit_text(
+            f"رنگ «{label}» را انتخاب کنید:", reply_markup=kb.admin_color_picker_kb(key, back_callback)
+        )
         await call.answer()
 
     @router.callback_query(F.data.startswith("adm_btn_color_set:"))
@@ -929,7 +932,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if _is_panel_item_key(key):
             await call.message.edit_text("🎨 رنگ‌آمیزی دکمه‌های پنل مدیریت:", reply_markup=kb.admin_panel_colors_kb(db, is_main_bot))
         else:
-            await call.message.edit_text("کدام دکمه ویرایش شود؟", reply_markup=kb.admin_edit_buttons_kb())
+            await call.message.edit_text("کدام دکمه ویرایش شود؟", reply_markup=kb.admin_edit_buttons_kb(db))
         await call.answer("✅ رنگ دکمه به‌روزرسانی شد.")
 
     @router.callback_query(F.data == "adm_panel_colors_menu")

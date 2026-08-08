@@ -289,21 +289,28 @@ BUTTON_LABELS = {
 }
 
 
-def admin_edit_buttons_kb() -> InlineKeyboardMarkup:
+def admin_edit_buttons_kb(db) -> InlineKeyboardMarkup:
     rows = []
     for key, label in BUTTON_LABELS.items():
-        rows.append([InlineKeyboardButton(text=f"✏️ {label}", callback_data=f"adm_btn_edit:{key}")])
+        current_style = db.get_setting(f"{key}_style", "")
+        style_icon = {"primary": "🔵", "success": "🟢", "danger": "🔴", "": "⚪️"}.get(current_style, "⚪️")
+        rows.append(
+            [
+                InlineKeyboardButton(text=f"✏️ {style_icon} {label}", callback_data=f"adm_btn_edit:{key}"),
+                InlineKeyboardButton(text="🎨 تغییر رنگ", callback_data=f"adm_btn_color_menu:{key}"),
+            ]
+        )
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_color_picker_kb(key: str) -> InlineKeyboardMarkup:
+def admin_color_picker_kb(key: str, back_callback: str = "adm_edit_buttons") -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="🔵 آبی (Primary)", callback_data=f"adm_btn_color_set:{key}:primary")],
         [InlineKeyboardButton(text="🟢 سبز (Success)", callback_data=f"adm_btn_color_set:{key}:success")],
         [InlineKeyboardButton(text="🔴 قرمز (Danger)", callback_data=f"adm_btn_color_set:{key}:danger")],
         [InlineKeyboardButton(text="⚪️ پیش‌فرض (خاکستری)", callback_data=f"adm_btn_color_set:{key}:none")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_edit_buttons")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data=back_callback)],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
