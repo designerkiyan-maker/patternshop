@@ -171,7 +171,7 @@ def api_create_order(body: OrderCreate, x_init_data: str = Header(...)):
         db.reward_referrer_if_first_purchase(tg_id, order["final_price"] or product["price"])
         order = db.get_order(order_id)
         cfg = db.get_config_by_id(order["config_id"])
-        return {"status": "approved", "order_id": order_id, "link": cfg["link"], "expires_at": order["expires_at"]}
+        return {"status": "approved", "order_id": order_id, "link": cfg["link"], "expires_at": cfg["expires_at"]}
 
     # مبلغی باقی مانده - کاربر باید مثل قبل از طریق بات رسید کارت‌به‌کارت بفرستد
     return {
