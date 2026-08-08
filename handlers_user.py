@@ -19,6 +19,7 @@ from aiogram.fsm.context import FSMContext
 import keyboards as kb
 from states import BuyFlow, ContactFlow, DiscountEntry, WalletTopup
 from config import MAX_TEST_PER_USER
+from config_delivery import deliver_config_to_user
 
 
 def create_user_router(db) -> Router:
@@ -269,8 +270,15 @@ def create_user_router(db) -> Router:
 
             await call.message.edit_text(
                 "✅ مبلغ سفارش شما به‌طور کامل از کیف پول/تخفیف پوشش داده شد.\n"
-                f"🔗 کانفیگ شما:\n`{result['link']}`",
-                parse_mode="Markdown",
+                "کانفیگ شما در پیام بعدی ارسال می‌شود 👇"
+            )
+            await deliver_config_to_user(
+                bot,
+                call.from_user.id,
+                product["name"],
+                result["link"],
+                final_price=0,
+                order_id=order_id,
             )
             await call.answer()
             return

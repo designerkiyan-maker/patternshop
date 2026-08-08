@@ -17,6 +17,7 @@ from aiogram.filters import Command
 import keyboards as kb
 from database import Database
 from config import RESELLER_DBS_DIR
+from config_delivery import deliver_config_to_user
 from states import (
     AdminAddCategory,
     AdminAddProduct,
@@ -357,10 +358,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 pass
 
         try:
-            await bot.send_message(
+            await bot.send_message(order["user_id"], f"✅ خرید شما تایید شد!\n📦 محصول: {product['name']}")
+            await deliver_config_to_user(
+                bot,
                 order["user_id"],
-                f"✅ خرید شما تایید شد!\n📦 محصول: {product['name']}\n\n🔗 کانفیگ شما:\n`{result['link']}`",
-                parse_mode="Markdown",
+                product["name"],
+                result["link"],
+                final_price=order["final_price"],
+                order_id=order_id,
             )
         except Exception:
             pass
