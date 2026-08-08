@@ -38,6 +38,3 @@ RESELLER_DBS_DIR = "reseller_dbs"
 
 # حداکثر تعداد کانفیگ تست مجاز برای هر کاربر
 MAX_TEST_PER_USER = 1
-
-# آدرس مینی‌اپ (باید HTTPS با گواهی معتبر باشد؛ خالی یعنی دکمه مینی‌اپ نمایش داده نشود)
-MINIAPP_URL = os.getenv("MINIAPP_URL", "")
