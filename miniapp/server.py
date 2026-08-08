@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import aiohttp
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -27,6 +28,29 @@ app = FastAPI(title="V2Ray Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 db = Database(DB_PATH)
+
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+
+def get_asset_version() -> str:
+    """نسخه‌ی خودکار برای cache-busting، بر اساس آخرین زمان تغییر فایل‌های استاتیک."""
+    try:
+        mtimes = [
+            os.path.getmtime(os.path.join(STATIC_DIR, "style.css")),
+            os.path.getmtime(os.path.join(STATIC_DIR, "app.js")),
+        ]
+        return str(int(max(mtimes)))
+    except OSError:
+        return "1"
+
+
+@app.get("/", response_class=HTMLResponse)
+def serve_index():
+    with open(os.path.join(STATIC_DIR, "index.html"), encoding="utf-8") as f:
+        html = f.read()
+    version = get_asset_version()
+    html = html.replace("{{VERSION}}", version)
+    return HTMLResponse(html)
 
 
 def get_verified_user(x_init_data: str = Header(...)) -> int:
