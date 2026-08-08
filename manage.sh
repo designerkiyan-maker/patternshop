@@ -167,6 +167,13 @@ update_bot() {
     deactivate
     echo -e "${CYAN}♻️ ری‌استارت سرویس...${RESET}"
     sudo systemctl restart "$SERVICE_NAME"
+
+    MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
+    if systemctl list-units --full -all | grep -q "${MINIAPP_SERVICE}.service"; then
+        echo -e "${CYAN}♻️ ری‌استارت سرویس مینی‌اپ...${RESET}"
+        sudo systemctl restart "$MINIAPP_SERVICE"
+    fi
+
     sleep 2
     echo -e "${GREEN}✅ آپدیت انجام شد.${RESET}"
 }
