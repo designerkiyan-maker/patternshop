@@ -174,17 +174,25 @@ def create_user_router(db) -> Router:
             caption += f"👛 استفاده از کیف پول: {order['wallet_used']:,} تومان\n"
         caption += f"💵 مبلغ قابل پرداخت: {order['final_price']:,} تومان"
 
+        # اگر سفارش از قبل به‌صورت خودکار تایید شده (کاملاً از کیف پول/کد تخفیف پوشش داده شده بود)،
+        # این پیام فقط جهت اطلاع ادمین است و نیازی به دکمه تایید/رد ندارد.
+        already_approved = order["status"] != "pending"
+        reply_markup = None if already_approved else kb.order_review_kb(order_id)
+        if already_approved:
+            caption += "\n\n✅ این سفارش به‌طور خودکار تایید و کانفیگ برای کاربر ارسال شد (پرداخت کامل از کیف پول/کد تخفیف)."
+
         for admin_id in db.list_admins():
             try:
                 if receipt_file_id:
                     sent = await bot.send_photo(
                         admin_id, receipt_file_id, caption=caption, parse_mode="Markdown",
-                        reply_markup=kb.order_review_kb(order_id),
+                        reply_markup=reply_markup,
                     )
                 else:
-                    caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول/تخفیف پوشش داده شده)"
+                    if not already_approved:
+                        caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول/تخفیف پوشش داده شده)"
                     sent = await bot.send_message(
-                        admin_id, caption, parse_mode="Markdown", reply_markup=kb.order_review_kb(order_id),
+                        admin_id, caption, parse_mode="Markdown", reply_markup=reply_markup,
                     )
                 db.set_order_admin_message(order_id, admin_id, sent.message_id)
             except Exception:
@@ -225,10 +233,44 @@ def create_user_router(db) -> Router:
 
         if order["final_price"] <= 0:
             await state.clear()
-            await _notify_admins_of_order(bot, order_id)
+
+            result = db.take_unused_config(product_id, call.from_user.id)
+            if not result:
+                # موجودی تمام شده: مبلغ کسرشده از کیف پول/کد تخفیف را برگردان و به ادمین اطلاع بده
+                db.reject_order(order_id)
+                await _notify_admins_of_order(bot, order_id)
+                await call.message.edit_text(
+                    "⛔️ موجودی این محصول در حال حاضر تمام شده است.\n"
+                    "مبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد. لطفاً بعداً دوباره تلاش کنید "
+                    "یا با پشتیبانی در تماس باشید."
+                )
+                await call.answer()
+                return
+
+            db.approve_order(order_id, result["id"])
+
+            reward_info = db.reward_referrer_if_first_purchase(call.from_user.id, order["base_price"])
+            if reward_info:
+                reward_amount, referrer_id = reward_info
+                try:
+                    await bot.send_message(
+                        referrer_id,
+                        f"🤝 تبریک! یکی از زیرمجموعه‌های شما اولین خرید خود را انجام داد.\n"
+                        f"💰 {reward_amount:,} تومان به کیف پول شما اضافه شد.",
+                    )
+                except Exception:
+                    pass
+
+            # اطلاع‌رسانی به ادمین‌ها فقط جهت آگاهی (نیازی به تایید دستی نیست)
+            try:
+                await _notify_admins_of_order(bot, order_id)
+            except Exception:
+                pass
+
             await call.message.edit_text(
                 "✅ مبلغ سفارش شما به‌طور کامل از کیف پول/تخفیف پوشش داده شد.\n"
-                "سفارش برای تایید نهایی ادمین ارسال شد و کانفیگ به‌زودی برایتان ارسال می‌شود."
+                f"🔗 کانفیگ شما:\n`{result['link']}`",
+                parse_mode="Markdown",
             )
             await call.answer()
             return
