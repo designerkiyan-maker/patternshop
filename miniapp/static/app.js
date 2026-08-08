@@ -62,9 +62,13 @@ function errorState(message) {
 async function renderHome() {
   content.innerHTML = skeleton(3);
   try {
-    const me = await api("/api/me");
+    const [me, orders, testStatus, referral] = await Promise.all([
+      api("/api/me"),
+      api("/api/orders"),
+      api("/api/test-config").catch(() => null),
+      api("/api/referral").catch(() => null),
+    ]);
     greeting.textContent = `سلام ${me.first_name} 👋`;
-    const orders = await api("/api/orders");
     const active = orders.filter((o) => o.status === "approved");
 
     content.innerHTML = `
@@ -82,10 +86,80 @@ async function renderHome() {
           ? `<div class="state-msg"><span class="ic">◌</span>سرویس فعالی ندارید.</div>`
           : active.map(orderCard).join("")}
       </div>
+
+      ${testStatus ? testConfigCard(testStatus) : ""}
+      ${referral && referral.enabled ? referralCard(referral) : ""}
     `;
+
+    const testBtn = document.getElementById("test-config-btn");
+    if (testBtn) testBtn.onclick = () => claimTestConfig(testBtn);
+
+    const copyRefBtn = document.getElementById("copy-referral-btn");
+    if (copyRefBtn) copyRefBtn.onclick = () => {
+      navigator.clipboard.writeText(copyRefBtn.dataset.link);
+      tg.HapticFeedback.notificationOccurred("success");
+      notify("لینک دعوت کپی شد.");
+    };
   } catch (e) {
     content.innerHTML = errorState(e.message);
   }
+}
+
+function testConfigCard(status) {
+  if (!status.enabled) return "";
+  let body;
+  if (status.used) {
+    body = `<div class="state-msg"><span class="ic">✅</span>شما کانفیگ تست خود را دریافت کرده‌اید.</div>`;
+  } else if (status.available <= 0) {
+    body = `<div class="state-msg"><span class="ic">◌</span>موجودی کانفیگ تست تمام شده است.</div>`;
+  } else {
+    body = `<button class="btn" id="test-config-btn">دریافت کانفیگ تست رایگان</button>`;
+  }
+  return `
+    <div class="eyebrow">کانفیگ تست</div>
+    <div class="card" id="test-config-card">
+      <h3><span class="ic">🧪</span>کانفیگ تست رایگان</h3>
+      ${body}
+    </div>
+  `;
+}
+
+async function claimTestConfig(btn) {
+  btn.disabled = true;
+  btn.textContent = "در حال دریافت...";
+  try {
+    const r = await api("/api/test-config/claim", { method: "POST" });
+    const card = document.getElementById("test-config-card");
+    card.innerHTML = `
+      <h3><span class="ic">🧪</span>کانفیگ تست رایگان</h3>
+      <div class="link-box">${r.link}</div>
+      <div class="qr-row">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(r.link)}" width="96" height="96" alt="QR" />
+        <button class="btn small outline" onclick="navigator.clipboard.writeText('${r.link}');tg.HapticFeedback.notificationOccurred('success')">📋 کپی لینک</button>
+      </div>
+    `;
+    tg.HapticFeedback.notificationOccurred("success");
+  } catch (e) {
+    notify("خطا: " + e.message);
+    btn.disabled = false;
+    btn.textContent = "دریافت کانفیگ تست رایگان";
+  }
+}
+
+function referralCard(r) {
+  return `
+    <div class="eyebrow">زیرمجموعه‌گیری</div>
+    <div class="card">
+      <h3><span class="ic">🤝</span>دعوت از دوستان</h3>
+      <div class="stat-row"><span>پورسانت شما</span><b>${r.percent}٪ از اولین خرید</b></div>
+      <div class="stat-row"><span>تعداد زیرمجموعه‌ها</span><b>${fmt(r.count)}</b></div>
+      <div class="stat-row"><span>اعتبار کسب‌شده</span><b>${fmt(r.credit)} تومان</b></div>
+      ${r.link ? `
+      <div class="link-box" style="margin-top:8px">${r.link}</div>
+      <button class="btn small outline" id="copy-referral-btn" data-link="${r.link}" style="width:100%;margin-top:8px">📋 کپی لینک دعوت</button>
+      ` : ""}
+    </div>
+  `;
 }
 
 function orderCard(o) {
