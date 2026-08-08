@@ -18,6 +18,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from database import Database
 from handlers_user import create_user_router
 from handlers_admin import create_admin_router
+from renewal_reminders import renewal_reminder_loop
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,11 @@ class BotManager:
 
         await bot.delete_webhook(drop_pending_updates=True)
         task = asyncio.create_task(dp.start_polling(bot))
+        reminder_task = asyncio.create_task(renewal_reminder_loop(bot, db))
 
-        self.instances[token] = {"bot": bot, "dp": dp, "task": task, "db_path": db_path}
+        self.instances[token] = {
+            "bot": bot, "dp": dp, "task": task, "reminder_task": reminder_task, "db_path": db_path,
+        }
         logger.info("بات با db_path=%s راه‌اندازی شد.", db_path)
         return True
 
@@ -57,6 +61,13 @@ class BotManager:
             await inst["task"]
         except Exception:
             pass
+        reminder_task = inst.get("reminder_task")
+        if reminder_task:
+            reminder_task.cancel()
+            try:
+                await reminder_task
+            except Exception:
+                pass
         try:
             await inst["bot"].session.close()
         except Exception:

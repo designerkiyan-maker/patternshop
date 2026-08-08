@@ -67,6 +67,12 @@ DEFAULT_SETTINGS = {
     "wheel_cooldown_hours": "24",  # فاصله مجاز بین دو چرخش هر کاربر
     "btn_wheel": "🎡 گردونه شانس",
     "btn_wheel_style": "success",
+    # یادآوری اتمام سرویس + کد تخفیف تشویقی تمدید
+    "renewal_reminder_enabled": "1",
+    "renewal_reminder_days_before": "5",  # چند روز قبل از اتمام سرویس یادآوری ارسال شود
+    "renewal_discount_percent": "20",  # درصد تخفیف کد تشویقی تمدید
+    "renewal_discount_expiry_hours": "24",  # اعتبار کد تشویقی تمدید (ساعت)
+    "adm_renewal_settings_style": "success",
 }
 
 
@@ -231,6 +237,9 @@ class Database:
             ("users", "last_wheel_spin_at", "TEXT"),
             ("discount_codes", "expires_at", "TEXT"),
             ("discount_codes", "source", "TEXT"),
+            ("products", "duration_days", "INTEGER DEFAULT 30"),
+            ("configs", "expires_at", "TEXT"),
+            ("configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -360,11 +369,11 @@ class Database:
     # محصولات
     # -----------------------------------------------------------------------
 
-    def add_product(self, category_id: int, name: str, price: int, description: str = "") -> int:
+    def add_product(self, category_id: int, name: str, price: int, description: str = "", duration_days: int = 30) -> int:
         with self._get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO products (category_id, name, price, description) VALUES (?, ?, ?, ?)",
-                (category_id, name, price, description),
+                "INSERT INTO products (category_id, name, price, description, duration_days) VALUES (?, ?, ?, ?, ?)",
+                (category_id, name, price, description, duration_days),
             )
             return cur.lastrowid
 
@@ -429,11 +438,18 @@ class Database:
             ).fetchone()
             if not row:
                 return None
+            prod = conn.execute(
+                "SELECT duration_days FROM products WHERE id=?", (product_id,)
+            ).fetchone()
+            duration_days = (prod["duration_days"] if prod and prod["duration_days"] else 30)
+            now = datetime.utcnow()
+            expires_at = (now + timedelta(days=duration_days)).isoformat()
             conn.execute(
-                "UPDATE configs SET is_used=1, assigned_user_id=?, assigned_at=? WHERE id=?",
-                (user_tg_id, datetime.utcnow().isoformat(), row["id"]),
+                "UPDATE configs SET is_used=1, assigned_user_id=?, assigned_at=?, expires_at=?, "
+                "renewal_reminder_sent=0 WHERE id=?",
+                (user_tg_id, now.isoformat(), expires_at, row["id"]),
             )
-            return {"id": row["id"], "link": row["link"]}
+            return {"id": row["id"], "link": row["link"], "expires_at": expires_at}
 
     def get_config_by_id(self, config_id: int):
         with self._get_conn() as conn:
@@ -442,7 +458,8 @@ class Database:
     def release_config(self, config_id: int):
         with self._get_conn() as conn:
             conn.execute(
-                "UPDATE configs SET is_used=0, assigned_user_id=NULL, assigned_at=NULL WHERE id=?",
+                "UPDATE configs SET is_used=0, assigned_user_id=NULL, assigned_at=NULL, "
+                "expires_at=NULL, renewal_reminder_sent=0 WHERE id=?",
                 (config_id,),
             )
 
@@ -837,3 +854,48 @@ class Database:
             code, percent=percent, max_uses=1, expires_at=expires_at, source="wheel"
         )
         return code, expires_at
+
+    # -----------------------------------------------------------------------
+    # یادآوری اتمام سرویس + کد تخفیف تشویقی تمدید
+    # -----------------------------------------------------------------------
+
+    def get_renewal_settings(self) -> dict:
+        return {
+            "enabled": self.get_setting("renewal_reminder_enabled", "1") == "1",
+            "days_before": int(self.get_setting("renewal_reminder_days_before", "5") or 5),
+            "discount_percent": int(self.get_setting("renewal_discount_percent", "20") or 20),
+            "discount_expiry_hours": int(self.get_setting("renewal_discount_expiry_hours", "24") or 24),
+        }
+
+    def get_configs_due_for_renewal_reminder(self):
+        """کانفیگ‌های فروخته‌شده‌ای که به تاریخ انقضایشان (طبق تنظیم «چند روز قبل») نزدیک شده‌اند
+        و هنوز پیام یادآوری برایشان ارسال نشده است."""
+        settings = self.get_renewal_settings()
+        if not settings["enabled"]:
+            return []
+        now = datetime.utcnow()
+        threshold = (now + timedelta(days=settings["days_before"])).isoformat()
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT cf.id as config_id, cf.link, cf.assigned_user_id, cf.expires_at, "
+                "p.id as product_id, p.name as product_name "
+                "FROM configs cf JOIN products p ON cf.product_id = p.id "
+                "WHERE cf.is_used=1 AND cf.renewal_reminder_sent=0 AND cf.expires_at IS NOT NULL "
+                "AND cf.expires_at <= ? AND cf.expires_at > ?",
+                (threshold, now.isoformat()),
+            ).fetchall()
+
+    def mark_renewal_reminder_sent(self, config_id: int):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE configs SET renewal_reminder_sent=1 WHERE id=?", (config_id,))
+
+    def generate_renewal_discount_code(self, user_tg_id: int) -> tuple:
+        """یک کد تخفیف یکبارمصرف و محدود به زمان برای یادآوری تمدید سرویس کاربر می‌سازد.
+        خروجی: (code, expires_at, percent, expiry_hours)"""
+        settings = self.get_renewal_settings()
+        expires_at = (datetime.utcnow() + timedelta(hours=settings["discount_expiry_hours"])).isoformat()
+        code = f"RENEW{user_tg_id}{secrets.randbelow(9000) + 1000}"
+        self.create_discount_code(
+            code, percent=settings["discount_percent"], max_uses=1, expires_at=expires_at, source="renewal_reminder"
+        )
+        return code, expires_at, settings["discount_percent"], settings["discount_expiry_hours"]

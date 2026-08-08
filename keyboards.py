@@ -149,6 +149,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_pending_topups", "👛 درخواست‌های شارژ کیف پول", "adm_pending_topups"),
     ("adm_discounts_menu", "🎟 مدیریت کدهای تخفیف", "adm_discounts_menu"),
     ("adm_wheel_settings", "🎡 مدیریت گردونه شانس", "adm_wheel_settings"),
+    ("adm_renewal_settings", "🔔 یادآوری تمدید سرویس", "adm_renewal_settings"),
     ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
     ("adm_resellers_menu", "🏪 مدیریت بات‌های نمایندگی", "adm_resellers_menu"),
     ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
@@ -233,7 +234,7 @@ def admin_products_list_kb(db, products) -> InlineKeyboardMarkup:
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"{state_icon} {p['name']} | {p['price']:,}ت | موجودی: {stock}",
+                    text=f"{state_icon} {p['name']} | {p['price']:,}ت | موجودی: {stock} | مدت: {p['duration_days'] or 30} روز",
                     callback_data="noop",
                 )
             ]
@@ -416,6 +417,23 @@ def wheel_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✏️ تغییر لیست جوایز", callback_data="adm_wheel_edit_prizes")],
         [InlineKeyboardButton(text="✏️ تغییر اعتبار کد", callback_data="adm_wheel_edit_expiry")],
         [InlineKeyboardButton(text="✏️ تغییر فاصله چرخش", callback_data="adm_wheel_edit_cooldown")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def renewal_settings_kb(db) -> InlineKeyboardMarkup:
+    s = db.get_renewal_settings()
+    toggle_text = "🔴 غیرفعال کردن یادآوری" if s["enabled"] else "🟢 فعال کردن یادآوری"
+    rows = [
+        [InlineKeyboardButton(text=f"وضعیت: {'🟢 فعال' if s['enabled'] else '🔴 غیرفعال'}", callback_data="noop")],
+        [InlineKeyboardButton(text=f"📅 چند روز قبل از اتمام سرویس: {s['days_before']} روز", callback_data="noop")],
+        [InlineKeyboardButton(text=f"🎟 درصد تخفیف کد تشویقی: {s['discount_percent']}٪", callback_data="noop")],
+        [InlineKeyboardButton(text=f"⏳ اعتبار کد تشویقی: {s['discount_expiry_hours']} ساعت", callback_data="noop")],
+        [InlineKeyboardButton(text=toggle_text, callback_data="adm_renewal_toggle")],
+        [InlineKeyboardButton(text="✏️ تغییر تعداد روز یادآوری", callback_data="adm_renewal_edit_days")],
+        [InlineKeyboardButton(text="✏️ تغییر درصد تخفیف", callback_data="adm_renewal_edit_percent")],
+        [InlineKeyboardButton(text="✏️ تغییر اعتبار کد (ساعت)", callback_data="adm_renewal_edit_hours")],
         [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)

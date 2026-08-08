@@ -34,6 +34,7 @@ from states import (
     AdminReferralPercent,
     AdminAddResellerBot,
     AdminWheelSettings,
+    AdminRenewalSettings,
 )
 
 
@@ -207,8 +208,21 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     @router.message(AdminAddProduct.waiting_desc)
     async def process_product_desc(message: Message, state: FSMContext):
         desc = "" if message.text.strip() == "-" else message.text.strip()
+        await state.update_data(description=desc)
+        await state.set_state(AdminAddProduct.waiting_duration)
+        await message.answer(
+            "مدت اعتبار این سرویس چند روز است؟ فقط عدد وارد کنید (مثال: 30).\n"
+            "این عدد برای محاسبه‌ی تاریخ یادآوری اتمام سرویس به کاربر استفاده می‌شود."
+        )
+
+    @router.message(AdminAddProduct.waiting_duration)
+    async def process_product_duration(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً فقط عدد صحیح و بزرگ‌تر از صفر وارد کنید. مثال: 30")
+            return
         data = await state.get_data()
-        db.add_product(data["category_id"], data["name"], data["price"], desc)
+        db.add_product(data["category_id"], data["name"], data["price"], data["description"], int(text))
         await state.clear()
         await message.answer("✅ محصول با موفقیت اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -735,6 +749,93 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         db.set_setting("wheel_cooldown_hours", text)
         await state.clear()
         await message.answer(f"✅ فاصله بین دو چرخش روی {text} ساعت تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    # -------------------------------------------------------------------
+    # یادآوری اتمام سرویس + کد تخفیف تشویقی تمدید
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_renewal_settings")
+    async def cb_admin_renewal_settings(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        await call.message.edit_text("🔔 یادآوری تمدید سرویس:", reply_markup=kb.renewal_settings_kb(db))
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_renewal_toggle")
+    async def cb_admin_renewal_toggle(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        current = db.get_setting("renewal_reminder_enabled", "1")
+        db.set_setting("renewal_reminder_enabled", "0" if current == "1" else "1")
+        await call.message.edit_text("🔔 یادآوری تمدید سرویس:", reply_markup=kb.renewal_settings_kb(db))
+        await call.answer("وضعیت تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_renewal_edit_days")
+    async def cb_admin_renewal_edit_days(call: CallbackQuery, state: FSMContext):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        await state.set_state(AdminRenewalSettings.waiting_days_before)
+        await call.message.edit_text(
+            "چند روز قبل از اتمام سرویس، یادآوری ارسال شود؟ (فقط عدد، مثلاً 5):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminRenewalSettings.waiting_days_before)
+    async def process_renewal_days(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
+            return
+        db.set_setting("renewal_reminder_days_before", text)
+        await state.clear()
+        await message.answer(
+            f"✅ یادآوری روی {text} روز قبل از اتمام سرویس تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot)
+        )
+
+    @router.callback_query(F.data == "adm_renewal_edit_percent")
+    async def cb_admin_renewal_edit_percent(call: CallbackQuery, state: FSMContext):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        await state.set_state(AdminRenewalSettings.waiting_percent)
+        await call.message.edit_text(
+            "درصد تخفیف کد تشویقی تمدید چقدر باشد؟ (عددی بین 1 تا 100، مثلاً 20):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminRenewalSettings.waiting_percent)
+    async def process_renewal_percent(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or not (0 < int(text) <= 100):
+            await message.answer("لطفاً یک عدد بین 1 تا 100 ارسال کنید.")
+            return
+        db.set_setting("renewal_discount_percent", text)
+        await state.clear()
+        await message.answer(f"✅ درصد تخفیف کد تشویقی روی {text}٪ تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    @router.callback_query(F.data == "adm_renewal_edit_hours")
+    async def cb_admin_renewal_edit_hours(call: CallbackQuery, state: FSMContext):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        await state.set_state(AdminRenewalSettings.waiting_expiry_hours)
+        await call.message.edit_text(
+            "کد تخفیف تشویقی چند ساعت اعتبار داشته باشد؟ (فقط عدد، مثلاً 24):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminRenewalSettings.waiting_expiry_hours)
+    async def process_renewal_hours(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
+            return
+        db.set_setting("renewal_discount_expiry_hours", text)
+        await state.clear()
+        await message.answer(
+            f"✅ اعتبار کد تخفیف تشویقی روی {text} ساعت تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot)
+        )
 
     # -------------------------------------------------------------------
     # مدیریت بات‌های نمایندگی (فقط در بات اصلی)
