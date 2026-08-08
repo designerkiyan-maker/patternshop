@@ -8,10 +8,12 @@
 
 import sys
 import os
+import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, Header, HTTPException
+import aiohttp
+from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -93,6 +95,35 @@ def api_catalog(x_init_data: str = Header(...)):
             ],
         })
     return result
+
+
+async def send_photo_to_admins(caption: str, reply_markup: str, photo_bytes: bytes, filename: str, content_type: str):
+    """رسید را برای همه‌ی ادمین‌ها ارسال می‌کند. (file_id, تعداد تحویل موفق) را برمی‌گرداند."""
+    admin_ids = db.list_admins()
+    sent_file_id = None
+    delivered = 0
+    results = []
+    async with aiohttp.ClientSession() as session:
+        for admin_id in admin_ids:
+            form = aiohttp.FormData()
+            form.add_field("chat_id", str(admin_id))
+            form.add_field("caption", caption)
+            form.add_field("reply_markup", reply_markup)
+            form.add_field("photo", photo_bytes, filename=filename, content_type=content_type)
+            try:
+                async with session.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto", data=form
+                ) as resp:
+                    data = await resp.json()
+                    if data.get("ok"):
+                        delivered += 1
+                        msg = data["result"]
+                        results.append((admin_id, msg["message_id"]))
+                        if not sent_file_id:
+                            sent_file_id = msg["photo"][-1]["file_id"]
+            except Exception:
+                pass
+    return sent_file_id, delivered, results
 
 
 class OrderCreate(BaseModel):
@@ -194,8 +225,118 @@ def api_topup_request(body: TopupCreate, x_init_data: str = Header(...)):
     return {
         "topup_id": topup_id, "card_number": db.get_setting("card_number"),
         "card_holder": db.get_setting("card_holder"),
-        "note": "رسید پرداخت را در خود بات (نه اینجا) برای ادمین ارسال کنید تا تایید شود.",
+        "note": "مبلغ را واریز کرده و عکس رسید را همینجا ارسال کنید.",
     }
+
+
+@app.post("/api/wallet/topup-receipt")
+async def api_topup_receipt(
+    topup_id: int = Form(...),
+    photo: UploadFile = File(...),
+    x_init_data: str = Header(...),
+):
+    tg_id = get_verified_user(x_init_data)
+    topup = db.get_topup(topup_id)
+    if not topup or topup["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="درخواست شارژ یافت نشد.")
+    if topup["status"] != "pending":
+        raise HTTPException(status_code=400, detail="این درخواست قبلاً بررسی شده است.")
+    if not photo.content_type or not photo.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="فقط عکس رسید پذیرفته می‌شود.")
+
+    photo_bytes = await photo.read()
+    if len(photo_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="حجم عکس بیش از حد مجاز است.")
+
+    user = db.get_user(tg_id)
+    caption = (
+        f"👛 درخواست شارژ کیف پول #{topup_id}\n"
+        f"👤 کاربر: {(user['first_name'] if user else '') or ''} (@{(user['username'] if user else '') or '---'})\n"
+        f"🆔 آیدی عددی: {tg_id}\n"
+        f"💰 مبلغ: {topup['amount']:,} تومان"
+    )
+    reply_markup = json.dumps({
+        "inline_keyboard": [[
+            {"text": "✅ تایید و شارژ کیف پول", "callback_data": f"topup_approve:{topup_id}"},
+            {"text": "❌ رد کردن", "callback_data": f"topup_reject:{topup_id}"},
+        ]]
+    })
+
+    admin_ids = db.list_admins()
+    if not admin_ids:
+        raise HTTPException(status_code=500, detail="هیچ ادمینی برای بررسی رسید ثبت نشده است.")
+
+    sent_file_id, delivered, results = await send_photo_to_admins(
+        caption, reply_markup, photo_bytes, photo.filename or "receipt.jpg", photo.content_type
+    )
+    if delivered == 0:
+        raise HTTPException(status_code=502, detail="ارسال رسید به ادمین ناموفق بود. دوباره تلاش کنید.")
+
+    for admin_id, message_id in results:
+        db.set_topup_admin_message(topup_id, admin_id, message_id)
+    if sent_file_id:
+        db.set_topup_receipt(topup_id, sent_file_id)
+
+    return {"status": "sent"}
+
+
+@app.post("/api/orders/{order_id}/receipt")
+async def api_order_receipt(
+    order_id: int,
+    photo: UploadFile = File(...),
+    x_init_data: str = Header(...),
+):
+    tg_id = get_verified_user(x_init_data)
+    order = db.get_order(order_id)
+    if not order or order["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
+    if order["status"] != "pending":
+        raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
+    if not photo.content_type or not photo.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="فقط عکس رسید پذیرفته می‌شود.")
+
+    photo_bytes = await photo.read()
+    if len(photo_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="حجم عکس بیش از حد مجاز است.")
+
+    product = db.get_product(order["product_id"])
+    user = db.get_user(tg_id)
+    caption = (
+        f"🧾 سفارش #{order_id}\n"
+        f"👤 کاربر: {(user['first_name'] if user else '') or ''} (@{(user['username'] if user else '') or '---'})\n"
+        f"🆔 آیدی عددی: {tg_id}\n"
+        f"📦 محصول: {product['name'] if product else '---'}\n"
+        f"💰 قیمت پایه: {order['base_price']:,} تومان\n"
+    )
+    if order["discount_amount"]:
+        caption += f"🎟 تخفیف کد: {order['discount_amount']:,} تومان\n"
+    if order["wallet_used"]:
+        caption += f"👛 استفاده از کیف پول: {order['wallet_used']:,} تومان\n"
+    caption += f"💵 مبلغ قابل پرداخت: {order['final_price']:,} تومان"
+
+    reply_markup = json.dumps({
+        "inline_keyboard": [[
+            {"text": "✅ تایید و ارسال کانفیگ", "callback_data": f"order_approve:{order_id}"},
+            {"text": "❌ رد کردن", "callback_data": f"order_reject:{order_id}"},
+        ]]
+    })
+
+    admin_ids = db.list_admins()
+    if not admin_ids:
+        raise HTTPException(status_code=500, detail="هیچ ادمینی برای بررسی رسید ثبت نشده است.")
+
+    sent_file_id, delivered, results = await send_photo_to_admins(
+        caption, reply_markup, photo_bytes, photo.filename or "receipt.jpg", photo.content_type
+    )
+    if delivered == 0:
+        raise HTTPException(status_code=502, detail="ارسال رسید به ادمین ناموفق بود. دوباره تلاش کنید.")
+
+    for admin_id, message_id in results:
+        db.set_order_admin_message(order_id, admin_id, message_id)
+    if sent_file_id:
+        db.set_order_receipt(order_id, sent_file_id)
+
+    return {"status": "sent"}
 
 
 app.mount("/", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static"), html=True), name="static")
