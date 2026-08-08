@@ -264,6 +264,133 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# عملیات: نصب/تنظیم کامل مینی‌اپ (دامنه + SSL + nginx + سرویس، همه خودکار)
+# ---------------------------------------------------------------------------
+setup_miniapp() {
+    if [ ! -d "$INSTALL_DIR/miniapp" ]; then
+        echo -e "${RED}⛔️ پوشه miniapp پیدا نشد. اول باید کد مینی‌اپ را داخل پروژه بیاوری (git pull/آپدیت).${RESET}"
+        return
+    fi
+
+    read -rp "دامنه‌ای که به IP همین سرور اشاره می‌کند را وارد کن (مثلاً shop.example.com): " DOMAIN
+    if [ -z "$DOMAIN" ]; then
+        echo -e "${RED}دامنه خالی است، لغو شد.${RESET}"
+        return
+    fi
+
+    echo -e "${CYAN}🔎 بررسی DNS دامنه...${RESET}"
+    SERVER_IP=$(curl -fsSL ifconfig.me || echo "")
+    DOMAIN_IP=$(getent ahosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -1)
+    if [ -n "$SERVER_IP" ] && [ -n "$DOMAIN_IP" ] && [ "$SERVER_IP" != "$DOMAIN_IP" ]; then
+        echo -e "${YELLOW}⚠️ هشدار: دامنه به IP این سرور ($SERVER_IP) اشاره نمی‌کند (الان $DOMAIN_IP است).${RESET}"
+        read -rp "همچنان ادامه بدهم؟ (yes برای ادامه): " CONT
+        [ "$CONT" != "yes" ] && return
+    fi
+
+    echo -e "${CYAN}📦 نصب nginx و certbot...${RESET}"
+    sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
+    timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 \
+        apt-get install -y -qq nginx certbot python3-certbot-nginx > /dev/null
+
+    echo -e "${CYAN}🐍 نصب پکیج‌های مینی‌اپ (fastapi, uvicorn)...${RESET}"
+    cd "$INSTALL_DIR"
+    source venv/bin/activate
+    pip install -r requirements.txt --quiet
+    deactivate
+
+    echo -e "${CYAN}⚙️ ساخت سرویس systemd برای بک‌اند مینی‌اپ...${RESET}"
+    MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
+    sudo bash -c "cat > /etc/systemd/system/${MINIAPP_SERVICE}.service" <<EOF
+[Unit]
+Description=V2Ray Mini App Backend
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$INSTALL_DIR/venv/bin/uvicorn miniapp.server:app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=5
+User=$(whoami)
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    sudo systemctl daemon-reload
+    sudo systemctl enable "$MINIAPP_SERVICE" > /dev/null 2>&1
+    sudo systemctl restart "$MINIAPP_SERVICE"
+
+    echo -e "${CYAN}🌐 تنظیم nginx برای $DOMAIN...${RESET}"
+    sudo bash -c "cat > /etc/nginx/sites-available/${DOMAIN}.conf" <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+
+    location / {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+    sudo ln -sf "/etc/nginx/sites-available/${DOMAIN}.conf" "/etc/nginx/sites-enabled/${DOMAIN}.conf"
+    if ! sudo nginx -t > /dev/null 2>&1; then
+        echo -e "${RED}⛔️ کانفیگ nginx خطا دارد. جزئیات: $(sudo nginx -t 2>&1)${RESET}"
+        return
+    fi
+    sudo systemctl reload nginx
+
+    echo -e "${CYAN}🔐 دریافت گواهی SSL رایگان (Let's Encrypt)...${RESET}"
+    sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos \
+        --register-unsafely-without-email --redirect
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}⛔️ دریافت SSL ناموفق بود. مطمئن شو دامنه درست به این سرور اشاره می‌کند و پورت 80/443 باز است.${RESET}"
+        return
+    fi
+
+    echo -e "${CYAN}📝 ثبت آدرس مینی‌اپ در .env...${RESET}"
+    if grep -q "^MINIAPP_URL=" "$INSTALL_DIR/.env" 2>/dev/null; then
+        sed -i "s|^MINIAPP_URL=.*|MINIAPP_URL=https://$DOMAIN|" "$INSTALL_DIR/.env"
+    else
+        echo "MINIAPP_URL=https://$DOMAIN" >> "$INSTALL_DIR/.env"
+    fi
+
+    sudo systemctl restart "$SERVICE_NAME"
+
+    echo -e "${GREEN}${BOLD}✅ مینی‌اپ آماده است: https://$DOMAIN${RESET}"
+    echo -e "${GREEN}دکمه «✨ مینی‌اپ فروشگاه» از الان در منوی بات دیده می‌شود.${RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# عملیات: حذف کامل مینی‌اپ
+# ---------------------------------------------------------------------------
+remove_miniapp() {
+    echo -e "${RED}${BOLD}⚠️ این کار سرویس و کانفیگ nginx مینی‌اپ را حذف می‌کند (گواهی SSL نگه داشته می‌شود).${RESET}"
+    read -rp "آیا مطمئن هستی؟ (yes برای تایید): " CONFIRM
+    [ "$CONFIRM" != "yes" ] && { echo -e "${YELLOW}لغو شد.${RESET}"; return; }
+
+    MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
+    sudo systemctl stop "$MINIAPP_SERVICE" 2>/dev/null || true
+    sudo systemctl disable "$MINIAPP_SERVICE" 2>/dev/null || true
+    sudo rm -f "/etc/systemd/system/${MINIAPP_SERVICE}.service"
+    sudo systemctl daemon-reload
+
+    read -rp "دامنه‌ای که برای مینی‌اپ استفاده کرده بودی چه بود؟ (برای حذف کانفیگ nginx): " DOMAIN
+    if [ -n "$DOMAIN" ]; then
+        sudo rm -f "/etc/nginx/sites-enabled/${DOMAIN}.conf" "/etc/nginx/sites-available/${DOMAIN}.conf"
+        sudo systemctl reload nginx 2>/dev/null || true
+    fi
+
+    if grep -q "^MINIAPP_URL=" "$INSTALL_DIR/.env" 2>/dev/null; then
+        sed -i "/^MINIAPP_URL=/d" "$INSTALL_DIR/.env"
+    fi
+    sudo systemctl restart "$SERVICE_NAME" 2>/dev/null || true
+    echo -e "${GREEN}✅ مینی‌اپ حذف شد.${RESET}"
+}
+
+# ---------------------------------------------------------------------------
 # منوی اصلی
 # ---------------------------------------------------------------------------
 ensure_figlet
@@ -284,10 +411,13 @@ while true; do
     echo -e "${YELLOW}[8]${RESET} » ${GREEN}مشاهده آمار فروش${RESET}"
     echo -e "${YELLOW}[9]${RESET} » ${GREEN}تغییر توکن یا آیدی ادمین${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
+    echo -e "${YELLOW}[10]${RESET} » ${GREEN}نصب/تنظیم مینی‌اپ (خودکار: دامنه + SSL + سرویس)${RESET}"
+    echo -e "${YELLOW}[11]${RESET} » ${GREEN}حذف مینی‌اپ${RESET}"
+    echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo -e "${RED}[0]${RESET} » ${GREEN}خروج${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo ""
-    read -rp "$(echo -e ${MAGENTA}${BOLD}"Enter choice [0-9]: "${RESET})" choice
+    read -rp "$(echo -e ${MAGENTA}${BOLD}"Enter choice [0-11]: "${RESET})" choice
 
     case $choice in
         1) install_bot; pause ;;
@@ -299,6 +429,8 @@ while true; do
         7) stop_bot; pause ;;
         8) show_stats; pause ;;
         9) edit_env; pause ;;
+        10) setup_miniapp; pause ;;
+        11) remove_miniapp; pause ;;
         0) echo -e "${CYAN}خدانگهدار 👋${RESET}"; exit 0 ;;
         *) echo -e "${RED}گزینه نامعتبر است.${RESET}"; sleep 1 ;;
     esac
