@@ -165,17 +165,36 @@ update_bot() {
     source venv/bin/activate
     pip install -r requirements.txt --quiet
     deactivate
-    echo -e "${CYAN}♻️ ری‌استارت سرویس...${RESET}"
+    echo -e "${CYAN}♻️ ری‌استارت سرویس بات...${RESET}"
     sudo systemctl restart "$SERVICE_NAME"
-
-    MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
-    if systemctl list-units --full -all | grep -q "${MINIAPP_SERVICE}.service"; then
-        echo -e "${CYAN}♻️ ری‌استارت سرویس مینی‌اپ...${RESET}"
-        sudo systemctl restart "$MINIAPP_SERVICE"
-    fi
-
     sleep 2
-    echo -e "${GREEN}✅ آپدیت انجام شد.${RESET}"
+    echo -e "${GREEN}✅ آپدیت بات انجام شد.${RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# عملیات: آپدیت مینی‌اپ
+# ---------------------------------------------------------------------------
+update_miniapp() {
+    MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
+    if ! systemctl list-units --full -all | grep -q "${MINIAPP_SERVICE}.service"; then
+        echo -e "${RED}⛔️ مینی‌اپ هنوز نصب نشده. اول گزینه ۱۰ (نصب/تنظیم مینی‌اپ) را بزن.${RESET}"
+        return
+    fi
+    if [ ! -d "$INSTALL_DIR/.git" ]; then
+        echo -e "${RED}⛔️ بات هنوز نصب نشده. اول گزینه ۱ (نصب) را بزن.${RESET}"
+        return
+    fi
+    cd "$INSTALL_DIR"
+    echo -e "${CYAN}🔄 دریافت آخرین تغییرات از گیت‌هاب...${RESET}"
+    git pull
+    echo -e "${CYAN}🐍 آپدیت پکیج‌ها...${RESET}"
+    source venv/bin/activate
+    pip install -r requirements.txt --quiet
+    deactivate
+    echo -e "${CYAN}♻️ ری‌استارت سرویس مینی‌اپ...${RESET}"
+    sudo systemctl restart "$MINIAPP_SERVICE"
+    sleep 2
+    echo -e "${GREEN}✅ آپدیت مینی‌اپ انجام شد.${RESET}"
 }
 
 # ---------------------------------------------------------------------------
@@ -420,15 +439,17 @@ while true; do
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo -e "${YELLOW}[10]${RESET} » ${GREEN}نصب/تنظیم مینی‌اپ (خودکار: دامنه + SSL + سرویس)${RESET}"
     echo -e "${YELLOW}[11]${RESET} » ${GREEN}حذف مینی‌اپ${RESET}"
+    echo -e "${YELLOW}[12]${RESET} » ${GREEN}آپدیت مینی‌اپ${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo -e "${RED}[0]${RESET} » ${GREEN}خروج${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo ""
-    read -rp "$(echo -e ${MAGENTA}${BOLD}"Enter choice [0-11]: "${RESET})" choice
+    read -rp "$(echo -e ${MAGENTA}${BOLD}"Enter choice [0-12]: "${RESET})" choice
 
     case $choice in
         1) install_bot; pause ;;
         2) update_bot; pause ;;
+        12) update_miniapp; pause ;;
         3) uninstall_bot; pause ;;
         4) view_status; pause ;;
         5) view_logs ;;
