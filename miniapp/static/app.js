@@ -248,6 +248,9 @@ async function renderHome() {
     greeting.textContent = `سلام ${me.first_name} 👋`;
     const active = orders.filter((o) => o.status === "approved");
 
+    const adminTabBtn = document.getElementById("admin-tab-btn");
+    if (adminTabBtn) adminTabBtn.style.display = me.is_admin ? "" : "none";
+
     content.innerHTML = `
       ${expiring.length > 0 ? expiringBanner(expiring) : ""}
 
@@ -655,6 +658,125 @@ function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder) {
 }
 
 // ---------------------------------------------------------------------------
+// تب مدیریت (فقط ادمین) - چیدمان دکمه‌های منوی اصلی
+// ---------------------------------------------------------------------------
+
+let adminMenuItems = [];
+
+const STYLE_OPTIONS = [
+  { value: "", label: "⚪️ پیش‌فرض" },
+  { value: "primary", label: "🔵 آبی" },
+  { value: "success", label: "🟢 سبز" },
+  { value: "danger", label: "🔴 قرمز" },
+];
+
+async function renderAdmin() {
+  content.innerHTML = skeleton(4);
+  try {
+    adminMenuItems = await api("/api/admin/menu");
+    content.innerHTML = `
+      <div class="eyebrow">مدیریت منوی اصلی بات</div>
+      <p class="hint-text">ترتیب، متن، رنگ و فعال/غیرفعال بودن دکمه‌های منوی اصلی بات را از اینجا مدیریت کن. با فلش‌ها جای دکمه‌ها را جابه‌جا کن.</p>
+      <div class="card" id="admin-menu-list"></div>
+      <button class="btn" id="admin-menu-save">💾 ذخیره تغییرات</button>
+    `;
+    renderAdminMenuList();
+    document.getElementById("admin-menu-save").onclick = saveAdminMenu;
+  } catch (e) {
+    content.innerHTML = errorState(e.message);
+  }
+}
+
+function renderAdminMenuList() {
+  const list = document.getElementById("admin-menu-list");
+  list.innerHTML = adminMenuItems.map((item, idx) => adminMenuRow(item, idx)).join("");
+  adminMenuItems.forEach((item, idx) => {
+    const upBtn = document.getElementById(`menu-up-${idx}`);
+    const downBtn = document.getElementById(`menu-down-${idx}`);
+    if (upBtn) upBtn.onclick = () => moveMenuItem(idx, -1);
+    if (downBtn) downBtn.onclick = () => moveMenuItem(idx, 1);
+  });
+}
+
+function adminMenuRow(item, idx) {
+  const styleSelect = item.has_style
+    ? `<select class="input menu-style-input" data-idx="${idx}">
+        ${STYLE_OPTIONS.map((o) => `<option value="${o.value}" ${o.value === (item.style || "") ? "selected" : ""}>${o.label}</option>`).join("")}
+      </select>`
+    : "";
+  const textInput = item.has_text
+    ? `<input class="input menu-text-input" data-idx="${idx}" type="text" value="${(item.text || "").replace(/"/g, "&quot;")}" placeholder="متن دکمه" />`
+    : `<div class="hint-text" style="margin:0">${item.label} (بدون متن قابل‌ویرایش)</div>`;
+  const toggle = item.togglable
+    ? `<label class="menu-toggle">
+        <input type="checkbox" class="menu-enabled-input" data-idx="${idx}" ${item.enabled ? "checked" : ""} />
+        <span>فعال</span>
+      </label>`
+    : "";
+  return `
+    <div class="menu-row" data-idx="${idx}">
+      <div class="menu-row-top">
+        <span class="menu-row-label">${item.label}${item.admin_only ? " (فقط ادمین)" : ""}</span>
+        <div class="menu-row-arrows">
+          <button type="button" class="btn small outline" id="menu-up-${idx}" ${idx === 0 ? "disabled" : ""}>▲</button>
+          <button type="button" class="btn small outline" id="menu-down-${idx}" ${idx === adminMenuItems.length - 1 ? "disabled" : ""}>▼</button>
+        </div>
+      </div>
+      <div class="menu-row-body">
+        ${textInput}
+        ${styleSelect}
+        ${toggle}
+      </div>
+    </div>
+  `;
+}
+
+function collectMenuEdits() {
+  document.querySelectorAll(".menu-text-input").forEach((el) => {
+    adminMenuItems[Number(el.dataset.idx)].text = el.value;
+  });
+  document.querySelectorAll(".menu-style-input").forEach((el) => {
+    adminMenuItems[Number(el.dataset.idx)].style = el.value;
+  });
+  document.querySelectorAll(".menu-enabled-input").forEach((el) => {
+    adminMenuItems[Number(el.dataset.idx)].enabled = el.checked;
+  });
+}
+
+function moveMenuItem(idx, dir) {
+  collectMenuEdits();
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= adminMenuItems.length) return;
+  const tmp = adminMenuItems[idx];
+  adminMenuItems[idx] = adminMenuItems[newIdx];
+  adminMenuItems[newIdx] = tmp;
+  renderAdminMenuList();
+}
+
+async function saveAdminMenu() {
+  collectMenuEdits();
+  const saveBtn = document.getElementById("admin-menu-save");
+  saveBtn.disabled = true;
+  saveBtn.textContent = "در حال ذخیره...";
+  try {
+    await api("/api/admin/menu", {
+      method: "POST",
+      body: JSON.stringify({
+        order: adminMenuItems.map((i) => i.key),
+        buttons: adminMenuItems.map((i) => ({ key: i.key, text: i.text, style: i.style, enabled: i.enabled })),
+      }),
+    });
+    tg.HapticFeedback.notificationOccurred("success");
+    notify("چیدمان منو با موفقیت ذخیره شد. برای دیدن تغییرات، بات را دوباره در تلگرام باز کن.");
+  } catch (e) {
+    notify(e.message);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = "💾 ذخیره تغییرات";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // تب‌ها
 // ---------------------------------------------------------------------------
 const tabs = {
@@ -665,6 +787,7 @@ const tabs = {
   referral: renderReferral,
   support: renderSupport,
   wallet: renderWallet,
+  admin: renderAdmin,
 };
 
 function switchTab(name) {
