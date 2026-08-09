@@ -72,6 +72,18 @@ print_status_line() {
     else
         echo -e "System Status: ${RED}${BOLD}متوقف ⛔️${RESET}"
     fi
+
+    MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
+    if systemctl list-unit-files 2>/dev/null | grep -q "^${MINIAPP_SERVICE}.service"; then
+        if systemctl is-active --quiet "$MINIAPP_SERVICE" 2>/dev/null; then
+            echo -e "Mini App Status: ${GREEN}${BOLD}در حال اجراست ✅${RESET}"
+        else
+            echo -e "Mini App Status: ${RED}${BOLD}متوقف ⛔️${RESET}"
+        fi
+    else
+        echo -e "Mini App Status: ${YELLOW}نصب نشده${RESET}"
+    fi
+
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
 }
 
