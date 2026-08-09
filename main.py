@@ -29,18 +29,19 @@ async def main():
     main_db = Database(DB_PATH)
     reseller_bots = main_db.list_reseller_bots(active_only=True)
     for rb in reseller_bots:
-        started = await manager.start_bot(
-            rb["bot_token"], rb["db_path"], rb["owner_telegram_id"], is_main_bot=False
-        )
-        if started:
-            logger.info("بات نمایندگی @%s راه‌اندازی شد.", rb["bot_username"])
-        # هماهنگ‌سازی شناسه‌ی تننت مینی‌اپ (برای نماینده‌های قدیمی‌تر که قبل از
-        # افزودن این قابلیت ثبت شده‌اند، و برای اطمینان همیشگی از تازه بودن آن)
+        # هماهنگ‌سازی شناسه‌ی تننت مینی‌اپ - باید قبل از start_bot باشد تا
+        # Menu Button (که موقع start_bot ست می‌شود) لینک درست را داشته باشد.
         try:
             reseller_db = Database(rb["db_path"])
             reseller_db.set_setting("miniapp_tenant_id", str(rb["id"]))
         except Exception:
             logger.warning("همگام‌سازی miniapp_tenant_id برای @%s ناموفق بود.", rb["bot_username"])
+
+        started = await manager.start_bot(
+            rb["bot_token"], rb["db_path"], rb["owner_telegram_id"], is_main_bot=False
+        )
+        if started:
+            logger.info("بات نمایندگی @%s راه‌اندازی شد.", rb["bot_username"])
 
     try:
         await manager.wait_all()

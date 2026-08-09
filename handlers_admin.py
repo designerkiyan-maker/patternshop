@@ -958,15 +958,16 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
             reseller_id = db.register_reseller_bot(token, username, owner_id, owner_name, db_path)
 
-            started = False
-            if bot_manager:
-                started = await bot_manager.start_bot(token, db_path, owner_id, is_main_bot=False)
-
             # دیتابیس همین نماینده باید بداند شناسه‌ی خودش در جدول reseller_bots (بات اصلی) چیست
-            # تا بتواند لینک مینی‌اپ اختصاصی خودش را بسازد (?b=<reseller_id>)
+            # تا بتواند لینک مینی‌اپ اختصاصی خودش را بسازد (?b=<reseller_id>). این باید قبل از
+            # start_bot ست شود تا Menu Button با لینک درست ساخته شود.
             reseller_db = Database(db_path)
             reseller_db.init_db(owner_id=owner_id)
             reseller_db.set_setting("miniapp_tenant_id", str(reseller_id))
+
+            started = False
+            if bot_manager:
+                started = await bot_manager.start_bot(token, db_path, owner_id, is_main_bot=False)
 
             await state.clear()
             status_text = "✅ بات نمایندگی راه‌اندازی و همین الان روشن شد." if started else \
