@@ -1,24 +1,34 @@
 # -*- coding: utf-8 -*-
 """
-بک‌اند مینی‌اپ (فقط بخش کاربر، فقط برای بات اصلی در این فاز).
+بک‌اند مینی‌اپ - چندمستأجر (Multi-tenant)
+
+یک سرور واحد، هم برای بات اصلی و هم برای همه‌ی بات‌های نمایندگی.
+شناسه‌ی نماینده از طریق کوئری‌پارامتر ?b=<reseller_id> در URL مینی‌اپ مشخص
+می‌شود (که هنگام ساخت دکمه‌ی مینی‌اپ در keyboards.py به‌صورت خودکار اضافه می‌شود).
+اگر ?b وجود نداشته باشد یا خالی/۰ باشد، یعنی بات اصلی.
+
+هر درخواست بر اساس همین شناسه، دیتابیس و توکن بات درست را resolve می‌کند؛
+یعنی هر نماینده کاملاً مستقل و ایزوله (دیتابیس خودش) از مینی‌اپ استفاده می‌کند.
 
 اجرا (جدا از پروسه‌ی اصلی بات): uvicorn miniapp.server:app --host 127.0.0.1 --port 8001
-سپس nginx مسیر /miniapp/ را به این پورت و فایل‌های استاتیک را proxy می‌کند.
+سپس nginx مسیر / را به این پورت proxy می‌کند.
 """
 
 import sys
 import os
 import json
+import random
+from dataclasses import dataclass
+from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import aiohttp
-from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form, Depends, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
 
 from config import BOT_TOKEN, DB_PATH, MAX_TEST_PER_USER
 from database import Database
@@ -27,28 +37,65 @@ from miniapp.auth import validate_init_data
 app = FastAPI(title="V2Ray Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-db = Database(DB_PATH)
-
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
-_bot_username_cache: Optional[str] = None
+# دیتابیس بات اصلی - هم برای سرویس‌دهی مستقیم به بات اصلی، هم برای پیدا کردن
+# دیتابیس/توکن بات‌های نمایندگی از روی جدول reseller_bots استفاده می‌شود.
+main_db = Database(DB_PATH)
+
+_bot_username_cache: dict[str, str] = {}  # bot_token -> username
 
 
-async def get_bot_username() -> str:
-    """یوزرنیم بات را (برای ساخت لینک دعوت زیرمجموعه‌گیری) از تلگرام می‌گیرد و کش می‌کند."""
-    global _bot_username_cache
-    if _bot_username_cache:
-        return _bot_username_cache
+# ---------------------------------------------------------------------------
+# تشخیص مستأجر (بات اصلی یا یک نماینده‌ی مشخص)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Tenant:
+    db: Database
+    bot_token: str
+    tenant_id: str  # "" برای بات اصلی، در غیر این صورت id عددی نماینده به‌صورت رشته
+
+
+def get_tenant(b: str = Query("", description="شناسه‌ی نماینده؛ خالی یعنی بات اصلی")) -> Tenant:
+    b = (b or "").strip()
+    if not b or b == "0":
+        return Tenant(db=main_db, bot_token=BOT_TOKEN, tenant_id="")
+    if not b.isdigit():
+        raise HTTPException(status_code=400, detail="شناسه‌ی فروشگاه نامعتبر است.")
+    row = main_db.get_reseller_bot(int(b))
+    if not row or not row["is_active"]:
+        raise HTTPException(status_code=404, detail="این فروشگاه در دسترس نیست.")
+    return Tenant(db=Database(row["db_path"]), bot_token=row["bot_token"], tenant_id=b)
+
+
+def get_verified_user(x_init_data: str = Header(...), tenant: Tenant = Depends(get_tenant)):
+    """initData را با توکن همان مستأجر تایید می‌کند. خروجی: (tg_id, db, tenant)"""
+    result = validate_init_data(x_init_data, tenant.bot_token)
+    if not result or "user" not in result:
+        raise HTTPException(status_code=401, detail="initData نامعتبر است.")
+    return result["user"]["id"], tenant.db, tenant
+
+
+async def get_bot_username(tenant: Tenant) -> str:
+    """یوزرنیم همان بات (برای ساخت لینک دعوت زیرمجموعه‌گیری) را می‌گیرد و کش می‌کند."""
+    cached = _bot_username_cache.get(tenant.bot_token)
+    if cached:
+        return cached
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe") as resp:
+            async with session.get(f"https://api.telegram.org/bot{tenant.bot_token}/getMe") as resp:
                 data = await resp.json()
                 if data.get("ok"):
-                    _bot_username_cache = data["result"]["username"]
+                    _bot_username_cache[tenant.bot_token] = data["result"]["username"]
     except Exception:
         pass
-    return _bot_username_cache or ""
+    return _bot_username_cache.get(tenant.bot_token, "")
 
+
+# ---------------------------------------------------------------------------
+# فایل‌های استاتیک
+# ---------------------------------------------------------------------------
 
 def get_asset_version() -> str:
     """نسخه‌ی خودکار برای cache-busting، بر اساس آخرین زمان تغییر فایل‌های استاتیک."""
@@ -71,16 +118,13 @@ def serve_index():
     return HTMLResponse(html)
 
 
-def get_verified_user(x_init_data: str = Header(...)) -> int:
-    result = validate_init_data(x_init_data, BOT_TOKEN)
-    if not result or "user" not in result:
-        raise HTTPException(status_code=401, detail="initData نامعتبر است.")
-    return result["user"]["id"]
-
+# ---------------------------------------------------------------------------
+# حساب کاربری
+# ---------------------------------------------------------------------------
 
 @app.get("/api/me")
-def api_me(user_id: int = Header(None), x_init_data: str = Header(...)):
-    tg_id = get_verified_user(x_init_data)
+def api_me(auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
     user = db.get_user(tg_id)
     if not user:
         raise HTTPException(status_code=404, detail="کاربر یافت نشد. ابتدا /start را در بات بزنید.")
@@ -97,8 +141,8 @@ def api_me(user_id: int = Header(None), x_init_data: str = Header(...)):
 
 
 @app.get("/api/orders")
-def api_orders(x_init_data: str = Header(...)):
-    tg_id = get_verified_user(x_init_data)
+def api_orders(auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
     orders = db.get_user_orders(tg_id)
     result = []
     for o in orders:
@@ -116,8 +160,8 @@ def api_orders(x_init_data: str = Header(...)):
 
 
 @app.get("/api/catalog")
-def api_catalog(x_init_data: str = Header(...)):
-    get_verified_user(x_init_data)  # فقط برای احراز هویت؛ کاتالوگ برای همه یکسان است
+def api_catalog(auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
     categories = db.get_categories(active_only=True)
     result = []
     for c in categories:
@@ -139,9 +183,13 @@ def api_catalog(x_init_data: str = Header(...)):
     return result
 
 
+# ---------------------------------------------------------------------------
+# کانفیگ تست
+# ---------------------------------------------------------------------------
+
 @app.get("/api/test-config")
-def api_test_config_status(x_init_data: str = Header(...)):
-    tg_id = get_verified_user(x_init_data)
+def api_test_config_status(auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
     user = db.get_user(tg_id)
     used = bool(user and user["test_used"] >= MAX_TEST_PER_USER)
     link = None
@@ -157,8 +205,8 @@ def api_test_config_status(x_init_data: str = Header(...)):
 
 
 @app.post("/api/test-config/claim")
-def api_test_config_claim(x_init_data: str = Header(...)):
-    tg_id = get_verified_user(x_init_data)
+def api_test_config_claim(auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
     if db.get_setting("test_enabled", "1") != "1":
         raise HTTPException(status_code=400, detail="در حال حاضر امکان دریافت کانفیگ تست غیرفعال است.")
     user = db.get_user(tg_id)
@@ -171,13 +219,18 @@ def api_test_config_claim(x_init_data: str = Header(...)):
     return {"link": result["link"]}
 
 
+# ---------------------------------------------------------------------------
+# زیرمجموعه‌گیری
+# ---------------------------------------------------------------------------
+
 @app.get("/api/referral")
-async def api_referral(x_init_data: str = Header(...)):
-    tg_id = get_verified_user(x_init_data)
+async def api_referral(auth=Depends(get_verified_user)):
+    tg_id, db, tenant = auth
     if db.get_setting("referral_enabled", "1") != "1":
         return {"enabled": False}
-    username = await get_bot_username()
-    link = f"https://t.me/{username}?start=ref{tg_id}" if username else None
+    username = await get_bot_username(tenant)
+    ref_start = f"ref{tg_id}"
+    link = f"https://t.me/{username}?start={ref_start}" if username else None
     stats = db.get_referral_stats(tg_id)
     return {
         "enabled": True,
@@ -188,9 +241,13 @@ async def api_referral(x_init_data: str = Header(...)):
     }
 
 
+# ---------------------------------------------------------------------------
+# هشدار انقضا
+# ---------------------------------------------------------------------------
+
 @app.get("/api/expiring")
-def api_expiring(x_init_data: str = Header(...)):
-    tg_id = get_verified_user(x_init_data)
+def api_expiring(auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
     rows = db.get_expiring_configs_for_user(tg_id)
     result = []
     for r in rows:
@@ -203,9 +260,13 @@ def api_expiring(x_init_data: str = Header(...)):
     return result
 
 
+# ---------------------------------------------------------------------------
+# چت پشتیبانی
+# ---------------------------------------------------------------------------
+
 @app.get("/api/support/messages")
-def api_support_messages(since_id: int = 0, x_init_data: str = Header(...)):
-    tg_id = get_verified_user(x_init_data)
+def api_support_messages(since_id: int = 0, auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
     db.mark_support_read_by_user(tg_id)
     rows = db.get_support_messages(tg_id, since_id=since_id)
     return [
@@ -219,8 +280,8 @@ class SupportMessageCreate(BaseModel):
 
 
 @app.post("/api/support/messages")
-async def api_support_send(body: SupportMessageCreate, x_init_data: str = Header(...)):
-    tg_id = get_verified_user(x_init_data)
+async def api_support_send(body: SupportMessageCreate, auth=Depends(get_verified_user)):
+    tg_id, db, tenant = auth
     text = (body.message or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="پیام نمی‌تواند خالی باشد.")
@@ -237,17 +298,17 @@ async def api_support_send(body: SupportMessageCreate, x_init_data: str = Header
         f"✉️ {text}"
     )
     admin_ids = db.list_admins()
-    reply_markup = json.dumps({
+    reply_markup = {
         "inline_keyboard": [[{"text": "↩️ پاسخ", "callback_data": f"reply_user:{tg_id}"}]]
-    })
+    }
     async with aiohttp.ClientSession() as session:
         for admin_id in admin_ids:
             try:
                 await session.post(
-                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
                     json={
                         "chat_id": admin_id, "text": caption,
-                        "parse_mode": "Markdown", "reply_markup": json.loads(reply_markup),
+                        "parse_mode": "Markdown", "reply_markup": reply_markup,
                     },
                 )
             except Exception:
@@ -256,8 +317,9 @@ async def api_support_send(body: SupportMessageCreate, x_init_data: str = Header
     return {"id": msg_id, "sender": "user", "message": text}
 
 
-async def send_photo_to_admins(caption: str, reply_markup: str, photo_bytes: bytes, filename: str, content_type: str):
-    """رسید را برای همه‌ی ادمین‌ها ارسال می‌کند. (file_id, تعداد تحویل موفق) را برمی‌گرداند."""
+async def send_photo_to_admins(db: Database, bot_token: str, caption: str, reply_markup: str,
+                                photo_bytes: bytes, filename: str, content_type: str):
+    """رسید را برای همه‌ی ادمین‌های همین مستأجر ارسال می‌کند. (file_id, تعداد تحویل موفق، نتایج) را برمی‌گرداند."""
     admin_ids = db.list_admins()
     sent_file_id = None
     delivered = 0
@@ -271,7 +333,7 @@ async def send_photo_to_admins(caption: str, reply_markup: str, photo_bytes: byt
             form.add_field("photo", photo_bytes, filename=filename, content_type=content_type)
             try:
                 async with session.post(
-                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto", data=form
+                    f"https://api.telegram.org/bot{bot_token}/sendPhoto", data=form
                 ) as resp:
                     data = await resp.json()
                     if data.get("ok"):
@@ -285,14 +347,18 @@ async def send_photo_to_admins(caption: str, reply_markup: str, photo_bytes: byt
     return sent_file_id, delivered, results
 
 
+# ---------------------------------------------------------------------------
+# سفارش‌ها
+# ---------------------------------------------------------------------------
+
 class OrderCreate(BaseModel):
     product_id: int
     discount_code: Optional[str] = None
 
 
 @app.post("/api/orders")
-def api_create_order(body: OrderCreate, x_init_data: str = Header(...)):
-    tg_id = get_verified_user(x_init_data)
+def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
     product = db.get_product(body.product_id)
     if not product or db.count_available_configs(body.product_id) <= 0:
         raise HTTPException(status_code=400, detail="این محصول موجود نیست.")
@@ -339,9 +405,13 @@ def api_create_order(body: OrderCreate, x_init_data: str = Header(...)):
     }
 
 
+# ---------------------------------------------------------------------------
+# گردونه‌ی شانس
+# ---------------------------------------------------------------------------
+
 @app.get("/api/wheel")
-def api_wheel_status(x_init_data: str = Header(...)):
-    tg_id = get_verified_user(x_init_data)
+def api_wheel_status(auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
     settings = db.get_wheel_settings()
     can_spin, remaining_hours = db.can_spin_wheel(tg_id)
     return {
@@ -352,9 +422,8 @@ def api_wheel_status(x_init_data: str = Header(...)):
 
 
 @app.post("/api/wheel/spin")
-def api_wheel_spin(x_init_data: str = Header(...)):
-    import random
-    tg_id = get_verified_user(x_init_data)
+def api_wheel_spin(auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
     settings = db.get_wheel_settings()
     if not settings["enabled"]:
         raise HTTPException(status_code=400, detail="گردونه غیرفعال است.")
@@ -371,13 +440,17 @@ def api_wheel_spin(x_init_data: str = Header(...)):
     return {"won": False}
 
 
+# ---------------------------------------------------------------------------
+# کیف پول
+# ---------------------------------------------------------------------------
+
 class TopupCreate(BaseModel):
     amount: int
 
 
 @app.post("/api/wallet/topup-request")
-def api_topup_request(body: TopupCreate, x_init_data: str = Header(...)):
-    tg_id = get_verified_user(x_init_data)
+def api_topup_request(body: TopupCreate, auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
     if body.amount < 1000:
         raise HTTPException(status_code=400, detail="حداقل مبلغ ۱۰۰۰ تومان است.")
     topup_id = db.create_topup(tg_id, body.amount)
@@ -393,8 +466,9 @@ async def api_topup_receipt(
     topup_id: int = Form(...),
     photo: UploadFile = File(...),
     x_init_data: str = Header(...),
+    tenant: Tenant = Depends(get_tenant),
 ):
-    tg_id = get_verified_user(x_init_data)
+    tg_id, db, tenant = get_verified_user(x_init_data, tenant)
     topup = db.get_topup(topup_id)
     if not topup or topup["user_id"] != tg_id:
         raise HTTPException(status_code=404, detail="درخواست شارژ یافت نشد.")
@@ -426,7 +500,7 @@ async def api_topup_receipt(
         raise HTTPException(status_code=500, detail="هیچ ادمینی برای بررسی رسید ثبت نشده است.")
 
     sent_file_id, delivered, results = await send_photo_to_admins(
-        caption, reply_markup, photo_bytes, photo.filename or "receipt.jpg", photo.content_type
+        db, tenant.bot_token, caption, reply_markup, photo_bytes, photo.filename or "receipt.jpg", photo.content_type
     )
     if delivered == 0:
         raise HTTPException(status_code=502, detail="ارسال رسید به ادمین ناموفق بود. دوباره تلاش کنید.")
@@ -444,8 +518,9 @@ async def api_order_receipt(
     order_id: int,
     photo: UploadFile = File(...),
     x_init_data: str = Header(...),
+    tenant: Tenant = Depends(get_tenant),
 ):
-    tg_id = get_verified_user(x_init_data)
+    tg_id, db, tenant = get_verified_user(x_init_data, tenant)
     order = db.get_order(order_id)
     if not order or order["user_id"] != tg_id:
         raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
@@ -485,7 +560,7 @@ async def api_order_receipt(
         raise HTTPException(status_code=500, detail="هیچ ادمینی برای بررسی رسید ثبت نشده است.")
 
     sent_file_id, delivered, results = await send_photo_to_admins(
-        caption, reply_markup, photo_bytes, photo.filename or "receipt.jpg", photo.content_type
+        db, tenant.bot_token, caption, reply_markup, photo_bytes, photo.filename or "receipt.jpg", photo.content_type
     )
     if delivered == 0:
         raise HTTPException(status_code=502, detail="ارسال رسید به ادمین ناموفق بود. دوباره تلاش کنید.")
@@ -498,4 +573,4 @@ async def api_order_receipt(
     return {"status": "sent"}
 
 
-app.mount("/", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static"), html=True), name="static")
+app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
