@@ -57,21 +57,180 @@ function errorState(message) {
 }
 
 // ---------------------------------------------------------------------------
+// تب کانفیگ تست
+// ---------------------------------------------------------------------------
+
+async function renderTestConfig() {
+  content.innerHTML = skeleton(1);
+  try {
+    const status = await api("/api/test-config");
+    content.innerHTML = `
+      <div class="eyebrow">کانفیگ تست</div>
+      <div class="card" id="test-config-card">
+        <h3><span class="ic">🧪</span>کانفیگ تست رایگان</h3>
+        <p class="hint-text">یک کانفیگ محدود و رایگان برای امتحان کیفیت سرویس، فقط یک‌بار برای هر کاربر.</p>
+        ${testConfigBody(status)}
+      </div>
+    `;
+    const btn = document.getElementById("test-config-btn");
+    if (btn) btn.onclick = () => claimTestConfig(btn);
+  } catch (e) {
+    content.innerHTML = errorState(e.message);
+  }
+}
+
+function testConfigBody(status) {
+  if (!status.enabled) return `<div class="state-msg"><span class="ic">◌</span>در حال حاضر کانفیگ تست غیرفعال است.</div>`;
+  if (status.used) return `<div class="state-msg"><span class="ic">✅</span>شما کانفیگ تست خود را قبلاً دریافت کرده‌اید.</div>`;
+  if (status.available <= 0) return `<div class="state-msg"><span class="ic">◌</span>موجودی کانفیگ تست تمام شده است.</div>`;
+  return `<button class="btn" id="test-config-btn">دریافت کانفیگ تست رایگان</button>`;
+}
+
+async function claimTestConfig(btn) {
+  btn.disabled = true;
+  btn.textContent = "در حال دریافت...";
+  try {
+    const r = await api("/api/test-config/claim", { method: "POST" });
+    const card = document.getElementById("test-config-card");
+    card.innerHTML = `
+      <h3><span class="ic">🧪</span>کانفیگ تست رایگان</h3>
+      <div class="link-box">${r.link}</div>
+      <div class="qr-row">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(r.link)}" width="96" height="96" alt="QR" />
+        <button class="btn small outline" onclick="navigator.clipboard.writeText('${r.link}');tg.HapticFeedback.notificationOccurred('success')">📋 کپی لینک</button>
+      </div>
+    `;
+    tg.HapticFeedback.notificationOccurred("success");
+  } catch (e) {
+    notify("خطا: " + e.message);
+    btn.disabled = false;
+    btn.textContent = "دریافت کانفیگ تست رایگان";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب زیرمجموعه‌گیری
+// ---------------------------------------------------------------------------
+
+async function renderReferral() {
+  content.innerHTML = skeleton(1);
+  try {
+    const r = await api("/api/referral");
+    if (!r.enabled) {
+      content.innerHTML = `<div class="state-msg"><span class="ic">◌</span>زیرمجموعه‌گیری در حال حاضر غیرفعال است.</div>`;
+      return;
+    }
+    content.innerHTML = `
+      <div class="eyebrow">زیرمجموعه‌گیری</div>
+      <div class="card">
+        <h3><span class="ic">🤝</span>دعوت از دوستان</h3>
+        <p class="hint-text">دوستانتان را با لینک زیر دعوت کنید و از اولین خریدشان پورسانت بگیرید.</p>
+        <div class="stat-row"><span>پورسانت شما</span><b>${r.percent}٪ از اولین خرید</b></div>
+        <div class="stat-row"><span>تعداد زیرمجموعه‌ها</span><b>${fmt(r.count)}</b></div>
+        <div class="stat-row"><span>اعتبار کسب‌شده</span><b>${fmt(r.credit)} تومان</b></div>
+        ${r.link ? `
+        <div class="link-box" style="margin-top:8px">${r.link}</div>
+        <button class="btn small outline" id="copy-referral-btn" style="width:100%;margin-top:8px">📋 کپی لینک دعوت</button>
+        ` : ""}
+      </div>
+    `;
+    const copyBtn = document.getElementById("copy-referral-btn");
+    if (copyBtn) copyBtn.onclick = () => {
+      navigator.clipboard.writeText(r.link);
+      tg.HapticFeedback.notificationOccurred("success");
+      notify("لینک دعوت کپی شد.");
+    };
+  } catch (e) {
+    content.innerHTML = errorState(e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب پشتیبانی (چت)
+// ---------------------------------------------------------------------------
+
+let supportPollTimer = null;
+let supportLastId = 0;
+
+function renderSupport() {
+  content.innerHTML = `
+    <div class="chat-wrap">
+      <div class="chat-messages" id="chat-messages">${skeleton(2)}</div>
+      <form class="chat-input-row" id="chat-form">
+        <input type="text" id="chat-input" placeholder="پیام خود را بنویسید..." autocomplete="off" />
+        <button type="submit" class="chat-send-btn" aria-label="ارسال">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 12 20 4l-6 16-3-7-7-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        </button>
+      </form>
+    </div>
+  `;
+
+  const form = document.getElementById("chat-form");
+  const input = document.getElementById("chat-input");
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    appendChatMessage({ sender: "user", message: text, created_at: new Date().toISOString() }, true);
+    try {
+      await api("/api/support/messages", { method: "POST", body: JSON.stringify({ message: text }) });
+    } catch (e2) {
+      notify("خطا: " + e2.message);
+    }
+  };
+
+  supportLastId = 0;
+  document.getElementById("chat-messages").innerHTML = "";
+  loadSupportMessages(true);
+  clearInterval(supportPollTimer);
+  supportPollTimer = setInterval(() => loadSupportMessages(false), 4000);
+}
+
+async function loadSupportMessages(initial) {
+  try {
+    const msgs = await api(`/api/support/messages?since_id=${supportLastId}`);
+    if (initial && msgs.length === 0) {
+      document.getElementById("chat-messages").innerHTML =
+        `<div class="state-msg"><span class="ic">💬</span>سوالی دارید؟ همینجا بنویسید تا پشتیبانی پاسخ دهد.</div>`;
+    }
+    msgs.forEach((m) => appendChatMessage(m, false));
+  } catch (e) {
+    // در پس‌زمینه صامت (ارور نمایش داده نمی‌شود تا مزاحم تایپ کاربر نشود)
+  }
+}
+
+function appendChatMessage(m, isOptimistic) {
+  const box = document.getElementById("chat-messages");
+  if (!box) return;
+  if (box.querySelector(".state-msg")) box.innerHTML = "";
+  if (m.id) supportLastId = Math.max(supportLastId, m.id);
+  const time = new Date(m.created_at).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+  const bubble = document.createElement("div");
+  bubble.className = `chat-bubble ${m.sender === "user" ? "mine" : "admin"}`;
+  bubble.innerHTML = `<div class="chat-text"></div><div class="chat-time">${time}</div>`;
+  bubble.querySelector(".chat-text").textContent = m.message;
+  box.appendChild(bubble);
+  box.scrollTop = box.scrollHeight;
+}
+
+// ---------------------------------------------------------------------------
 // تب خانه
 // ---------------------------------------------------------------------------
 async function renderHome() {
   content.innerHTML = skeleton(3);
   try {
-    const [me, orders, testStatus, referral] = await Promise.all([
+    const [me, orders, expiring] = await Promise.all([
       api("/api/me"),
       api("/api/orders"),
-      api("/api/test-config").catch(() => null),
-      api("/api/referral").catch(() => null),
+      api("/api/expiring").catch(() => []),
     ]);
     greeting.textContent = `سلام ${me.first_name} 👋`;
     const active = orders.filter((o) => o.status === "approved");
 
     content.innerHTML = `
+      ${expiring.length > 0 ? expiringBanner(expiring) : ""}
+
       <div class="eyebrow">وضعیت حساب</div>
       <div class="card">
         <h3><span class="ic">◆</span>خلاصه</h3>
@@ -86,23 +245,28 @@ async function renderHome() {
           ? `<div class="state-msg"><span class="ic">◌</span>سرویس فعالی ندارید.</div>`
           : active.map(orderCard).join("")}
       </div>
-
-      ${testStatus ? testConfigCard(testStatus) : ""}
-      ${referral && referral.enabled ? referralCard(referral) : ""}
     `;
-
-    const testBtn = document.getElementById("test-config-btn");
-    if (testBtn) testBtn.onclick = () => claimTestConfig(testBtn);
-
-    const copyRefBtn = document.getElementById("copy-referral-btn");
-    if (copyRefBtn) copyRefBtn.onclick = () => {
-      navigator.clipboard.writeText(copyRefBtn.dataset.link);
-      tg.HapticFeedback.notificationOccurred("success");
-      notify("لینک دعوت کپی شد.");
-    };
   } catch (e) {
     content.innerHTML = errorState(e.message);
   }
+}
+
+function expiringBanner(items) {
+  const rows = items.map((it) => {
+    const d = new Date(it.expires_at);
+    const days = Math.max(0, Math.ceil((d - new Date()) / 86400000));
+    return `<div class="expiring-row">
+      <span>📦 ${it.product_name}</span>
+      <b>${days === 0 ? "امروز منقضی می‌شود" : `${days} روز مانده`}</b>
+    </div>`;
+  }).join("");
+  return `
+    <div class="banner banner-warn">
+      <div class="banner-title"><span class="ic">⏰</span>سرویس‌های نزدیک به انقضا</div>
+      ${rows}
+      <div class="banner-hint">برای تمدید به بخش «فروشگاه» بروید.</div>
+    </div>
+  `;
 }
 
 function testConfigCard(status) {
@@ -473,11 +637,23 @@ function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder) {
 // ---------------------------------------------------------------------------
 // تب‌ها
 // ---------------------------------------------------------------------------
-const tabs = { home: renderHome, store: renderStore, wheel: renderWheel, wallet: renderWallet };
+const tabs = {
+  home: renderHome,
+  store: renderStore,
+  test: renderTestConfig,
+  wheel: renderWheel,
+  referral: renderReferral,
+  support: renderSupport,
+  wallet: renderWallet,
+};
 
 function switchTab(name) {
   document.querySelectorAll("#tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  if (name !== "support") clearInterval(supportPollTimer);
+  content.classList.remove("fade-in");
+  void content.offsetWidth; // ری‌استارت انیمیشن
   tabs[name]();
+  content.classList.add("fade-in");
 }
 
 document.querySelectorAll("#tabbar button").forEach((b) => b.onclick = () => switchTab(b.dataset.tab));
