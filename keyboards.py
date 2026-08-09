@@ -42,25 +42,12 @@ def _miniapp_url(db) -> str:
     return MINIAPP_URL
 
 
-MINIAPP_BTN_TEXT = "✨ مینی‌اپ فروشگاه"
-
-
-def miniapp_inline_kb(miniapp_url: str) -> InlineKeyboardMarkup:
-    """دکمه‌ی واقعی وب‌اپ به‌صورت inline (نه reply keyboard)، چون طبق مستندات
-    تلگرام، initData فقط وقتی از دکمه‌ی reply keyboard باز شود همیشه خالی است."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=MINIAPP_BTN_TEXT, web_app=WebAppInfo(url=miniapp_url))]
-    ])
-
-
 def main_menu_kb(db, is_admin: bool) -> ReplyKeyboardMarkup:
     settings = db.get_all_settings()
     rows = []
     miniapp_url = _miniapp_url(db)
     if miniapp_url:
-        # این فقط یک دکمه‌ی متنی معمولی است؛ با فشردنش (در handlers_user.py)
-        # دکمه‌ی واقعی inline وب‌اپ ارسال می‌شود تا initData معتبر باشد.
-        rows.append([KeyboardButton(text=MINIAPP_BTN_TEXT)])
+        rows.append([KeyboardButton(text="✨ مینی‌اپ فروشگاه", web_app=WebAppInfo(url=miniapp_url))])
     rows.append(
         [_styled_button(settings.get("btn_buy", "🛒 خرید کانفیگ"), settings.get("btn_buy_style", ""))]
     )
@@ -178,6 +165,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_products", "📦 مدیریت محصولات", "adm_products"),
     ("adm_add_configs", "🔗 افزودن کانفیگ به محصول", "adm_add_configs"),
     ("adm_test_menu", "🧪 مدیریت کانفیگ تست", "adm_test_menu"),
+    ("adm_forcejoin_menu", "📢 عضویت اجباری در کانال", "adm_forcejoin_menu"),
     ("adm_pending_orders", "🧾 سفارش‌های در انتظار", "adm_pending_orders"),
     ("adm_pending_topups", "👛 درخواست‌های شارژ کیف پول", "adm_pending_topups"),
     ("adm_discounts_menu", "🎟 مدیریت کدهای تخفیف", "adm_discounts_menu"),
@@ -306,6 +294,19 @@ def admin_test_menu_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=f"موجودی فعلی: {remaining} عدد", callback_data="noop")],
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_test_toggle")],
         [InlineKeyboardButton(text="➕ افزودن لینک تست", callback_data="adm_test_add")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_forcejoin_menu_kb(db) -> InlineKeyboardMarkup:
+    settings = db.get_force_join_settings()
+    toggle_text = "🔴 غیرفعال کردن عضویت اجباری" if settings["enabled"] else "🟢 فعال کردن عضویت اجباری"
+    channel_text = f"کانال فعلی: {settings['channel']}" if settings["channel"] else "کانالی ثبت نشده است"
+    rows = [
+        [InlineKeyboardButton(text=channel_text, callback_data="noop")],
+        [InlineKeyboardButton(text="✏️ تنظیم / تغییر کانال", callback_data="adm_forcejoin_set_channel")],
+        [InlineKeyboardButton(text=toggle_text, callback_data="adm_forcejoin_toggle")],
         [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)

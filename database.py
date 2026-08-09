@@ -26,6 +26,8 @@ DEFAULT_SETTINGS = {
     "btn_wallet": "👛 کیف پول من",
     "btn_admin_panel": "⚙️ پنل مدیریت",
     "test_enabled": "1",
+    "force_join_enabled": "0",
+    "force_join_channel": "",  # مثلاً: @mychannel
     "card_number": "0000-0000-0000-0000",
     "card_holder": "نام صاحب حساب",
     "contact_text": "پیام خود را بنویسید تا مستقیم برای پشتیبانی ارسال شود:",
@@ -959,3 +961,13 @@ class Database:
                 "AND cf.expires_at > ? AND cf.expires_at <= ? AND o.user_id=?",
                 (user_tg_id, now, threshold, user_tg_id),
             ).fetchall()
+
+    # -----------------------------------------------------------------------
+    # عضویت اجباری در کانال
+    # -----------------------------------------------------------------------
+
+    def get_force_join_settings(self) -> dict:
+        return {
+            "enabled": self.get_setting("force_join_enabled", "0") == "1",
+            "channel": self.get_setting("force_join_channel", "").strip(),
+        }

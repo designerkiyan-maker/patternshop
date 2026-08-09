@@ -44,6 +44,10 @@ class AdminAddTestConfigs(StatesGroup):
     waiting_links = State()
 
 
+class AdminForceJoin(StatesGroup):
+    waiting_channel = State()
+
+
 class AdminEditButton(StatesGroup):
     waiting_text = State()
 

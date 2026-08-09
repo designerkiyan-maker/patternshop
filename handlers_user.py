@@ -20,10 +20,37 @@ import keyboards as kb
 from states import BuyFlow, ContactFlow, DiscountEntry, WalletTopup
 from config import MAX_TEST_PER_USER
 from config_delivery import deliver_config_to_user
+from force_join import is_channel_member, CHECK_CALLBACK
 
 
 def create_user_router(db) -> Router:
     router = Router()
+
+    # -----------------------------------------------------------------------
+    # عضویت اجباری در کانال
+    # -----------------------------------------------------------------------
+
+    @router.callback_query(F.data == CHECK_CALLBACK)
+    async def cb_check_force_join(call: CallbackQuery, bot: Bot):
+        settings = db.get_force_join_settings()
+        if not settings["enabled"] or not settings["channel"]:
+            await call.answer("✅")
+            try:
+                await call.message.delete()
+            except Exception:
+                pass
+            return
+        member = await is_channel_member(bot, settings["channel"], call.from_user.id)
+        if member:
+            await call.answer("✅ عضویت شما تایید شد.", show_alert=True)
+            try:
+                await call.message.delete()
+            except Exception:
+                pass
+            welcome = db.get_setting("welcome_text")
+            await call.message.answer(welcome, reply_markup=kb.menu_for_user(db, call.from_user.id))
+        else:
+            await call.answer("❌ هنوز عضو کانال نشده‌اید.", show_alert=True)
 
     # -----------------------------------------------------------------------
     # شروع
@@ -45,20 +72,6 @@ def create_user_router(db) -> Router:
 
         welcome = db.get_setting("welcome_text")
         await message.answer(welcome, reply_markup=kb.menu_for_user(db, message.from_user.id))
-
-    # -----------------------------------------------------------------------
-    # مینی‌اپ (دکمه‌ی متنی -> پیام با دکمه‌ی inline واقعی وب‌اپ)
-    # -----------------------------------------------------------------------
-
-    @router.message(F.text == kb.MINIAPP_BTN_TEXT)
-    async def open_miniapp(message: Message):
-        miniapp_url = kb._miniapp_url(db)
-        if not miniapp_url:
-            return
-        await message.answer(
-            "برای ورود به مینی‌اپ فروشگاه، روی دکمه‌ی زیر بزن:",
-            reply_markup=kb.miniapp_inline_kb(miniapp_url),
-        )
 
     # -----------------------------------------------------------------------
     # خرید کانفیگ

@@ -23,6 +23,7 @@ from states import (
     AdminAddProduct,
     AdminAddConfigs,
     AdminAddTestConfigs,
+    AdminForceJoin,
     AdminEditButton,
     AdminSetCard,
     AdminBroadcast,
@@ -304,6 +305,77 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         db.add_test_configs(links)
         await state.clear()
         await message.answer(f"✅ {len(links)} لینک تست اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    # -------------------------------------------------------------------
+    # عضویت اجباری در کانال
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_forcejoin_menu")
+    async def cb_admin_forcejoin_menu(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        await call.message.edit_text(
+            "📢 عضویت اجباری در کانال:\n\n"
+            "کاربران قبل از استفاده از بات باید عضو کانال شما باشند. "
+            "دقت کن که ربات باید از قبل ادمین کانال شده باشد تا بتواند عضویت را بررسی کند.",
+            reply_markup=kb.admin_forcejoin_menu_kb(db),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_forcejoin_toggle")
+    async def cb_admin_forcejoin_toggle(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        settings = db.get_force_join_settings()
+        if not settings["enabled"] and not settings["channel"]:
+            await call.answer("اول باید آیدی کانال را تنظیم کنی.", show_alert=True)
+            return
+        current = db.get_setting("force_join_enabled", "0")
+        db.set_setting("force_join_enabled", "0" if current == "1" else "1")
+        await call.message.edit_text("📢 عضویت اجباری در کانال:", reply_markup=kb.admin_forcejoin_menu_kb(db))
+        await call.answer("وضعیت عضویت اجباری تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_forcejoin_set_channel")
+    async def cb_admin_forcejoin_set_channel(call: CallbackQuery, state: FSMContext):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        await state.set_state(AdminForceJoin.waiting_channel)
+        await call.message.edit_text(
+            "آیدی عددی یا یوزرنیم کانال را ارسال کن.\n\n"
+            "مثال: `@mychannel`\n\n"
+            "⚠️ حتماً ربات باید از قبل به‌عنوان ادمین به کانال اضافه شده باشد؛ در غیر این صورت نمی‌تواند عضویت را بررسی کند.",
+            reply_markup=kb.admin_back_kb("adm_forcejoin_menu"),
+        )
+        await call.answer()
+
+    @router.message(AdminForceJoin.waiting_channel)
+    async def process_forcejoin_channel(message: Message, state: FSMContext, bot: Bot):
+        channel = (message.text or "").strip()
+        if not channel:
+            await message.answer("ورودی نامعتبر است. دوباره تلاش کن.")
+            return
+        if not channel.startswith("@") and not channel.startswith("-"):
+            channel = "@" + channel
+
+        try:
+            chat = await bot.get_chat(channel)
+            member = await bot.get_chat_member(channel, bot.id)
+            if member.status not in ("administrator", "creator"):
+                raise ValueError("bot is not admin")
+        except Exception:
+            await message.answer(
+                "⛔️ نتوانستم به این کانال دسترسی پیدا کنم.\n"
+                "مطمئن شو آیدی درست است و ربات از قبل به‌عنوان *ادمین* به کانال اضافه شده باشد.",
+                reply_markup=kb.admin_back_kb("adm_forcejoin_menu"),
+            )
+            return
+
+        db.set_setting("force_join_channel", channel)
+        await state.clear()
+        await message.answer(
+            f"✅ کانال «{chat.title}» ثبت شد. حالا می‌تونی از منوی قبلی عضویت اجباری رو فعال کنی.",
+            reply_markup=kb.admin_forcejoin_menu_kb(db),
+        )
 
     # -------------------------------------------------------------------
     # سفارش‌های در انتظار
@@ -958,16 +1030,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
             reseller_id = db.register_reseller_bot(token, username, owner_id, owner_name, db_path)
 
-            # دیتابیس همین نماینده باید بداند شناسه‌ی خودش در جدول reseller_bots (بات اصلی) چیست
-            # تا بتواند لینک مینی‌اپ اختصاصی خودش را بسازد (?b=<reseller_id>). این باید قبل از
-            # start_bot ست شود تا Menu Button با لینک درست ساخته شود.
-            reseller_db = Database(db_path)
-            reseller_db.init_db(owner_id=owner_id)
-            reseller_db.set_setting("miniapp_tenant_id", str(reseller_id))
-
             started = False
             if bot_manager:
                 started = await bot_manager.start_bot(token, db_path, owner_id, is_main_bot=False)
+
+            # دیتابیس همین نماینده باید بداند شناسه‌ی خودش در جدول reseller_bots (بات اصلی) چیست
+            # تا بتواند لینک مینی‌اپ اختصاصی خودش را بسازد (?b=<reseller_id>)
+            reseller_db = Database(db_path)
+            reseller_db.init_db(owner_id=owner_id)
+            reseller_db.set_setting("miniapp_tenant_id", str(reseller_id))
 
             await state.clear()
             status_text = "✅ بات نمایندگی راه‌اندازی و همین الان روشن شد." if started else \
