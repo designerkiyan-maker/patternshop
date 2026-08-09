@@ -67,7 +67,7 @@
 برای نصب کامل بات روی یک سرور تازه (Ubuntu/Debian)، فقط این دستور را در ترمینال سرور اجرا کن:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/mehdirafatpanah/Shopvpn/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/mehdirafatpanah/Shopvpn/main/manage.sh)
 ```
 
 این اسکریپت به‌صورت خودکار:
