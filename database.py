@@ -75,7 +75,26 @@ DEFAULT_SETTINGS = {
     "renewal_discount_percent": "20",  # درصد تخفیف کد تشویقی تمدید
     "renewal_discount_expiry_hours": "24",  # اعتبار کد تشویقی تمدید (ساعت)
     "adm_renewal_settings_style": "success",
+    # چیدمان دکمه‌های منوی اصلی (ترتیب و نمایش) - آرایه JSON از کلیدها
+    "menu_order": '["miniapp","btn_buy","btn_test","btn_my_orders","btn_wallet","btn_referral","btn_wheel","btn_contact","btn_admin_panel"]',
 }
+
+
+# تعریف کامل دکمه‌های قابل‌مدیریت در منوی اصلی: کلید -> متادیتا
+# toggle_key: نام تنظیمی که فعال/غیرفعال بودن دکمه را کنترل می‌کند (None یعنی همیشه نمایش داده می‌شود)
+# admin_only: اگر True فقط برای ادمین‌ها نمایش داده می‌شود
+MENU_BUTTON_META = {
+    "miniapp": {"label": "دکمه مینی‌اپ فروشگاه", "toggle_key": None, "admin_only": False, "has_text": False, "has_style": False},
+    "btn_buy": {"label": "دکمه خرید کانفیگ", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
+    "btn_test": {"label": "دکمه کانفیگ تست", "toggle_key": "test_enabled", "admin_only": False, "has_text": True, "has_style": True},
+    "btn_my_orders": {"label": "دکمه سفارش‌های من", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
+    "btn_wallet": {"label": "دکمه کیف پول", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
+    "btn_referral": {"label": "دکمه زیرمجموعه‌گیری", "toggle_key": "referral_enabled", "admin_only": False, "has_text": True, "has_style": True},
+    "btn_wheel": {"label": "دکمه گردونه شانس", "toggle_key": "wheel_enabled", "admin_only": False, "has_text": True, "has_style": True},
+    "btn_contact": {"label": "دکمه ارتباط با پشتیبانی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
+    "btn_admin_panel": {"label": "دکمه پنل مدیریت", "toggle_key": None, "admin_only": True, "has_text": True, "has_style": True},
+}
+DEFAULT_MENU_ORDER = ["miniapp", "btn_buy", "btn_test", "btn_my_orders", "btn_wallet", "btn_referral", "btn_wheel", "btn_contact", "btn_admin_panel"]
 
 
 class Database:
@@ -278,6 +297,37 @@ class Database:
         with self._get_conn() as conn:
             rows = conn.execute("SELECT key, value FROM settings").fetchall()
             return {r["key"]: r["value"] for r in rows}
+
+    # -----------------------------------------------------------------------
+    # چیدمان منوی اصلی (ترتیب دکمه‌ها)
+    # -----------------------------------------------------------------------
+
+    def get_menu_order(self) -> list:
+        """ترتیب کلیدهای دکمه‌های منوی اصلی را برمی‌گرداند. کلیدهای جدیدی که در
+        تنظیمات ذخیره‌شده نیستند (مثلاً بعد از آپدیت پروژه) به انتهای لیست اضافه می‌شوند
+        تا هیچ دکمه‌ای گم نشود."""
+        import json
+        raw = self.get_setting("menu_order", "")
+        order = []
+        if raw:
+            try:
+                order = [k for k in json.loads(raw) if k in DEFAULT_MENU_ORDER]
+            except (ValueError, TypeError):
+                order = []
+        if not order:
+            order = list(DEFAULT_MENU_ORDER)
+        for k in DEFAULT_MENU_ORDER:
+            if k not in order:
+                order.append(k)
+        return order
+
+    def set_menu_order(self, order: list):
+        import json
+        clean = [k for k in order if k in DEFAULT_MENU_ORDER]
+        for k in DEFAULT_MENU_ORDER:
+            if k not in clean:
+                clean.append(k)
+        self.set_setting("menu_order", json.dumps(clean, ensure_ascii=False))
 
     # -----------------------------------------------------------------------
     # کاربران

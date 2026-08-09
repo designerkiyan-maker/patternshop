@@ -44,46 +44,70 @@ def _miniapp_url(db) -> str:
 
 def main_menu_kb(db, is_admin: bool) -> ReplyKeyboardMarkup:
     settings = db.get_all_settings()
-    rows = []
+    order = db.get_menu_order()
     miniapp_url = _miniapp_url(db)
-    if miniapp_url:
-        rows.append([KeyboardButton(text="✨ مینی‌اپ فروشگاه", web_app=WebAppInfo(url=miniapp_url))])
-    rows.append(
-        [_styled_button(settings.get("btn_buy", "🛒 خرید کانفیگ"), settings.get("btn_buy_style", ""))]
-    )
-    if settings.get("test_enabled", "1") == "1":
-        rows.append(
-            [_styled_button(settings.get("btn_test", "🧪 کانفیگ تست رایگان"), settings.get("btn_test_style", ""))]
-        )
-    rows.append(
-        [_styled_button(settings.get("btn_my_orders", "📦 سفارش‌های من"), settings.get("btn_my_orders_style", ""))]
-    )
-    rows.append(
-        [_styled_button(settings.get("btn_wallet", "👛 کیف پول من"), settings.get("btn_wallet_style", ""))]
-    )
-    if settings.get("referral_enabled", "1") == "1":
-        rows.append(
-            [
-                _styled_button(
-                    settings.get("btn_referral", "🤝 زیرمجموعه‌گیری من"), settings.get("btn_referral_style", "")
-                )
-            ]
-        )
-    if settings.get("wheel_enabled", "1") == "1":
-        rows.append(
-            [_styled_button(settings.get("btn_wheel", "🎡 گردونه شانس"), settings.get("btn_wheel_style", ""))]
-        )
-    rows.append(
-        [_styled_button(settings.get("btn_contact", "📞 ارتباط با پشتیبانی"), settings.get("btn_contact_style", ""))]
-    )
-    if is_admin:
-        rows.append(
-            [
-                _styled_button(
-                    settings.get("btn_admin_panel", "⚙️ پنل مدیریت"), settings.get("btn_admin_panel_style", "")
-                )
-            ]
-        )
+
+    # هر آیتم منو: تابعی که در صورت لازم‌بودن نمایش، یک ردیف (لیست دکمه) برمی‌گرداند، وگرنه None
+    def row_miniapp():
+        return [KeyboardButton(text="✨ مینی‌اپ فروشگاه", web_app=WebAppInfo(url=miniapp_url))] if miniapp_url else None
+
+    def row_buy():
+        return [_styled_button(settings.get("btn_buy", "🛒 خرید کانفیگ"), settings.get("btn_buy_style", ""))]
+
+    def row_test():
+        if settings.get("test_enabled", "1") != "1":
+            return None
+        return [_styled_button(settings.get("btn_test", "🧪 کانفیگ تست رایگان"), settings.get("btn_test_style", ""))]
+
+    def row_my_orders():
+        return [_styled_button(settings.get("btn_my_orders", "📦 سفارش‌های من"), settings.get("btn_my_orders_style", ""))]
+
+    def row_wallet():
+        return [_styled_button(settings.get("btn_wallet", "👛 کیف پول من"), settings.get("btn_wallet_style", ""))]
+
+    def row_referral():
+        if settings.get("referral_enabled", "1") != "1":
+            return None
+        return [
+            _styled_button(settings.get("btn_referral", "🤝 زیرمجموعه‌گیری من"), settings.get("btn_referral_style", ""))
+        ]
+
+    def row_wheel():
+        if settings.get("wheel_enabled", "1") != "1":
+            return None
+        return [_styled_button(settings.get("btn_wheel", "🎡 گردونه شانس"), settings.get("btn_wheel_style", ""))]
+
+    def row_contact():
+        return [_styled_button(settings.get("btn_contact", "📞 ارتباط با پشتیبانی"), settings.get("btn_contact_style", ""))]
+
+    def row_admin_panel():
+        if not is_admin:
+            return None
+        return [
+            _styled_button(settings.get("btn_admin_panel", "⚙️ پنل مدیریت"), settings.get("btn_admin_panel_style", ""))
+        ]
+
+    builders = {
+        "miniapp": row_miniapp,
+        "btn_buy": row_buy,
+        "btn_test": row_test,
+        "btn_my_orders": row_my_orders,
+        "btn_wallet": row_wallet,
+        "btn_referral": row_referral,
+        "btn_wheel": row_wheel,
+        "btn_contact": row_contact,
+        "btn_admin_panel": row_admin_panel,
+    }
+
+    rows = []
+    for key in order:
+        builder = builders.get(key)
+        if not builder:
+            continue
+        row = builder()
+        if row:
+            rows.append(row)
+
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
