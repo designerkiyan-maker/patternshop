@@ -14,12 +14,14 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import MenuButtonWebApp, MenuButtonDefault, WebAppInfo
 
 from database import Database
 from handlers_user import create_user_router
 from handlers_admin import create_admin_router
 from renewal_reminders import renewal_reminder_loop
 from force_join import ForceJoinMiddleware
+import keyboards as kb
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,22 @@ logger = logging.getLogger(__name__)
 class BotManager:
     def __init__(self):
         self.instances = {}  # token -> {"bot": Bot, "dp": Dispatcher, "task": asyncio.Task, "db_path": str}
+
+    async def _sync_menu_button(self, bot: Bot, db) -> None:
+        """دکمه‌ی منو (کنار باکس پیام) را روی مینی‌اپ همین بات ست می‌کند.
+        چون از Menu Button باز می‌شود، initData واقعی و معتبر تولید می‌شود
+        (برخلاف دکمه‌ی reply keyboard که initData همیشه خالی است).
+        این کار کاملاً خودکار است؛ نماینده هیچ کاری (دامنه/BotFather) لازم ندارد."""
+        miniapp_url = kb._miniapp_url(db)
+        try:
+            if miniapp_url:
+                await bot.set_chat_menu_button(
+                    menu_button=MenuButtonWebApp(text="فروشگاه", web_app=WebAppInfo(url=miniapp_url))
+                )
+            else:
+                await bot.set_chat_menu_button(menu_button=MenuButtonDefault())
+        except Exception:
+            logger.warning("ست‌کردن Menu Button ناموفق بود.", exc_info=True)
 
     async def start_bot(self, token: str, db_path: str, owner_id: int, is_main_bot: bool = False) -> bool:
         """یک بات جدید (اصلی یا نمایندگی) را با دیتابیس مستقل خودش راه‌اندازی می‌کند.
@@ -48,6 +66,7 @@ class BotManager:
         dp.include_router(create_user_router(db))
 
         await bot.delete_webhook(drop_pending_updates=True)
+        await self._sync_menu_button(bot, db)
         task = asyncio.create_task(dp.start_polling(bot))
         reminder_task = asyncio.create_task(renewal_reminder_loop(bot, db))
 

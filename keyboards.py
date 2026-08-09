@@ -42,6 +42,19 @@ def _miniapp_url(db) -> str:
     return MINIAPP_URL
 
 
+MINIAPP_BTN_TEXT = "✨ مینی‌اپ فروشگاه"
+
+
+def miniapp_inline_kb(miniapp_url: str) -> InlineKeyboardMarkup:
+    """دکمه‌ی واقعی وب‌اپ به‌صورت inline (نه reply keyboard)، چون طبق تجربه‌ی عملی،
+    initData وقتی از دکمه‌ی reply keyboard با web_app مستقیم باز شود، در برخی
+    کلاینت‌های تلگرام همیشه خالی برمی‌گردد. راه اصلی و مطمئن، Menu Button
+    (در bot_manager._sync_menu_button) است؛ این دکمه صرفاً یک مسیر جایگزین است."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=MINIAPP_BTN_TEXT, web_app=WebAppInfo(url=miniapp_url))]
+    ])
+
+
 def main_menu_kb(db, is_admin: bool) -> ReplyKeyboardMarkup:
     settings = db.get_all_settings()
     order = db.get_menu_order()
@@ -49,7 +62,7 @@ def main_menu_kb(db, is_admin: bool) -> ReplyKeyboardMarkup:
 
     # هر آیتم منو: تابعی که در صورت لازم‌بودن نمایش، یک ردیف (لیست دکمه) برمی‌گرداند، وگرنه None
     def row_miniapp():
-        return [KeyboardButton(text="✨ مینی‌اپ فروشگاه", web_app=WebAppInfo(url=miniapp_url))] if miniapp_url else None
+        return [KeyboardButton(text=MINIAPP_BTN_TEXT)] if miniapp_url else None
 
     def row_buy():
         return [_styled_button(settings.get("btn_buy", "🛒 خرید کانفیگ"), settings.get("btn_buy_style", ""))]

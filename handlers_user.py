@@ -74,6 +74,20 @@ def create_user_router(db) -> Router:
         await message.answer(welcome, reply_markup=kb.menu_for_user(db, message.from_user.id))
 
     # -----------------------------------------------------------------------
+    # مینی‌اپ (دکمه‌ی متنی -> پیام با دکمه‌ی inline واقعی وب‌اپ)
+    # -----------------------------------------------------------------------
+
+    @router.message(F.text == kb.MINIAPP_BTN_TEXT)
+    async def open_miniapp(message: Message):
+        miniapp_url = kb._miniapp_url(db)
+        if not miniapp_url:
+            return
+        await message.answer(
+            "برای ورود به مینی‌اپ فروشگاه، روی دکمه‌ی زیر بزن:",
+            reply_markup=kb.miniapp_inline_kb(miniapp_url),
+        )
+
+    # -----------------------------------------------------------------------
     # خرید کانفیگ
     # -----------------------------------------------------------------------
 
