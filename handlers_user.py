@@ -548,6 +548,8 @@ def create_user_router(db) -> Router:
     @router.message(ContactFlow.waiting_message)
     async def contact_receive(message: Message, state: FSMContext, bot: Bot):
         user = message.from_user
+        if message.text:
+            db.add_support_message(user.id, "user", message.text)
         text = (
             f"📩 پیام جدید از کاربر\n"
             f"👤 {user.first_name or ''} (@{user.username or '---'})\n"

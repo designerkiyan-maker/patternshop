@@ -210,6 +210,15 @@ class Database:
                     is_active INTEGER DEFAULT 1,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS support_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    sender TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    is_read_by_user INTEGER DEFAULT 0
+                );
                 """
             )
 
@@ -900,3 +909,46 @@ class Database:
             code, percent=settings["discount_percent"], max_uses=1, expires_at=expires_at, source="renewal_reminder"
         )
         return code, expires_at, settings["discount_percent"], settings["discount_expiry_hours"]
+
+    # -----------------------------------------------------------------------
+    # چت پشتیبانی (مینی‌اپ + بات، یکپارچه)
+    # -----------------------------------------------------------------------
+
+    def add_support_message(self, user_id: int, sender: str, message: str) -> int:
+        """sender باید 'user' یا 'admin' باشد."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO support_messages (user_id, sender, message, is_read_by_user) "
+                "VALUES (?, ?, ?, ?)",
+                (user_id, sender, message, 1 if sender == "user" else 0),
+            )
+            return cur.lastrowid
+
+    def get_support_messages(self, user_id: int, since_id: int = 0, limit: int = 100):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM support_messages WHERE user_id=? AND id>? ORDER BY id LIMIT ?",
+                (user_id, since_id, limit),
+            ).fetchall()
+
+    def mark_support_read_by_user(self, user_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE support_messages SET is_read_by_user=1 WHERE user_id=? AND is_read_by_user=0",
+                (user_id,),
+            )
+
+    def get_expiring_configs_for_user(self, user_tg_id: int, days_before: int = None):
+        """کانفیگ‌های فعال کاربر که تا چند روز آینده منقضی می‌شوند."""
+        if days_before is None:
+            days_before = int(self.get_setting("renewal_reminder_days_before", "5") or 5)
+        with self._get_conn() as conn:
+            threshold = (datetime.utcnow() + timedelta(days=days_before)).isoformat()
+            now = datetime.utcnow().isoformat()
+            return conn.execute(
+                "SELECT cf.id as config_id, cf.link, cf.expires_at, o.product_id "
+                "FROM configs cf JOIN orders o ON o.config_id = cf.id "
+                "WHERE cf.assigned_user_id=? AND cf.is_used=1 AND cf.expires_at IS NOT NULL "
+                "AND cf.expires_at > ? AND cf.expires_at <= ? AND o.user_id=?",
+                (user_tg_id, now, threshold, user_tg_id),
+            ).fetchall()

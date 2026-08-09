@@ -1193,6 +1193,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         try:
             await bot.send_message(user_id, f"📩 پاسخ پشتیبانی:\n\n{message.text}")
+            if message.text:
+                db.add_support_message(user_id, "admin", message.text)
             await message.answer("✅ پاسخ ارسال شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
         except Exception:
             await message.answer("⛔️ ارسال پیام به کاربر با خطا مواجه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
