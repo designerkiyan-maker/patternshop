@@ -7,13 +7,23 @@ const initData = tg.initData; // برای هدر X-Init-Data به بک‌اند 
 const content = document.getElementById("content");
 const greeting = document.getElementById("greeting");
 
+// شناسه‌ی نماینده (اگر مینی‌اپ از یک بات نمایندگی باز شده باشد) - از URL خوانده می‌شود
+// و به تمام درخواست‌های API اضافه می‌شود تا سرور دیتابیس/توکن درست را انتخاب کند.
+const TENANT_ID = new URLSearchParams(window.location.search).get("b") || "";
+
+function withTenant(path) {
+  if (!TENANT_ID) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}b=${encodeURIComponent(TENANT_ID)}`;
+}
+
 function notify(message) {
   if (tg.showAlert) tg.showAlert(message);
   else alert(message);
 }
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
+  const res = await fetch(withTenant(path), {
     ...options,
     headers: { "Content-Type": "application/json", "X-Init-Data": initData, ...(options.headers || {}) },
   });
@@ -26,7 +36,7 @@ async function api(path, options = {}) {
 
 // آپلود فایل (مولتی‌پارت) - بدون Content-Type دستی تا مرورگر boundary را ست کند
 async function apiUpload(path, formData) {
-  const res = await fetch(path, {
+  const res = await fetch(withTenant(path), {
     method: "POST",
     headers: { "X-Init-Data": initData },
     body: formData,
