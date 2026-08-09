@@ -143,10 +143,16 @@ def api_catalog(x_init_data: str = Header(...)):
 def api_test_config_status(x_init_data: str = Header(...)):
     tg_id = get_verified_user(x_init_data)
     user = db.get_user(tg_id)
+    used = bool(user and user["test_used"] >= MAX_TEST_PER_USER)
+    link = None
+    if used:
+        row = db.get_assigned_test_config(tg_id)
+        link = row["link"] if row else None
     return {
         "enabled": db.get_setting("test_enabled", "1") == "1",
-        "used": bool(user and user["test_used"] >= MAX_TEST_PER_USER),
+        "used": used,
         "available": db.count_available_test_configs(),
+        "link": link,
     }
 
 
