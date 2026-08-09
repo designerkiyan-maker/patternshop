@@ -31,7 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from config import BOT_TOKEN, DB_PATH, MAX_TEST_PER_USER
-from database import Database
+from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER
 from miniapp.auth import validate_init_data
 
 app = FastAPI(title="V2Ray Shop Mini App API")
@@ -84,6 +84,14 @@ def get_verified_user(x_init_data: str = Header(...), tenant: Tenant = Depends(g
     if not result or "user" not in result:
         raise HTTPException(status_code=401, detail="initData نامعتبر است.")
     return result["user"]["id"], tenant.db, tenant
+
+
+def require_admin(auth=Depends(get_verified_user)):
+    """مثل get_verified_user، ولی فقط اگر کاربر ادمین همان مستأجر باشد اجازه می‌دهد."""
+    tg_id, db, tenant = auth
+    if not db.is_admin(tg_id):
+        raise HTTPException(status_code=403, detail="دسترسی ادمین لازم است.")
+    return auth
 
 
 async def get_bot_username(tenant: Tenant) -> str:
@@ -146,6 +154,7 @@ def api_me(auth=Depends(get_verified_user)):
         "wallet_credit": wallet,
         "referral_count": referral["count"],
         "orders_count": len(orders),
+        "is_admin": db.is_admin(tg_id),
     }
 
 
@@ -580,6 +589,74 @@ async def api_order_receipt(
         db.set_order_receipt(order_id, sent_file_id)
 
     return {"status": "sent"}
+
+
+# ---------------------------------------------------------------------------
+# مدیریت (فقط ادمین) - چیدمان دکمه‌های منوی اصلی
+# ---------------------------------------------------------------------------
+
+class MenuButtonUpdate(BaseModel):
+    key: str
+    text: Optional[str] = None
+    style: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+class MenuLayoutUpdate(BaseModel):
+    order: list[str]
+    buttons: list[MenuButtonUpdate]
+
+
+@app.get("/api/admin/check")
+def api_admin_check(auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
+    return {"is_admin": db.is_admin(tg_id)}
+
+
+@app.get("/api/admin/menu")
+def api_admin_get_menu(auth=Depends(require_admin)):
+    _, db, _ = auth
+    settings = db.get_all_settings()
+    order = db.get_menu_order()
+    result = []
+    for key in order:
+        meta = MENU_BUTTON_META.get(key)
+        if not meta:
+            continue
+        item = {
+            "key": key,
+            "label": meta["label"],
+            "admin_only": meta["admin_only"],
+            "has_text": meta["has_text"],
+            "has_style": meta["has_style"],
+            "togglable": meta["toggle_key"] is not None,
+        }
+        if meta["has_text"]:
+            item["text"] = settings.get(key, "")
+        if meta["has_style"]:
+            item["style"] = settings.get(f"{key}_style", "")
+        if meta["toggle_key"]:
+            item["enabled"] = settings.get(meta["toggle_key"], "1") == "1"
+        result.append(item)
+    return result
+
+
+@app.post("/api/admin/menu")
+def api_admin_save_menu(body: MenuLayoutUpdate, auth=Depends(require_admin)):
+    _, db, _ = auth
+    for btn in body.buttons:
+        meta = MENU_BUTTON_META.get(btn.key)
+        if not meta:
+            continue
+        if meta["has_text"] and btn.text is not None and btn.text.strip():
+            db.set_setting(btn.key, btn.text.strip())
+        if meta["has_style"] and btn.style is not None:
+            style = btn.style if btn.style in ("primary", "success", "danger") else ""
+            db.set_setting(f"{btn.key}_style", style)
+        if meta["toggle_key"] and btn.enabled is not None:
+            db.set_setting(meta["toggle_key"], "1" if btn.enabled else "0")
+    db.set_menu_order(body.order)
+    return {"status": "ok"}
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
