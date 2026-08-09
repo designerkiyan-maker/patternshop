@@ -30,7 +30,12 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from config import BOT_TOKEN, DB_PATH, MAX_TEST_PER_USER
+import logging
+import sqlite3
+
+logging.basicConfig(level=logging.INFO)
+
+from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, resolve_db_path
 from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER
 from miniapp.auth import validate_init_data
 
@@ -42,6 +47,12 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 # دیتابیس بات اصلی - هم برای سرویس‌دهی مستقیم به بات اصلی، هم برای پیدا کردن
 # دیتابیس/توکن بات‌های نمایندگی از روی جدول reseller_bots استفاده می‌شود.
 main_db = Database(DB_PATH)
+try:
+    # اگر این پروسه (uvicorn مینی‌اپ) قبل از بات اصلی اجرا شده و فایل دیتابیس
+    # هنوز جدول ندارد، این‌جا هم می‌سازیمش تا هیچ درخواستی با خطای ۵۰۰ مواجه نشود.
+    main_db.init_db(owner_id=OWNER_ID)
+except Exception:
+    logging.getLogger("miniapp.tenant").exception("مقداردهی اولیه دیتابیس اصلی ناموفق بود.")
 
 _bot_username_cache: dict[str, str] = {}  # bot_token -> username
 
@@ -57,25 +68,53 @@ class Tenant:
     tenant_id: str  # "" برای بات اصلی، در غیر این صورت id عددی نماینده به‌صورت رشته
 
 
+_tenant_logger = logging.getLogger("miniapp.tenant")
+
+
 def get_tenant(b: str = Query("", description="شناسه‌ی نماینده؛ خالی یعنی بات اصلی")) -> Tenant:
     b = (b or "").strip()
     if not b or b == "0":
         return Tenant(db=main_db, bot_token=BOT_TOKEN, tenant_id="")
     if not b.isdigit():
         raise HTTPException(status_code=400, detail="شناسه‌ی فروشگاه نامعتبر است.")
-    row = main_db.get_reseller_bot(int(b))
+
+    try:
+        row = main_db.get_reseller_bot(int(b))
+    except sqlite3.OperationalError:
+        _tenant_logger.exception(
+            "خطای دیتابیس اصلی هنگام خواندن reseller_bots (b=%s). db_path=%s - احتمالاً جدول‌ها هنوز ساخته نشده‌اند.",
+            b, DB_PATH,
+        )
+        raise HTTPException(status_code=503, detail="سرور موقتاً در دسترس نیست، دوباره تلاش کنید.")
+
     if not row or not row["is_active"]:
-        import logging
-        logging.getLogger("miniapp.auth").warning(
+        _tenant_logger.warning(
             "تننت b=%s پیدا نشد یا غیرفعال است. row=%s", b, dict(row) if row else None
         )
         raise HTTPException(status_code=404, detail="این فروشگاه در دسترس نیست.")
-    import logging
-    logging.getLogger("miniapp.auth").info(
+
+    resolved_path = resolve_db_path(row["db_path"])
+    if not os.path.exists(resolved_path):
+        _tenant_logger.error(
+            "تننت b=%s معتبر است ولی فایل دیتابیسش پیدا نشد. stored_path=%s resolved_path=%s",
+            b, row["db_path"], resolved_path,
+        )
+        raise HTTPException(status_code=503, detail="دیتابیس این فروشگاه در دسترس نیست.")
+
+    tenant_db = Database(resolved_path)
+    try:
+        tenant_db.get_all_settings()
+    except sqlite3.OperationalError:
+        _tenant_logger.exception(
+            "تننت b=%s: خواندن settings از %s ناموفق بود (جدول‌ها ساخته نشده؟).", b, resolved_path
+        )
+        raise HTTPException(status_code=503, detail="دیتابیس این فروشگاه هنوز آماده نیست.")
+
+    _tenant_logger.info(
         "تننت b=%s resolve شد -> bot_username=%s token=...%s db_path=%s",
-        b, row["bot_username"], row["bot_token"][-6:], row["db_path"],
+        b, row["bot_username"], row["bot_token"][-6:], resolved_path,
     )
-    return Tenant(db=Database(row["db_path"]), bot_token=row["bot_token"], tenant_id=b)
+    return Tenant(db=tenant_db, bot_token=row["bot_token"], tenant_id=b)
 
 
 def get_verified_user(x_init_data: str = Header(...), tenant: Tenant = Depends(get_tenant)):
