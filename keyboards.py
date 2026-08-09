@@ -29,11 +29,25 @@ def _styled_button(text: str, style_value: str) -> KeyboardButton:
     return KeyboardButton(text=text, style=style)
 
 
+def _miniapp_url(db) -> str:
+    """آدرس مینی‌اپ مخصوص همین بات (اصلی یا نمایندگی) را می‌سازد.
+    برای بات‌های نمایندگی، شناسه‌ی تننت به‌صورت پارامتر ?b= اضافه می‌شود تا
+    سرور مینی‌اپ (چندمستأجر) بداند دیتابیس و توکن کدام بات را استفاده کند."""
+    if not MINIAPP_URL:
+        return ""
+    tenant_id = db.get_setting("miniapp_tenant_id", "")
+    if tenant_id:
+        sep = "&" if "?" in MINIAPP_URL else "?"
+        return f"{MINIAPP_URL}{sep}b={tenant_id}"
+    return MINIAPP_URL
+
+
 def main_menu_kb(db, is_admin: bool) -> ReplyKeyboardMarkup:
     settings = db.get_all_settings()
     rows = []
-    if MINIAPP_URL:
-        rows.append([KeyboardButton(text="✨ مینی‌اپ فروشگاه", web_app=WebAppInfo(url=MINIAPP_URL))])
+    miniapp_url = _miniapp_url(db)
+    if miniapp_url:
+        rows.append([KeyboardButton(text="✨ مینی‌اپ فروشگاه", web_app=WebAppInfo(url=miniapp_url))])
     rows.append(
         [_styled_button(settings.get("btn_buy", "🛒 خرید کانفیگ"), settings.get("btn_buy_style", ""))]
     )

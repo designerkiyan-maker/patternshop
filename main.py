@@ -34,6 +34,13 @@ async def main():
         )
         if started:
             logger.info("بات نمایندگی @%s راه‌اندازی شد.", rb["bot_username"])
+        # هماهنگ‌سازی شناسه‌ی تننت مینی‌اپ (برای نماینده‌های قدیمی‌تر که قبل از
+        # افزودن این قابلیت ثبت شده‌اند، و برای اطمینان همیشگی از تازه بودن آن)
+        try:
+            reseller_db = Database(rb["db_path"])
+            reseller_db.set_setting("miniapp_tenant_id", str(rb["id"]))
+        except Exception:
+            logger.warning("همگام‌سازی miniapp_tenant_id برای @%s ناموفق بود.", rb["bot_username"])
 
     try:
         await manager.wait_all()
