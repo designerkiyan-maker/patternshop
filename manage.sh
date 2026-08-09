@@ -74,7 +74,7 @@ print_status_line() {
     fi
 
     MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
-    if systemctl list-unit-files 2>/dev/null | grep -q "^${MINIAPP_SERVICE}.service"; then
+    if systemctl list-units --type=service --all 2>/dev/null | grep -q "${MINIAPP_SERVICE}.service"; then
         if systemctl is-active --quiet "$MINIAPP_SERVICE" 2>/dev/null; then
             echo -e "Mini App Status: ${GREEN}${BOLD}در حال اجراست ✅${RESET}"
         else
