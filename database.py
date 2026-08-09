@@ -502,6 +502,13 @@ class Database:
             )
             return {"id": row["id"], "link": row["link"]}
 
+    def get_assigned_test_config(self, user_tg_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT id, link FROM test_configs WHERE assigned_user_id=? ORDER BY id DESC LIMIT 1",
+                (user_tg_id,),
+            ).fetchone()
+
     # -----------------------------------------------------------------------
     # سفارش‌ها
     # -----------------------------------------------------------------------
