@@ -182,6 +182,74 @@ async def api_referral(x_init_data: str = Header(...)):
     }
 
 
+@app.get("/api/expiring")
+def api_expiring(x_init_data: str = Header(...)):
+    tg_id = get_verified_user(x_init_data)
+    rows = db.get_expiring_configs_for_user(tg_id)
+    result = []
+    for r in rows:
+        product = db.get_product(r["product_id"])
+        result.append({
+            "product_name": product["name"] if product else "نامشخص",
+            "expires_at": r["expires_at"],
+            "link": r["link"],
+        })
+    return result
+
+
+@app.get("/api/support/messages")
+def api_support_messages(since_id: int = 0, x_init_data: str = Header(...)):
+    tg_id = get_verified_user(x_init_data)
+    db.mark_support_read_by_user(tg_id)
+    rows = db.get_support_messages(tg_id, since_id=since_id)
+    return [
+        {"id": m["id"], "sender": m["sender"], "message": m["message"], "created_at": m["created_at"]}
+        for m in rows
+    ]
+
+
+class SupportMessageCreate(BaseModel):
+    message: str
+
+
+@app.post("/api/support/messages")
+async def api_support_send(body: SupportMessageCreate, x_init_data: str = Header(...)):
+    tg_id = get_verified_user(x_init_data)
+    text = (body.message or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="پیام نمی‌تواند خالی باشد.")
+    if len(text) > 2000:
+        raise HTTPException(status_code=400, detail="پیام بیش از حد طولانی است.")
+
+    msg_id = db.add_support_message(tg_id, "user", text)
+
+    user = db.get_user(tg_id)
+    caption = (
+        f"📩 پیام جدید از کاربر (مینی‌اپ)\n"
+        f"👤 {(user['first_name'] if user else '') or ''} (@{(user['username'] if user else '') or '---'})\n"
+        f"🆔 `{tg_id}`\n\n"
+        f"✉️ {text}"
+    )
+    admin_ids = db.list_admins()
+    reply_markup = json.dumps({
+        "inline_keyboard": [[{"text": "↩️ پاسخ", "callback_data": f"reply_user:{tg_id}"}]]
+    })
+    async with aiohttp.ClientSession() as session:
+        for admin_id in admin_ids:
+            try:
+                await session.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                    json={
+                        "chat_id": admin_id, "text": caption,
+                        "parse_mode": "Markdown", "reply_markup": json.loads(reply_markup),
+                    },
+                )
+            except Exception:
+                pass
+
+    return {"id": msg_id, "sender": "user", "message": text}
+
+
 async def send_photo_to_admins(caption: str, reply_markup: str, photo_bytes: bytes, filename: str, content_type: str):
     """رسید را برای همه‌ی ادمین‌ها ارسال می‌کند. (file_id, تعداد تحویل موفق) را برمی‌گرداند."""
     admin_ids = db.list_admins()
