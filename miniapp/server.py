@@ -65,7 +65,16 @@ def get_tenant(b: str = Query("", description="شناسه‌ی نماینده؛ 
         raise HTTPException(status_code=400, detail="شناسه‌ی فروشگاه نامعتبر است.")
     row = main_db.get_reseller_bot(int(b))
     if not row or not row["is_active"]:
+        import logging
+        logging.getLogger("miniapp.auth").warning(
+            "تننت b=%s پیدا نشد یا غیرفعال است. row=%s", b, dict(row) if row else None
+        )
         raise HTTPException(status_code=404, detail="این فروشگاه در دسترس نیست.")
+    import logging
+    logging.getLogger("miniapp.auth").info(
+        "تننت b=%s resolve شد -> bot_username=%s token=...%s db_path=%s",
+        b, row["bot_username"], row["bot_token"][-6:], row["db_path"],
+    )
     return Tenant(db=Database(row["db_path"]), bot_token=row["bot_token"], tenant_id=b)
 
 
