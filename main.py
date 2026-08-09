@@ -10,7 +10,7 @@
 import asyncio
 import logging
 
-from config import BOT_TOKEN, OWNER_ID, DB_PATH
+from config import BOT_TOKEN, OWNER_ID, DB_PATH, resolve_db_path
 from database import Database
 from bot_manager import BotManager
 
@@ -29,16 +29,18 @@ async def main():
     main_db = Database(DB_PATH)
     reseller_bots = main_db.list_reseller_bots(active_only=True)
     for rb in reseller_bots:
+        resolved_path = resolve_db_path(rb["db_path"])
         # هماهنگ‌سازی شناسه‌ی تننت مینی‌اپ - باید قبل از start_bot باشد تا
-        # Menu Button (که موقع start_bot ست می‌شود) لینک درست را داشته باشد.
+        # لینک مینی‌اپ این نماینده از همون اول درست ساخته شود.
         try:
-            reseller_db = Database(rb["db_path"])
+            reseller_db = Database(resolved_path)
+            reseller_db.init_db(owner_id=rb["owner_telegram_id"])
             reseller_db.set_setting("miniapp_tenant_id", str(rb["id"]))
         except Exception:
-            logger.warning("همگام‌سازی miniapp_tenant_id برای @%s ناموفق بود.", rb["bot_username"])
+            logger.exception("همگام‌سازی miniapp_tenant_id برای @%s ناموفق بود.", rb["bot_username"])
 
         started = await manager.start_bot(
-            rb["bot_token"], rb["db_path"], rb["owner_telegram_id"], is_main_bot=False
+            rb["bot_token"], resolved_path, rb["owner_telegram_id"], is_main_bot=False
         )
         if started:
             logger.info("بات نمایندگی @%s راه‌اندازی شد.", rb["bot_username"])

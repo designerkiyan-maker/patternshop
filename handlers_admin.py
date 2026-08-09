@@ -16,7 +16,7 @@ from aiogram.filters import Command
 
 import keyboards as kb
 from database import Database
-from config import RESELLER_DBS_DIR
+from config import RESELLER_DBS_DIR, resolve_db_path
 from config_delivery import deliver_config_to_user
 from states import (
     AdminAddCategory,
@@ -941,7 +941,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if bot_manager:
                 if updated["is_active"]:
                     await bot_manager.start_bot(
-                        updated["bot_token"], updated["db_path"], updated["owner_telegram_id"], is_main_bot=False
+                        updated["bot_token"], resolve_db_path(updated["db_path"]), updated["owner_telegram_id"],
+                        is_main_bot=False,
                     )
                 else:
                     await bot_manager.stop_bot(updated["bot_token"])

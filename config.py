@@ -30,11 +30,23 @@ if not OWNER_ID_RAW or not OWNER_ID_RAW.strip().lstrip("-").isdigit():
 
 OWNER_ID = int(OWNER_ID_RAW)
 
+# پوشه‌ی ریشه‌ی پروژه (مطلق) - برای اینکه مسیر دیتابیس‌ها به cwd پروسه‌ای که
+# main.py یا uvicorn (مینی‌اپ) با آن اجرا می‌شوند وابسته نباشد و همیشه یکی باشد
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # مسیر فایل دیتابیس بات اصلی
-DB_PATH = "bot_database.db"
+DB_PATH = os.path.join(BASE_DIR, "bot_database.db")
 
 # پوشه‌ای که دیتابیس هر بات نمایندگی داخلش ذخیره می‌شود
-RESELLER_DBS_DIR = "reseller_dbs"
+RESELLER_DBS_DIR = os.path.join(BASE_DIR, "reseller_dbs")
+
+
+def resolve_db_path(path: str) -> str:
+    """مسیرهای قدیمی که ممکن است نسبی داخل دیتابیس ذخیره شده باشند را هم
+    به مسیر مطلق تبدیل می‌کند (سازگاری با رکوردهای نمایندگی قدیمی‌تر)."""
+    if not path:
+        return path
+    return path if os.path.isabs(path) else os.path.join(BASE_DIR, path)
 
 # حداکثر تعداد کانفیگ تست مجاز برای هر کاربر
 MAX_TEST_PER_USER = 1
