@@ -39,6 +39,48 @@
   --radius-lg: 20px;
   --radius-md: 14px;
   --radius-sm: 10px;
+
+  /* theme-able header/sun tokens (overridden per data-theme below) */
+  --header-g1: #1a0e3d;
+  --header-g2: #3a1256;
+  --header-g3: #7a1f5e;
+  --header-g4: #ff5f6d;
+  --sun-a: #ffe36b;
+  --sun-b: var(--orange);
+  --sun-c: var(--pink);
+  --grid-line: rgba(126, 249, 255, 0.5);
+}
+
+/* ===================================================================
+   Theme presets — selectable per store from the admin panel
+=================================================================== */
+html[data-theme="neon-mint"] {
+  --bg: #04100d; --bg2: #071c16; --bg-elevated: #06160f;
+  --pink: #00ffa3; --orange: #ffb800; --cyan: #00e1ff; --violet: #7a5cff; --amber: #ffe066; --danger: #ff5470;
+  --header-g1: #041b16; --header-g2: #073a2c; --header-g3: #0a6b4f; --header-g4: #00ffa3;
+  --sun-a: #d9ff8a; --sun-b: #00ffa3; --sun-c: #00e1ff;
+  --grid-line: rgba(0, 255, 163, 0.5);
+}
+html[data-theme="royal-violet"] {
+  --bg: #0d0620; --bg2: #180a33; --bg-elevated: #140a2c;
+  --pink: #b98cff; --orange: #ffd166; --cyan: #7ee7e1; --violet: #8b5cf6; --amber: #ffe08a; --danger: #ff5d8f;
+  --header-g1: #170a33; --header-g2: #2d0f57; --header-g3: #4a1470; --header-g4: #ffd166;
+  --sun-a: #ffe9a8; --sun-b: #ffd166; --sun-c: #b98cff;
+  --grid-line: rgba(185, 140, 255, 0.5);
+}
+html[data-theme="blood-moon"] {
+  --bg: #0a0505; --bg2: #170808; --bg-elevated: #120707;
+  --pink: #ff1f4e; --orange: #ff7b39; --cyan: #ffb199; --violet: #7a1f2e; --amber: #ffcf6b; --danger: #ff0033;
+  --header-g1: #1a0505; --header-g2: #3d0a0a; --header-g3: #7a0f0f; --header-g4: #ff2d4e;
+  --sun-a: #ffce8a; --sun-b: #ff7b39; --sun-c: #ff1f4e;
+  --grid-line: rgba(255, 45, 78, 0.45);
+}
+html[data-theme="aurora-ice"] {
+  --bg: #04101c; --bg2: #071e33; --bg-elevated: #06192b;
+  --pink: #7fd8ff; --orange: #ffd27f; --cyan: #a0fff0; --violet: #6ea8ff; --amber: #ffe9a8; --danger: #ff6b81;
+  --header-g1: #041428; --header-g2: #0a2c4d; --header-g3: #145a8a; --header-g4: #7fd8ff;
+  --sun-a: #eaffff; --sun-b: #a0fff0; --sun-c: #7fd8ff;
+  --grid-line: rgba(127, 216, 255, 0.5);
 }
 
 /* ===================================================================
@@ -89,24 +131,35 @@ header.horizon {
 header.horizon::before {
   content: "";
   position: absolute; inset: 0;
-  background: linear-gradient(180deg, #1a0e3d 0%, #3a1256 40%, #7a1f5e 65%, #ff5f6d 100%);
+  background: linear-gradient(180deg, var(--header-g1) 0%, var(--header-g2) 40%, var(--header-g3) 65%, var(--header-g4) 100%);
   opacity: 0.85;
 }
 .sun {
   position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
   width: 130px; height: 130px; border-radius: 50%;
-  background: linear-gradient(180deg, #ffe36b, var(--orange) 45%, var(--pink) 100%);
+  background: linear-gradient(180deg, var(--sun-a), var(--sun-b) 45%, var(--sun-c) 100%);
   box-shadow: 0 0 60px 10px rgba(255, 90, 140, 0.45);
   -webkit-mask-image: repeating-linear-gradient(180deg, #000 0 3px, transparent 3px 6px);
   mask-image: repeating-linear-gradient(180deg, #000 0 3px, transparent 3px 6px);
   animation: sunRise 0.9s ease-out;
 }
 @keyframes sunRise { from { transform: translateX(-50%) translateY(24px); opacity: 0; } to { transform: translateX(-50%) translateY(0); opacity: 1; } }
+/* دکمه‌ی لوگوی سفارشی که می‌تواند به‌جای خورشید انیمیشنی نمایش داده شود */
+.brand-logo { display: none; }
+header.horizon.has-logo .sun { display: none; }
+header.horizon.has-logo .brand-logo {
+  display: block;
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  width: 108px; height: 108px; border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 0 40px 8px rgba(255, 90, 140, 0.4), 0 0 0 3px rgba(255, 255, 255, 0.15);
+  animation: sunRise 0.9s ease-out;
+}
 .grid-floor {
   position: absolute; left: 0; right: 0; bottom: 0; height: 78px;
   background-image:
-    linear-gradient(rgba(126, 249, 255, 0.5) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(126, 249, 255, 0.5) 1px, transparent 1px);
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: 32px 18px;
   transform: perspective(140px) rotateX(55deg); transform-origin: bottom;
   mask-image: linear-gradient(180deg, transparent, black 40%);
@@ -127,6 +180,7 @@ header.horizon::before {
 .header-sub { font-size: 11.5px; color: rgba(255, 255, 255, 0.7); margin-top: 4px; }
 @media (prefers-reduced-motion: reduce) {
   .sun { animation: none; }
+  .brand-logo { animation: none; }
   .dot { animation: none; }
 }
 

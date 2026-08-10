@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fa" dir="rtl">
+<html lang="fa" dir="rtl" data-theme="{{THEME}}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
@@ -14,8 +14,9 @@
 <div id="app">
   <div class="grid-fx" aria-hidden="true"></div>
 
-  <header class="horizon">
+  <header class="horizon {{HEADER_LOGO_CLASS}}">
     <div class="sun" aria-hidden="true"></div>
+    {{HEADER_LOGO_HTML}}
     <div class="grid-floor" aria-hidden="true"></div>
     <div class="horizon-content">
       <div class="topline">

@@ -936,6 +936,30 @@ async function renderAdminMenuSection() {
         <button class="btn" id="brand-save" style="margin-top:8px">💾 ذخیره برندینگ</button>
       </div>
 
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🖼 عکس بالای صفحه (به‌جای خورشید)</div>
+        <p class="hint-text">می‌تونی به‌جای انیمیشن خورشید بالای مینی‌اپ، یک عکس/لوگوی دلخواه بذاری.</p>
+        <div id="header-logo-preview" style="margin-bottom:10px">
+          ${branding.header_image ? `<img src="${branding.header_image}" style="width:88px;height:88px;border-radius:50%;object-fit:cover;border:2px solid var(--glass-brd)" />` : `<span class="hint-text" style="margin:0">فعلاً عکسی تنظیم نشده؛ همون خورشید انیمیشنی نمایش داده می‌شه.</span>`}
+        </div>
+        <input type="file" accept="image/*" id="header-logo-file" style="margin-bottom:10px" />
+        <div class="field-error" id="header-logo-error"></div>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button class="btn" id="header-logo-save">💾 آپلود عکس</button>
+          ${branding.header_image ? `<button class="btn outline danger" id="header-logo-reset">🗑 بازگشت به خورشید</button>` : ""}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🎨 تم مینی‌اپ</div>
+        <p class="hint-text">یکی از تم‌های آماده رو برای رنگ‌بندی کل مینی‌اپ انتخاب کن.</p>
+        <select class="input" id="theme-select" style="margin-bottom:10px">
+          ${branding.themes.map((t) => `<option value="${t.id}" ${t.id === branding.theme ? "selected" : ""}>${t.label}</option>`).join("")}
+        </select>
+        <div class="field-error" id="theme-error"></div>
+        <button class="btn" id="theme-save">💾 اعمال تم</button>
+      </div>
+
       <p class="hint-text">ترتیب، متن، رنگ و فعال/غیرفعال بودن دکمه‌های منوی اصلی بات را از اینجا مدیریت کن. با فلش‌ها جای دکمه‌ها را جابه‌جا کن.</p>
       <div class="card" id="admin-menu-list"></div>
       <button class="btn" id="admin-menu-save">💾 ذخیره تغییرات</button>
@@ -956,6 +980,45 @@ async function renderAdminMenuSection() {
         });
         tg.HapticFeedback.notificationOccurred("success");
         notify("برندینگ ذخیره شد. برای دیدن تغییر، صفحه را دوباره باز کن.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+
+    document.getElementById("header-logo-save").onclick = async () => {
+      const errBox = document.getElementById("header-logo-error");
+      errBox.textContent = "";
+      const fileInput = document.getElementById("header-logo-file");
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) { errBox.textContent = "ابتدا یک عکس انتخاب کن."; return; }
+      const fd = new FormData();
+      fd.append("photo", file);
+      try {
+        await apiUpload("/api/admin/settings/header-image", fd);
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("عکس بالای صفحه ذخیره شد. برای دیدن تغییر، صفحه را دوباره باز کن.");
+        renderAdminMenuSection();
+      } catch (e) { errBox.textContent = e.message; }
+    };
+
+    const resetBtn = document.getElementById("header-logo-reset");
+    if (resetBtn) {
+      resetBtn.onclick = async () => {
+        if (!confirm("عکس سفارشی حذف و به خورشید انیمیشنی پیش‌فرض برگردد؟")) return;
+        try {
+          await api("/api/admin/settings/header-image", { method: "DELETE" });
+          tg.HapticFeedback.notificationOccurred("success");
+          renderAdminMenuSection();
+        } catch (e) { notify(e.message); }
+      };
+    }
+
+    document.getElementById("theme-save").onclick = async () => {
+      const errBox = document.getElementById("theme-error");
+      errBox.textContent = "";
+      const theme = document.getElementById("theme-select").value;
+      try {
+        await api("/api/admin/settings/theme", { method: "POST", body: JSON.stringify({ theme }) });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("تم ذخیره شد. برای دیدن تغییر، صفحه را دوباره باز کن.");
       } catch (e) { errBox.textContent = e.message; }
     };
   } catch (e) {
@@ -1349,7 +1412,8 @@ async function renderAdminSalesSection() {
         <div class="eyebrow" style="margin-top:0">✏️ ویرایش موجودی کیف‌پول کاربر</div>
         <p class="hint-text">آیدی عددی کاربر را وارد کن و مبلغی که می‌خوای به کیف‌پولش اضافه یا ازش کم بشه رو بزن.</p>
         <label class="field-label">آیدی عددی کاربر (Telegram ID)</label>
-        <input class="input" id="wallet-user-id" type="number" placeholder="مثال: 123456789" style="margin-bottom:10px" />
+        <input class="input" id="wallet-user-id" type="number" placeholder="مثال: 123456789" style="margin-bottom:8px" />
+        <div id="wallet-user-info" class="hint-text" style="margin:0 0 10px"></div>
         <label class="field-label">مبلغ تغییر به تومان (برای کاهش، عدد منفی بزن، مثلاً -20000)</label>
         <input class="input" id="wallet-amount" type="number" placeholder="مثال: 50000 یا -20000" style="margin-bottom:4px" />
         <div class="field-error" id="wallet-error"></div>
@@ -1441,6 +1505,23 @@ async function renderAdminSalesSection() {
       </div>
     `;
 
+    let walletLookupTimer = null;
+    document.getElementById("wallet-user-id").addEventListener("input", (e) => {
+      const infoBox = document.getElementById("wallet-user-info");
+      const uid = e.target.value.trim();
+      clearTimeout(walletLookupTimer);
+      if (!uid || uid.length < 5) { infoBox.textContent = ""; return; }
+      infoBox.textContent = "در حال بررسی...";
+      walletLookupTimer = setTimeout(async () => {
+        try {
+          const info = await api(`/api/admin/wallet/lookup?telegram_id=${encodeURIComponent(uid)}`);
+          infoBox.innerHTML = `👤 ${info.user_name || "بدون نام"}${info.username ? " (@" + info.username + ")" : ""} — 👛 موجودی فعلی: <b>${fmt(info.wallet_credit)} تومان</b>`;
+        } catch (e2) {
+          infoBox.textContent = "⚠️ " + e2.message;
+        }
+      }, 500);
+    });
+
     document.getElementById("wallet-adjust-save").onclick = async () => {
       const errBox = document.getElementById("wallet-error");
       errBox.textContent = "";
@@ -1457,6 +1538,7 @@ async function renderAdminSalesSection() {
         tg.HapticFeedback.notificationOccurred("success");
         notify(`موجودی ${res.user_name || "کاربر"} به ${fmt(res.new_balance)} تومان تغییر کرد.`);
         document.getElementById("wallet-amount").value = "";
+        document.getElementById("wallet-user-info").innerHTML = `👤 ${res.user_name || "بدون نام"} — 👛 موجودی فعلی: <b>${fmt(res.new_balance)} تومان</b>`;
       } catch (e) { errBox.textContent = e.message; }
     };
 
