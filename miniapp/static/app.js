@@ -826,7 +826,7 @@ const STYLE_OPTIONS = [
   { value: "danger", label: "🔴 قرمز" },
 ];
 
-let adminSection = "menu"; // menu | catalog | tickets | sales | resellers
+let adminSection = "stats"; // stats | menu | catalog | tickets | sales | resellers
 let adminCatalogView = { level: "categories" }; // categories | products | configs
 let adminTicketView = { level: "list" }; // list | thread
 
@@ -834,6 +834,7 @@ async function renderAdmin() {
   const isMainBot = !TENANT_ID;
   content.innerHTML = `
     <div class="segmented" id="admin-section-tabs">
+      <button class="seg-btn ${adminSection === "stats" ? "active" : ""}" data-section="stats">آمار</button>
       <button class="seg-btn ${adminSection === "menu" ? "active" : ""}" data-section="menu">چیدمان منو</button>
       <button class="seg-btn ${adminSection === "catalog" ? "active" : ""}" data-section="catalog">محصولات</button>
       <button class="seg-btn ${adminSection === "sales" ? "active" : ""}" data-section="sales">فروش</button>
@@ -850,12 +851,69 @@ async function renderAdmin() {
       renderAdmin();
     };
   });
-  if (adminSection === "menu") await renderAdminMenuSection();
+  if (adminSection === "stats") await renderAdminStatsSection();
+  else if (adminSection === "menu") await renderAdminMenuSection();
   else if (adminSection === "catalog") await renderAdminCatalogSection();
   else if (adminSection === "sales") await renderAdminSalesSection();
   else if (adminSection === "tickets") await renderAdminTicketsSection();
   else if (adminSection === "resellers" && isMainBot) await renderAdminResellersSection();
 }
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > آمار (داشبورد)
+// ---------------------------------------------------------------------------
+
+async function renderAdminStatsSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(4);
+  try {
+    const s = await api("/api/admin/dashboard?days=14");
+    const maxRevenue = Math.max(...s.daily_series.map((d) => d.revenue), 1);
+
+    body.innerHTML = `
+      <div class="stat-grid">
+        <div class="stat-card"><span class="stat-num">${fmt(s.users)}</span><span class="stat-label">کل کاربران</span></div>
+        <div class="stat-card"><span class="stat-num">+${fmt(s.today_users)}</span><span class="stat-label">کاربر جدید امروز</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.total_revenue)}</span><span class="stat-label">درآمد کل (تومان)</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.today_revenue)}</span><span class="stat-label">درآمد امروز (تومان)</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.pending_orders)}</span><span class="stat-label">سفارش در انتظار</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.approved_orders)}</span><span class="stat-label">سفارش تاییدشده</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.active_configs)}</span><span class="stat-label">کانفیگ فعال</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.open_tickets)}</span><span class="stat-label">تیکت باز</span></div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">📈 روند درآمد ۱۴ روز اخیر</div>
+        <div class="bar-chart">
+          ${s.daily_series.map((d) => `
+            <div class="bar-chart-col">
+              <div class="bar-chart-bar" style="height:${Math.max((d.revenue / maxRevenue) * 100, 3)}%" title="${fmt(d.revenue)} تومان"></div>
+              <span class="bar-chart-label">${d.date.slice(5)}</span>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🏆 پرفروش‌ترین محصولات</div>
+        ${s.top_products.length === 0 ? `<div class="hint-text" style="margin:0">هنوز فروشی ثبت نشده.</div>` : s.top_products.map((p, i) => `
+          <div class="admin-list-row">
+            <div class="admin-list-row-main">
+              <span>${i + 1}. ${p.name}</span>
+              <span class="hint-text" style="margin:0">${p.orders} فروش · ${fmt(p.revenue)} تومان</span>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    `;
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > چیدمان منو
+// ---------------------------------------------------------------------------
 
 async function renderAdminMenuSection() {
   const body = document.getElementById("admin-section-body");
@@ -1212,34 +1270,51 @@ async function renderAdminSalesSection() {
     body.innerHTML = `
       <div class="card">
         <div class="eyebrow" style="margin-top:0">🤝 زیرمجموعه‌گیری (رفرال)</div>
-        <label class="menu-toggle" style="margin-bottom:10px">
-          <input type="checkbox" id="ref-enabled" ${referral.enabled ? "checked" : ""} /><span>فعال باشد</span>
-        </label>
-        <input class="input" id="ref-percent" type="number" placeholder="درصد پاداش دعوت‌کننده" value="${referral.percent}" style="margin-bottom:8px" />
-        <button class="btn" id="ref-save">💾 ذخیره</button>
+        <p class="hint-text">وقتی کاربری با لینک دعوت یکی دیگه وارد بشه و خرید کنه، درصدی از خریدش به‌عنوان اعتبار کیف‌پول به دعوت‌کننده تعلق می‌گیره.</p>
+        <div class="field-switch-row">
+          <span>سیستم رفرال فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="ref-enabled" ${referral.enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">درصد پاداش دعوت‌کننده از هر خرید زیرمجموعه (۰ تا ۱۰۰)</label>
+        <input class="input" id="ref-percent" type="number" placeholder="مثال: 10" value="${referral.percent}" style="margin-bottom:4px" />
+        <div class="field-error" id="ref-error"></div>
+        <button class="btn" id="ref-save" style="margin-top:8px">💾 ذخیره</button>
       </div>
 
       <div class="card">
         <div class="eyebrow" style="margin-top:0">🎡 گردونه شانس</div>
-        <label class="menu-toggle" style="margin-bottom:10px">
-          <input type="checkbox" id="wheel-enabled" ${wheel.enabled ? "checked" : ""} /><span>فعال باشد</span>
-        </label>
-        <input class="input" id="wheel-win-percent" type="number" placeholder="احتمال برد (٪)" value="${wheel.win_percent}" style="margin-bottom:8px" />
-        <input class="input" id="wheel-prizes" type="text" placeholder="جوایز با کاما (مثال: 10,20,30,50)" value="${wheel.prizes.join(",")}" style="margin-bottom:8px" />
-        <input class="input" id="wheel-expiry" type="number" placeholder="اعتبار کد جایزه (ساعت)" value="${wheel.expiry_hours}" style="margin-bottom:8px" />
-        <input class="input" id="wheel-cooldown" type="number" placeholder="فاصله بین دو چرخش (ساعت)" value="${wheel.cooldown_hours}" style="margin-bottom:8px" />
-        <button class="btn" id="wheel-save">💾 ذخیره</button>
+        <p class="hint-text">کاربرها با گردوندن این چرخ، شانس بردن کد تخفیف دارن.</p>
+        <div class="field-switch-row">
+          <span>گردونه شانس فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="wheel-enabled" ${wheel.enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">احتمال برد در هر چرخش (درصد از ۰ تا ۱۰۰)</label>
+        <input class="input" id="wheel-win-percent" type="number" placeholder="مثال: 30" value="${wheel.win_percent}" style="margin-bottom:10px" />
+        <label class="field-label">لیست درصد جوایز، با کاما جدا شود</label>
+        <input class="input" id="wheel-prizes" type="text" placeholder="مثال: 10,20,30,50" value="${wheel.prizes.join(",")}" style="margin-bottom:10px" />
+        <label class="field-label">مدت اعتبار کد جایزه پس از برد (ساعت)</label>
+        <input class="input" id="wheel-expiry" type="number" placeholder="مثال: 24" value="${wheel.expiry_hours}" style="margin-bottom:10px" />
+        <label class="field-label">حداقل فاصله‌ی زمانی بین دو چرخش هر کاربر (ساعت)</label>
+        <input class="input" id="wheel-cooldown" type="number" placeholder="مثال: 24" value="${wheel.cooldown_hours}" style="margin-bottom:4px" />
+        <div class="field-error" id="wheel-error"></div>
+        <button class="btn" id="wheel-save" style="margin-top:8px">💾 ذخیره</button>
       </div>
 
       <div class="card">
         <div class="eyebrow" style="margin-top:0">⏰ یادآوری تمدید سرویس</div>
-        <label class="menu-toggle" style="margin-bottom:10px">
-          <input type="checkbox" id="ren-enabled" ${renewal.enabled ? "checked" : ""} /><span>فعال باشد</span>
-        </label>
-        <input class="input" id="ren-days" type="number" placeholder="چند روز قبل از اتمام یادآوری شود" value="${renewal.days_before}" style="margin-bottom:8px" />
-        <input class="input" id="ren-percent" type="number" placeholder="درصد تخفیف کد تشویقی" value="${renewal.discount_percent}" style="margin-bottom:8px" />
-        <input class="input" id="ren-expiry" type="number" placeholder="اعتبار کد تشویقی (ساعت)" value="${renewal.discount_expiry_hours}" style="margin-bottom:8px" />
-        <button class="btn" id="ren-save">💾 ذخیره</button>
+        <p class="hint-text">چند روز مانده به اتمام سرویس، به کاربر پیام یادآوری همراه با کد تخفیف تشویقی برای تمدید فرستاده می‌شود.</p>
+        <div class="field-switch-row">
+          <span>یادآوری تمدید فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="ren-enabled" ${renewal.enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">چند روز مانده به پایان سرویس، یادآوری ارسال شود</label>
+        <input class="input" id="ren-days" type="number" placeholder="مثال: 5" value="${renewal.days_before}" style="margin-bottom:10px" />
+        <label class="field-label">درصد تخفیف کد تشویقی تمدید (۰ تا ۱۰۰)</label>
+        <input class="input" id="ren-percent" type="number" placeholder="مثال: 20" value="${renewal.discount_percent}" style="margin-bottom:10px" />
+        <label class="field-label">مدت اعتبار کد تشویقی (ساعت)</label>
+        <input class="input" id="ren-expiry" type="number" placeholder="مثال: 24" value="${renewal.discount_expiry_hours}" style="margin-bottom:4px" />
+        <div class="field-error" id="ren-error"></div>
+        <button class="btn" id="ren-save" style="margin-top:8px">💾 ذخیره</button>
       </div>
 
       <div class="card">
@@ -1262,59 +1337,90 @@ async function renderAdminSalesSection() {
             </div>
           `).join("")}
         </div>
-        <div style="margin-top:12px">
-          <input class="input" id="new-disc-code" type="text" placeholder="کد تخفیف (مثال: SUMMER25)" style="margin-bottom:8px;direction:ltr;text-align:left" />
-          <input class="input" id="new-disc-percent" type="number" placeholder="درصد تخفیف (یا مبلغ ثابت را پر کن)" style="margin-bottom:8px" />
-          <input class="input" id="new-disc-fixed" type="number" placeholder="مبلغ ثابت تخفیف - تومان (اختیاری)" style="margin-bottom:8px" />
-          <input class="input" id="new-disc-maxuses" type="number" placeholder="حداکثر تعداد استفاده (۰ = نامحدود)" value="0" style="margin-bottom:8px" />
-          <button class="btn" id="new-disc-save">➕ افزودن کد تخفیف</button>
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--glass-brd)">
+          <div class="eyebrow">افزودن کد تخفیف جدید</div>
+          <label class="field-label">کد تخفیف (حروف/عدد انگلیسی، مثال: SUMMER25)</label>
+          <input class="input" id="new-disc-code" type="text" placeholder="SUMMER25" style="margin-bottom:10px;direction:ltr;text-align:left" />
+          <label class="field-label">درصد تخفیف (اگر می‌خوای درصدی باشه)</label>
+          <input class="input" id="new-disc-percent" type="number" placeholder="مثال: 25" style="margin-bottom:10px" />
+          <label class="field-label">یا مبلغ ثابت تخفیف به تومان (فقط یکی از این دو را پر کن)</label>
+          <input class="input" id="new-disc-fixed" type="number" placeholder="مثال: 50000" style="margin-bottom:10px" />
+          <label class="field-label">حداکثر تعداد دفعات استفاده (۰ یعنی نامحدود)</label>
+          <input class="input" id="new-disc-maxuses" type="number" placeholder="0" value="0" style="margin-bottom:4px" />
+          <div class="field-error" id="new-disc-error"></div>
+          <button class="btn" id="new-disc-save" style="margin-top:8px">➕ افزودن کد تخفیف</button>
         </div>
       </div>
     `;
 
     document.getElementById("ref-save").onclick = async () => {
+      const errBox = document.getElementById("ref-error");
+      errBox.textContent = "";
+      const percentRaw = document.getElementById("ref-percent").value.trim();
+      if (percentRaw === "") { errBox.textContent = "درصد پاداش را وارد کن."; return; }
+      const percent = Number(percentRaw);
+      if (isNaN(percent) || percent < 0 || percent > 100) { errBox.textContent = "درصد باید عددی بین ۰ تا ۱۰۰ باشد."; return; }
       try {
         await api("/api/admin/settings/referral", {
           method: "POST",
-          body: JSON.stringify({
-            enabled: document.getElementById("ref-enabled").checked,
-            percent: Number(document.getElementById("ref-percent").value),
-          }),
+          body: JSON.stringify({ enabled: document.getElementById("ref-enabled").checked, percent }),
         });
+        tg.HapticFeedback.notificationOccurred("success");
         notify("تنظیمات رفرال ذخیره شد.");
-      } catch (e) { notify(e.message); }
+      } catch (e) { errBox.textContent = e.message; }
     };
 
     document.getElementById("wheel-save").onclick = async () => {
-      const prizes = document.getElementById("wheel-prizes").value.split(",").map((p) => Number(p.trim())).filter((p) => p > 0);
+      const errBox = document.getElementById("wheel-error");
+      errBox.textContent = "";
+      const winRaw = document.getElementById("wheel-win-percent").value.trim();
+      const prizesRaw = document.getElementById("wheel-prizes").value.trim();
+      const expiryRaw = document.getElementById("wheel-expiry").value.trim();
+      const cooldownRaw = document.getElementById("wheel-cooldown").value.trim();
+      if (!winRaw || !prizesRaw || !expiryRaw || !cooldownRaw) { errBox.textContent = "همه‌ی کادرها باید پر شوند."; return; }
+      const winPercent = Number(winRaw);
+      const prizes = prizesRaw.split(",").map((p) => Number(p.trim())).filter((p) => p > 0);
+      const expiry = Number(expiryRaw);
+      const cooldown = Number(cooldownRaw);
+      if (isNaN(winPercent) || winPercent < 0 || winPercent > 100) { errBox.textContent = "احتمال برد باید عددی بین ۰ تا ۱۰۰ باشد."; return; }
+      if (prizes.length === 0) { errBox.textContent = "حداقل یک جایزه‌ی معتبر وارد کن."; return; }
+      if (isNaN(expiry) || expiry <= 0) { errBox.textContent = "اعتبار کد جایزه باید عددی بزرگ‌تر از صفر باشد."; return; }
+      if (isNaN(cooldown) || cooldown <= 0) { errBox.textContent = "فاصله‌ی بین چرخش‌ها باید عددی بزرگ‌تر از صفر باشد."; return; }
       try {
         await api("/api/admin/settings/wheel", {
           method: "POST",
           body: JSON.stringify({
             enabled: document.getElementById("wheel-enabled").checked,
-            win_percent: Number(document.getElementById("wheel-win-percent").value),
-            prizes,
-            expiry_hours: Number(document.getElementById("wheel-expiry").value),
-            cooldown_hours: Number(document.getElementById("wheel-cooldown").value),
+            win_percent: winPercent, prizes, expiry_hours: expiry, cooldown_hours: cooldown,
           }),
         });
+        tg.HapticFeedback.notificationOccurred("success");
         notify("تنظیمات گردونه شانس ذخیره شد.");
-      } catch (e) { notify(e.message); }
+      } catch (e) { errBox.textContent = e.message; }
     };
 
     document.getElementById("ren-save").onclick = async () => {
+      const errBox = document.getElementById("ren-error");
+      errBox.textContent = "";
+      const daysRaw = document.getElementById("ren-days").value.trim();
+      const percentRaw = document.getElementById("ren-percent").value.trim();
+      const expiryRaw = document.getElementById("ren-expiry").value.trim();
+      if (!daysRaw || !percentRaw || !expiryRaw) { errBox.textContent = "همه‌ی کادرها باید پر شوند."; return; }
+      const days = Number(daysRaw), percent = Number(percentRaw), expiry = Number(expiryRaw);
+      if (isNaN(days) || days <= 0) { errBox.textContent = "تعداد روز باید عددی بزرگ‌تر از صفر باشد."; return; }
+      if (isNaN(percent) || percent < 0 || percent > 100) { errBox.textContent = "درصد تخفیف باید عددی بین ۰ تا ۱۰۰ باشد."; return; }
+      if (isNaN(expiry) || expiry <= 0) { errBox.textContent = "اعتبار کد باید عددی بزرگ‌تر از صفر باشد."; return; }
       try {
         await api("/api/admin/settings/renewal", {
           method: "POST",
           body: JSON.stringify({
             enabled: document.getElementById("ren-enabled").checked,
-            days_before: Number(document.getElementById("ren-days").value),
-            discount_percent: Number(document.getElementById("ren-percent").value),
-            discount_expiry_hours: Number(document.getElementById("ren-expiry").value),
+            days_before: days, discount_percent: percent, discount_expiry_hours: expiry,
           }),
         });
+        tg.HapticFeedback.notificationOccurred("success");
         notify("تنظیمات یادآوری تمدید ذخیره شد.");
-      } catch (e) { notify(e.message); }
+      } catch (e) { errBox.textContent = e.message; }
     };
 
     body.querySelectorAll("[data-toggle-disc]").forEach((el) => {
@@ -1335,12 +1441,15 @@ async function renderAdminSalesSection() {
       };
     });
     document.getElementById("new-disc-save").onclick = async () => {
+      const errBox = document.getElementById("new-disc-error");
+      errBox.textContent = "";
       const code = document.getElementById("new-disc-code").value.trim();
-      const percentVal = document.getElementById("new-disc-percent").value;
-      const fixedVal = document.getElementById("new-disc-fixed").value;
+      const percentVal = document.getElementById("new-disc-percent").value.trim();
+      const fixedVal = document.getElementById("new-disc-fixed").value.trim();
       const maxUses = Number(document.getElementById("new-disc-maxuses").value) || 0;
-      if (!code) { notify("کد تخفیف را وارد کن."); return; }
-      if (!percentVal && !fixedVal) { notify("درصد یا مبلغ ثابت را وارد کن."); return; }
+      if (!code) { errBox.textContent = "کد تخفیف را وارد کن."; return; }
+      if (!percentVal && !fixedVal) { errBox.textContent = "باید یکی از دو کادر درصد یا مبلغ ثابت را پر کنی."; return; }
+      if (percentVal && fixedVal) { errBox.textContent = "فقط یکی از دو کادر درصد یا مبلغ ثابت را پر کن، نه هردو."; return; }
       try {
         await api("/api/admin/discounts", {
           method: "POST",
@@ -1351,7 +1460,7 @@ async function renderAdminSalesSection() {
         });
         tg.HapticFeedback.notificationOccurred("success");
         renderAdminSalesSection();
-      } catch (e) { notify(e.message); }
+      } catch (e) { errBox.textContent = e.message; }
     };
   } catch (e) {
     body.innerHTML = errorState(e.message);
