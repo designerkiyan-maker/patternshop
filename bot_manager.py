@@ -118,3 +118,39 @@ class BotManager:
                 exc = d.exception()
                 if exc and not isinstance(exc, asyncio.CancelledError):
                     logger.error("یکی از بات‌ها با خطا متوقف شد: %s", exc)
+
+    async def reconcile_resellers_loop(self, main_db, main_bot_token: str, interval: int = 10):
+        """هر چند ثانیه یک‌بار وضعیت بات‌های نمایندگی را با جدول reseller_bots
+        (منبع حقیقت) مقایسه و همگام می‌کند. این باعث می‌شود تغییراتی که از طریق
+        Mini App (که در یک پروسه‌ی جدا از این بات اجرا می‌شود و مستقیماً به
+        BotManager دسترسی ندارد) روی دیتابیس اعمال می‌شوند - مثل افزودن،
+        فعال/غیرفعال‌کردن یا حذف یک نماینده - با تأخیر کوتاهی خودکار اجرا شوند،
+        بدون نیاز به ری‌استارت کل سرویس."""
+        from config import resolve_db_path
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                rows = main_db.list_reseller_bots()
+                active_tokens = {r["bot_token"]: r for r in rows if r["is_active"]}
+                all_tokens = {r["bot_token"] for r in rows}
+
+                for token, row in active_tokens.items():
+                    if token not in self.instances:
+                        resolved_path = resolve_db_path(row["db_path"])
+                        started = await self.start_bot(
+                            token, resolved_path, row["owner_telegram_id"], is_main_bot=False
+                        )
+                        if started:
+                            logger.info("بات نمایندگی @%s توسط reconcile راه‌اندازی شد.", row["bot_username"])
+
+                for token in list(self.instances.keys()):
+                    if token == main_bot_token:
+                        continue
+                    if token not in active_tokens:
+                        # یا غیرفعال شده یا کاملاً حذف شده (دیگر در all_tokens هم نیست)
+                        await self.stop_bot(token)
+                        logger.info(
+                            "بات نمایندگی (token=...%s) توسط reconcile متوقف شد (غیرفعال/حذف‌شده).", token[-6:]
+                        )
+            except Exception:
+                logger.exception("خطا در حلقه‌ی reconcile نمایندگی‌ها.")

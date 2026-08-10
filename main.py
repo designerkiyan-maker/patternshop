@@ -45,9 +45,18 @@ async def main():
         if started:
             logger.info("بات نمایندگی @%s راه‌اندازی شد.", rb["bot_username"])
 
+    reconcile_task = asyncio.create_task(
+        manager.reconcile_resellers_loop(main_db, BOT_TOKEN, interval=10)
+    )
+
     try:
         await manager.wait_all()
     finally:
+        reconcile_task.cancel()
+        try:
+            await reconcile_task
+        except Exception:
+            pass
         await manager.stop_all()
 
 

@@ -423,6 +423,10 @@ class Database:
                 new_val = 0 if row["is_active"] else 1
                 conn.execute("UPDATE categories SET is_active=? WHERE id=?", (new_val, cat_id))
 
+    def edit_category(self, cat_id: int, name: str):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE categories SET name=? WHERE id=?", (name, cat_id))
+
     def delete_category(self, cat_id: int):
         with self._get_conn() as conn:
             conn.execute("DELETE FROM categories WHERE id=?", (cat_id,))
@@ -470,6 +474,23 @@ class Database:
                 new_val = 0 if row["is_active"] else 1
                 conn.execute("UPDATE products SET is_active=? WHERE id=?", (new_val, product_id))
 
+    def edit_product(self, product_id: int, name: str = None, price: int = None,
+                      description: str = None, duration_days: int = None):
+        fields, values = [], []
+        if name is not None:
+            fields.append("name=?"); values.append(name)
+        if price is not None:
+            fields.append("price=?"); values.append(price)
+        if description is not None:
+            fields.append("description=?"); values.append(description)
+        if duration_days is not None:
+            fields.append("duration_days=?"); values.append(duration_days)
+        if not fields:
+            return
+        values.append(product_id)
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE products SET {', '.join(fields)} WHERE id=?", values)
+
     def delete_product(self, product_id: int):
         with self._get_conn() as conn:
             conn.execute("DELETE FROM products WHERE id=?", (product_id,))
@@ -491,6 +512,16 @@ class Database:
                 "SELECT COUNT(*) c FROM configs WHERE product_id=? AND is_used=0", (product_id,)
             ).fetchone()
             return row["c"]
+
+    def get_unused_configs(self, product_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT id, link FROM configs WHERE product_id=? AND is_used=0 ORDER BY id", (product_id,)
+            ).fetchall()
+
+    def delete_config(self, config_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM configs WHERE id=? AND is_used=0", (config_id,))
 
     def take_unused_config(self, product_id: int, user_tg_id: int):
         with self._get_conn() as conn:
@@ -870,6 +901,18 @@ class Database:
                 conn.execute(
                     "UPDATE reseller_bots SET is_active=? WHERE id=?", (0 if row["is_active"] else 1, bot_id)
                 )
+
+    def edit_reseller_bot(self, bot_id: int, owner_telegram_id: int = None, owner_name: str = None):
+        fields, values = [], []
+        if owner_telegram_id is not None:
+            fields.append("owner_telegram_id=?"); values.append(owner_telegram_id)
+        if owner_name is not None:
+            fields.append("owner_name=?"); values.append(owner_name)
+        if not fields:
+            return
+        values.append(bot_id)
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE reseller_bots SET {', '.join(fields)} WHERE id=?", values)
 
     def delete_reseller_bot(self, bot_id: int):
         with self._get_conn() as conn:
