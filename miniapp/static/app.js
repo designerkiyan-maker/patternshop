@@ -670,14 +670,16 @@ const STYLE_OPTIONS = [
   { value: "danger", label: "🔴 قرمز" },
 ];
 
-let adminSection = "menu"; // menu | catalog
+let adminSection = "menu"; // menu | catalog | resellers
 let adminCatalogView = { level: "categories" }; // categories | products | configs
 
 async function renderAdmin() {
+  const isMainBot = !TENANT_ID;
   content.innerHTML = `
     <div class="segmented" id="admin-section-tabs">
       <button class="seg-btn ${adminSection === "menu" ? "active" : ""}" data-section="menu">چیدمان منو</button>
       <button class="seg-btn ${adminSection === "catalog" ? "active" : ""}" data-section="catalog">محصولات</button>
+      ${isMainBot ? `<button class="seg-btn ${adminSection === "resellers" ? "active" : ""}" data-section="resellers">نمایندگی‌ها</button>` : ""}
     </div>
     <div id="admin-section-body">${skeleton(4)}</div>
   `;
@@ -689,7 +691,8 @@ async function renderAdmin() {
     };
   });
   if (adminSection === "menu") await renderAdminMenuSection();
-  else await renderAdminCatalogSection();
+  else if (adminSection === "catalog") await renderAdminCatalogSection();
+  else if (adminSection === "resellers" && isMainBot) await renderAdminResellersSection();
 }
 
 async function renderAdminMenuSection() {
@@ -1027,6 +1030,107 @@ async function renderAdminConfigs(body) {
       renderAdmin();
     } catch (e) { notify(e.message); }
   };
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > نمایندگی‌ها (فقط بات اصلی)
+// ---------------------------------------------------------------------------
+
+async function renderAdminResellersSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  try {
+    const resellers = await api("/api/admin/resellers");
+    body.innerHTML = `
+      <p class="hint-text">تغییرات فعال/غیرفعال‌کردن یا حذف، حداکثر تا ۱۰ ثانیه دیگر روی بات واقعی اعمال می‌شود.</p>
+      <div class="card">
+        ${resellers.length === 0 ? `<div class="hint-text" style="margin:0">هنوز نماینده‌ای ثبت نشده.</div>` : resellers.map((r) => `
+          <div class="admin-list-row">
+            <div class="admin-list-row-main">
+              <span>@${r.bot_username}</span>
+              <span class="hint-text" style="margin:0">${r.owner_name || "بدون نام"} · شناسه: ${r.owner_telegram_id} ${r.is_active ? "" : "· غیرفعال"}</span>
+            </div>
+            <div class="admin-list-row-actions">
+              <button class="btn small outline" data-edit-res="${r.id}">✏️</button>
+              <button class="btn small outline" data-toggle-res="${r.id}">${r.is_active ? "⛔️" : "✅"}</button>
+              <button class="btn small outline danger" data-del-res="${r.id}">🗑️</button>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">افزودن نماینده‌ی جدید</div>
+        <input class="input" id="new-res-token" type="text" placeholder="توکن بات (از BotFather)" style="margin-bottom:8px" />
+        <button class="btn outline" id="new-res-validate">🔎 بررسی توکن</button>
+        <div id="new-res-step2" style="display:none;margin-top:10px">
+          <p class="hint-text" id="new-res-username-line"></p>
+          <input class="input" id="new-res-owner-id" type="number" placeholder="آیدی عددی نماینده" style="margin-bottom:8px" />
+          <input class="input" id="new-res-owner-name" type="text" placeholder="نام نماینده (برای نمایش)" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:8px" />
+          <button class="btn" id="new-res-save">➕ افزودن نماینده</button>
+        </div>
+      </div>
+    `;
+    body.querySelectorAll("[data-edit-res]").forEach((el) => {
+      el.onclick = async () => {
+        const r = resellers.find((x) => x.id === Number(el.dataset.editRes));
+        const ownerId = prompt("آیدی عددی نماینده:", r.owner_telegram_id);
+        if (ownerId === null || !ownerId.trim()) return;
+        const ownerName = prompt("نام نماینده:", r.owner_name || "");
+        if (ownerName === null) return;
+        try {
+          await api(`/api/admin/resellers/${r.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ owner_telegram_id: Number(ownerId), owner_name: ownerName.trim() }),
+          });
+          renderAdmin();
+        } catch (e) { notify(e.message); }
+      };
+    });
+    body.querySelectorAll("[data-toggle-res]").forEach((el) => {
+      el.onclick = async () => {
+        try {
+          const res = await api(`/api/admin/resellers/${el.dataset.toggleRes}/toggle`, { method: "POST" });
+          notify(res.note || "وضعیت تغییر کرد.");
+          renderAdmin();
+        } catch (e) { notify(e.message); }
+      };
+    });
+    body.querySelectorAll("[data-del-res]").forEach((el) => {
+      el.onclick = async () => {
+        const purge = confirm("همراه با حذف نماینده، فایل دیتابیسش هم برای همیشه پاک شود؟\n(تایید = بله پاک شود / لغو = فقط حذف از لیست، فایل نگه داشته شود)");
+        try {
+          const res = await api(`/api/admin/resellers/${el.dataset.delRes}?purge_db=${purge}`, { method: "DELETE" });
+          notify((res.db_purged ? "نماینده حذف و دیتابیسش پاک شد. " : "نماینده حذف شد (دیتابیس نگه داشته شد). ") + (res.note || ""));
+          renderAdmin();
+        } catch (e) { notify(e.message); }
+      };
+    });
+    document.getElementById("new-res-validate").onclick = async () => {
+      const token = document.getElementById("new-res-token").value.trim();
+      if (!token) { notify("توکن را وارد کن."); return; }
+      try {
+        const res = await api("/api/admin/resellers/validate", { method: "POST", body: JSON.stringify({ token }) });
+        document.getElementById("new-res-step2").style.display = "";
+        document.getElementById("new-res-username-line").textContent = `✅ توکن معتبر است: @${res.username}`;
+        document.getElementById("new-res-save").onclick = async () => {
+          const ownerId = Number(document.getElementById("new-res-owner-id").value);
+          const ownerName = document.getElementById("new-res-owner-name").value.trim();
+          if (!ownerId) { notify("آیدی عددی نماینده الزامی است."); return; }
+          try {
+            const createRes = await api("/api/admin/resellers", {
+              method: "POST",
+              body: JSON.stringify({ token, username: res.username, owner_telegram_id: ownerId, owner_name: ownerName }),
+            });
+            tg.HapticFeedback.notificationOccurred("success");
+            notify(createRes.note || "نماینده اضافه شد.");
+            renderAdmin();
+          } catch (e) { notify(e.message); }
+        };
+      } catch (e) { notify(e.message); }
+    };
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
 }
 
 
