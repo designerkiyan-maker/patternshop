@@ -826,7 +826,7 @@ const STYLE_OPTIONS = [
   { value: "danger", label: "🔴 قرمز" },
 ];
 
-let adminSection = "menu"; // menu | catalog | resellers | tickets
+let adminSection = "menu"; // menu | catalog | tickets | sales | resellers
 let adminCatalogView = { level: "categories" }; // categories | products | configs
 let adminTicketView = { level: "list" }; // list | thread
 
@@ -836,6 +836,7 @@ async function renderAdmin() {
     <div class="segmented" id="admin-section-tabs">
       <button class="seg-btn ${adminSection === "menu" ? "active" : ""}" data-section="menu">چیدمان منو</button>
       <button class="seg-btn ${adminSection === "catalog" ? "active" : ""}" data-section="catalog">محصولات</button>
+      <button class="seg-btn ${adminSection === "sales" ? "active" : ""}" data-section="sales">فروش</button>
       <button class="seg-btn ${adminSection === "tickets" ? "active" : ""}" data-section="tickets">تیکت‌ها</button>
       ${isMainBot ? `<button class="seg-btn ${adminSection === "resellers" ? "active" : ""}" data-section="resellers">نمایندگی‌ها</button>` : ""}
     </div>
@@ -851,6 +852,7 @@ async function renderAdmin() {
   });
   if (adminSection === "menu") await renderAdminMenuSection();
   else if (adminSection === "catalog") await renderAdminCatalogSection();
+  else if (adminSection === "sales") await renderAdminSalesSection();
   else if (adminSection === "tickets") await renderAdminTicketsSection();
   else if (adminSection === "resellers" && isMainBot) await renderAdminResellersSection();
 }
@@ -1190,6 +1192,170 @@ async function renderAdminConfigs(body) {
       renderAdmin();
     } catch (e) { notify(e.message); }
   };
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > فروش (رفرال / گردونه شانس / یادآوری تمدید / کدهای تخفیف)
+// ---------------------------------------------------------------------------
+
+async function renderAdminSalesSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(4);
+  try {
+    const [referral, wheel, renewal, discounts] = await Promise.all([
+      api("/api/admin/settings/referral"),
+      api("/api/admin/settings/wheel"),
+      api("/api/admin/settings/renewal"),
+      api("/api/admin/discounts"),
+    ]);
+
+    body.innerHTML = `
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🤝 زیرمجموعه‌گیری (رفرال)</div>
+        <label class="menu-toggle" style="margin-bottom:10px">
+          <input type="checkbox" id="ref-enabled" ${referral.enabled ? "checked" : ""} /><span>فعال باشد</span>
+        </label>
+        <input class="input" id="ref-percent" type="number" placeholder="درصد پاداش دعوت‌کننده" value="${referral.percent}" style="margin-bottom:8px" />
+        <button class="btn" id="ref-save">💾 ذخیره</button>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🎡 گردونه شانس</div>
+        <label class="menu-toggle" style="margin-bottom:10px">
+          <input type="checkbox" id="wheel-enabled" ${wheel.enabled ? "checked" : ""} /><span>فعال باشد</span>
+        </label>
+        <input class="input" id="wheel-win-percent" type="number" placeholder="احتمال برد (٪)" value="${wheel.win_percent}" style="margin-bottom:8px" />
+        <input class="input" id="wheel-prizes" type="text" placeholder="جوایز با کاما (مثال: 10,20,30,50)" value="${wheel.prizes.join(",")}" style="margin-bottom:8px" />
+        <input class="input" id="wheel-expiry" type="number" placeholder="اعتبار کد جایزه (ساعت)" value="${wheel.expiry_hours}" style="margin-bottom:8px" />
+        <input class="input" id="wheel-cooldown" type="number" placeholder="فاصله بین دو چرخش (ساعت)" value="${wheel.cooldown_hours}" style="margin-bottom:8px" />
+        <button class="btn" id="wheel-save">💾 ذخیره</button>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">⏰ یادآوری تمدید سرویس</div>
+        <label class="menu-toggle" style="margin-bottom:10px">
+          <input type="checkbox" id="ren-enabled" ${renewal.enabled ? "checked" : ""} /><span>فعال باشد</span>
+        </label>
+        <input class="input" id="ren-days" type="number" placeholder="چند روز قبل از اتمام یادآوری شود" value="${renewal.days_before}" style="margin-bottom:8px" />
+        <input class="input" id="ren-percent" type="number" placeholder="درصد تخفیف کد تشویقی" value="${renewal.discount_percent}" style="margin-bottom:8px" />
+        <input class="input" id="ren-expiry" type="number" placeholder="اعتبار کد تشویقی (ساعت)" value="${renewal.discount_expiry_hours}" style="margin-bottom:8px" />
+        <button class="btn" id="ren-save">💾 ذخیره</button>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🏷️ کدهای تخفیف</div>
+        <div id="discounts-list">
+          ${discounts.length === 0 ? `<div class="hint-text" style="margin:0">هنوز کد تخفیفی ثبت نشده.</div>` : discounts.map((d) => `
+            <div class="admin-list-row">
+              <div class="admin-list-row-main">
+                <span style="direction:ltr">${d.code}</span>
+                <span class="hint-text" style="margin:0">
+                  ${d.percent ? `${d.percent}٪` : `${fmt(d.fixed_amount)} تومان`} ·
+                  استفاده: ${d.used_count}${d.max_uses ? "/" + d.max_uses : " (نامحدود)"}
+                  ${d.is_active ? "" : "· غیرفعال"}
+                </span>
+              </div>
+              <div class="admin-list-row-actions">
+                <button class="btn small outline" data-toggle-disc="${d.id}">${d.is_active ? "⛔️" : "✅"}</button>
+                <button class="btn small outline danger" data-del-disc="${d.id}">🗑️</button>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+        <div style="margin-top:12px">
+          <input class="input" id="new-disc-code" type="text" placeholder="کد تخفیف (مثال: SUMMER25)" style="margin-bottom:8px;direction:ltr;text-align:left" />
+          <input class="input" id="new-disc-percent" type="number" placeholder="درصد تخفیف (یا مبلغ ثابت را پر کن)" style="margin-bottom:8px" />
+          <input class="input" id="new-disc-fixed" type="number" placeholder="مبلغ ثابت تخفیف - تومان (اختیاری)" style="margin-bottom:8px" />
+          <input class="input" id="new-disc-maxuses" type="number" placeholder="حداکثر تعداد استفاده (۰ = نامحدود)" value="0" style="margin-bottom:8px" />
+          <button class="btn" id="new-disc-save">➕ افزودن کد تخفیف</button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById("ref-save").onclick = async () => {
+      try {
+        await api("/api/admin/settings/referral", {
+          method: "POST",
+          body: JSON.stringify({
+            enabled: document.getElementById("ref-enabled").checked,
+            percent: Number(document.getElementById("ref-percent").value),
+          }),
+        });
+        notify("تنظیمات رفرال ذخیره شد.");
+      } catch (e) { notify(e.message); }
+    };
+
+    document.getElementById("wheel-save").onclick = async () => {
+      const prizes = document.getElementById("wheel-prizes").value.split(",").map((p) => Number(p.trim())).filter((p) => p > 0);
+      try {
+        await api("/api/admin/settings/wheel", {
+          method: "POST",
+          body: JSON.stringify({
+            enabled: document.getElementById("wheel-enabled").checked,
+            win_percent: Number(document.getElementById("wheel-win-percent").value),
+            prizes,
+            expiry_hours: Number(document.getElementById("wheel-expiry").value),
+            cooldown_hours: Number(document.getElementById("wheel-cooldown").value),
+          }),
+        });
+        notify("تنظیمات گردونه شانس ذخیره شد.");
+      } catch (e) { notify(e.message); }
+    };
+
+    document.getElementById("ren-save").onclick = async () => {
+      try {
+        await api("/api/admin/settings/renewal", {
+          method: "POST",
+          body: JSON.stringify({
+            enabled: document.getElementById("ren-enabled").checked,
+            days_before: Number(document.getElementById("ren-days").value),
+            discount_percent: Number(document.getElementById("ren-percent").value),
+            discount_expiry_hours: Number(document.getElementById("ren-expiry").value),
+          }),
+        });
+        notify("تنظیمات یادآوری تمدید ذخیره شد.");
+      } catch (e) { notify(e.message); }
+    };
+
+    body.querySelectorAll("[data-toggle-disc]").forEach((el) => {
+      el.onclick = async () => {
+        try {
+          await api(`/api/admin/discounts/${el.dataset.toggleDisc}/toggle`, { method: "POST" });
+          renderAdminSalesSection();
+        } catch (e) { notify(e.message); }
+      };
+    });
+    body.querySelectorAll("[data-del-disc]").forEach((el) => {
+      el.onclick = async () => {
+        if (!confirm("این کد تخفیف حذف شود؟")) return;
+        try {
+          await api(`/api/admin/discounts/${el.dataset.delDisc}`, { method: "DELETE" });
+          renderAdminSalesSection();
+        } catch (e) { notify(e.message); }
+      };
+    });
+    document.getElementById("new-disc-save").onclick = async () => {
+      const code = document.getElementById("new-disc-code").value.trim();
+      const percentVal = document.getElementById("new-disc-percent").value;
+      const fixedVal = document.getElementById("new-disc-fixed").value;
+      const maxUses = Number(document.getElementById("new-disc-maxuses").value) || 0;
+      if (!code) { notify("کد تخفیف را وارد کن."); return; }
+      if (!percentVal && !fixedVal) { notify("درصد یا مبلغ ثابت را وارد کن."); return; }
+      try {
+        await api("/api/admin/discounts", {
+          method: "POST",
+          body: JSON.stringify({
+            code, percent: percentVal ? Number(percentVal) : null,
+            fixed_amount: fixedVal ? Number(fixedVal) : null, max_uses: maxUses,
+          }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        renderAdminSalesSection();
+      } catch (e) { notify(e.message); }
+    };
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
 }
 
 // ---------------------------------------------------------------------------
