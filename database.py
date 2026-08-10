@@ -41,6 +41,8 @@ DEFAULT_SETTINGS = {
     "btn_referral_style": "",
     "btn_wallet_style": "success",
     "btn_admin_panel_style": "danger",
+    "store_name": "⚡ SHOP VPN",
+    "miniapp_banner_text": "اتصال امن و پایدار برقرار است",
     # سیستم زیرمجموعه‌گیری
     "referral_enabled": "1",
     "referral_percent": "10",  # درصدی که به دعوت‌کننده به‌عنوان اعتبار کیف پول تعلق می‌گیرد
@@ -560,6 +562,30 @@ class Database:
                 "UPDATE configs SET is_used=1, assigned_user_id=?, assigned_at=?, expires_at=?, "
                 "renewal_reminder_sent=0 WHERE id=?",
                 (user_tg_id, now.isoformat(), expires_at, row["id"]),
+            )
+            return {"id": row["id"], "link": row["link"], "expires_at": expires_at}
+
+    def admin_take_random_config(self, product_id: int, admin_tg_id: int):
+        """برای دکمه‌ی «دریافت کانفیگ رندوم» در پنل ادمین: برخلاف take_unused_config
+        (که برای فروش واقعی به‌ترتیب FIFO عمل می‌کند)، این یکی از کانفیگ‌های آزاد را
+        کاملاً تصادفی برمی‌دارد و مصرف‌شده علامت می‌زند."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT id, link FROM configs WHERE product_id=? AND is_used=0 ORDER BY RANDOM() LIMIT 1",
+                (product_id,),
+            ).fetchone()
+            if not row:
+                return None
+            prod = conn.execute(
+                "SELECT duration_days FROM products WHERE id=?", (product_id,)
+            ).fetchone()
+            duration_days = (prod["duration_days"] if prod and prod["duration_days"] else 30)
+            now = datetime.utcnow()
+            expires_at = (now + timedelta(days=duration_days)).isoformat()
+            conn.execute(
+                "UPDATE configs SET is_used=1, assigned_user_id=?, assigned_at=?, expires_at=?, "
+                "renewal_reminder_sent=0 WHERE id=?",
+                (admin_tg_id, now.isoformat(), expires_at, row["id"]),
             )
             return {"id": row["id"], "link": row["link"], "expires_at": expires_at}
 
