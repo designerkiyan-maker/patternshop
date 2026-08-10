@@ -18,6 +18,7 @@ import sys
 import os
 import json
 import random
+import base64
 import html as html_lib
 from dataclasses import dataclass
 from typing import Optional
@@ -44,6 +45,16 @@ app = FastAPI(title="V2Ray Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+# تم‌های قابل انتخاب برای مینی‌اپ (هر تننت/نماینده جدا انتخاب می‌کند)
+MINIAPP_THEMES = {
+    "synthwave": "🌅 سینت‌ویو (پیش‌فرض)",
+    "neon-mint": "🟢 نئون مینت",
+    "royal-violet": "👑 بنفش سلطنتی",
+    "blood-moon": "🔴 ماه خونین",
+    "aurora-ice": "🧊 یخ شمالی",
+}
+MAX_HEADER_IMAGE_BYTES = 2 * 1024 * 1024  # 2 مگابایت
 
 # دیتابیس بات اصلی - هم برای سرویس‌دهی مستقیم به بات اصلی، هم برای پیدا کردن
 # دیتابیس/توکن بات‌های نمایندگی از روی جدول reseller_bots استفاده می‌شود.
@@ -187,6 +198,20 @@ def serve_index(tenant: Tenant = Depends(get_tenant)):
     banner_text = tenant.db.get_setting("miniapp_banner_text", "اتصال امن و پایدار برقرار است")
     html = html.replace("{{STORE_NAME}}", html_lib.escape(store_name))
     html = html.replace("{{BANNER_TEXT}}", html_lib.escape(banner_text))
+
+    theme = tenant.db.get_setting("miniapp_theme", "synthwave")
+    if theme not in MINIAPP_THEMES:
+        theme = "synthwave"
+    html = html.replace("{{THEME}}", theme)
+
+    header_image = tenant.db.get_setting("header_image_data", "")
+    if header_image:
+        html = html.replace("{{HEADER_LOGO_CLASS}}", "has-logo")
+        html = html.replace("{{HEADER_LOGO_HTML}}", f'<img class="brand-logo" src="{header_image}" alt="" />')
+    else:
+        html = html.replace("{{HEADER_LOGO_CLASS}}", "")
+        html = html.replace("{{HEADER_LOGO_HTML}}", "")
+
     return HTMLResponse(html)
 
 
@@ -1392,9 +1417,15 @@ class BrandingUpdate(BaseModel):
 @app.get("/api/admin/settings/branding")
 def api_admin_get_branding(auth=Depends(require_admin)):
     _, db, _ = auth
+    theme = db.get_setting("miniapp_theme", "synthwave")
+    if theme not in MINIAPP_THEMES:
+        theme = "synthwave"
     return {
         "store_name": db.get_setting("store_name", "⚡ SHOP VPN"),
         "banner_text": db.get_setting("miniapp_banner_text", "اتصال امن و پایدار برقرار است"),
+        "theme": theme,
+        "themes": [{"id": k, "label": v} for k, v in MINIAPP_THEMES.items()],
+        "header_image": db.get_setting("header_image_data", "") or None,
     }
 
 
@@ -1416,9 +1447,55 @@ def api_admin_set_branding(body: BrandingUpdate, auth=Depends(require_admin)):
     return {"status": "ok"}
 
 
+class ThemeUpdate(BaseModel):
+    theme: str
+
+
+@app.post("/api/admin/settings/theme")
+def api_admin_set_theme(body: ThemeUpdate, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if body.theme not in MINIAPP_THEMES:
+        raise HTTPException(status_code=400, detail="این تم معتبر نیست.")
+    db.set_setting("miniapp_theme", body.theme)
+    return {"status": "ok", "theme": body.theme}
+
+
+@app.post("/api/admin/settings/header-image")
+async def api_admin_set_header_image(photo: UploadFile = File(...), auth=Depends(require_admin)):
+    _, db, _ = auth
+    if not photo.content_type or not photo.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="فقط فایل عکس پذیرفته می‌شود.")
+    photo_bytes = await photo.read()
+    if len(photo_bytes) > MAX_HEADER_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="حجم عکس نباید بیشتر از ۲ مگابایت باشد.")
+    data_uri = f"data:{photo.content_type};base64,{base64.b64encode(photo_bytes).decode('ascii')}"
+    db.set_setting("header_image_data", data_uri)
+    return {"status": "ok", "header_image": data_uri}
+
+
+@app.delete("/api/admin/settings/header-image")
+def api_admin_delete_header_image(auth=Depends(require_admin)):
+    _, db, _ = auth
+    db.set_setting("header_image_data", "")
+    return {"status": "ok"}
+
+
 # ---------------------------------------------------------------------------
 # ویرایش موجودی کیف‌پول کاربر (ادمین)
 # ---------------------------------------------------------------------------
+
+@app.get("/api/admin/wallet/lookup")
+def api_admin_wallet_lookup(telegram_id: int, auth=Depends(require_admin)):
+    _, db, _ = auth
+    user = db.get_user(telegram_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربری با این آیدی عددی پیدا نشد.")
+    return {
+        "user_name": user["first_name"] or "",
+        "username": user["username"] or "",
+        "wallet_credit": db.get_wallet_credit(telegram_id),
+    }
+
 
 class WalletAdjust(BaseModel):
     telegram_id: int
