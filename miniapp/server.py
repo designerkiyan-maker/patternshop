@@ -384,6 +384,128 @@ async def api_support_send(body: SupportMessageCreate, auth=Depends(get_verified
     return {"id": msg_id, "sender": "user", "message": text}
 
 
+# ---------------------------------------------------------------------------
+# سیستم تیکت (جدا از چت مستقیم بالا)
+# ---------------------------------------------------------------------------
+
+class TicketCreate(BaseModel):
+    subject: str
+    message: str
+
+
+class TicketMessageCreate(BaseModel):
+    message: str
+
+
+def _ticket_to_dict(t):
+    return {
+        "id": t["id"], "subject": t["subject"], "status": t["status"],
+        "created_at": t["created_at"], "updated_at": t["updated_at"],
+    }
+
+
+@app.get("/api/tickets")
+def api_list_my_tickets(auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
+    return [_ticket_to_dict(t) for t in db.get_user_tickets(tg_id)]
+
+
+@app.post("/api/tickets")
+async def api_create_ticket(body: TicketCreate, auth=Depends(get_verified_user)):
+    tg_id, db, tenant = auth
+    subject = (body.subject or "").strip()
+    message = (body.message or "").strip()
+    if not subject or not message:
+        raise HTTPException(status_code=400, detail="موضوع و متن پیام نمی‌تواند خالی باشد.")
+    if len(subject) > 150 or len(message) > 2000:
+        raise HTTPException(status_code=400, detail="متن وارد شده بیش از حد طولانی است.")
+
+    ticket_id = db.create_ticket(tg_id, subject, message)
+
+    user = db.get_user(tg_id)
+    caption = (
+        f"🎫 تیکت جدید #{ticket_id}\n"
+        f"👤 {(user['first_name'] if user else '') or ''} (@{(user['username'] if user else '') or '---'})\n"
+        f"🆔 `{tg_id}`\n\n"
+        f"📌 {subject}\n✉️ {message}"
+    )
+    admin_ids = db.list_admins()
+    async with aiohttp.ClientSession() as session:
+        for admin_id in admin_ids:
+            try:
+                await session.post(
+                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                    json={"chat_id": admin_id, "text": caption, "parse_mode": "Markdown"},
+                )
+            except Exception:
+                pass
+
+    return _ticket_to_dict(db.get_ticket(ticket_id))
+
+
+@app.get("/api/tickets/{ticket_id}/messages")
+def api_get_my_ticket_messages(ticket_id: int, since_id: int = 0, auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
+    ticket = db.get_ticket(ticket_id)
+    if not ticket or ticket["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
+    db.mark_ticket_read_by_user(ticket_id)
+    rows = db.get_ticket_messages(ticket_id, since_id=since_id)
+    return {
+        "ticket": _ticket_to_dict(ticket),
+        "messages": [
+            {"id": m["id"], "sender": m["sender"], "message": m["message"], "created_at": m["created_at"]}
+            for m in rows
+        ],
+    }
+
+
+@app.post("/api/tickets/{ticket_id}/messages")
+async def api_send_my_ticket_message(ticket_id: int, body: TicketMessageCreate, auth=Depends(get_verified_user)):
+    tg_id, db, tenant = auth
+    ticket = db.get_ticket(ticket_id)
+    if not ticket or ticket["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
+    if ticket["status"] == "closed":
+        raise HTTPException(status_code=400, detail="این تیکت بسته شده است.")
+    text = (body.message or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="پیام نمی‌تواند خالی باشد.")
+    if len(text) > 2000:
+        raise HTTPException(status_code=400, detail="پیام بیش از حد طولانی است.")
+
+    msg_id = db.add_ticket_message(ticket_id, "user", text)
+
+    user = db.get_user(tg_id)
+    caption = (
+        f"🎫 پیام جدید در تیکت #{ticket_id} ({ticket['subject']})\n"
+        f"👤 {(user['first_name'] if user else '') or ''} (@{(user['username'] if user else '') or '---'})\n\n"
+        f"✉️ {text}"
+    )
+    admin_ids = db.list_admins()
+    async with aiohttp.ClientSession() as session:
+        for admin_id in admin_ids:
+            try:
+                await session.post(
+                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                    json={"chat_id": admin_id, "text": caption, "parse_mode": "Markdown"},
+                )
+            except Exception:
+                pass
+
+    return {"id": msg_id, "sender": "user", "message": text}
+
+
+@app.post("/api/tickets/{ticket_id}/close")
+def api_close_my_ticket(ticket_id: int, auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
+    ticket = db.get_ticket(ticket_id)
+    if not ticket or ticket["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
+    db.close_ticket(ticket_id)
+    return {"status": "ok"}
+
+
 async def send_photo_to_admins(db: Database, bot_token: str, caption: str, reply_markup: str,
                                 photo_bytes: bytes, filename: str, content_type: str):
     """رسید را برای همه‌ی ادمین‌های همین مستأجر ارسال می‌کند. (file_id, تعداد تحویل موفق، نتایج) را برمی‌گرداند."""
@@ -1006,6 +1128,91 @@ def api_admin_delete_reseller(reseller_id: int, purge_db: bool = Query(False), a
         "db_purged": file_removed,
         "note": "بات نماینده حداکثر تا ۱۰ ثانیه دیگر متوقف می‌شود.",
     }
+
+
+# ---------------------------------------------------------------------------
+# مدیریت تیکت‌ها (ادمین)
+# ---------------------------------------------------------------------------
+
+class AdminTicketMessageCreate(BaseModel):
+    message: str
+
+
+@app.get("/api/admin/tickets")
+def api_admin_list_tickets(status: Optional[str] = None, auth=Depends(require_admin)):
+    _, db, _ = auth
+    rows = db.get_all_tickets(status=status)
+    result = []
+    for t in rows:
+        user = db.get_user(t["user_id"])
+        result.append({
+            **_ticket_to_dict(t),
+            "user_id": t["user_id"],
+            "user_name": (user["first_name"] if user else "") or "",
+            "user_username": (user["username"] if user else "") or "",
+        })
+    return result
+
+
+@app.get("/api/admin/tickets/{ticket_id}/messages")
+def api_admin_get_ticket_messages(ticket_id: int, since_id: int = 0, auth=Depends(require_admin)):
+    _, db, _ = auth
+    ticket = db.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
+    db.mark_ticket_read_by_admin(ticket_id)
+    rows = db.get_ticket_messages(ticket_id, since_id=since_id)
+    user = db.get_user(ticket["user_id"])
+    return {
+        "ticket": {
+            **_ticket_to_dict(ticket),
+            "user_id": ticket["user_id"],
+            "user_name": (user["first_name"] if user else "") or "",
+            "user_username": (user["username"] if user else "") or "",
+        },
+        "messages": [
+            {"id": m["id"], "sender": m["sender"], "message": m["message"], "created_at": m["created_at"]}
+            for m in rows
+        ],
+    }
+
+
+@app.post("/api/admin/tickets/{ticket_id}/messages")
+async def api_admin_send_ticket_message(ticket_id: int, body: AdminTicketMessageCreate, auth=Depends(require_admin)):
+    _, db, tenant = auth
+    ticket = db.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
+    text = (body.message or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="پیام نمی‌تواند خالی باشد.")
+    if len(text) > 2000:
+        raise HTTPException(status_code=400, detail="پیام بیش از حد طولانی است.")
+
+    msg_id = db.add_ticket_message(ticket_id, "admin", text)
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                json={
+                    "chat_id": ticket["user_id"],
+                    "text": f"🎫 پاسخ پشتیبانی به تیکت «{ticket['subject']}»:\n\n{text}",
+                },
+            )
+    except Exception:
+        pass
+
+    return {"id": msg_id, "sender": "admin", "message": text}
+
+
+@app.post("/api/admin/tickets/{ticket_id}/close")
+def api_admin_close_ticket(ticket_id: int, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if not db.get_ticket(ticket_id):
+        raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
+    db.close_ticket(ticket_id)
+    return {"status": "ok"}
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
