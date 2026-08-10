@@ -35,7 +35,7 @@ import sqlite3
 
 logging.basicConfig(level=logging.INFO)
 
-from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, resolve_db_path
+from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, resolve_db_path, RESELLER_DBS_DIR
 from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER
 from miniapp.auth import validate_init_data
 
@@ -128,6 +128,16 @@ def get_verified_user(x_init_data: str = Header(...), tenant: Tenant = Depends(g
 def require_admin(auth=Depends(get_verified_user)):
     """مثل get_verified_user، ولی فقط اگر کاربر ادمین همان مستأجر باشد اجازه می‌دهد."""
     tg_id, db, tenant = auth
+    if not db.is_admin(tg_id):
+        raise HTTPException(status_code=403, detail="دسترسی ادمین لازم است.")
+    return auth
+
+
+def require_main_admin(auth=Depends(get_verified_user)):
+    """مثل require_admin، ولی فقط برای بات اصلی مجاز است (نه بات‌های نمایندگی)."""
+    tg_id, db, tenant = auth
+    if tenant.tenant_id:
+        raise HTTPException(status_code=403, detail="این بخش فقط در بات اصلی در دسترس است.")
     if not db.is_admin(tg_id):
         raise HTTPException(status_code=403, detail="دسترسی ادمین لازم است.")
     return auth
@@ -696,6 +706,306 @@ def api_admin_save_menu(body: MenuLayoutUpdate, auth=Depends(require_admin)):
             db.set_setting(meta["toggle_key"], "1" if btn.enabled else "0")
     db.set_menu_order(body.order)
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# مدیریت (فقط ادمین) - دسته‌بندی‌ها و محصولات
+# ---------------------------------------------------------------------------
+
+class CategoryCreate(BaseModel):
+    name: str
+
+
+class CategoryUpdate(BaseModel):
+    name: str
+
+
+class ProductCreate(BaseModel):
+    category_id: int
+    name: str
+    price: int
+    description: str = ""
+    duration_days: int = 30
+
+
+class ProductUpdate(BaseModel):
+    name: Optional[str] = None
+    price: Optional[int] = None
+    description: Optional[str] = None
+    duration_days: Optional[int] = None
+
+
+class ConfigsAdd(BaseModel):
+    links: list[str]
+
+
+@app.get("/api/admin/categories")
+def api_admin_list_categories(auth=Depends(require_admin)):
+    _, db, _ = auth
+    cats = db.get_categories(active_only=False)
+    result = []
+    for c in cats:
+        products = db.get_products(c["id"], active_only=False)
+        result.append({
+            "id": c["id"], "name": c["name"], "is_active": bool(c["is_active"]),
+            "product_count": len(products),
+        })
+    return result
+
+
+@app.post("/api/admin/categories")
+def api_admin_create_category(body: CategoryCreate, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="نام دسته‌بندی نمی‌تواند خالی باشد.")
+    cat_id = db.add_category(body.name.strip())
+    return {"id": cat_id}
+
+
+@app.patch("/api/admin/categories/{cat_id}")
+def api_admin_edit_category(cat_id: int, body: CategoryUpdate, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if not db.get_category(cat_id):
+        raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="نام دسته‌بندی نمی‌تواند خالی باشد.")
+    db.edit_category(cat_id, body.name.strip())
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/categories/{cat_id}/toggle")
+def api_admin_toggle_category(cat_id: int, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if not db.get_category(cat_id):
+        raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
+    db.toggle_category(cat_id)
+    return {"status": "ok"}
+
+
+@app.delete("/api/admin/categories/{cat_id}")
+def api_admin_delete_category(cat_id: int, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if not db.get_category(cat_id):
+        raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
+    db.delete_category(cat_id)
+    return {"status": "ok"}
+
+
+@app.get("/api/admin/categories/{cat_id}/products")
+def api_admin_list_products(cat_id: int, auth=Depends(require_admin)):
+    _, db, _ = auth
+    products = db.get_products(cat_id, active_only=False)
+    return [
+        {
+            "id": p["id"], "name": p["name"], "price": p["price"],
+            "description": p["description"], "duration_days": p["duration_days"],
+            "is_active": bool(p["is_active"]), "stock": db.count_available_configs(p["id"]),
+        }
+        for p in products
+    ]
+
+
+@app.post("/api/admin/products")
+def api_admin_create_product(body: ProductCreate, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if not db.get_category(body.category_id):
+        raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="نام محصول نمی‌تواند خالی باشد.")
+    if body.price < 0:
+        raise HTTPException(status_code=400, detail="قیمت نامعتبر است.")
+    product_id = db.add_product(body.category_id, body.name.strip(), body.price, body.description, body.duration_days)
+    return {"id": product_id}
+
+
+@app.patch("/api/admin/products/{product_id}")
+def api_admin_edit_product(product_id: int, body: ProductUpdate, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if not db.get_product(product_id):
+        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
+    if body.price is not None and body.price < 0:
+        raise HTTPException(status_code=400, detail="قیمت نامعتبر است.")
+    db.edit_product(
+        product_id,
+        name=body.name.strip() if body.name else None,
+        price=body.price,
+        description=body.description,
+        duration_days=body.duration_days,
+    )
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/products/{product_id}/toggle")
+def api_admin_toggle_product(product_id: int, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if not db.get_product(product_id):
+        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
+    db.toggle_product(product_id)
+    return {"status": "ok"}
+
+
+@app.delete("/api/admin/products/{product_id}")
+def api_admin_delete_product(product_id: int, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if not db.get_product(product_id):
+        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
+    db.delete_product(product_id)
+    return {"status": "ok"}
+
+
+@app.get("/api/admin/products/{product_id}/configs")
+def api_admin_list_configs(product_id: int, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if not db.get_product(product_id):
+        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
+    rows = db.get_unused_configs(product_id)
+    return [{"id": r["id"], "link": r["link"]} for r in rows]
+
+
+@app.post("/api/admin/products/{product_id}/configs")
+def api_admin_add_configs(product_id: int, body: ConfigsAdd, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if not db.get_product(product_id):
+        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
+    links = [l.strip() for l in body.links if l.strip()]
+    if not links:
+        raise HTTPException(status_code=400, detail="هیچ لینک معتبری وارد نشده است.")
+    db.add_configs(product_id, links)
+    return {"added": len(links)}
+
+
+@app.delete("/api/admin/configs/{config_id}")
+def api_admin_delete_config(config_id: int, auth=Depends(require_admin)):
+    _, db, _ = auth
+    db.delete_config(config_id)
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# مدیریت نمایندگی‌ها (فقط بات اصلی)
+# ---------------------------------------------------------------------------
+
+class ResellerTokenCheck(BaseModel):
+    token: str
+
+
+class ResellerCreate(BaseModel):
+    token: str
+    username: str
+    owner_telegram_id: int
+    owner_name: str = ""
+
+
+class ResellerUpdate(BaseModel):
+    owner_telegram_id: Optional[int] = None
+    owner_name: Optional[str] = None
+
+
+@app.get("/api/admin/resellers")
+def api_admin_list_resellers(auth=Depends(require_main_admin)):
+    _, db, _ = auth
+    rows = db.list_reseller_bots()
+    return [
+        {
+            "id": r["id"], "bot_username": r["bot_username"], "owner_telegram_id": r["owner_telegram_id"],
+            "owner_name": r["owner_name"], "is_active": bool(r["is_active"]), "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+
+
+@app.post("/api/admin/resellers/validate")
+async def api_admin_validate_reseller_token(body: ResellerTokenCheck, auth=Depends(require_main_admin)):
+    _, db, _ = auth
+    token = body.token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="توکن نمی‌تواند خالی باشد.")
+    for r in db.list_reseller_bots():
+        if r["bot_token"] == token:
+            raise HTTPException(status_code=400, detail="این توکن قبلاً ثبت شده است.")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"https://api.telegram.org/bot{token}/getMe", timeout=10) as resp:
+                data = await resp.json()
+                if not data.get("ok"):
+                    raise HTTPException(status_code=400, detail="این توکن معتبر نیست.")
+                username = data["result"]["username"]
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="این توکن معتبر نیست یا تلگرام در دسترس نیست.")
+    return {"username": username}
+
+
+@app.post("/api/admin/resellers")
+def api_admin_create_reseller(body: ResellerCreate, auth=Depends(require_main_admin)):
+    _, db, _ = auth
+    for r in db.list_reseller_bots():
+        if r["bot_token"] == body.token:
+            raise HTTPException(status_code=400, detail="این توکن قبلاً ثبت شده است.")
+    os.makedirs(RESELLER_DBS_DIR, exist_ok=True)
+    db_path = os.path.join(RESELLER_DBS_DIR, f"{body.username}.db")
+    reseller_id = db.register_reseller_bot(body.token, body.username, body.owner_telegram_id, body.owner_name, db_path)
+
+    # دیتابیس همین نماینده باید بداند شناسه‌ی خودش را تا لینک مینی‌اپ اختصاصی بسازد
+    try:
+        reseller_db = Database(db_path)
+        reseller_db.init_db(owner_id=body.owner_telegram_id)
+        reseller_db.set_setting("miniapp_tenant_id", str(reseller_id))
+    except Exception:
+        logging.getLogger("miniapp.resellers").exception("مقداردهی اولیه دیتابیس نماینده‌ی جدید ناموفق بود.")
+
+    return {
+        "id": reseller_id,
+        "note": "بات نمایندگی ثبت شد. حداکثر تا ۱۰ ثانیه دیگر توسط بات اصلی خودکار روشن می‌شود.",
+    }
+
+
+@app.patch("/api/admin/resellers/{reseller_id}")
+def api_admin_edit_reseller(reseller_id: int, body: ResellerUpdate, auth=Depends(require_main_admin)):
+    _, db, _ = auth
+    if not db.get_reseller_bot(reseller_id):
+        raise HTTPException(status_code=404, detail="نماینده یافت نشد.")
+    db.edit_reseller_bot(
+        reseller_id,
+        owner_telegram_id=body.owner_telegram_id,
+        owner_name=body.owner_name.strip() if body.owner_name else None,
+    )
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/resellers/{reseller_id}/toggle")
+def api_admin_toggle_reseller(reseller_id: int, auth=Depends(require_main_admin)):
+    _, db, _ = auth
+    if not db.get_reseller_bot(reseller_id):
+        raise HTTPException(status_code=404, detail="نماینده یافت نشد.")
+    db.toggle_reseller_bot(reseller_id)
+    return {"status": "ok", "note": "تغییر وضعیت حداکثر تا ۱۰ ثانیه دیگر روی بات اعمال می‌شود."}
+
+
+@app.delete("/api/admin/resellers/{reseller_id}")
+def api_admin_delete_reseller(reseller_id: int, purge_db: bool = Query(False), auth=Depends(require_main_admin)):
+    _, db, _ = auth
+    reseller_bot = db.get_reseller_bot(reseller_id)
+    if not reseller_bot:
+        raise HTTPException(status_code=404, detail="نماینده یافت نشد.")
+    db.delete_reseller_bot(reseller_id)
+
+    file_removed = False
+    if purge_db:
+        resolved_path = resolve_db_path(reseller_bot["db_path"])
+        try:
+            if os.path.exists(resolved_path):
+                os.remove(resolved_path)
+                file_removed = True
+        except OSError:
+            logging.getLogger("miniapp.resellers").exception("حذف فایل دیتابیس نماینده ناموفق بود: %s", resolved_path)
+
+    return {
+        "status": "ok",
+        "db_purged": file_removed,
+        "note": "بات نماینده حداکثر تا ۱۰ ثانیه دیگر متوقف می‌شود.",
+    }
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
