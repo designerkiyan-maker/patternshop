@@ -826,7 +826,7 @@ const STYLE_OPTIONS = [
   { value: "danger", label: "🔴 قرمز" },
 ];
 
-let adminSection = "stats"; // stats | menu | catalog | tickets | sales | resellers
+let adminSection = "stats"; // stats | menu | branding | catalog | tickets | sales | users | resellers
 let adminCatalogView = { level: "categories" }; // categories | products | configs
 let adminTicketView = { level: "list" }; // list | thread
 
@@ -836,7 +836,9 @@ async function renderAdmin() {
     <div class="segmented" id="admin-section-tabs">
       <button class="seg-btn ${adminSection === "stats" ? "active" : ""}" data-section="stats">آمار</button>
       <button class="seg-btn ${adminSection === "menu" ? "active" : ""}" data-section="menu">چیدمان منو</button>
+      <button class="seg-btn ${adminSection === "branding" ? "active" : ""}" data-section="branding">برندینگ</button>
       <button class="seg-btn ${adminSection === "catalog" ? "active" : ""}" data-section="catalog">محصولات</button>
+      <button class="seg-btn ${adminSection === "users" ? "active" : ""}" data-section="users">مدیریت کاربران</button>
       <button class="seg-btn ${adminSection === "sales" ? "active" : ""}" data-section="sales">فروش</button>
       <button class="seg-btn ${adminSection === "tickets" ? "active" : ""}" data-section="tickets">تیکت‌ها</button>
       ${isMainBot ? `<button class="seg-btn ${adminSection === "resellers" ? "active" : ""}" data-section="resellers">نمایندگی‌ها</button>` : ""}
@@ -853,7 +855,9 @@ async function renderAdmin() {
   });
   if (adminSection === "stats") await renderAdminStatsSection();
   else if (adminSection === "menu") await renderAdminMenuSection();
+  else if (adminSection === "branding") await renderAdminBrandingSection();
   else if (adminSection === "catalog") await renderAdminCatalogSection();
+  else if (adminSection === "users") await renderAdminUsersSection();
   else if (adminSection === "sales") await renderAdminSalesSection();
   else if (adminSection === "tickets") await renderAdminTicketsSection();
   else if (adminSection === "resellers" && isMainBot) await renderAdminResellersSection();
@@ -919,11 +923,29 @@ async function renderAdminMenuSection() {
   const body = document.getElementById("admin-section-body");
   body.innerHTML = skeleton(3);
   try {
-    const [branding, menu] = await Promise.all([
-      api("/api/admin/settings/branding"),
-      api("/api/admin/menu"),
-    ]);
+    const menu = await api("/api/admin/menu");
     adminMenuItems = menu;
+    body.innerHTML = `
+      <p class="hint-text">ترتیب، متن، رنگ و فعال/غیرفعال بودن دکمه‌های منوی اصلی بات را از اینجا مدیریت کن. با فلش‌ها جای دکمه‌ها را جابه‌جا کن.</p>
+      <div class="card" id="admin-menu-list"></div>
+      <button class="btn" id="admin-menu-save">💾 ذخیره تغییرات</button>
+    `;
+    renderAdminMenuList();
+    document.getElementById("admin-menu-save").onclick = saveAdminMenu;
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > برندینگ (نام فروشگاه / بنر / عکس هدر / تم مینی‌اپ)
+// ---------------------------------------------------------------------------
+
+async function renderAdminBrandingSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  try {
+    const branding = await api("/api/admin/settings/branding");
     body.innerHTML = `
       <div class="card">
         <div class="eyebrow" style="margin-top:0">🎨 برندینگ مینی‌اپ</div>
@@ -959,13 +981,7 @@ async function renderAdminMenuSection() {
         <div class="field-error" id="theme-error"></div>
         <button class="btn" id="theme-save">💾 اعمال تم</button>
       </div>
-
-      <p class="hint-text">ترتیب، متن، رنگ و فعال/غیرفعال بودن دکمه‌های منوی اصلی بات را از اینجا مدیریت کن. با فلش‌ها جای دکمه‌ها را جابه‌جا کن.</p>
-      <div class="card" id="admin-menu-list"></div>
-      <button class="btn" id="admin-menu-save">💾 ذخیره تغییرات</button>
     `;
-    renderAdminMenuList();
-    document.getElementById("admin-menu-save").onclick = saveAdminMenu;
 
     document.getElementById("brand-save").onclick = async () => {
       const errBox = document.getElementById("brand-error");
@@ -995,7 +1011,7 @@ async function renderAdminMenuSection() {
         await apiUpload("/api/admin/settings/header-image", fd);
         tg.HapticFeedback.notificationOccurred("success");
         notify("عکس بالای صفحه ذخیره شد. برای دیدن تغییر، صفحه را دوباره باز کن.");
-        renderAdminMenuSection();
+        renderAdminBrandingSection();
       } catch (e) { errBox.textContent = e.message; }
     };
 
@@ -1006,7 +1022,7 @@ async function renderAdminMenuSection() {
         try {
           await api("/api/admin/settings/header-image", { method: "DELETE" });
           tg.HapticFeedback.notificationOccurred("success");
-          renderAdminMenuSection();
+          renderAdminBrandingSection();
         } catch (e) { notify(e.message); }
       };
     }
@@ -1393,6 +1409,69 @@ async function renderAdminConfigs(body) {
 }
 
 // ---------------------------------------------------------------------------
+// تب مدیریت > مدیریت کاربران (کیف‌پول و در آینده امکانات بیشتر)
+// ---------------------------------------------------------------------------
+
+async function renderAdminUsersSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(2);
+  try {
+    body.innerHTML = `
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">✏️ ویرایش موجودی کیف‌پول کاربر</div>
+        <p class="hint-text">آیدی عددی کاربر را وارد کن و مبلغی که می‌خوای به کیف‌پولش اضافه یا ازش کم بشه رو بزن.</p>
+        <label class="field-label">آیدی عددی کاربر (Telegram ID)</label>
+        <input class="input" id="wallet-user-id" type="number" placeholder="مثال: 123456789" style="margin-bottom:8px" />
+        <div id="wallet-user-info" class="hint-text" style="margin:0 0 10px"></div>
+        <label class="field-label">مبلغ تغییر به تومان (برای کاهش، عدد منفی بزن، مثلاً -20000)</label>
+        <input class="input" id="wallet-amount" type="number" placeholder="مثال: 50000 یا -20000" style="margin-bottom:4px" />
+        <div class="field-error" id="wallet-error"></div>
+        <button class="btn" id="wallet-adjust-save" style="margin-top:8px">💾 اعمال تغییر</button>
+      </div>
+    `;
+
+    let walletLookupTimer = null;
+    document.getElementById("wallet-user-id").addEventListener("input", (e) => {
+      const infoBox = document.getElementById("wallet-user-info");
+      const uid = e.target.value.trim();
+      clearTimeout(walletLookupTimer);
+      if (!uid || uid.length < 5) { infoBox.textContent = ""; return; }
+      infoBox.textContent = "در حال بررسی...";
+      walletLookupTimer = setTimeout(async () => {
+        try {
+          const info = await api(`/api/admin/wallet/lookup?telegram_id=${encodeURIComponent(uid)}`);
+          infoBox.innerHTML = `👤 ${info.user_name || "بدون نام"}${info.username ? " (@" + info.username + ")" : ""} — 👛 موجودی فعلی: <b>${fmt(info.wallet_credit)} تومان</b>`;
+        } catch (e2) {
+          infoBox.textContent = "⚠️ " + e2.message;
+        }
+      }, 500);
+    });
+
+    document.getElementById("wallet-adjust-save").onclick = async () => {
+      const errBox = document.getElementById("wallet-error");
+      errBox.textContent = "";
+      const uid = document.getElementById("wallet-user-id").value.trim();
+      const amountRaw = document.getElementById("wallet-amount").value.trim();
+      if (!uid || !amountRaw) { errBox.textContent = "هر دو کادر باید پر باشند."; return; }
+      const amount = Number(amountRaw);
+      if (isNaN(amount) || amount === 0) { errBox.textContent = "مبلغ باید عددی غیرصفر باشد."; return; }
+      try {
+        const res = await api("/api/admin/wallet/adjust", {
+          method: "POST",
+          body: JSON.stringify({ telegram_id: Number(uid), amount }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify(`موجودی ${res.user_name || "کاربر"} به ${fmt(res.new_balance)} تومان تغییر کرد.`);
+        document.getElementById("wallet-amount").value = "";
+        document.getElementById("wallet-user-info").innerHTML = `👤 ${res.user_name || "بدون نام"} — 👛 موجودی فعلی: <b>${fmt(res.new_balance)} تومان</b>`;
+      } catch (e) { errBox.textContent = e.message; }
+    };
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // تب مدیریت > فروش (رفرال / گردونه شانس / یادآوری تمدید / کدهای تخفیف)
 // ---------------------------------------------------------------------------
 
@@ -1408,18 +1487,6 @@ async function renderAdminSalesSection() {
     ]);
 
     body.innerHTML = `
-      <div class="card">
-        <div class="eyebrow" style="margin-top:0">✏️ ویرایش موجودی کیف‌پول کاربر</div>
-        <p class="hint-text">آیدی عددی کاربر را وارد کن و مبلغی که می‌خوای به کیف‌پولش اضافه یا ازش کم بشه رو بزن.</p>
-        <label class="field-label">آیدی عددی کاربر (Telegram ID)</label>
-        <input class="input" id="wallet-user-id" type="number" placeholder="مثال: 123456789" style="margin-bottom:8px" />
-        <div id="wallet-user-info" class="hint-text" style="margin:0 0 10px"></div>
-        <label class="field-label">مبلغ تغییر به تومان (برای کاهش، عدد منفی بزن، مثلاً -20000)</label>
-        <input class="input" id="wallet-amount" type="number" placeholder="مثال: 50000 یا -20000" style="margin-bottom:4px" />
-        <div class="field-error" id="wallet-error"></div>
-        <button class="btn" id="wallet-adjust-save" style="margin-top:8px">💾 اعمال تغییر</button>
-      </div>
-
       <div class="card">
         <div class="eyebrow" style="margin-top:0">🤝 زیرمجموعه‌گیری (رفرال)</div>
         <p class="hint-text">وقتی کاربری با لینک دعوت یکی دیگه وارد بشه و خرید کنه، درصدی از خریدش به‌عنوان اعتبار کیف‌پول به دعوت‌کننده تعلق می‌گیره.</p>
@@ -1504,43 +1571,6 @@ async function renderAdminSalesSection() {
         </div>
       </div>
     `;
-
-    let walletLookupTimer = null;
-    document.getElementById("wallet-user-id").addEventListener("input", (e) => {
-      const infoBox = document.getElementById("wallet-user-info");
-      const uid = e.target.value.trim();
-      clearTimeout(walletLookupTimer);
-      if (!uid || uid.length < 5) { infoBox.textContent = ""; return; }
-      infoBox.textContent = "در حال بررسی...";
-      walletLookupTimer = setTimeout(async () => {
-        try {
-          const info = await api(`/api/admin/wallet/lookup?telegram_id=${encodeURIComponent(uid)}`);
-          infoBox.innerHTML = `👤 ${info.user_name || "بدون نام"}${info.username ? " (@" + info.username + ")" : ""} — 👛 موجودی فعلی: <b>${fmt(info.wallet_credit)} تومان</b>`;
-        } catch (e2) {
-          infoBox.textContent = "⚠️ " + e2.message;
-        }
-      }, 500);
-    });
-
-    document.getElementById("wallet-adjust-save").onclick = async () => {
-      const errBox = document.getElementById("wallet-error");
-      errBox.textContent = "";
-      const uid = document.getElementById("wallet-user-id").value.trim();
-      const amountRaw = document.getElementById("wallet-amount").value.trim();
-      if (!uid || !amountRaw) { errBox.textContent = "هر دو کادر باید پر باشند."; return; }
-      const amount = Number(amountRaw);
-      if (isNaN(amount) || amount === 0) { errBox.textContent = "مبلغ باید عددی غیرصفر باشد."; return; }
-      try {
-        const res = await api("/api/admin/wallet/adjust", {
-          method: "POST",
-          body: JSON.stringify({ telegram_id: Number(uid), amount }),
-        });
-        tg.HapticFeedback.notificationOccurred("success");
-        notify(`موجودی ${res.user_name || "کاربر"} به ${fmt(res.new_balance)} تومان تغییر کرد.`);
-        document.getElementById("wallet-amount").value = "";
-        document.getElementById("wallet-user-info").innerHTML = `👤 ${res.user_name || "بدون نام"} — 👛 موجودی فعلی: <b>${fmt(res.new_balance)} تومان</b>`;
-      } catch (e) { errBox.textContent = e.message; }
-    };
 
     document.getElementById("ref-save").onclick = async () => {
       const errBox = document.getElementById("ref-error");
