@@ -18,6 +18,7 @@ import sys
 import os
 import json
 import random
+import html as html_lib
 from dataclasses import dataclass
 from typing import Optional
 
@@ -176,11 +177,16 @@ def get_asset_version() -> str:
 
 
 @app.get("/", response_class=HTMLResponse)
-def serve_index():
+def serve_index(tenant: Tenant = Depends(get_tenant)):
     with open(os.path.join(STATIC_DIR, "index.html"), encoding="utf-8") as f:
         html = f.read()
     version = get_asset_version()
     html = html.replace("{{VERSION}}", version)
+
+    store_name = tenant.db.get_setting("store_name", "⚡ SHOP VPN")
+    banner_text = tenant.db.get_setting("miniapp_banner_text", "اتصال امن و پایدار برقرار است")
+    html = html.replace("{{STORE_NAME}}", html_lib.escape(store_name))
+    html = html.replace("{{BANNER_TEXT}}", html_lib.escape(banner_text))
     return HTMLResponse(html)
 
 
@@ -1372,6 +1378,83 @@ def api_admin_close_ticket(ticket_id: int, auth=Depends(require_admin)):
         raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
     db.close_ticket(ticket_id)
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# مدیریت برندینگ Mini App (نام فروشگاه / متن بنر) - ادمین
+# ---------------------------------------------------------------------------
+
+class BrandingUpdate(BaseModel):
+    store_name: str
+    banner_text: str
+
+
+@app.get("/api/admin/settings/branding")
+def api_admin_get_branding(auth=Depends(require_admin)):
+    _, db, _ = auth
+    return {
+        "store_name": db.get_setting("store_name", "⚡ SHOP VPN"),
+        "banner_text": db.get_setting("miniapp_banner_text", "اتصال امن و پایدار برقرار است"),
+    }
+
+
+@app.post("/api/admin/settings/branding")
+def api_admin_set_branding(body: BrandingUpdate, auth=Depends(require_admin)):
+    _, db, _ = auth
+    store_name = body.store_name.strip()
+    banner_text = body.banner_text.strip()
+    if not store_name:
+        raise HTTPException(status_code=400, detail="نام فروشگاه نمی‌تواند خالی باشد.")
+    if not banner_text:
+        raise HTTPException(status_code=400, detail="متن بنر نمی‌تواند خالی باشد.")
+    if len(store_name) > 40:
+        raise HTTPException(status_code=400, detail="نام فروشگاه بیش از حد طولانی است.")
+    if len(banner_text) > 80:
+        raise HTTPException(status_code=400, detail="متن بنر بیش از حد طولانی است.")
+    db.set_setting("store_name", store_name)
+    db.set_setting("miniapp_banner_text", banner_text)
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# ویرایش موجودی کیف‌پول کاربر (ادمین)
+# ---------------------------------------------------------------------------
+
+class WalletAdjust(BaseModel):
+    telegram_id: int
+    amount: int  # مثبت = افزایش، منفی = کاهش
+
+
+@app.post("/api/admin/wallet/adjust")
+def api_admin_adjust_wallet(body: WalletAdjust, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if body.amount == 0:
+        raise HTTPException(status_code=400, detail="مقدار تغییر نمی‌تواند صفر باشد.")
+    user = db.get_user(body.telegram_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربری با این آیدی عددی پیدا نشد.")
+    db.add_wallet_credit(body.telegram_id, body.amount)
+    new_balance = db.get_wallet_credit(body.telegram_id)
+    return {
+        "status": "ok",
+        "user_name": user["first_name"] or "",
+        "new_balance": new_balance,
+    }
+
+
+# ---------------------------------------------------------------------------
+# دریافت یک کانفیگ رندوم آزاد (ادمین)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/admin/products/{product_id}/take-random-config")
+def api_admin_take_random_config(product_id: int, auth=Depends(require_admin)):
+    tg_id, db, _ = auth
+    if not db.get_product(product_id):
+        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
+    result = db.admin_take_random_config(product_id, tg_id)
+    if not result:
+        raise HTTPException(status_code=400, detail="کانفیگ آزادی برای این محصول موجود نیست.")
+    return result
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
