@@ -917,15 +917,47 @@ async function renderAdminStatsSection() {
 
 async function renderAdminMenuSection() {
   const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
   try {
-    adminMenuItems = await api("/api/admin/menu");
+    const [branding, menu] = await Promise.all([
+      api("/api/admin/settings/branding"),
+      api("/api/admin/menu"),
+    ]);
+    adminMenuItems = menu;
     body.innerHTML = `
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🎨 برندینگ مینی‌اپ</div>
+        <p class="hint-text">نام و متن بالای صفحه‌ی مینی‌اپ (بنر) همینجا قابل تغییره.</p>
+        <label class="field-label">نام فروشگاه (بالای صفحه، کنار آیکون ⚡)</label>
+        <input class="input" id="brand-store-name" type="text" placeholder="مثال: SHOP VPN" value="${branding.store_name.replace(/"/g, "&quot;")}" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:10px" />
+        <label class="field-label">متن بنر (زیر نام کاربر، مثلاً یک شعار کوتاه)</label>
+        <input class="input" id="brand-banner-text" type="text" placeholder="مثال: اتصال امن و پایدار برقرار است" value="${branding.banner_text.replace(/"/g, "&quot;")}" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:4px" />
+        <div class="field-error" id="brand-error"></div>
+        <button class="btn" id="brand-save" style="margin-top:8px">💾 ذخیره برندینگ</button>
+      </div>
+
       <p class="hint-text">ترتیب، متن، رنگ و فعال/غیرفعال بودن دکمه‌های منوی اصلی بات را از اینجا مدیریت کن. با فلش‌ها جای دکمه‌ها را جابه‌جا کن.</p>
       <div class="card" id="admin-menu-list"></div>
       <button class="btn" id="admin-menu-save">💾 ذخیره تغییرات</button>
     `;
     renderAdminMenuList();
     document.getElementById("admin-menu-save").onclick = saveAdminMenu;
+
+    document.getElementById("brand-save").onclick = async () => {
+      const errBox = document.getElementById("brand-error");
+      errBox.textContent = "";
+      const storeName = document.getElementById("brand-store-name").value.trim();
+      const bannerText = document.getElementById("brand-banner-text").value.trim();
+      if (!storeName || !bannerText) { errBox.textContent = "هر دو کادر باید پر باشند."; return; }
+      try {
+        await api("/api/admin/settings/branding", {
+          method: "POST",
+          body: JSON.stringify({ store_name: storeName, banner_text: bannerText }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("برندینگ ذخیره شد. برای دیدن تغییر، صفحه را دوباره باز کن.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
   } catch (e) {
     body.innerHTML = errorState(e.message);
   }
@@ -1208,8 +1240,15 @@ async function renderAdminConfigs(body) {
   body.innerHTML = `
     <button class="btn outline small" id="back-to-prods" style="width:auto;margin-bottom:12px">→ بازگشت به محصولات «${categoryName}»</button>
     <div class="eyebrow" style="margin-top:0">بانک کانفیگ «${productName}»</div>
-    <p class="hint-text">موجودی فعلی: ${configs.length} کانفیگ استفاده‌نشده</p>
     <div class="card">
+      <div class="eyebrow" style="margin-top:0">🎲 دریافت کانفیگ رندوم</div>
+      <p class="hint-text">یکی از کانفیگ‌های آزاد این محصول به‌صورت تصادفی برداشته و به تو اختصاص داده می‌شود (از انبار کم می‌شود).</p>
+      <button class="btn outline" id="take-random-cfg-btn">🎲 دریافت یک کانفیگ رندوم</button>
+      <div id="random-cfg-result"></div>
+    </div>
+    <div class="card">
+      <p class="hint-text" id="cfg-stock-count" style="margin:0 0 10px">موجودی فعلی: ${configs.length} کانفیگ استفاده‌نشده</p>
+      <div id="cfg-list-box">
       ${configs.length === 0 ? `<div class="hint-text" style="margin:0">کانفیگی در انبار نیست.</div>` : configs.map((c) => `
         <div class="admin-list-row">
           <div class="admin-list-row-main" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.link}</div>
@@ -1218,6 +1257,7 @@ async function renderAdminConfigs(body) {
           </div>
         </div>
       `).join("")}
+      </div>
     </div>
     <div class="card">
       <div class="eyebrow" style="margin-top:0">افزودن دسته‌ای کانفیگ</div>
@@ -1229,6 +1269,43 @@ async function renderAdminConfigs(body) {
   document.getElementById("back-to-prods").onclick = () => {
     adminCatalogView = { level: "products", categoryId, categoryName };
     renderAdmin();
+  };
+  document.getElementById("take-random-cfg-btn").onclick = async () => {
+    const resultBox = document.getElementById("random-cfg-result");
+    try {
+      const res = await api(`/api/admin/products/${productId}/take-random-config`, { method: "POST" });
+      tg.HapticFeedback.notificationOccurred("success");
+      resultBox.innerHTML = `
+        <div class="hint-text" style="margin:10px 0 4px">کانفیگ دریافت‌شده (این مورد از انبار کم شد):</div>
+        <div class="input" style="direction:ltr;text-align:left;word-break:break-all;user-select:all">${res.link}</div>
+      `;
+      // به‌جای رفرش کامل صفحه (که نتیجه‌ی بالا را پاک می‌کند)، فقط لیست و شمارنده را به‌روزرسانی می‌کنیم
+      const idx = configs.findIndex((c) => c.id === res.id);
+      if (idx !== -1) configs.splice(idx, 1);
+      const listBox = document.getElementById("cfg-list-box");
+      listBox.innerHTML = configs.length === 0
+        ? `<div class="hint-text" style="margin:0">کانفیگی در انبار نیست.</div>`
+        : configs.map((c) => `
+            <div class="admin-list-row">
+              <div class="admin-list-row-main" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.link}</div>
+              <div class="admin-list-row-actions">
+                <button class="btn small outline danger" data-del-cfg="${c.id}">🗑️</button>
+              </div>
+            </div>
+          `).join("");
+      listBox.querySelectorAll("[data-del-cfg]").forEach((el) => {
+        el.onclick = async () => {
+          if (!confirm("این کانفیگ حذف شود؟")) return;
+          try {
+            await api(`/api/admin/configs/${el.dataset.delCfg}`, { method: "DELETE" });
+            renderAdmin();
+          } catch (e2) { notify(e2.message); }
+        };
+      });
+      document.getElementById("cfg-stock-count").textContent = `موجودی فعلی: ${configs.length} کانفیگ استفاده‌نشده`;
+    } catch (e) {
+      resultBox.innerHTML = `<div class="field-error" style="margin-top:10px">${e.message}</div>`;
+    }
   };
   body.querySelectorAll("[data-del-cfg]").forEach((el) => {
     el.onclick = async () => {
@@ -1268,6 +1345,17 @@ async function renderAdminSalesSection() {
     ]);
 
     body.innerHTML = `
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">✏️ ویرایش موجودی کیف‌پول کاربر</div>
+        <p class="hint-text">آیدی عددی کاربر را وارد کن و مبلغی که می‌خوای به کیف‌پولش اضافه یا ازش کم بشه رو بزن.</p>
+        <label class="field-label">آیدی عددی کاربر (Telegram ID)</label>
+        <input class="input" id="wallet-user-id" type="number" placeholder="مثال: 123456789" style="margin-bottom:10px" />
+        <label class="field-label">مبلغ تغییر به تومان (برای کاهش، عدد منفی بزن، مثلاً -20000)</label>
+        <input class="input" id="wallet-amount" type="number" placeholder="مثال: 50000 یا -20000" style="margin-bottom:4px" />
+        <div class="field-error" id="wallet-error"></div>
+        <button class="btn" id="wallet-adjust-save" style="margin-top:8px">💾 اعمال تغییر</button>
+      </div>
+
       <div class="card">
         <div class="eyebrow" style="margin-top:0">🤝 زیرمجموعه‌گیری (رفرال)</div>
         <p class="hint-text">وقتی کاربری با لینک دعوت یکی دیگه وارد بشه و خرید کنه، درصدی از خریدش به‌عنوان اعتبار کیف‌پول به دعوت‌کننده تعلق می‌گیره.</p>
@@ -1352,6 +1440,25 @@ async function renderAdminSalesSection() {
         </div>
       </div>
     `;
+
+    document.getElementById("wallet-adjust-save").onclick = async () => {
+      const errBox = document.getElementById("wallet-error");
+      errBox.textContent = "";
+      const uid = document.getElementById("wallet-user-id").value.trim();
+      const amountRaw = document.getElementById("wallet-amount").value.trim();
+      if (!uid || !amountRaw) { errBox.textContent = "هر دو کادر باید پر باشند."; return; }
+      const amount = Number(amountRaw);
+      if (isNaN(amount) || amount === 0) { errBox.textContent = "مبلغ باید عددی غیرصفر باشد."; return; }
+      try {
+        const res = await api("/api/admin/wallet/adjust", {
+          method: "POST",
+          body: JSON.stringify({ telegram_id: Number(uid), amount }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify(`موجودی ${res.user_name || "کاربر"} به ${fmt(res.new_balance)} تومان تغییر کرد.`);
+        document.getElementById("wallet-amount").value = "";
+      } catch (e) { errBox.textContent = e.message; }
+    };
 
     document.getElementById("ref-save").onclick = async () => {
       const errBox = document.getElementById("ref-error");
