@@ -270,6 +270,43 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         )
 
     # -------------------------------------------------------------------
+    # دریافت یک کانفیگ رندوم آزاد (خارج از فرآیند سفارش، برای فروش دستی)
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_random_cfg")
+    async def cb_admin_random_cfg(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        products = db.get_all_products()
+        if not products:
+            await call.answer("ابتدا باید یک محصول بسازید.", show_alert=True)
+            return
+        await call.message.edit_text(
+            "دریافت یک کانفیگ رندوم آزاد از کدام محصول؟",
+            reply_markup=kb.admin_pick_product_kb(products, "adm_randomcfg_prod"),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_randomcfg_prod:"))
+    async def cb_admin_random_cfg_pick(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        product_id = int(call.data.split(":")[1])
+        product = db.get_product(product_id)
+        result = db.admin_take_random_config(product_id, call.from_user.id)
+        if not result:
+            await call.answer("کانفیگ آزادی برای این محصول موجود نیست.", show_alert=True)
+            return
+        expires_display = (result.get("expires_at") or "")[:10] or "-"
+        text = (
+            f"🎲 یک کانفیگ رندوم از انبار «{product['name'] if product else 'محصول'}» برداشته و از انبار کم شد:\n\n"
+            f"`{result['link']}`\n\n"
+            f"⏳ تاریخ انقضا: {expires_display}"
+        )
+        await call.message.edit_text(text, parse_mode="Markdown", reply_markup=kb.admin_back_kb())
+        await call.answer("کانفیگ دریافت شد ✅")
+
+    # -------------------------------------------------------------------
     # مدیریت کانفیگ تست
     # -------------------------------------------------------------------
 

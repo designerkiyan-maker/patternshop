@@ -201,6 +201,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_categories", "📂 مدیریت دسته‌بندی‌ها", "adm_categories"),
     ("adm_products", "📦 مدیریت محصولات", "adm_products"),
     ("adm_add_configs", "🔗 افزودن کانفیگ به محصول", "adm_add_configs"),
+    ("adm_random_cfg", "🎲 دریافت کانفیگ رندوم", "adm_random_cfg"),
     ("adm_test_menu", "🧪 مدیریت کانفیگ تست", "adm_test_menu"),
     ("adm_forcejoin_menu", "📢 عضویت اجباری در کانال", "adm_forcejoin_menu"),
     ("adm_pending_orders", "🧾 سفارش‌های در انتظار", "adm_pending_orders"),
