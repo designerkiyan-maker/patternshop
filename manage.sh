@@ -20,17 +20,24 @@ BRAND_NAME="SHOP VPN"
 # نسخه به‌صورت خودکار از روی گیت محاسبه می‌شود (شماره‌ی کامیت + هش کوتاه)
 # تا با هر آپدیت (پول جدید از گیت‌هاب)، نسخه‌ی نمایش داده‌شده هم خودکار عوض شود
 # و همیشه مشخص باشد که آخرین نسخه در حال اجراست یا نه.
+# نسخه از فایل VERSION خوانده می‌شود (عددی که فقط با تغییرات واقعی و قابل‌توجه
+# بالا می‌رود، نه با هر کامیت خام). هش کوتاه گیت هم برای شناسایی دقیق build
+# کنارش نمایش داده می‌شود. اگر فایل VERSION نبود، به همان روش قدیمی
+# (شماره‌ی کامیت) برمی‌گردد تا هیچ‌وقت بنر خالی نماند.
 get_version() {
-    if [ -d "$INSTALL_DIR/.git" ]; then
-        local count hash
-        count=$(git -C "$INSTALL_DIR" rev-list --count HEAD 2>/dev/null)
-        hash=$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null)
-        if [ -n "$count" ] && [ -n "$hash" ]; then
-            echo "v${count} (${hash})"
-            return
-        fi
+    local base hash
+    if [ -f "$INSTALL_DIR/VERSION" ]; then
+        base="v$(cat "$INSTALL_DIR/VERSION" 2>/dev/null | tr -d '[:space:]')"
+    elif [ -d "$INSTALL_DIR/.git" ]; then
+        base="v$(git -C "$INSTALL_DIR" rev-list --count HEAD 2>/dev/null)"
+    else
+        base="v1.0"
     fi
-    echo "v1.0"
+    if [ -d "$INSTALL_DIR/.git" ]; then
+        hash=$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null)
+        [ -n "$hash" ] && base="${base} (${hash})"
+    fi
+    echo "$base"
 }
 
 # جلوگیری از گیر کردن apt پشت پنجره‌های تعاملی (مثل پرسش needrestart برای ری‌استارت سرویس‌ها)
