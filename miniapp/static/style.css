@@ -472,6 +472,39 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
 .menu-toggle input { width: 16px; height: 16px; accent-color: var(--cyan); }
 
 /* ===================================================================
+   مدیریت محصولات (دسته‌بندی/محصول/کانفیگ) - تب ادمین
+=================================================================== */
+.segmented {
+  display: flex; gap: 6px; margin-bottom: 14px;
+  background: var(--bg-elevated); border: 1px solid var(--glass-brd);
+  border-radius: var(--radius-sm); padding: 4px;
+}
+.seg-btn {
+  flex: 1; border: none; background: transparent; color: var(--text-muted);
+  padding: 8px 6px; border-radius: 8px; font-family: var(--font-body);
+  font-size: 12.5px; cursor: pointer;
+}
+.seg-btn.active { background: var(--cyan); color: #06222a; font-weight: 700; }
+
+.admin-list-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 0; border-bottom: 1px solid var(--glass-brd);
+}
+.admin-list-row:last-child { border-bottom: none; }
+.admin-list-row-main {
+  display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;
+  cursor: pointer;
+}
+.admin-list-row-main span:first-child { font-size: 13.5px; color: var(--text); font-weight: 600; }
+.admin-list-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.btn.danger, .btn.outline.danger {
+  border-color: rgba(239, 68, 68, 0.45); color: #f87171;
+}
+
+textarea.input { font-family: var(--font-mono); min-height: 90px; }
+
+/* ===================================================================
    Loading / empty / error states
 =================================================================== */
 .skeleton-block { display: flex; flex-direction: column; gap: 10px; }

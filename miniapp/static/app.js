@@ -670,12 +670,33 @@ const STYLE_OPTIONS = [
   { value: "danger", label: "🔴 قرمز" },
 ];
 
+let adminSection = "menu"; // menu | catalog
+let adminCatalogView = { level: "categories" }; // categories | products | configs
+
 async function renderAdmin() {
-  content.innerHTML = skeleton(4);
+  content.innerHTML = `
+    <div class="segmented" id="admin-section-tabs">
+      <button class="seg-btn ${adminSection === "menu" ? "active" : ""}" data-section="menu">چیدمان منو</button>
+      <button class="seg-btn ${adminSection === "catalog" ? "active" : ""}" data-section="catalog">محصولات</button>
+    </div>
+    <div id="admin-section-body">${skeleton(4)}</div>
+  `;
+  document.querySelectorAll("#admin-section-tabs .seg-btn").forEach((b) => {
+    b.onclick = () => {
+      adminSection = b.dataset.section;
+      if (adminSection === "catalog") adminCatalogView = { level: "categories" };
+      renderAdmin();
+    };
+  });
+  if (adminSection === "menu") await renderAdminMenuSection();
+  else await renderAdminCatalogSection();
+}
+
+async function renderAdminMenuSection() {
+  const body = document.getElementById("admin-section-body");
   try {
     adminMenuItems = await api("/api/admin/menu");
-    content.innerHTML = `
-      <div class="eyebrow">مدیریت منوی اصلی بات</div>
+    body.innerHTML = `
       <p class="hint-text">ترتیب، متن، رنگ و فعال/غیرفعال بودن دکمه‌های منوی اصلی بات را از اینجا مدیریت کن. با فلش‌ها جای دکمه‌ها را جابه‌جا کن.</p>
       <div class="card" id="admin-menu-list"></div>
       <button class="btn" id="admin-menu-save">💾 ذخیره تغییرات</button>
@@ -683,7 +704,7 @@ async function renderAdmin() {
     renderAdminMenuList();
     document.getElementById("admin-menu-save").onclick = saveAdminMenu;
   } catch (e) {
-    content.innerHTML = errorState(e.message);
+    body.innerHTML = errorState(e.message);
   }
 }
 
@@ -777,8 +798,238 @@ async function saveAdminMenu() {
 }
 
 // ---------------------------------------------------------------------------
-// تب‌ها
+// تب مدیریت > محصولات (دسته‌بندی‌ها / محصولات / بانک کانفیگ)
 // ---------------------------------------------------------------------------
+
+async function renderAdminCatalogSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  try {
+    if (adminCatalogView.level === "categories") {
+      await renderAdminCategories(body);
+    } else if (adminCatalogView.level === "products") {
+      await renderAdminProducts(body);
+    } else if (adminCatalogView.level === "configs") {
+      await renderAdminConfigs(body);
+    }
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+async function renderAdminCategories(body) {
+  const cats = await api("/api/admin/categories");
+  body.innerHTML = `
+    <div class="card">
+      ${cats.length === 0 ? `<div class="hint-text" style="margin:0">هنوز دسته‌بندی‌ای ثبت نشده.</div>` : cats.map((c) => `
+        <div class="admin-list-row">
+          <div class="admin-list-row-main" data-open-cat="${c.id}" data-cat-name="${(c.name || "").replace(/"/g, "&quot;")}">
+            <span>${c.name}</span>
+            <span class="hint-text" style="margin:0">${c.product_count} محصول ${c.is_active ? "" : "· غیرفعال"}</span>
+          </div>
+          <div class="admin-list-row-actions">
+            <button class="btn small outline" data-edit-cat="${c.id}">✏️</button>
+            <button class="btn small outline" data-toggle-cat="${c.id}">${c.is_active ? "⛔️" : "✅"}</button>
+            <button class="btn small outline danger" data-del-cat="${c.id}">🗑️</button>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">افزودن دسته‌بندی جدید</div>
+      <input class="input" id="new-cat-name" type="text" placeholder="نام دسته‌بندی" style="direction:rtl;text-align:right;font-family:var(--font-body)" />
+      <button class="btn" id="new-cat-save" style="margin-top:8px">➕ افزودن</button>
+    </div>
+  `;
+  body.querySelectorAll("[data-open-cat]").forEach((el) => {
+    el.onclick = () => {
+      adminCatalogView = { level: "products", categoryId: Number(el.dataset.openCat), categoryName: el.dataset.catName };
+      renderAdmin();
+    };
+  });
+  body.querySelectorAll("[data-edit-cat]").forEach((el) => {
+    el.onclick = async () => {
+      const cat = cats.find((c) => c.id === Number(el.dataset.editCat));
+      const name = prompt("نام جدید دسته‌بندی:", cat.name);
+      if (!name || !name.trim()) return;
+      try {
+        await api(`/api/admin/categories/${cat.id}`, { method: "PATCH", body: JSON.stringify({ name: name.trim() }) });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
+    };
+  });
+  body.querySelectorAll("[data-toggle-cat]").forEach((el) => {
+    el.onclick = async () => {
+      try {
+        await api(`/api/admin/categories/${el.dataset.toggleCat}/toggle`, { method: "POST" });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
+    };
+  });
+  body.querySelectorAll("[data-del-cat]").forEach((el) => {
+    el.onclick = async () => {
+      if (!confirm("حذف این دسته‌بندی و همه‌ی محصولاتش؟ این کار برگشت‌ناپذیر است.")) return;
+      try {
+        await api(`/api/admin/categories/${el.dataset.delCat}`, { method: "DELETE" });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
+    };
+  });
+  document.getElementById("new-cat-save").onclick = async () => {
+    const input = document.getElementById("new-cat-name");
+    if (!input.value.trim()) return;
+    try {
+      await api("/api/admin/categories", { method: "POST", body: JSON.stringify({ name: input.value.trim() }) });
+      renderAdmin();
+    } catch (e) { notify(e.message); }
+  };
+}
+
+async function renderAdminProducts(body) {
+  const { categoryId, categoryName } = adminCatalogView;
+  const products = await api(`/api/admin/categories/${categoryId}/products`);
+  body.innerHTML = `
+    <button class="btn outline small" id="back-to-cats" style="width:auto;margin-bottom:12px">→ بازگشت به دسته‌بندی‌ها</button>
+    <div class="eyebrow" style="margin-top:0">محصولات «${categoryName}»</div>
+    <div class="card">
+      ${products.length === 0 ? `<div class="hint-text" style="margin:0">هنوز محصولی در این دسته ثبت نشده.</div>` : products.map((p) => `
+        <div class="admin-list-row">
+          <div class="admin-list-row-main" data-open-prod="${p.id}" data-prod-name="${(p.name || "").replace(/"/g, "&quot;")}">
+            <span>${p.name}</span>
+            <span class="hint-text" style="margin:0">${fmt(p.price)} تومان · موجودی: ${p.stock} ${p.is_active ? "" : "· غیرفعال"}</span>
+          </div>
+          <div class="admin-list-row-actions">
+            <button class="btn small outline" data-edit-prod="${p.id}">✏️</button>
+            <button class="btn small outline" data-toggle-prod="${p.id}">${p.is_active ? "⛔️" : "✅"}</button>
+            <button class="btn small outline danger" data-del-prod="${p.id}">🗑️</button>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">افزودن محصول جدید</div>
+      <input class="input" id="new-prod-name" type="text" placeholder="نام محصول" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:8px" />
+      <input class="input" id="new-prod-price" type="number" placeholder="قیمت (تومان)" style="margin-bottom:8px" />
+      <input class="input" id="new-prod-duration" type="number" placeholder="مدت اعتبار (روز)" value="30" style="margin-bottom:8px" />
+      <input class="input" id="new-prod-desc" type="text" placeholder="توضیحات (اختیاری)" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:8px" />
+      <button class="btn" id="new-prod-save">➕ افزودن محصول</button>
+    </div>
+  `;
+  document.getElementById("back-to-cats").onclick = () => {
+    adminCatalogView = { level: "categories" };
+    renderAdmin();
+  };
+  body.querySelectorAll("[data-open-prod]").forEach((el) => {
+    el.onclick = () => {
+      adminCatalogView = {
+        level: "configs", productId: Number(el.dataset.openProd), productName: el.dataset.prodName,
+        categoryId, categoryName,
+      };
+      renderAdmin();
+    };
+  });
+  body.querySelectorAll("[data-edit-prod]").forEach((el) => {
+    el.onclick = async () => {
+      const p = products.find((x) => x.id === Number(el.dataset.editProd));
+      const name = prompt("نام محصول:", p.name);
+      if (name === null) return;
+      const price = prompt("قیمت (تومان):", p.price);
+      if (price === null) return;
+      const duration = prompt("مدت اعتبار (روز):", p.duration_days);
+      if (duration === null) return;
+      try {
+        await api(`/api/admin/products/${p.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name: name.trim() || undefined, price: Number(price), duration_days: Number(duration) }),
+        });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
+    };
+  });
+  body.querySelectorAll("[data-toggle-prod]").forEach((el) => {
+    el.onclick = async () => {
+      try {
+        await api(`/api/admin/products/${el.dataset.toggleProd}/toggle`, { method: "POST" });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
+    };
+  });
+  body.querySelectorAll("[data-del-prod]").forEach((el) => {
+    el.onclick = async () => {
+      if (!confirm("حذف این محصول و بانک کانفیگ‌هایش؟ این کار برگشت‌ناپذیر است.")) return;
+      try {
+        await api(`/api/admin/products/${el.dataset.delProd}`, { method: "DELETE" });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
+    };
+  });
+  document.getElementById("new-prod-save").onclick = async () => {
+    const name = document.getElementById("new-prod-name").value.trim();
+    const price = Number(document.getElementById("new-prod-price").value);
+    const duration = Number(document.getElementById("new-prod-duration").value) || 30;
+    const desc = document.getElementById("new-prod-desc").value.trim();
+    if (!name || !price) { notify("نام و قیمت الزامی است."); return; }
+    try {
+      await api("/api/admin/products", {
+        method: "POST",
+        body: JSON.stringify({ category_id: categoryId, name, price, duration_days: duration, description: desc }),
+      });
+      renderAdmin();
+    } catch (e) { notify(e.message); }
+  };
+}
+
+async function renderAdminConfigs(body) {
+  const { productId, productName, categoryId, categoryName } = adminCatalogView;
+  const configs = await api(`/api/admin/products/${productId}/configs`);
+  body.innerHTML = `
+    <button class="btn outline small" id="back-to-prods" style="width:auto;margin-bottom:12px">→ بازگشت به محصولات «${categoryName}»</button>
+    <div class="eyebrow" style="margin-top:0">بانک کانفیگ «${productName}»</div>
+    <p class="hint-text">موجودی فعلی: ${configs.length} کانفیگ استفاده‌نشده</p>
+    <div class="card">
+      ${configs.length === 0 ? `<div class="hint-text" style="margin:0">کانفیگی در انبار نیست.</div>` : configs.map((c) => `
+        <div class="admin-list-row">
+          <div class="admin-list-row-main" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.link}</div>
+          <div class="admin-list-row-actions">
+            <button class="btn small outline danger" data-del-cfg="${c.id}">🗑️</button>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">افزودن دسته‌ای کانفیگ</div>
+      <p class="hint-text">هر خط یک لینک کانفیگ (vmess/vless/...) وارد کن.</p>
+      <textarea class="input" id="new-configs-bulk" rows="5" style="direction:ltr;text-align:left;resize:vertical"></textarea>
+      <button class="btn" id="new-configs-save" style="margin-top:8px">➕ افزودن به انبار</button>
+    </div>
+  `;
+  document.getElementById("back-to-prods").onclick = () => {
+    adminCatalogView = { level: "products", categoryId, categoryName };
+    renderAdmin();
+  };
+  body.querySelectorAll("[data-del-cfg]").forEach((el) => {
+    el.onclick = async () => {
+      if (!confirm("این کانفیگ حذف شود؟")) return;
+      try {
+        await api(`/api/admin/configs/${el.dataset.delCfg}`, { method: "DELETE" });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
+    };
+  });
+  document.getElementById("new-configs-save").onclick = async () => {
+    const raw = document.getElementById("new-configs-bulk").value;
+    const links = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (links.length === 0) { notify("هیچ لینکی وارد نشده."); return; }
+    try {
+      const res = await api(`/api/admin/products/${productId}/configs`, { method: "POST", body: JSON.stringify({ links }) });
+      tg.HapticFeedback.notificationOccurred("success");
+      notify(`${res.added} کانفیگ اضافه شد.`);
+      renderAdmin();
+    } catch (e) { notify(e.message); }
+  };
+}
+
+
 const tabs = {
   home: renderHome,
   store: renderStore,
