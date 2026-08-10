@@ -1131,6 +1131,155 @@ def api_admin_delete_reseller(reseller_id: int, purge_db: bool = Query(False), a
 
 
 # ---------------------------------------------------------------------------
+# مدیریت تنظیمات - رفرال / گردونه شانس / یادآوری تمدید (ادمین)
+# ---------------------------------------------------------------------------
+
+class ReferralSettingsUpdate(BaseModel):
+    enabled: bool
+    percent: int
+
+
+class WheelSettingsUpdate(BaseModel):
+    enabled: bool
+    win_percent: int
+    prizes: list[int]
+    expiry_hours: int
+    cooldown_hours: int
+
+
+class RenewalSettingsUpdate(BaseModel):
+    enabled: bool
+    days_before: int
+    discount_percent: int
+    discount_expiry_hours: int
+
+
+@app.get("/api/admin/settings/referral")
+def api_admin_get_referral_settings(auth=Depends(require_admin)):
+    _, db, _ = auth
+    return {
+        "enabled": db.get_setting("referral_enabled", "1") == "1",
+        "percent": int(db.get_setting("referral_percent", "10") or 0),
+    }
+
+
+@app.post("/api/admin/settings/referral")
+def api_admin_set_referral_settings(body: ReferralSettingsUpdate, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if body.percent < 0 or body.percent > 100:
+        raise HTTPException(status_code=400, detail="درصد باید بین ۰ تا ۱۰۰ باشد.")
+    db.set_setting("referral_enabled", "1" if body.enabled else "0")
+    db.set_setting("referral_percent", str(body.percent))
+    return {"status": "ok"}
+
+
+@app.get("/api/admin/settings/wheel")
+def api_admin_get_wheel_settings(auth=Depends(require_admin)):
+    _, db, _ = auth
+    return db.get_wheel_settings()
+
+
+@app.post("/api/admin/settings/wheel")
+def api_admin_set_wheel_settings(body: WheelSettingsUpdate, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if body.win_percent < 0 or body.win_percent > 100:
+        raise HTTPException(status_code=400, detail="درصد برد باید بین ۰ تا ۱۰۰ باشد.")
+    if not body.prizes or any(p <= 0 for p in body.prizes):
+        raise HTTPException(status_code=400, detail="حداقل یک جایزه‌ی معتبر (بزرگ‌تر از صفر) لازم است.")
+    if body.expiry_hours <= 0 or body.cooldown_hours <= 0:
+        raise HTTPException(status_code=400, detail="مقادیر ساعت باید بزرگ‌تر از صفر باشند.")
+    db.set_setting("wheel_enabled", "1" if body.enabled else "0")
+    db.set_setting("wheel_win_percent", str(body.win_percent))
+    db.set_wheel_prizes(body.prizes)
+    db.set_setting("wheel_code_expiry_hours", str(body.expiry_hours))
+    db.set_setting("wheel_cooldown_hours", str(body.cooldown_hours))
+    return {"status": "ok"}
+
+
+@app.get("/api/admin/settings/renewal")
+def api_admin_get_renewal_settings(auth=Depends(require_admin)):
+    _, db, _ = auth
+    return db.get_renewal_settings()
+
+
+@app.post("/api/admin/settings/renewal")
+def api_admin_set_renewal_settings(body: RenewalSettingsUpdate, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if body.discount_percent < 0 or body.discount_percent > 100:
+        raise HTTPException(status_code=400, detail="درصد تخفیف باید بین ۰ تا ۱۰۰ باشد.")
+    if body.days_before <= 0 or body.discount_expiry_hours <= 0:
+        raise HTTPException(status_code=400, detail="مقادیر روز/ساعت باید بزرگ‌تر از صفر باشند.")
+    db.set_setting("renewal_reminder_enabled", "1" if body.enabled else "0")
+    db.set_setting("renewal_reminder_days_before", str(body.days_before))
+    db.set_setting("renewal_discount_percent", str(body.discount_percent))
+    db.set_setting("renewal_discount_expiry_hours", str(body.discount_expiry_hours))
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# مدیریت کدهای تخفیف (ادمین)
+# ---------------------------------------------------------------------------
+
+class DiscountCreate(BaseModel):
+    code: str
+    percent: Optional[int] = None
+    fixed_amount: Optional[int] = None
+    max_uses: int = 0
+    expires_at: Optional[str] = None
+
+
+def _discount_to_dict(d):
+    return {
+        "id": d["id"], "code": d["code"], "percent": d["percent"], "fixed_amount": d["fixed_amount"],
+        "max_uses": d["max_uses"], "used_count": d["used_count"], "is_active": bool(d["is_active"]),
+        "created_at": d["created_at"],
+    }
+
+
+@app.get("/api/admin/discounts")
+def api_admin_list_discounts(auth=Depends(require_admin)):
+    _, db, _ = auth
+    return [_discount_to_dict(d) for d in db.list_discount_codes()]
+
+
+@app.post("/api/admin/discounts")
+def api_admin_create_discount(body: DiscountCreate, auth=Depends(require_admin)):
+    _, db, _ = auth
+    code = (body.code or "").strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="کد تخفیف نمی‌تواند خالی باشد.")
+    if db.get_discount_code(code):
+        raise HTTPException(status_code=400, detail="این کد قبلاً ثبت شده است.")
+    if body.percent is None and body.fixed_amount is None:
+        raise HTTPException(status_code=400, detail="باید درصد یا مبلغ ثابت تخفیف را مشخص کنی.")
+    if body.percent is not None and (body.percent <= 0 or body.percent > 100):
+        raise HTTPException(status_code=400, detail="درصد باید بین ۱ تا ۱۰۰ باشد.")
+    discount_id = db.create_discount_code(
+        code, percent=body.percent, fixed_amount=body.fixed_amount,
+        max_uses=body.max_uses, expires_at=body.expires_at, source="admin",
+    )
+    return _discount_to_dict(db.get_discount_code_by_id(discount_id))
+
+
+@app.post("/api/admin/discounts/{discount_id}/toggle")
+def api_admin_toggle_discount(discount_id: int, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if not db.get_discount_code_by_id(discount_id):
+        raise HTTPException(status_code=404, detail="کد تخفیف یافت نشد.")
+    db.toggle_discount_code(discount_id)
+    return {"status": "ok"}
+
+
+@app.delete("/api/admin/discounts/{discount_id}")
+def api_admin_delete_discount(discount_id: int, auth=Depends(require_admin)):
+    _, db, _ = auth
+    if not db.get_discount_code_by_id(discount_id):
+        raise HTTPException(status_code=404, detail="کد تخفیف یافت نشد.")
+    db.delete_discount_code(discount_id)
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
 # مدیریت تیکت‌ها (ادمین)
 # ---------------------------------------------------------------------------
 
