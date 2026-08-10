@@ -240,6 +240,25 @@ class Database:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     is_read_by_user INTEGER DEFAULT 0
                 );
+
+                CREATE TABLE IF NOT EXISTS tickets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    subject TEXT NOT NULL,
+                    status TEXT DEFAULT 'open',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS ticket_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticket_id INTEGER NOT NULL,
+                    sender TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    is_read_by_user INTEGER DEFAULT 0,
+                    is_read_by_admin INTEGER DEFAULT 0
+                );
                 """
             )
 
@@ -1038,6 +1057,86 @@ class Database:
             conn.execute(
                 "UPDATE support_messages SET is_read_by_user=1 WHERE user_id=? AND is_read_by_user=0",
                 (user_id,),
+            )
+
+    # -----------------------------------------------------------------------
+    # سیستم تیکت (مستقل از چت مستقیم بالا - یک راه ارتباطی جداگانه و رسمی‌تر
+    # با موضوع مشخص و وضعیت باز/پاسخ‌داده‌شده/بسته)
+    # -----------------------------------------------------------------------
+
+    def create_ticket(self, user_id: int, subject: str, first_message: str) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO tickets (user_id, subject, status) VALUES (?, ?, 'open')",
+                (user_id, subject),
+            )
+            ticket_id = cur.lastrowid
+            conn.execute(
+                "INSERT INTO ticket_messages (ticket_id, sender, message, is_read_by_user, is_read_by_admin) "
+                "VALUES (?, 'user', ?, 1, 0)",
+                (ticket_id, first_message),
+            )
+            return ticket_id
+
+    def get_user_tickets(self, user_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM tickets WHERE user_id=? ORDER BY updated_at DESC", (user_id,)
+            ).fetchall()
+
+    def get_all_tickets(self, status: str = None):
+        with self._get_conn() as conn:
+            if status:
+                return conn.execute(
+                    "SELECT * FROM tickets WHERE status=? ORDER BY updated_at DESC", (status,)
+                ).fetchall()
+            return conn.execute("SELECT * FROM tickets ORDER BY updated_at DESC").fetchall()
+
+    def get_ticket(self, ticket_id: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)).fetchone()
+
+    def add_ticket_message(self, ticket_id: int, sender: str, message: str) -> int:
+        """sender باید 'user' یا 'admin' باشد. وضعیت تیکت را هم خودکار به‌روز می‌کند:
+        پاسخ ادمین -> answered ، پیام جدید کاربر روی تیکت بسته/پاسخ‌داده‌شده -> open."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO ticket_messages (ticket_id, sender, message, is_read_by_user, is_read_by_admin) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (ticket_id, sender, message, 1 if sender == "user" else 0, 1 if sender == "admin" else 0),
+            )
+            new_status = "answered" if sender == "admin" else "open"
+            conn.execute(
+                "UPDATE tickets SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (new_status, ticket_id),
+            )
+            return cur.lastrowid
+
+    def get_ticket_messages(self, ticket_id: int, since_id: int = 0, limit: int = 200):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM ticket_messages WHERE ticket_id=? AND id>? ORDER BY id LIMIT ?",
+                (ticket_id, since_id, limit),
+            ).fetchall()
+
+    def close_ticket(self, ticket_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE tickets SET status='closed', updated_at=CURRENT_TIMESTAMP WHERE id=?", (ticket_id,)
+            )
+
+    def mark_ticket_read_by_user(self, ticket_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE ticket_messages SET is_read_by_user=1 WHERE ticket_id=? AND is_read_by_user=0",
+                (ticket_id,),
+            )
+
+    def mark_ticket_read_by_admin(self, ticket_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE ticket_messages SET is_read_by_admin=1 WHERE ticket_id=? AND is_read_by_admin=0",
+                (ticket_id,),
             )
 
     def get_expiring_configs_for_user(self, user_tg_id: int, days_before: int = None):

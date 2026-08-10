@@ -15,8 +15,23 @@
 REPO_URL="https://github.com/mehdirafatpanah/Shopvpn.git"
 INSTALL_DIR="$HOME/v2ray_bot"
 SERVICE_NAME="v2raybot"
-BRAND_NAME="VPN HUNTER"
-VERSION="v1.0"
+BRAND_NAME="SHOP VPN"
+
+# نسخه به‌صورت خودکار از روی گیت محاسبه می‌شود (شماره‌ی کامیت + هش کوتاه)
+# تا با هر آپدیت (پول جدید از گیت‌هاب)، نسخه‌ی نمایش داده‌شده هم خودکار عوض شود
+# و همیشه مشخص باشد که آخرین نسخه در حال اجراست یا نه.
+get_version() {
+    if [ -d "$INSTALL_DIR/.git" ]; then
+        local count hash
+        count=$(git -C "$INSTALL_DIR" rev-list --count HEAD 2>/dev/null)
+        hash=$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null)
+        if [ -n "$count" ] && [ -n "$hash" ]; then
+            echo "v${count} (${hash})"
+            return
+        fi
+    fi
+    echo "v1.0"
+}
 
 # جلوگیری از گیر کردن apt پشت پنجره‌های تعاملی (مثل پرسش needrestart برای ری‌استارت سرویس‌ها)
 export DEBIAN_FRONTEND=noninteractive
@@ -59,7 +74,7 @@ print_banner() {
     else
         echo -e "${CYAN}${BOLD}                     $BRAND_NAME${RESET}"
     fi
-    echo -e "${YELLOW}                 B O T   M A N A G E M E N T   E N G I N E   $VERSION${RESET}"
+    echo -e "${YELLOW}                 B O T   M A N A G E M E N T   E N G I N E   $(get_version)${RESET}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════╝${RESET}"
     echo ""
 }
