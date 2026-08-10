@@ -171,9 +171,32 @@ async function renderReferral() {
 
 let supportPollTimer = null;
 let supportLastId = 0;
+let supportSection = "chat"; // chat | tickets
+let ticketView = { level: "list" }; // list | thread
 
 function renderSupport() {
   content.innerHTML = `
+    <div class="segmented" id="support-section-tabs">
+      <button class="seg-btn ${supportSection === "chat" ? "active" : ""}" data-section="chat">گفتگوی زنده</button>
+      <button class="seg-btn ${supportSection === "tickets" ? "active" : ""}" data-section="tickets">تیکت‌ها</button>
+    </div>
+    <div id="support-section-body"></div>
+  `;
+  document.querySelectorAll("#support-section-tabs .seg-btn").forEach((b) => {
+    b.onclick = () => {
+      clearInterval(supportPollTimer);
+      supportSection = b.dataset.section;
+      if (supportSection === "tickets") ticketView = { level: "list" };
+      renderSupport();
+    };
+  });
+  if (supportSection === "chat") renderSupportChat();
+  else renderTicketsSection();
+}
+
+function renderSupportChat() {
+  const body = document.getElementById("support-section-body");
+  body.innerHTML = `
     <div class="chat-wrap">
       <div class="chat-messages" id="chat-messages">${skeleton(2)}</div>
       <form class="chat-input-row" id="chat-form">
@@ -232,6 +255,139 @@ function appendChatMessage(m, isOptimistic) {
   bubble.querySelector(".chat-text").textContent = m.message;
   box.appendChild(bubble);
   box.scrollTop = box.scrollHeight;
+}
+
+// ---------------------------------------------------------------------------
+// تیکت‌ها (بخش دوم تب پشتیبانی)
+// ---------------------------------------------------------------------------
+
+const TICKET_STATUS_LABEL = { open: "🟡 در انتظار پاسخ", answered: "🟢 پاسخ داده‌شده", closed: "⚪️ بسته‌شده" };
+
+async function renderTicketsSection() {
+  const body = document.getElementById("support-section-body");
+  body.innerHTML = skeleton(2);
+  try {
+    if (ticketView.level === "list") await renderTicketsList(body);
+    else await renderTicketThread(body);
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+async function renderTicketsList(body) {
+  const tickets = await api("/api/tickets");
+  body.innerHTML = `
+    <div class="card">
+      ${tickets.length === 0 ? `<div class="hint-text" style="margin:0">هنوز تیکتی ثبت نکرده‌ای.</div>` : tickets.map((t) => `
+        <div class="admin-list-row" data-open-ticket="${t.id}" style="cursor:pointer">
+          <div class="admin-list-row-main">
+            <span>${t.subject}</span>
+            <span class="hint-text" style="margin:0">${TICKET_STATUS_LABEL[t.status] || t.status}</span>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+    <button class="btn" id="new-ticket-btn">🎫 ثبت تیکت جدید</button>
+    <div class="card" id="new-ticket-form" style="display:none;margin-top:12px">
+      <input class="input" id="new-ticket-subject" type="text" placeholder="موضوع تیکت" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:8px" />
+      <textarea class="input" id="new-ticket-message" rows="4" placeholder="توضیح مشکل یا سوال خود را بنویس..." style="direction:rtl;text-align:right;font-family:var(--font-body)"></textarea>
+      <button class="btn" id="new-ticket-submit" style="margin-top:8px">ارسال تیکت</button>
+    </div>
+  `;
+  body.querySelectorAll("[data-open-ticket]").forEach((el) => {
+    el.onclick = () => {
+      ticketView = { level: "thread", ticketId: Number(el.dataset.openTicket) };
+      renderTicketsSection();
+    };
+  });
+  document.getElementById("new-ticket-btn").onclick = () => {
+    document.getElementById("new-ticket-form").style.display = "";
+  };
+  document.getElementById("new-ticket-submit").onclick = async () => {
+    const subject = document.getElementById("new-ticket-subject").value.trim();
+    const message = document.getElementById("new-ticket-message").value.trim();
+    if (!subject || !message) { notify("موضوع و متن پیام الزامی است."); return; }
+    try {
+      const t = await api("/api/tickets", { method: "POST", body: JSON.stringify({ subject, message }) });
+      tg.HapticFeedback.notificationOccurred("success");
+      ticketView = { level: "thread", ticketId: t.id };
+      renderTicketsSection();
+    } catch (e) { notify(e.message); }
+  };
+}
+
+let ticketThreadLastId = 0;
+
+async function renderTicketThread(body) {
+  const { ticketId } = ticketView;
+  const data = await api(`/api/tickets/${ticketId}/messages`);
+  const { ticket, messages } = data;
+  ticketThreadLastId = messages.length ? messages[messages.length - 1].id : 0;
+  const closed = ticket.status === "closed";
+  body.innerHTML = `
+    <button class="btn outline small" id="back-to-tickets" style="width:auto;margin-bottom:12px">→ بازگشت به لیست تیکت‌ها</button>
+    <div class="eyebrow" style="margin-top:0">${ticket.subject} <span class="hint-text" style="margin-right:6px">${TICKET_STATUS_LABEL[ticket.status] || ""}</span></div>
+    <div class="chat-wrap">
+      <div class="chat-messages" id="ticket-messages"></div>
+      ${closed
+        ? `<p class="hint-text" style="text-align:center">این تیکت بسته شده است.</p>`
+        : `<form class="chat-input-row" id="ticket-form">
+            <input type="text" id="ticket-input" placeholder="پاسخ خود را بنویسید..." autocomplete="off" />
+            <button type="submit" class="chat-send-btn" aria-label="ارسال">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 12 20 4l-6 16-3-7-7-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+            </button>
+          </form>
+          <button class="btn outline small" id="close-ticket-btn" style="width:auto;margin-top:8px">بستن این تیکت</button>`}
+    </div>
+  `;
+  document.getElementById("back-to-tickets").onclick = () => {
+    ticketView = { level: "list" };
+    renderTicketsSection();
+  };
+  const box = document.getElementById("ticket-messages");
+  if (messages.length === 0) {
+    box.innerHTML = `<div class="state-msg"><span class="ic">🎫</span>پیامی هنوز ثبت نشده.</div>`;
+  }
+  messages.forEach((m) => {
+    if (box.querySelector(".state-msg")) box.innerHTML = "";
+    const time = new Date(m.created_at).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+    const bubble = document.createElement("div");
+    bubble.className = `chat-bubble ${m.sender === "user" ? "mine" : "admin"}`;
+    bubble.innerHTML = `<div class="chat-text"></div><div class="chat-time">${time}</div>`;
+    bubble.querySelector(".chat-text").textContent = m.message;
+    box.appendChild(bubble);
+  });
+  box.scrollTop = box.scrollHeight;
+
+  if (!closed) {
+    const form = document.getElementById("ticket-form");
+    const input = document.getElementById("ticket-input");
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      const time = new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+      const bubble = document.createElement("div");
+      bubble.className = "chat-bubble mine";
+      bubble.innerHTML = `<div class="chat-text"></div><div class="chat-time">${time}</div>`;
+      bubble.querySelector(".chat-text").textContent = text;
+      box.appendChild(bubble);
+      box.scrollTop = box.scrollHeight;
+      try {
+        await api(`/api/tickets/${ticketId}/messages`, { method: "POST", body: JSON.stringify({ message: text }) });
+      } catch (e2) {
+        notify("خطا: " + e2.message);
+      }
+    };
+    document.getElementById("close-ticket-btn").onclick = async () => {
+      if (!confirm("این تیکت بسته شود؟")) return;
+      try {
+        await api(`/api/tickets/${ticketId}/close`, { method: "POST" });
+        renderTicketsSection();
+      } catch (e) { notify(e.message); }
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -670,8 +826,9 @@ const STYLE_OPTIONS = [
   { value: "danger", label: "🔴 قرمز" },
 ];
 
-let adminSection = "menu"; // menu | catalog | resellers
+let adminSection = "menu"; // menu | catalog | resellers | tickets
 let adminCatalogView = { level: "categories" }; // categories | products | configs
+let adminTicketView = { level: "list" }; // list | thread
 
 async function renderAdmin() {
   const isMainBot = !TENANT_ID;
@@ -679,6 +836,7 @@ async function renderAdmin() {
     <div class="segmented" id="admin-section-tabs">
       <button class="seg-btn ${adminSection === "menu" ? "active" : ""}" data-section="menu">چیدمان منو</button>
       <button class="seg-btn ${adminSection === "catalog" ? "active" : ""}" data-section="catalog">محصولات</button>
+      <button class="seg-btn ${adminSection === "tickets" ? "active" : ""}" data-section="tickets">تیکت‌ها</button>
       ${isMainBot ? `<button class="seg-btn ${adminSection === "resellers" ? "active" : ""}" data-section="resellers">نمایندگی‌ها</button>` : ""}
     </div>
     <div id="admin-section-body">${skeleton(4)}</div>
@@ -687,11 +845,13 @@ async function renderAdmin() {
     b.onclick = () => {
       adminSection = b.dataset.section;
       if (adminSection === "catalog") adminCatalogView = { level: "categories" };
+      if (adminSection === "tickets") adminTicketView = { level: "list" };
       renderAdmin();
     };
   });
   if (adminSection === "menu") await renderAdminMenuSection();
   else if (adminSection === "catalog") await renderAdminCatalogSection();
+  else if (adminSection === "tickets") await renderAdminTicketsSection();
   else if (adminSection === "resellers" && isMainBot) await renderAdminResellersSection();
 }
 
@@ -1030,6 +1190,115 @@ async function renderAdminConfigs(body) {
       renderAdmin();
     } catch (e) { notify(e.message); }
   };
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > تیکت‌ها
+// ---------------------------------------------------------------------------
+
+async function renderAdminTicketsSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  try {
+    if (adminTicketView.level === "list") await renderAdminTicketsList(body);
+    else await renderAdminTicketThread(body);
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+async function renderAdminTicketsList(body) {
+  const tickets = await api("/api/admin/tickets");
+  body.innerHTML = `
+    <div class="card">
+      ${tickets.length === 0 ? `<div class="hint-text" style="margin:0">هیچ تیکتی ثبت نشده.</div>` : tickets.map((t) => `
+        <div class="admin-list-row" data-open-admin-ticket="${t.id}" style="cursor:pointer">
+          <div class="admin-list-row-main">
+            <span>${t.subject}</span>
+            <span class="hint-text" style="margin:0">${t.user_name || "کاربر"} (@${t.user_username || "---"}) · ${TICKET_STATUS_LABEL[t.status] || t.status}</span>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+  body.querySelectorAll("[data-open-admin-ticket]").forEach((el) => {
+    el.onclick = () => {
+      adminTicketView = { level: "thread", ticketId: Number(el.dataset.openAdminTicket) };
+      renderAdminTicketsSection();
+    };
+  });
+}
+
+async function renderAdminTicketThread(body) {
+  const { ticketId } = adminTicketView;
+  const data = await api(`/api/admin/tickets/${ticketId}/messages`);
+  const { ticket, messages } = data;
+  const closed = ticket.status === "closed";
+  body.innerHTML = `
+    <button class="btn outline small" id="back-to-admin-tickets" style="width:auto;margin-bottom:12px">→ بازگشت به لیست تیکت‌ها</button>
+    <div class="eyebrow" style="margin-top:0">${ticket.subject}</div>
+    <p class="hint-text">${ticket.user_name || "کاربر"} (@${ticket.user_username || "---"}) · شناسه: ${ticket.user_id} · ${TICKET_STATUS_LABEL[ticket.status] || ""}</p>
+    <div class="chat-wrap">
+      <div class="chat-messages" id="admin-ticket-messages"></div>
+      ${closed
+        ? `<p class="hint-text" style="text-align:center">این تیکت بسته شده است.</p>`
+        : `<form class="chat-input-row" id="admin-ticket-form">
+            <input type="text" id="admin-ticket-input" placeholder="پاسخ خود را بنویسید..." autocomplete="off" />
+            <button type="submit" class="chat-send-btn" aria-label="ارسال">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 12 20 4l-6 16-3-7-7-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+            </button>
+          </form>
+          <button class="btn outline small" id="admin-close-ticket-btn" style="width:auto;margin-top:8px">بستن این تیکت</button>`}
+    </div>
+  `;
+  document.getElementById("back-to-admin-tickets").onclick = () => {
+    adminTicketView = { level: "list" };
+    renderAdminTicketsSection();
+  };
+  const box = document.getElementById("admin-ticket-messages");
+  if (messages.length === 0) {
+    box.innerHTML = `<div class="state-msg"><span class="ic">🎫</span>پیامی هنوز ثبت نشده.</div>`;
+  }
+  messages.forEach((m) => {
+    if (box.querySelector(".state-msg")) box.innerHTML = "";
+    const time = new Date(m.created_at).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+    const bubble = document.createElement("div");
+    bubble.className = `chat-bubble ${m.sender === "admin" ? "mine" : "admin"}`;
+    bubble.innerHTML = `<div class="chat-text"></div><div class="chat-time">${time}</div>`;
+    bubble.querySelector(".chat-text").textContent = m.message;
+    box.appendChild(bubble);
+  });
+  box.scrollTop = box.scrollHeight;
+
+  if (!closed) {
+    const form = document.getElementById("admin-ticket-form");
+    const input = document.getElementById("admin-ticket-input");
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      const time = new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+      const bubble = document.createElement("div");
+      bubble.className = "chat-bubble mine";
+      bubble.innerHTML = `<div class="chat-text"></div><div class="chat-time">${time}</div>`;
+      bubble.querySelector(".chat-text").textContent = text;
+      box.appendChild(bubble);
+      box.scrollTop = box.scrollHeight;
+      try {
+        await api(`/api/admin/tickets/${ticketId}/messages`, { method: "POST", body: JSON.stringify({ message: text }) });
+      } catch (e2) {
+        notify("خطا: " + e2.message);
+      }
+    };
+    document.getElementById("admin-close-ticket-btn").onclick = async () => {
+      if (!confirm("این تیکت بسته شود؟")) return;
+      try {
+        await api(`/api/admin/tickets/${ticketId}/close`, { method: "POST" });
+        renderAdminTicketsSection();
+      } catch (e) { notify(e.message); }
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
