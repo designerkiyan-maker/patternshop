@@ -700,6 +700,67 @@ class Database:
                 "revenue": revenue,
             }
 
+    def get_dashboard_stats(self, days: int = 14):
+        """آماری کامل‌تر برای داشبورد Mini App: کارت‌های خلاصه + روند فروش روزانه."""
+        with self._get_conn() as conn:
+            users_c = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
+            today_users_c = conn.execute(
+                "SELECT COUNT(*) c FROM users WHERE date(joined_at)=date('now')"
+            ).fetchone()["c"]
+            pending_c = conn.execute("SELECT COUNT(*) c FROM orders WHERE status='pending'").fetchone()["c"]
+            approved_c = conn.execute("SELECT COUNT(*) c FROM orders WHERE status='approved'").fetchone()["c"]
+            rejected_c = conn.execute("SELECT COUNT(*) c FROM orders WHERE status='rejected'").fetchone()["c"]
+            total_revenue = conn.execute(
+                "SELECT COALESCE(SUM(COALESCE(o.final_price, p.price)),0) s FROM orders o "
+                "JOIN products p ON o.product_id=p.id WHERE o.status='approved'"
+            ).fetchone()["s"]
+            today_revenue = conn.execute(
+                "SELECT COALESCE(SUM(COALESCE(o.final_price, p.price)),0) s FROM orders o "
+                "JOIN products p ON o.product_id=p.id "
+                "WHERE o.status='approved' AND date(o.updated_at)=date('now')"
+            ).fetchone()["s"]
+            active_configs_c = conn.execute("SELECT COUNT(*) c FROM configs WHERE is_used=1").fetchone()["c"]
+            wallet_total = conn.execute("SELECT COALESCE(SUM(referral_credit),0) s FROM users").fetchone()["s"]
+            open_tickets_c = conn.execute(
+                "SELECT COUNT(*) c FROM tickets WHERE status IN ('open','answered')"
+            ).fetchone()["c"]
+
+            daily_rows = conn.execute(
+                "SELECT date(o.updated_at) d, COALESCE(SUM(COALESCE(o.final_price, p.price)),0) s, COUNT(*) c "
+                "FROM orders o JOIN products p ON o.product_id=p.id "
+                "WHERE o.status='approved' AND o.updated_at >= date('now', ?) "
+                "GROUP BY date(o.updated_at) ORDER BY d",
+                (f"-{days - 1} days",),
+            ).fetchall()
+            daily_map = {r["d"]: {"revenue": r["s"], "orders": r["c"]} for r in daily_rows}
+
+            daily_series = []
+            for i in range(days - 1, -1, -1):
+                d = conn.execute("SELECT date('now', ?) d", (f"-{i} days",)).fetchone()["d"]
+                entry = daily_map.get(d, {"revenue": 0, "orders": 0})
+                daily_series.append({"date": d, "revenue": entry["revenue"], "orders": entry["orders"]})
+
+            top_products = conn.execute(
+                "SELECT p.name name, COUNT(*) c, COALESCE(SUM(COALESCE(o.final_price, p.price)),0) s "
+                "FROM orders o JOIN products p ON o.product_id=p.id "
+                "WHERE o.status='approved' GROUP BY p.id ORDER BY c DESC LIMIT 5"
+            ).fetchall()
+
+            return {
+                "users": users_c,
+                "today_users": today_users_c,
+                "pending_orders": pending_c,
+                "approved_orders": approved_c,
+                "rejected_orders": rejected_c,
+                "total_revenue": total_revenue,
+                "today_revenue": today_revenue,
+                "active_configs": active_configs_c,
+                "wallet_total": wallet_total,
+                "open_tickets": open_tickets_c,
+                "daily_series": daily_series,
+                "top_products": [{"name": r["name"], "orders": r["c"], "revenue": r["s"]} for r in top_products],
+            }
+
     # -----------------------------------------------------------------------
     # زیرمجموعه‌گیری (رفرال) و کیف پول اعتباری
     # -----------------------------------------------------------------------
