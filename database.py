@@ -376,6 +376,95 @@ class Database:
         with self._get_conn() as conn:
             conn.execute("UPDATE users SET is_blocked=? WHERE telegram_id=?", (1 if blocked else 0, tg_id))
 
+    def search_users(self, query: str = "", status_filter: str = "all", limit: int = 30, offset: int = 0):
+        """جستجو/فیلتر کاربران برای پنل مدیریت.
+        status_filter: 'all' | 'active' | 'expired' | 'blocked'
+        خروجی: (rows, total_count)
+        """
+        now = datetime.utcnow().isoformat()
+        conditions = []
+        params = []
+
+        if query:
+            conditions.append("(CAST(u.telegram_id AS TEXT) LIKE ? OR u.username LIKE ? OR u.first_name LIKE ?)")
+            like = f"%{query}%"
+            params += [like, like, like]
+
+        if status_filter == "blocked":
+            conditions.append("u.is_blocked=1")
+        elif status_filter == "active":
+            conditions.append(
+                "EXISTS (SELECT 1 FROM configs c WHERE c.assigned_user_id=u.telegram_id AND c.is_used=1 "
+                "AND (c.expires_at IS NULL OR c.expires_at > ?))"
+            )
+            params.append(now)
+        elif status_filter == "expired":
+            conditions.append(
+                "EXISTS (SELECT 1 FROM configs c WHERE c.assigned_user_id=u.telegram_id AND c.is_used=1) "
+                "AND NOT EXISTS (SELECT 1 FROM configs c2 WHERE c2.assigned_user_id=u.telegram_id AND c2.is_used=1 "
+                "AND (c2.expires_at IS NULL OR c2.expires_at > ?))"
+            )
+            params.append(now)
+
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        with self._get_conn() as conn:
+            total = conn.execute(f"SELECT COUNT(*) c FROM users u {where}", params).fetchone()["c"]
+            rows = conn.execute(
+                f"SELECT u.* FROM users u {where} ORDER BY u.id DESC LIMIT ? OFFSET ?",
+                params + [limit, offset],
+            ).fetchall()
+            return rows, total
+
+    def get_user_status(self, tg_id: int) -> str:
+        """وضعیت خلاصه‌ی یک کاربر: 'blocked' | 'active' | 'expired' | 'none' (هیچ سرویسی نداشته)."""
+        now = datetime.utcnow().isoformat()
+        with self._get_conn() as conn:
+            u = conn.execute("SELECT is_blocked FROM users WHERE telegram_id=?", (tg_id,)).fetchone()
+            if u and u["is_blocked"]:
+                return "blocked"
+            has_active = conn.execute(
+                "SELECT 1 FROM configs WHERE assigned_user_id=? AND is_used=1 "
+                "AND (expires_at IS NULL OR expires_at > ?) LIMIT 1",
+                (tg_id, now),
+            ).fetchone()
+            if has_active:
+                return "active"
+            has_any = conn.execute(
+                "SELECT 1 FROM configs WHERE assigned_user_id=? AND is_used=1 LIMIT 1", (tg_id,)
+            ).fetchone()
+            return "expired" if has_any else "none"
+
+    def get_user_full_history(self, tg_id: int):
+        """تاریخچه‌ی کامل یک کاربر: سفارش‌ها (با نام محصول و لینک کانفیگ) + شارژهای کیف‌پول."""
+        with self._get_conn() as conn:
+            orders = conn.execute(
+                "SELECT o.*, p.name as product_name, cf.link as config_link, cf.expires_at as config_expires_at "
+                "FROM orders o "
+                "LEFT JOIN products p ON o.product_id = p.id "
+                "LEFT JOIN configs cf ON o.config_id = cf.id "
+                "WHERE o.user_id=? ORDER BY o.id DESC",
+                (tg_id,),
+            ).fetchall()
+            topups = conn.execute(
+                "SELECT * FROM wallet_topups WHERE user_id=? ORDER BY id DESC", (tg_id,)
+            ).fetchall()
+            return {"orders": orders, "topups": topups}
+
+    def get_expired_user_ids(self):
+        """آیدی کاربرانی که سابقه‌ی سرویس دارند ولی الان هیچ سرویس فعالی ندارند و بلاک نیستند
+        (برای ارسال پیام گروهی تشویق به تمدید)."""
+        now = datetime.utcnow().isoformat()
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT u.telegram_id FROM users u "
+                "WHERE u.is_blocked=0 "
+                "AND EXISTS (SELECT 1 FROM configs c WHERE c.assigned_user_id=u.telegram_id AND c.is_used=1) "
+                "AND NOT EXISTS (SELECT 1 FROM configs c2 WHERE c2.assigned_user_id=u.telegram_id AND c2.is_used=1 "
+                "AND (c2.expires_at IS NULL OR c2.expires_at > ?))",
+                (now,),
+            ).fetchall()
+            return [r["telegram_id"] for r in rows]
+
     def mark_test_used(self, tg_id: int):
         with self._get_conn() as conn:
             conn.execute("UPDATE users SET test_used=test_used+1 WHERE telegram_id=?", (tg_id,))

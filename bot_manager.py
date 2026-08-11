@@ -21,6 +21,7 @@ from handlers_user import create_user_router
 from handlers_admin import create_admin_router
 from renewal_reminders import renewal_reminder_loop
 from force_join import ForceJoinMiddleware
+from blocked_user import BlockedUserMiddleware
 import keyboards as kb
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,10 @@ class BotManager:
 
         bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         dp = Dispatcher(storage=MemoryStorage())
+
+        blocked_mw = BlockedUserMiddleware(db)
+        dp.message.outer_middleware(blocked_mw)
+        dp.callback_query.outer_middleware(blocked_mw)
 
         force_join_mw = ForceJoinMiddleware(db)
         dp.message.outer_middleware(force_join_mw)
