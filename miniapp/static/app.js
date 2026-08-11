@@ -900,6 +900,7 @@ async function renderAdmin() {
       adminSection = b.dataset.section;
       if (adminSection === "catalog") adminCatalogView = { level: "categories" };
       if (adminSection === "tickets") adminTicketView = { level: "list" };
+      if (adminSection === "users") adminUserView = { level: "list", filter: "all", query: "" };
       renderAdmin();
     };
   });
@@ -1462,63 +1463,208 @@ async function renderAdminConfigs(body) {
 // تب مدیریت > مدیریت کاربران (کیف‌پول و در آینده امکانات بیشتر)
 // ---------------------------------------------------------------------------
 
+let adminUserView = { level: "list", filter: "all", query: "" };
+const USER_STATUS_LABEL = { active: "فعال", expired: "منقضی‌شده", blocked: "بلاک‌شده", none: "بدون سرویس" };
+const USER_STATUS_BADGE_CLASS = { active: "approved", expired: "pending", blocked: "rejected", none: "" };
+
+function escHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 async function renderAdminUsersSection() {
   const body = document.getElementById("admin-section-body");
-  body.innerHTML = skeleton(2);
+  body.innerHTML = skeleton(3);
   try {
-    body.innerHTML = `
-      <div class="card">
-        <div class="eyebrow" style="margin-top:0">✏️ ویرایش موجودی کیف‌پول کاربر</div>
-        <p class="hint-text">آیدی عددی کاربر را وارد کن و مبلغی که می‌خوای به کیف‌پولش اضافه یا ازش کم بشه رو بزن.</p>
-        <label class="field-label">آیدی عددی کاربر (Telegram ID)</label>
-        <input class="input" id="wallet-user-id" type="number" placeholder="مثال: 123456789" style="margin-bottom:8px" />
-        <div id="wallet-user-info" class="hint-text" style="margin:0 0 10px"></div>
-        <label class="field-label">مبلغ تغییر به تومان (برای کاهش، عدد منفی بزن، مثلاً -20000)</label>
-        <input class="input" id="wallet-amount" type="number" placeholder="مثال: 50000 یا -20000" style="margin-bottom:4px" />
-        <div class="field-error" id="wallet-error"></div>
-        <button class="btn" id="wallet-adjust-save" style="margin-top:8px">💾 اعمال تغییر</button>
-      </div>
-    `;
-
-    let walletLookupTimer = null;
-    document.getElementById("wallet-user-id").addEventListener("input", (e) => {
-      const infoBox = document.getElementById("wallet-user-info");
-      const uid = e.target.value.trim();
-      clearTimeout(walletLookupTimer);
-      if (!uid || uid.length < 5) { infoBox.textContent = ""; return; }
-      infoBox.textContent = "در حال بررسی...";
-      walletLookupTimer = setTimeout(async () => {
-        try {
-          const info = await api(`/api/admin/wallet/lookup?telegram_id=${encodeURIComponent(uid)}`);
-          infoBox.innerHTML = `👤 ${info.user_name || "بدون نام"}${info.username ? " (@" + info.username + ")" : ""} — 👛 موجودی فعلی: <b>${fmt(info.wallet_credit)} تومان</b>`;
-        } catch (e2) {
-          infoBox.textContent = "⚠️ " + e2.message;
-        }
-      }, 500);
-    });
-
-    document.getElementById("wallet-adjust-save").onclick = async () => {
-      const errBox = document.getElementById("wallet-error");
-      errBox.textContent = "";
-      const uid = document.getElementById("wallet-user-id").value.trim();
-      const amountRaw = document.getElementById("wallet-amount").value.trim();
-      if (!uid || !amountRaw) { errBox.textContent = "هر دو کادر باید پر باشند."; return; }
-      const amount = Number(amountRaw);
-      if (isNaN(amount) || amount === 0) { errBox.textContent = "مبلغ باید عددی غیرصفر باشد."; return; }
-      try {
-        const res = await api("/api/admin/wallet/adjust", {
-          method: "POST",
-          body: JSON.stringify({ telegram_id: Number(uid), amount }),
-        });
-        tg.HapticFeedback.notificationOccurred("success");
-        notify(`موجودی ${res.user_name || "کاربر"} به ${fmt(res.new_balance)} تومان تغییر کرد.`);
-        document.getElementById("wallet-amount").value = "";
-        document.getElementById("wallet-user-info").innerHTML = `👤 ${res.user_name || "بدون نام"} — 👛 موجودی فعلی: <b>${fmt(res.new_balance)} تومان</b>`;
-      } catch (e) { errBox.textContent = e.message; }
-    };
+    if (adminUserView.level === "list") await renderAdminUsersList(body);
+    else await renderAdminUserDetail(body);
   } catch (e) {
     body.innerHTML = errorState(e.message);
   }
+}
+
+async function renderAdminUsersList(body) {
+  const filter = adminUserView.filter || "all";
+  const query = adminUserView.query || "";
+  const data = await api(`/api/admin/users?query=${encodeURIComponent(query)}&status=${filter}&limit=50&offset=0`);
+
+  const filters = [
+    { k: "all", label: "همه" },
+    { k: "active", label: "فعال" },
+    { k: "expired", label: "منقضی‌شده" },
+    { k: "blocked", label: "بلاک‌شده" },
+  ];
+
+  body.innerHTML = `
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">📢 پیام گروهی به کاربران منقضی‌شده</div>
+      <textarea class="input" id="broadcast-expired-text" rows="2" placeholder="متن پیام تشویق به تمدید..." style="margin-bottom:8px;resize:vertical"></textarea>
+      <button class="btn outline small" id="broadcast-expired-btn" style="width:auto">ارسال به همه‌ی کاربران منقضی‌شده</button>
+    </div>
+
+    <div class="card">
+      <input class="input" id="user-search-input" type="text" placeholder="جستجو با آیدی عددی، یوزرنیم یا نام..." value="${escHtml(query)}" style="margin-bottom:10px" />
+      <div class="segmented" style="margin-bottom:0">
+        ${filters.map((f) => `<button class="seg-btn ${filter === f.k ? "active" : ""}" data-user-filter="${f.k}">${f.label}</button>`).join("")}
+      </div>
+    </div>
+
+    <div class="card">
+      ${data.users.length === 0
+        ? `<div class="state-msg"><span class="ic">👤</span>کاربری پیدا نشد.</div>`
+        : data.users.map((u) => `
+        <div class="admin-list-row" data-open-user="${u.telegram_id}" style="cursor:pointer">
+          <div class="admin-list-row-main">
+            <span>${escHtml(u.first_name || "بدون نام")}${u.username ? " (@" + escHtml(u.username) + ")" : ""}</span>
+            <span class="hint-text" style="margin:0">🆔 ${u.telegram_id} · 👛 ${fmt(u.wallet_credit)} تومان</span>
+          </div>
+          <div class="admin-list-row-actions">
+            <span class="badge ${USER_STATUS_BADGE_CLASS[u.status]}">${USER_STATUS_LABEL[u.status]}</span>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+    ${data.total > data.users.length ? `<p class="hint-text" style="text-align:center">${data.users.length} از ${data.total} کاربر نمایش داده شد؛ برای محدودکردن نتایج جستجو کنید.</p>` : ""}
+  `;
+
+  document.getElementById("user-search-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      adminUserView = { ...adminUserView, query: e.target.value.trim() };
+      renderAdminUsersSection();
+    }
+  });
+  body.querySelectorAll("[data-user-filter]").forEach((el) => {
+    el.onclick = () => {
+      adminUserView = { ...adminUserView, filter: el.dataset.userFilter };
+      renderAdminUsersSection();
+    };
+  });
+  body.querySelectorAll("[data-open-user]").forEach((el) => {
+    el.onclick = () => {
+      adminUserView = { level: "detail", telegramId: Number(el.dataset.openUser), returnTo: adminUserView };
+      renderAdminUsersSection();
+    };
+  });
+  document.getElementById("broadcast-expired-btn").onclick = async () => {
+    const text = document.getElementById("broadcast-expired-text").value.trim();
+    if (!text) { notify("متن پیام را وارد کن."); return; }
+    if (!confirm("این پیام برای همه‌ی کاربران منقضی‌شده ارسال می‌شود. ادامه؟")) return;
+    try {
+      const res = await api("/api/admin/users/broadcast-expired", { method: "POST", body: JSON.stringify({ text }) });
+      tg.HapticFeedback.notificationOccurred("success");
+      notify(`ارسال شد. موفق: ${res.success} از ${res.total}`);
+      document.getElementById("broadcast-expired-text").value = "";
+    } catch (e) { notify("⚠️ " + e.message); }
+  };
+}
+
+async function renderAdminUserDetail(body) {
+  const { telegramId } = adminUserView;
+  const u = await api(`/api/admin/users/${telegramId}`);
+
+  const statusLine = `<span class="badge ${USER_STATUS_BADGE_CLASS[u.status]}">${USER_STATUS_LABEL[u.status]}</span>`;
+
+  const ordersHtml = u.orders.length === 0
+    ? `<div class="hint-text" style="margin:0">هیچ سفارشی ثبت نکرده.</div>`
+    : u.orders.map((o) => `
+      <div class="admin-list-row">
+        <div class="admin-list-row-main">
+          <span>${escHtml(o.product_name || "نامشخص")} — ${fmt(o.final_price ?? o.base_price ?? 0)} تومان</span>
+          <span class="hint-text" style="margin:0">#${o.id} · ${o.created_at ? o.created_at.slice(0, 16).replace("T", " ") : ""}${o.config_link ? " · دارای کانفیگ" : ""}</span>
+        </div>
+        <div class="admin-list-row-actions">
+          <span class="badge ${o.status === "approved" ? "approved" : o.status === "pending" ? "pending" : "rejected"}">${o.status === "approved" ? "تاییدشده" : o.status === "pending" ? "در انتظار" : "ردشده"}</span>
+        </div>
+      </div>
+    `).join("");
+
+  const topupsHtml = u.topups.length === 0
+    ? `<div class="hint-text" style="margin:0">هیچ شارژ کیف‌پولی ثبت نکرده.</div>`
+    : u.topups.map((t) => `
+      <div class="admin-list-row">
+        <div class="admin-list-row-main">
+          <span>${fmt(t.amount)} تومان</span>
+          <span class="hint-text" style="margin:0">${t.created_at ? t.created_at.slice(0, 16).replace("T", " ") : ""}</span>
+        </div>
+        <div class="admin-list-row-actions">
+          <span class="badge ${t.status === "approved" ? "approved" : t.status === "pending" ? "pending" : "rejected"}">${t.status === "approved" ? "تاییدشده" : t.status === "pending" ? "در انتظار" : "ردشده"}</span>
+        </div>
+      </div>
+    `).join("");
+
+  body.innerHTML = `
+    <button class="btn outline small" id="back-to-user-list" style="width:auto;margin-bottom:12px">→ بازگشت به لیست کاربران</button>
+
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">${escHtml(u.first_name || "بدون نام")}${u.username ? " (@" + escHtml(u.username) + ")" : ""}</div>
+      <div class="stat-row"><span>🆔 آیدی عددی</span><span>${u.telegram_id}</span></div>
+      <div class="stat-row"><span>📅 تاریخ عضویت</span><span>${u.joined_at ? u.joined_at.slice(0, 10) : "---"}</span></div>
+      <div class="stat-row"><span>👛 موجودی کیف‌پول</span><span>${fmt(u.wallet_credit)} تومان</span></div>
+      <div class="stat-row"><span>وضعیت سرویس</span>${statusLine}</div>
+      <button class="btn ${u.is_blocked ? "" : "outline"} small" id="toggle-block-btn" style="width:auto;margin-top:10px">
+        ${u.is_blocked ? "✅ رفع بلاک کاربر" : "⛔️ بلاک‌کردن کاربر"}
+      </button>
+    </div>
+
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">✏️ تغییر موجودی کیف‌پول</div>
+      <input class="input" id="detail-wallet-amount" type="number" placeholder="مثال: 50000 یا -20000" style="margin-bottom:8px" />
+      <button class="btn small" id="detail-wallet-save" style="width:auto">💾 اعمال تغییر</button>
+    </div>
+
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">✉️ ارسال پیام مستقیم</div>
+      <textarea class="input" id="detail-message-text" rows="2" placeholder="متن پیام..." style="margin-bottom:8px;resize:vertical"></textarea>
+      <button class="btn small" id="detail-message-send" style="width:auto">ارسال پیام</button>
+    </div>
+
+    <div class="eyebrow">🧾 تاریخچه سفارش‌ها</div>
+    <div class="card">${ordersHtml}</div>
+
+    <div class="eyebrow">💳 تاریخچه شارژ کیف‌پول</div>
+    <div class="card">${topupsHtml}</div>
+  `;
+
+  document.getElementById("back-to-user-list").onclick = () => {
+    adminUserView = adminUserView.returnTo || { level: "list", filter: "all", query: "" };
+    renderAdminUsersSection();
+  };
+
+  document.getElementById("toggle-block-btn").onclick = async () => {
+    const willBlock = !u.is_blocked;
+    if (willBlock && !confirm("این کاربر بلاک شود؟ دیگر نمی‌تواند از بات یا فروشگاه استفاده کند.")) return;
+    try {
+      await api(`/api/admin/users/${telegramId}/block`, { method: "POST", body: JSON.stringify({ blocked: willBlock }) });
+      tg.HapticFeedback.notificationOccurred("success");
+      notify(willBlock ? "کاربر بلاک شد." : "بلاک کاربر برداشته شد.");
+      renderAdminUsersSection();
+    } catch (e) { notify("⚠️ " + e.message); }
+  };
+
+  document.getElementById("detail-wallet-save").onclick = async () => {
+    const amountRaw = document.getElementById("detail-wallet-amount").value.trim();
+    const amount = Number(amountRaw);
+    if (!amountRaw || isNaN(amount) || amount === 0) { notify("مبلغ باید عددی غیرصفر باشد."); return; }
+    try {
+      const res = await api("/api/admin/wallet/adjust", {
+        method: "POST",
+        body: JSON.stringify({ telegram_id: telegramId, amount }),
+      });
+      tg.HapticFeedback.notificationOccurred("success");
+      notify(`موجودی به ${fmt(res.new_balance)} تومان تغییر کرد.`);
+      renderAdminUsersSection();
+    } catch (e) { notify("⚠️ " + e.message); }
+  };
+
+  document.getElementById("detail-message-send").onclick = async () => {
+    const text = document.getElementById("detail-message-text").value.trim();
+    if (!text) { notify("متن پیام را وارد کن."); return; }
+    try {
+      await api(`/api/admin/users/${telegramId}/message`, { method: "POST", body: JSON.stringify({ text }) });
+      tg.HapticFeedback.notificationOccurred("success");
+      notify("پیام ارسال شد.");
+      document.getElementById("detail-message-text").value = "";
+    } catch (e) { notify("⚠️ " + e.message); }
+  };
 }
 
 // ---------------------------------------------------------------------------
