@@ -425,6 +425,7 @@ async function renderHome() {
           : active.map(orderCard).join("")}
       </div>
     `;
+    active.filter((o) => o.link).forEach((o) => loadSubInfo(o.id, o.link));
   } catch (e) {
     content.innerHTML = errorState(e.message);
   }
@@ -511,6 +512,7 @@ function orderCard(o) {
     <div class="order-block">
       <div class="stat-row"><span>${o.product_name}</span><span class="badge approved">فعال تا ${exp}</span></div>
       ${o.link ? `
+      <div class="sub-info" id="sub-info-${o.id}"><div class="sub-info-loading">در حال دریافت اطلاعات مصرف...</div></div>
       <div class="link-box">${o.link}</div>
       <div class="qr-row">
         <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(o.link)}" width="96" height="96" alt="QR" />
@@ -518,6 +520,46 @@ function orderCard(o) {
       </div>` : ""}
     </div>
   `;
+}
+
+function fmtGB(bytes) {
+  return (bytes / (1024 ** 3)).toFixed(2);
+}
+
+async function loadSubInfo(orderId, link) {
+  const box = document.getElementById(`sub-info-${orderId}`);
+  if (!box) return;
+  try {
+    const info = await api(`/api/sub-info?link=${encodeURIComponent(link)}`);
+    if (!box.isConnected) return;
+    if (!info.ok) {
+      box.innerHTML = `<div class="sub-info-error">⚠️ اطلاعات مصرف در دسترس نیست</div>`;
+      return;
+    }
+    const used = info.upload + info.download;
+    const total = info.total;
+    let usageHtml;
+    if (total > 0) {
+      const percent = Math.min(100, Math.round((used / total) * 100));
+      const remaining = Math.max(0, total - used);
+      usageHtml = `
+        <div class="sub-info-row"><span>مصرف</span><b>${fmtGB(used)} از ${fmtGB(total)} گیگابایت</b></div>
+        <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
+        <div class="sub-info-row"><span>باقی‌مانده</span><b>${fmtGB(remaining)} گیگابایت</b></div>
+      `;
+    } else {
+      usageHtml = `<div class="sub-info-row"><span>مصرف</span><b>${fmtGB(used)} گیگابایت (نامحدود)</b></div>`;
+    }
+    let expiryHtml = `<div class="sub-info-row"><span>انقضا</span><b>نامحدود</b></div>`;
+    if (info.expire) {
+      const expDate = new Date(info.expire * 1000);
+      const daysLeft = Math.max(0, Math.ceil((expDate - new Date()) / 86400000));
+      expiryHtml = `<div class="sub-info-row"><span>انقضا</span><b>${expDate.toISOString().slice(0, 10)} (${daysLeft} روز مانده)</b></div>`;
+    }
+    box.innerHTML = usageHtml + expiryHtml;
+  } catch (e) {
+    if (box.isConnected) box.innerHTML = `<div class="sub-info-error">⚠️ اطلاعات مصرف در دسترس نیست</div>`;
+  }
 }
 
 // ---------------------------------------------------------------------------
