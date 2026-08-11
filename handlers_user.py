@@ -21,6 +21,7 @@ from states import BuyFlow, ContactFlow, DiscountEntry, WalletTopup
 from config import MAX_TEST_PER_USER
 from config_delivery import deliver_config_to_user
 from force_join import is_channel_member, CHECK_CALLBACK
+from sub_info import fetch_sub_info, format_sub_info_fa
 
 
 def create_user_router(db) -> Router:
@@ -416,6 +417,7 @@ def create_user_router(db) -> Router:
 
         status_map = {"pending": "⏳ در انتظار بررسی", "approved": "✅ تایید شده", "rejected": "❌ رد شده"}
         lines = []
+        approved = []  # (product_name, link)
         for o in orders:
             product = db.get_product(o["product_id"])
             pname = product["name"] if product else "نامشخص"
@@ -424,8 +426,20 @@ def create_user_router(db) -> Router:
                 cfg = db.get_config_by_id(o["config_id"])
                 if cfg:
                     line += f"\n🔗 `{cfg['link']}`"
+                    approved.append((pname, cfg["link"]))
             lines.append(line)
         await message.answer("\n\n".join(lines), parse_mode="Markdown")
+
+        if approved:
+            wait_msg = await message.answer("⏳ در حال دریافت اطلاعات لحظه‌ای مصرف سرویس‌ها...")
+            infos = await asyncio.gather(*[fetch_sub_info(link) for _, link in approved])
+            try:
+                await wait_msg.delete()
+            except Exception:
+                pass
+            for (pname, _link), info in zip(approved, infos):
+                text = f"📦 {pname}\n\n{format_sub_info_fa(info)}"
+                await message.answer(text)
 
     # -----------------------------------------------------------------------
     # زیرمجموعه‌گیری (رفرال)
