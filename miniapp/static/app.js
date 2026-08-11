@@ -832,6 +832,8 @@ let adminTicketView = { level: "list" }; // list | thread
 
 async function renderAdmin() {
   const isMainBot = !TENANT_ID;
+  const prevTabsEl = document.getElementById("admin-section-tabs");
+  const prevScrollLeft = prevTabsEl ? prevTabsEl.scrollLeft : 0;
   content.innerHTML = `
     <div class="segmented" id="admin-section-tabs">
       <button class="seg-btn ${adminSection === "stats" ? "active" : ""}" data-section="stats">آمار</button>
@@ -845,6 +847,12 @@ async function renderAdmin() {
     </div>
     <div id="admin-section-body">${skeleton(4)}</div>
   `;
+  const newTabsEl = document.getElementById("admin-section-tabs");
+  if (newTabsEl) {
+    newTabsEl.scrollLeft = prevScrollLeft;
+    const activeBtn = newTabsEl.querySelector(".seg-btn.active");
+    if (activeBtn) activeBtn.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
   document.querySelectorAll("#admin-section-tabs .seg-btn").forEach((b) => {
     b.onclick = () => {
       adminSection = b.dataset.section;
