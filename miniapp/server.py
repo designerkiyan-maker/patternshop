@@ -40,6 +40,7 @@ logging.basicConfig(level=logging.INFO)
 from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, resolve_db_path, RESELLER_DBS_DIR
 from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER
 from miniapp.auth import validate_init_data
+from sub_info import fetch_sub_info
 
 app = FastAPI(title="V2Ray Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -342,6 +343,23 @@ async def api_referral(auth=Depends(get_verified_user)):
 # ---------------------------------------------------------------------------
 # هشدار انقضا
 # ---------------------------------------------------------------------------
+
+@app.get("/api/sub-info")
+async def api_sub_info(link: str = Query(...), auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
+    orders = db.get_user_orders(tg_id)
+    owns_link = False
+    for o in orders:
+        cfg = db.get_config_by_id(o["config_id"]) if o["config_id"] else None
+        if cfg and cfg["link"] == link:
+            owns_link = True
+            break
+    if not owns_link:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    info = await fetch_sub_info(link)
+    return info
+
 
 @app.get("/api/expiring")
 def api_expiring(auth=Depends(get_verified_user)):
