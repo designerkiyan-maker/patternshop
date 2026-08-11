@@ -20,7 +20,9 @@ import json
 import random
 import base64
 import html as html_lib
+import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -362,15 +364,30 @@ async def api_sub_info(link: str = Query(...), auth=Depends(get_verified_user)):
 
 
 @app.get("/api/expiring")
-def api_expiring(auth=Depends(get_verified_user)):
+async def api_expiring(auth=Depends(get_verified_user)):
     tg_id, db, _ = auth
     rows = db.get_expiring_configs_for_user(tg_id)
+    if not rows:
+        return []
+
+    threshold_days = int(db.get_setting("renewal_reminder_days_before", "5") or 5)
+    infos = await asyncio.gather(*[fetch_sub_info(r["link"]) for r in rows])
+
     result = []
-    for r in rows:
+    for r, info in zip(rows, infos):
+        expires_at = r["expires_at"]
+        if info.get("ok") and info.get("expire"):
+            exp_dt = datetime.fromtimestamp(info["expire"], tz=timezone.utc)
+            real_days_left = (exp_dt - datetime.now(timezone.utc)).days
+            if real_days_left > threshold_days:
+                # طبق داده‌ی واقعی پنل هنوز واقعاً نزدیک انقضا نیست
+                continue
+            expires_at = exp_dt.isoformat()
+
         product = db.get_product(r["product_id"])
         result.append({
             "product_name": product["name"] if product else "نامشخص",
-            "expires_at": r["expires_at"],
+            "expires_at": expires_at,
             "link": r["link"],
         })
     return result
