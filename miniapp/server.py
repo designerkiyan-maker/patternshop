@@ -614,6 +614,9 @@ class OrderCreate(BaseModel):
 @app.post("/api/orders")
 def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
     tg_id, db, _ = auth
+    user_row = db.get_user(tg_id)
+    if user_row and user_row["is_blocked"]:
+        raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
     product = db.get_product(body.product_id)
     if not product or db.count_available_configs(body.product_id) <= 0:
         raise HTTPException(status_code=400, detail="این محصول موجود نیست.")
@@ -706,6 +709,9 @@ class TopupCreate(BaseModel):
 @app.post("/api/wallet/topup-request")
 def api_topup_request(body: TopupCreate, auth=Depends(get_verified_user)):
     tg_id, db, _ = auth
+    user_row = db.get_user(tg_id)
+    if user_row and user_row["is_blocked"]:
+        raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
     if body.amount < 1000:
         raise HTTPException(status_code=400, detail="حداقل مبلغ ۱۰۰۰ تومان است.")
     topup_id = db.create_topup(tg_id, body.amount)
@@ -1513,6 +1519,119 @@ def api_admin_delete_header_image(auth=Depends(require_admin)):
     _, db, _ = auth
     db.set_setting("header_image_data", "")
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# مدیریت کاربران (جستجو/فیلتر/بلاک/تاریخچه/پیام) — ادمین
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/users")
+def api_admin_list_users(
+    query: str = "", status: str = "all", limit: int = 30, offset: int = 0,
+    auth=Depends(require_admin),
+):
+    _, db, _ = auth
+    if status not in ("all", "active", "expired", "blocked"):
+        status = "all"
+    limit = max(1, min(limit, 100))
+    rows, total = db.search_users(query=query.strip(), status_filter=status, limit=limit, offset=offset)
+    users = []
+    for u in rows:
+        users.append({
+            "telegram_id": u["telegram_id"],
+            "username": u["username"] or "",
+            "first_name": u["first_name"] or "",
+            "is_blocked": bool(u["is_blocked"]),
+            "joined_at": u["joined_at"],
+            "wallet_credit": db.get_wallet_credit(u["telegram_id"]),
+            "status": db.get_user_status(u["telegram_id"]),
+        })
+    return {"users": users, "total": total, "limit": limit, "offset": offset}
+
+
+@app.get("/api/admin/users/{telegram_id}")
+def api_admin_get_user(telegram_id: int, auth=Depends(require_admin)):
+    _, db, _ = auth
+    user = db.get_user(telegram_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربری با این آیدی عددی پیدا نشد.")
+    history = db.get_user_full_history(telegram_id)
+    return {
+        "telegram_id": user["telegram_id"],
+        "username": user["username"] or "",
+        "first_name": user["first_name"] or "",
+        "is_blocked": bool(user["is_blocked"]),
+        "joined_at": user["joined_at"],
+        "wallet_credit": db.get_wallet_credit(telegram_id),
+        "status": db.get_user_status(telegram_id),
+        "orders": [dict(o) for o in history["orders"]],
+        "topups": [dict(t) for t in history["topups"]],
+    }
+
+
+class UserBlockUpdate(BaseModel):
+    blocked: bool
+
+
+@app.post("/api/admin/users/{telegram_id}/block")
+def api_admin_set_user_blocked(telegram_id: int, body: UserBlockUpdate, auth=Depends(require_admin)):
+    _, db, _ = auth
+    user = db.get_user(telegram_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربری با این آیدی عددی پیدا نشد.")
+    db.set_user_blocked(telegram_id, body.blocked)
+    return {"status": "ok", "is_blocked": body.blocked}
+
+
+class UserMessageSend(BaseModel):
+    text: str
+
+
+@app.post("/api/admin/users/{telegram_id}/message")
+async def api_admin_message_user(telegram_id: int, body: UserMessageSend, tenant: Tenant = Depends(get_tenant), auth=Depends(require_admin)):
+    _, db, _ = auth
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="متن پیام خالی است.")
+    user = db.get_user(telegram_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربری با این آیدی عددی پیدا نشد.")
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+            json={"chat_id": telegram_id, "text": f"📩 پیام از پشتیبانی:\n\n{text}"},
+        ) as resp:
+            if resp.status != 200:
+                raise HTTPException(status_code=502, detail="ارسال پیام به کاربر ناموفق بود (شاید بات را بلاک کرده).")
+    return {"status": "ok"}
+
+
+class BroadcastExpiredSend(BaseModel):
+    text: str
+
+
+@app.post("/api/admin/users/broadcast-expired")
+async def api_admin_broadcast_expired(body: BroadcastExpiredSend, tenant: Tenant = Depends(get_tenant), auth=Depends(require_admin)):
+    _, db, _ = auth
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="متن پیام خالی است.")
+    user_ids = db.get_expired_user_ids()
+    success, failed = 0, 0
+    async with aiohttp.ClientSession() as session:
+        for uid in user_ids:
+            try:
+                async with session.post(
+                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                    json={"chat_id": uid, "text": text},
+                ) as resp:
+                    if resp.status == 200:
+                        success += 1
+                    else:
+                        failed += 1
+            except Exception:
+                failed += 1
+    return {"status": "ok", "total": len(user_ids), "success": success, "failed": failed}
 
 
 # ---------------------------------------------------------------------------
