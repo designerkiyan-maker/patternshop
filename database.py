@@ -1086,21 +1086,22 @@ class Database:
         }
 
     def get_configs_due_for_renewal_reminder(self):
-        """کانفیگ‌های فروخته‌شده‌ای که به تاریخ انقضایشان (طبق تنظیم «چند روز قبل») نزدیک شده‌اند
-        و هنوز پیام یادآوری برایشان ارسال نشده است."""
+        """کانفیگ‌های فعال و بدون یادآوری را برمی‌گرداند.
+
+        نکته مهم: زمان انقضای ذخیره‌شده در cf.expires_at عمداً در اینجا
+        برای زمان‌بندی یادآوری استفاده نمی‌شود. زمان واقعی انقضا از لینک
+        Subscription در renewal_reminders.py خوانده می‌شود.
+        """
         settings = self.get_renewal_settings()
         if not settings["enabled"]:
             return []
-        now = datetime.utcnow()
-        threshold = (now + timedelta(days=settings["days_before"])).isoformat()
         with self._get_conn() as conn:
             return conn.execute(
                 "SELECT cf.id as config_id, cf.link, cf.assigned_user_id, cf.expires_at, "
                 "p.id as product_id, p.name as product_name "
                 "FROM configs cf JOIN products p ON cf.product_id = p.id "
-                "WHERE cf.is_used=1 AND cf.renewal_reminder_sent=0 AND cf.expires_at IS NOT NULL "
-                "AND cf.expires_at <= ? AND cf.expires_at > ?",
-                (threshold, now.isoformat()),
+                "WHERE cf.is_used=1 AND cf.renewal_reminder_sent=0 "
+                "AND cf.link IS NOT NULL AND TRIM(cf.link) != ''"
             ).fetchall()
 
     def mark_renewal_reminder_sent(self, config_id: int):

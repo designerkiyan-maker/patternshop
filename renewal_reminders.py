@@ -3,8 +3,8 @@
 یادآوری خودکار اتمام سرویس + کد تخفیف تشویقی تمدید
 
 این ماژول به‌صورت دوره‌ای (برای هر بات، مستقل و روی دیتابیس خودش) بررسی می‌کند
-که آیا کانفیگ فروخته‌شده‌ای به تاریخ انقضایش نزدیک شده یا نه (طبق تنظیم «چند روز
-قبل» در پنل مدیریت → «🔔 یادآوری تمدید سرویس»). به هر کاربری که سرویسش رو به
+که آیا زمان انقضای واقعی Subscription کانفیگ فروخته‌شده به بازه یادآوری رسیده یا نه
+(طبق تنظیم «چند روز قبل» در پنل مدیریت → «🔔 یادآوری تمدید سرویس»). به هر کاربری که سرویسش رو به
 اتمام است، دقیقاً یک‌بار پیام یادآوری همراه با یک کد تخفیف اختصاصی و محدود به
 زمان ارسال می‌شود.
 """
@@ -25,17 +25,43 @@ async def _send_single_reminder(bot, db, row) -> None:
         return
 
     settings = db.get_renewal_settings()
-    days_left = None
 
+    # زمان انقضا فقط از Subscription واقعی خوانده می‌شود.
+    # cf.expires_at دیتابیس نباید روی زمان ارسال یادآوری اثر بگذارد.
     info = await fetch_sub_info(row["link"])
-    if info.get("ok") and info.get("expire"):
-        exp_dt = datetime.fromtimestamp(info["expire"], tz=timezone.utc)
-        real_days_left = (exp_dt - datetime.now(timezone.utc)).days
-        if real_days_left > settings["days_before"]:
-            # طبق داده‌ی واقعی پنل هنوز واقعاً نزدیک انقضا نیست (مثلاً کاربر
-            # دستی در پنل تمدید شده)؛ فعلاً یادآوری نمی‌فرستیم و بعداً دوباره چک می‌شود.
-            return
-        days_left = max(0, real_days_left)
+    if not info.get("ok") or not info.get("expire"):
+        logger.warning(
+            "زمان انقضای واقعی Subscription برای config=%s قابل دریافت نیست؛ "
+            "یادآوری ارسال نمی‌شود.",
+            row["config_id"],
+        )
+        return
+
+    try:
+        expire_ts = float(info["expire"])
+    except (TypeError, ValueError):
+        logger.warning(
+            "expire نامعتبر برای config=%s؛ یادآوری ارسال نمی‌شود.",
+            row["config_id"],
+        )
+        return
+
+    now = datetime.now(timezone.utc)
+    exp_dt = datetime.fromtimestamp(expire_ts, tz=timezone.utc)
+    seconds_left = expire_ts - now.timestamp()
+    reminder_window = settings["days_before"] * 24 * 60 * 60
+
+    # هنوز وارد بازه یادآوری نشده است.
+    if seconds_left > reminder_window:
+        return
+
+    # کانفیگ منقضی شده است؛ یادآوری ارسال نکن.
+    if seconds_left <= 0:
+        return
+
+    # محاسبه فقط برای نمایش پیام است؛ شرط ارسال با ثانیه انجام می‌شود.
+    real_days_left = int(seconds_left // (24 * 60 * 60))
+    days_left = max(0, real_days_left)
 
     code, discount_expires_at, percent, expiry_hours = db.generate_renewal_discount_code(user_id)
 
@@ -63,7 +89,7 @@ async def _send_single_reminder(bot, db, row) -> None:
 
 
 async def check_and_send_renewal_reminders(bot, db) -> None:
-    """یک بار کل کانفیگ‌های نزدیک به انقضا را بررسی و برای هرکدام یادآوری ارسال می‌کند."""
+    """یک بار کانفیگ‌ها را بررسی می‌کند و زمان‌بندی را فقط از Subscription واقعی می‌خواند."""
     try:
         rows = db.get_configs_due_for_renewal_reminder()
     except Exception:
