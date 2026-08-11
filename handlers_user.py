@@ -99,7 +99,7 @@ def create_user_router(db) -> Router:
         if not categories:
             await message.answer("در حال حاضر دسته‌بندی فعالی وجود ندارد.")
             return
-        await message.answer("یک دسته‌بندی را انتخاب کنید:", reply_markup=kb.categories_kb(categories))
+        await message.answer("یک دسته‌بندی را انتخاب کنید:", reply_markup=kb.categories_kb(db, categories))
 
     @router.callback_query(F.data == "back_main")
     async def cb_back_main(call: CallbackQuery, state: FSMContext):
@@ -110,7 +110,7 @@ def create_user_router(db) -> Router:
     @router.callback_query(F.data == "back_categories")
     async def cb_back_categories(call: CallbackQuery):
         categories = db.get_categories(active_only=True)
-        await call.message.edit_text("یک دسته‌بندی را انتخاب کنید:", reply_markup=kb.categories_kb(categories))
+        await call.message.edit_text("یک دسته‌بندی را انتخاب کنید:", reply_markup=kb.categories_kb(db, categories))
         await call.answer()
 
     @router.callback_query(F.data.startswith("cat:"))
@@ -145,7 +145,7 @@ def create_user_router(db) -> Router:
             await call.message.edit_text(text)
             await call.answer()
             return
-        await call.message.edit_text(text, reply_markup=kb.product_confirm_kb(product_id))
+        await call.message.edit_text(text, reply_markup=kb.product_confirm_kb(db, product_id))
         await call.answer()
 
     @router.callback_query(F.data.startswith("enter_code:"))
@@ -195,7 +195,7 @@ def create_user_router(db) -> Router:
         text += f"💵 مبلغ نهایی قابل پرداخت: {final_preview:,} تومان\n"
         text += f"📊 موجودی: {stock} عدد"
 
-        await message.answer(text, reply_markup=kb.product_confirm_kb(product_id))
+        await message.answer(text, reply_markup=kb.product_confirm_kb(db, product_id))
 
     async def _notify_admins_of_order(bot: Bot, order_id: int, receipt_file_id: str = None):
         order = db.get_order(order_id)

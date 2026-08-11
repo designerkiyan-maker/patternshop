@@ -132,11 +132,11 @@ def menu_for_user(db, user_tg_id: int) -> ReplyKeyboardMarkup:
 # دسته‌بندی‌ها / محصولات (کاربر)
 # ---------------------------------------------------------------------------
 
-def categories_kb(categories) -> InlineKeyboardMarkup:
+def categories_kb(db, categories) -> InlineKeyboardMarkup:
     rows = []
     for cat in categories:
-        rows.append([InlineKeyboardButton(text=f"📁 {cat['name']}", callback_data=f"cat:{cat['id']}")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="back_main")])
+        rows.append([_styled_inline(db, f"📁 {cat['name']}", f"cat:{cat['id']}", "btn_cat_select_style")])
+    rows.append([_styled_inline(db, "⬅️ بازگشت", "back_main", "btn_buy_back_style")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -147,21 +147,23 @@ def products_kb(db, products, category_id) -> InlineKeyboardMarkup:
         stock_tag = "✅" if stock > 0 else "⛔️"
         rows.append(
             [
-                InlineKeyboardButton(
-                    text=f"{stock_tag} {p['name']} - {p['price']:,} تومان",
-                    callback_data=f"prod:{p['id']}",
+                _styled_inline(
+                    db,
+                    f"{stock_tag} {p['name']} - {p['price']:,} تومان",
+                    f"prod:{p['id']}",
+                    "btn_product_select_style",
                 )
             ]
         )
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت به دسته‌بندی‌ها", callback_data="back_categories")])
+    rows.append([_styled_inline(db, "⬅️ بازگشت به دسته‌بندی‌ها", "back_categories", "btn_buy_back_style")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def product_confirm_kb(product_id) -> InlineKeyboardMarkup:
+def product_confirm_kb(db, product_id) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="✅ ادامه و ارسال رسید", callback_data=f"buy_start:{product_id}")],
-        [InlineKeyboardButton(text="🎟 وارد کردن کد تخفیف", callback_data=f"enter_code:{product_id}")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="back_categories")],
+        [_styled_inline(db, "✅ ادامه و ارسال رسید", f"buy_start:{product_id}", "btn_buy_continue_style")],
+        [_styled_inline(db, "🎟 وارد کردن کد تخفیف", f"enter_code:{product_id}", "btn_enter_code_style")],
+        [_styled_inline(db, "⬅️ بازگشت", "back_categories", "btn_buy_back_style")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -234,6 +236,7 @@ def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
             continue
         rows.append([_styled_inline(db, label, callback_data, f"{key}_style")])
     rows.append([InlineKeyboardButton(text="🎨 رنگ‌آمیزی دکمه‌های پنل", callback_data="adm_panel_colors_menu")])
+    rows.append([InlineKeyboardButton(text="🎨 رنگ‌آمیزی دکمه‌های خرید", callback_data="adm_buyflow_colors_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -242,6 +245,30 @@ def admin_panel_colors_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
     for key, label, _ in ADMIN_PANEL_ITEMS:
         if key == "adm_resellers_menu" and not is_main_bot:
             continue
+        current_style = db.get_setting(f"{key}_style", "")
+        style_icon = {"primary": "🔵", "success": "🟢", "danger": "🔴", "": "⚪️"}.get(current_style, "⚪️")
+        rows.append(
+            [
+                InlineKeyboardButton(text=f"{style_icon} {label}", callback_data="noop"),
+                InlineKeyboardButton(text="🎨 تغییر رنگ", callback_data=f"adm_btn_color_menu:{key}"),
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+BUY_FLOW_COLOR_ITEMS = [
+    ("btn_cat_select", "📁 دکمه‌های انتخاب دسته‌بندی"),
+    ("btn_product_select", "📦 دکمه‌های انتخاب محصول"),
+    ("btn_buy_continue", "✅ دکمه «ادامه و ارسال رسید»"),
+    ("btn_enter_code", "🎟 دکمه «وارد کردن کد تخفیف»"),
+    ("btn_buy_back", "⬅️ دکمه‌های بازگشت در مسیر خرید"),
+]
+
+
+def buy_flow_colors_kb(db) -> InlineKeyboardMarkup:
+    rows = []
+    for key, label in BUY_FLOW_COLOR_ITEMS:
         current_style = db.get_setting(f"{key}_style", "")
         style_icon = {"primary": "🔵", "success": "🟢", "danger": "🔴", "": "⚪️"}.get(current_style, "⚪️")
         rows.append(

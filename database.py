@@ -63,6 +63,12 @@ DEFAULT_SETTINGS = {
     "adm_broadcast_style": "",
     "adm_stats_style": "success",
     "adm_wheel_settings_style": "success",
+    # رنگ دکمه‌های شیشه‌ای مسیر خرید (دسته‌بندی/محصول/تایید و ...)
+    "btn_cat_select_style": "primary",
+    "btn_product_select_style": "primary",
+    "btn_buy_continue_style": "success",
+    "btn_enter_code_style": "",
+    "btn_buy_back_style": "",
     # گردونه شانس
     "wheel_enabled": "1",
     "wheel_win_percent": "10",  # درصد احتمال برد از هر چرخش

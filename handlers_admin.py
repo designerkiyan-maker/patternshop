@@ -1127,16 +1127,27 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         for item_key, label, _ in kb.ADMIN_PANEL_ITEMS:
             if item_key == key:
                 return label
+        for item_key, label in kb.BUY_FLOW_COLOR_ITEMS:
+            if item_key == key:
+                return label
         return key
 
     def _is_panel_item_key(key: str) -> bool:
         return any(item_key == key for item_key, _, _ in kb.ADMIN_PANEL_ITEMS)
 
+    def _is_buyflow_key(key: str) -> bool:
+        return any(item_key == key for item_key, _ in kb.BUY_FLOW_COLOR_ITEMS)
+
     @router.callback_query(F.data.startswith("adm_btn_color_menu:"))
     async def cb_admin_btn_color_menu(call: CallbackQuery):
         key = call.data.split(":")[1]
         label = _lookup_button_label(key)
-        back_callback = "adm_panel_colors_menu" if _is_panel_item_key(key) else "adm_edit_buttons"
+        if _is_panel_item_key(key):
+            back_callback = "adm_panel_colors_menu"
+        elif _is_buyflow_key(key):
+            back_callback = "adm_buyflow_colors_menu"
+        else:
+            back_callback = "adm_edit_buttons"
         await call.message.edit_text(
             f"رنگ «{label}» را انتخاب کنید:", reply_markup=kb.admin_color_picker_kb(key, back_callback)
         )
@@ -1148,6 +1159,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         db.set_setting(f"{key}_style", "" if style == "none" else style)
         if _is_panel_item_key(key):
             await call.message.edit_text("🎨 رنگ‌آمیزی دکمه‌های پنل مدیریت:", reply_markup=kb.admin_panel_colors_kb(db, is_main_bot))
+        elif _is_buyflow_key(key):
+            await call.message.edit_text("🎨 رنگ‌آمیزی دکمه‌های خرید:", reply_markup=kb.buy_flow_colors_kb(db))
         else:
             await call.message.edit_text("کدام دکمه ویرایش شود؟", reply_markup=kb.admin_edit_buttons_kb(db))
         await call.answer("✅ رنگ دکمه به‌روزرسانی شد.")
@@ -1155,6 +1168,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     @router.callback_query(F.data == "adm_panel_colors_menu")
     async def cb_admin_panel_colors_menu(call: CallbackQuery):
         await call.message.edit_text("🎨 رنگ‌آمیزی دکمه‌های پنل مدیریت:", reply_markup=kb.admin_panel_colors_kb(db, is_main_bot))
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_buyflow_colors_menu")
+    async def cb_admin_buyflow_colors_menu(call: CallbackQuery):
+        await call.message.edit_text("🎨 رنگ‌آمیزی دکمه‌های خرید:", reply_markup=kb.buy_flow_colors_kb(db))
         await call.answer()
 
     # -------------------------------------------------------------------
