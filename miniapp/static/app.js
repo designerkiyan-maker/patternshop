@@ -657,17 +657,17 @@ const VPN_APPS = {
   ios: [
     {
       key: "shadowrocket", name: "Shadowrocket", icon: "🚀",
-      store: "https://apps.apple.com/app/id932747118",
+      store: "https://apps.apple.com/us/app/shadowrocket/id932747118",
       deepLink: (sub, remark) => `shadowrocket://add/sub/${btoa(unescape(encodeURIComponent(sub)))}?remark=${encodeURIComponent(remark)}`,
     },
     {
       key: "streisand", name: "Streisand", icon: "🎗",
-      store: "https://apps.apple.com/app/id6450534064",
+      store: "https://apps.apple.com/us/app/streisand/id6450534064",
       deepLink: (sub) => `streisand://import/${encodeURIComponent(sub)}`,
     },
     {
       key: "v2box", name: "V2Box", icon: "📦",
-      store: "https://apps.apple.com/app/id6446814690",
+      store: "https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690",
       deepLink: (sub, remark) => `v2box://install-sub?url=${encodeURIComponent(sub)}&name=${encodeURIComponent(remark)}`,
     },
   ],
@@ -692,7 +692,7 @@ const VPN_APPS = {
     },
     {
       key: "v2rayng", name: "v2rayNG", icon: "🔷",
-      store: "https://github.com/2dust/v2rayNG/releases/latest",
+      store: "https://play.google.com/store/apps/details?id=com.v2ray.ang",
       androidPackage: "com.v2ray.ang",
       deepLink: (sub, remark) => `v2rayng://install-sub?url=${encodeURIComponent(sub)}&name=${encodeURIComponent(remark)}`,
     },
@@ -731,92 +731,96 @@ function addToAppListHtml(orderId, platform) {
 }
 
 function tryOpenAppOrStore(deepLink, storeUrl, androidPackage = "") {
-  const isAndroid = /Android/i.test(navigator.userAgent || "");
-  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
-    (/Macintosh/i.test(navigator.userAgent || "") && navigator.maxTouchPoints > 1);
+  const ua = navigator.userAgent || "";
+  const isAndroid = /Android/i.test(ua);
+  const isIOS =
+    /iPhone|iPad|iPod/i.test(ua) ||
+    (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
 
-  let appOpened = false;
-  let finished = false;
-
-  const markAppOpened = () => {
-    appOpened = true;
-  };
-
-  const cleanup = () => {
-    document.removeEventListener("visibilitychange", markAppOpened);
-    window.removeEventListener("blur", markAppOpened);
-  };
-
-  document.addEventListener("visibilitychange", markAppOpened);
-  window.addEventListener("blur", markAppOpened);
-
-  const openHttp = (url) => {
+  const openStore = () => {
     try {
+      // Use a normal HTTPS App Store / Play Store URL. Telegram can open this
+      // externally, and it remains usable even when the native store app is
+      // unavailable.
       if (tg && typeof tg.openLink === "function") {
-        tg.openLink(url);
+        tg.openLink(storeUrl);
       } else {
-        window.open(url, "_blank", "noopener,noreferrer");
+        window.location.href = storeUrl;
       }
     } catch (e) {
-      try { window.open(url, "_blank", "noopener,noreferrer"); } catch (_) {}
+      try { window.location.href = storeUrl; } catch (_) {}
     }
   };
 
-  const openByAnchor = (url) => {
-    try {
-      const a = document.createElement("a");
-      a.href = url;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      a.style.position = "fixed";
-      a.style.left = "-9999px";
-      a.style.width = "1px";
-      a.style.height = "1px";
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => a.remove(), 1500);
-    } catch (e) {}
-  };
-
-  // Android: use intent:// with an OS-level fallback URL.
-  // If the app exists, Android opens it. If it does not exist, Android
-  // opens the supplied Play Store/App Store web URL instead of showing
-  // ERR_UNKNOWN_URL_SCHEME inside the Mini App.
+  // Android: let Android resolve the app first. If the package is not
+  // installed, browser_fallback_url sends the user to the Play Store.
   if (isAndroid && androidPackage) {
     try {
       const u = new URL(deepLink);
-      const scheme = u.protocol.slice(0, -1);
-      const body = `${u.host}${u.pathname}${u.search}`;
-      const fallback = encodeURIComponent(storeUrl);
-      const intentUrl = `intent://${body}#Intent;scheme=${scheme};package=${androidPackage};S.browser_fallback_url=${fallback};end`;
-      openByAnchor(intentUrl);
+      const scheme = u.protocol.replace(":", "");
+      const body = `${u.host}${u.pathname}${u.search}${u.hash}`;
+      const intentUrl =
+        `intent://${body}` +
+        `#Intent;scheme=${scheme};package=${androidPackage};` +
+        `S.browser_fallback_url=${encodeURIComponent(storeUrl)};end`;
 
-      setTimeout(() => {
-        if (!finished && !appOpened) {
-          finished = true;
-          cleanup();
-          openHttp(storeUrl);
-        }
-      }, 1800);
+      window.location.href = intentUrl;
       return;
     } catch (e) {
-      // Fall through to the generic method below.
+      openStore();
+      return;
     }
   }
 
-  // iOS / generic: try the app URL first. If the app is not installed,
-  // Telegram stays in the Mini App and the normal HTTP App Store URL is
-  // opened after a short delay.
-  openByAnchor(deepLink);
+  // iOS: trigger the custom URL scheme through a real user-initiated anchor
+  // click. This is more reliable inside WKWebView / Telegram Mini Apps than
+  // assigning window.location directly. If iOS does not switch to the app,
+  // pagehide/visibilitychange/blur are not observed and we fall back to the
+  // App Store after a short delay.
+  if (isIOS) {
+    let leftPage = false;
+    let timer = null;
 
-  setTimeout(() => {
-    if (finished) return;
-    finished = true;
-    cleanup();
-    if (!appOpened) openHttp(storeUrl);
-  }, isIOS ? 1400 : 1800);
+    const markLeftPage = () => { leftPage = true; };
+    const cleanup = () => {
+      document.removeEventListener("visibilitychange", markLeftPage);
+      window.removeEventListener("blur", markLeftPage);
+      window.removeEventListener("pagehide", markLeftPage);
+      if (timer) clearTimeout(timer);
+    };
+
+    document.addEventListener("visibilitychange", markLeftPage, { once: false });
+    window.addEventListener("blur", markLeftPage, { once: false });
+    window.addEventListener("pagehide", markLeftPage, { once: false });
+
+    const a = document.createElement("a");
+    a.href = deepLink;
+    a.style.display = "none";
+    a.setAttribute("aria-hidden", "true");
+    document.body.appendChild(a);
+
+    try {
+      a.click();
+    } catch (e) {
+      try { window.location.href = deepLink; } catch (_) {}
+    }
+
+    timer = setTimeout(() => {
+      a.remove();
+      cleanup();
+      if (!leftPage) openStore();
+    }, 1800);
+
+    return;
+  }
+
+  // Desktop / unknown platform: just try the app scheme.
+  try {
+    window.location.href = deepLink;
+  } catch (e) {
+    openStore();
+  }
 }
-
 function wireAddToAppButtons(root) {
   root.querySelectorAll(".add-to-app-toggle").forEach((btn) => {
     btn.onclick = () => {
