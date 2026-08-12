@@ -551,6 +551,7 @@ async function renderHome() {
       </div>
     `;
     active.filter((o) => o.link).forEach((o) => loadSubInfo(o.id, o.link));
+    wireAddToAppButtons(content);
   } catch (e) {
     content.innerHTML = errorState(e.message);
   }
@@ -642,9 +643,155 @@ function orderCard(o) {
       <div class="qr-row">
         <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(o.link)}" width="96" height="96" alt="QR" />
         <button class="btn small outline" onclick="navigator.clipboard.writeText('${o.link}');tg.HapticFeedback.notificationOccurred('success')">📋 کپی لینک</button>
-      </div>` : ""}
+      </div>
+      ${renderAddToAppBlock(o.id, o.link, o.product_name)}` : ""}
     </div>
   `;
+}
+
+// ---------------------------------------------------------------------------
+// افزودن خودکار اشتراک به اپلیکیشن‌های وی‌پی‌ان (iOS / اندروید)
+// ---------------------------------------------------------------------------
+
+const VPN_APPS = {
+  ios: [
+    {
+      key: "shadowrocket", name: "Shadowrocket", icon: "🚀",
+      store: "https://apps.apple.com/app/id932747118",
+      deepLink: (sub, remark) => `shadowrocket://add/sub/${btoa(unescape(encodeURIComponent(sub)))}?remark=${encodeURIComponent(remark)}`,
+    },
+    {
+      key: "streisand", name: "Streisand", icon: "🎗",
+      store: "https://apps.apple.com/app/id6450534064",
+      deepLink: (sub) => `streisand://import/${encodeURIComponent(sub)}`,
+    },
+    {
+      key: "v2box", name: "V2Box", icon: "📦",
+      store: "https://apps.apple.com/app/id6446814690",
+      deepLink: (sub, remark) => `v2box://install-sub?url=${encodeURIComponent(sub)}&name=${encodeURIComponent(remark)}`,
+    },
+  ],
+  android: [
+    {
+      key: "hiddify", name: "Hiddify Next", icon: "🛡",
+      store: "https://play.google.com/store/apps/details?id=app.hiddify.com",
+      deepLink: (sub, remark) => `hiddify://install-sub?url=${encodeURIComponent(sub)}#${encodeURIComponent(remark)}`,
+    },
+    {
+      key: "v2raytun", name: "v2RayTun", icon: "⚡",
+      store: "https://play.google.com/store/apps/details?id=com.v2raytun.android",
+      deepLink: (sub) => `v2raytun://import/${encodeURIComponent(sub)}`,
+    },
+    {
+      key: "v2box", name: "V2Box", icon: "📦",
+      store: "https://play.google.com/store/apps/details?id=dev.hexasoftware.v2box",
+      deepLink: (sub, remark) => `v2box://install-sub?url=${encodeURIComponent(sub)}&name=${encodeURIComponent(remark)}`,
+    },
+    {
+      key: "v2rayng", name: "v2rayNG", icon: "🔷",
+      store: "https://github.com/2dust/v2rayNG/releases/latest",
+      deepLink: (sub, remark) => `v2rayng://install-sub?url=${encodeURIComponent(sub)}&name=${encodeURIComponent(remark)}`,
+    },
+  ],
+};
+
+function renderAddToAppBlock(orderId, link, productName) {
+  return `
+    <div class="add-to-app-wrap" style="margin-top:10px">
+      <button class="btn small outline add-to-app-toggle" data-order-id="${orderId}" style="width:100%">📲 افزودن به برنامه</button>
+      <div class="add-to-app-panel" id="add-to-app-panel-${orderId}" data-link="${escHtml(link)}" data-name="${escHtml(productName || "ShopVPN")}" style="display:none;margin-top:8px"></div>
+    </div>
+  `;
+}
+
+function addToAppPlatformPickerHtml(orderId) {
+  return `
+    <div style="display:flex;gap:8px">
+      <button class="btn small add-to-app-platform" data-order-id="${orderId}" data-platform="ios" style="width:50%">📱 آیفون (iOS)</button>
+      <button class="btn small add-to-app-platform" data-order-id="${orderId}" data-platform="android" style="width:50%">🤖 اندروید</button>
+    </div>
+  `;
+}
+
+function addToAppListHtml(orderId, platform) {
+  const apps = VPN_APPS[platform] || [];
+  return `
+    <p class="hint-text" style="margin:0 0 8px">برنامه‌ات رو انتخاب کن؛ اگر نصب باشه اشتراک خودکار اضافه می‌شه، وگرنه صفحه‌ی دانلودش باز می‌شه.</p>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${apps.map((a) => `
+        <button class="btn small outline add-to-app-pick" data-order-id="${orderId}" data-platform="${platform}" data-app="${a.key}" style="width:100%;text-align:right">${a.icon} ${a.name}</button>
+      `).join("")}
+    </div>
+    <button class="btn small outline add-to-app-back" data-order-id="${orderId}" style="width:100%;margin-top:8px">⬅️ بازگشت</button>
+  `;
+}
+
+function tryOpenAppOrStore(deepLink, storeUrl) {
+  let backgrounded = false;
+  const markBackgrounded = () => { backgrounded = true; };
+  document.addEventListener("visibilitychange", markBackgrounded);
+  window.addEventListener("blur", markBackgrounded);
+  window.location.href = deepLink;
+  setTimeout(() => {
+    document.removeEventListener("visibilitychange", markBackgrounded);
+    window.removeEventListener("blur", markBackgrounded);
+    if (!backgrounded) {
+      if (tg && tg.openLink) tg.openLink(storeUrl);
+      else window.open(storeUrl, "_blank");
+    }
+  }, 1600);
+}
+
+function wireAddToAppButtons(root) {
+  root.querySelectorAll(".add-to-app-toggle").forEach((btn) => {
+    btn.onclick = () => {
+      const orderId = btn.dataset.orderId;
+      const panel = document.getElementById(`add-to-app-panel-${orderId}`);
+      if (!panel) return;
+      const isOpen = panel.style.display !== "none";
+      if (isOpen) {
+        panel.style.display = "none";
+        return;
+      }
+      panel.innerHTML = addToAppPlatformPickerHtml(orderId);
+      panel.style.display = "";
+      wireAddToAppButtons(panel);
+    };
+  });
+  root.querySelectorAll(".add-to-app-platform").forEach((btn) => {
+    btn.onclick = () => {
+      const orderId = btn.dataset.orderId;
+      const platform = btn.dataset.platform;
+      const panel = document.getElementById(`add-to-app-panel-${orderId}`);
+      if (!panel) return;
+      panel.innerHTML = addToAppListHtml(orderId, platform);
+      wireAddToAppButtons(panel);
+    };
+  });
+  root.querySelectorAll(".add-to-app-back").forEach((btn) => {
+    btn.onclick = () => {
+      const orderId = btn.dataset.orderId;
+      const panel = document.getElementById(`add-to-app-panel-${orderId}`);
+      if (!panel) return;
+      panel.innerHTML = addToAppPlatformPickerHtml(orderId);
+      wireAddToAppButtons(panel);
+    };
+  });
+  root.querySelectorAll(".add-to-app-pick").forEach((btn) => {
+    btn.onclick = () => {
+      const orderId = btn.dataset.orderId;
+      const platform = btn.dataset.platform;
+      const appKey = btn.dataset.app;
+      const panel = document.getElementById(`add-to-app-panel-${orderId}`);
+      if (!panel) return;
+      const link = panel.dataset.link;
+      const name = panel.dataset.name;
+      const app = (VPN_APPS[platform] || []).find((a) => a.key === appKey);
+      if (!app) return;
+      tg.HapticFeedback.notificationOccurred("success");
+      tryOpenAppOrStore(app.deepLink(link, name), app.store);
+    };
+  });
 }
 
 function fmtGB(bytes) {
