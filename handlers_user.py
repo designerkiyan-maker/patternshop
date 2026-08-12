@@ -612,7 +612,11 @@ def create_user_router(db) -> Router:
             f"🆔 `{user.id}`\n\n"
             f"✉️ {message.text or '(بدون متن / رسانه)'}"
         )
-        for admin_id in db.list_admins():
+        # فقط به اولین ادمین/مالک آنلاین اطلاع بده تا مکالمه به او اختصاص یابد؛
+        # اگر هیچ‌کس آنلاین نبود، طبق روال قدیم به همه‌ی ادمین‌ها اطلاع بده.
+        target_admin = db.resolve_support_admin_for_message(user.id)
+        admin_ids = [target_admin] if target_admin else db.list_admins()
+        for admin_id in admin_ids:
             try:
                 await bot.send_message(admin_id, text, parse_mode="Markdown", reply_markup=kb.contact_reply_kb(user.id))
             except Exception:

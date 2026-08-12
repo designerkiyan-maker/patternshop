@@ -28,6 +28,23 @@ import keyboards as kb
 logger = logging.getLogger(__name__)
 
 
+class AdminPresenceMiddleware:
+    """با هر پیام/کلیک یک ادمین در بات، حضور آنلاین او را ثبت می‌کند تا پیام‌های
+    جدید پشتیبانی زنده به اولین ادمین/مالک آنلاین مسیریابی شوند (نه به همه)."""
+
+    def __init__(self, db):
+        self.db = db
+
+    async def __call__(self, handler, event, data: dict):
+        user = data.get("event_from_user")
+        if user is not None and self.db.is_admin(user.id):
+            try:
+                self.db.touch_admin_presence(user.id)
+            except Exception:
+                pass
+        return await handler(event, data)
+
+
 async def _global_error_handler(event: ErrorEvent) -> bool:
     """هندلر سراسری خطا.
 
@@ -85,6 +102,10 @@ class BotManager:
         blocked_mw = BlockedUserMiddleware(db)
         dp.message.outer_middleware(blocked_mw)
         dp.callback_query.outer_middleware(blocked_mw)
+
+        presence_mw = AdminPresenceMiddleware(db)
+        dp.message.outer_middleware(presence_mw)
+        dp.callback_query.outer_middleware(presence_mw)
 
         force_join_mw = ForceJoinMiddleware(db)
         dp.message.outer_middleware(force_join_mw)

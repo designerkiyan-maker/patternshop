@@ -1485,6 +1485,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     @router.callback_query(F.data.startswith("reply_user:"))
     async def cb_reply_user(call: CallbackQuery, state: FSMContext):
         user_id = int(call.data.split(":")[1])
+        conv = db.get_support_conversation(user_id)
+        assigned_admin_id = conv["assigned_admin_id"] if conv else None
+        if assigned_admin_id and assigned_admin_id != call.from_user.id and not owner_only(call.from_user.id):
+            await call.answer(
+                "⛔️ این گفتگو در حال حاضر توسط ادمین دیگری پاسخ داده می‌شود.", show_alert=True
+            )
+            return
         await state.update_data(reply_to_user=user_id)
         await state.set_state(AdminReplyFlow.waiting_reply)
         await call.message.answer(f"متن پاسخ برای کاربر {user_id} را ارسال کنید:")
@@ -1497,9 +1504,20 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not user_id:
             await state.clear()
             return
+        conv = db.get_support_conversation(user_id)
+        assigned_admin_id = conv["assigned_admin_id"] if conv else None
+        if assigned_admin_id and assigned_admin_id != message.from_user.id and not owner_only(message.from_user.id):
+            await message.answer(
+                "⛔️ این گفتگو در حال حاضر توسط ادمین دیگری پاسخ داده می‌شود.",
+                reply_markup=kb.admin_panel_kb(db, is_main_bot),
+            )
+            await state.clear()
+            return
         try:
             await bot.send_message(user_id, f"📩 پاسخ پشتیبانی:\n\n{message.text}")
             if message.text:
+                if not owner_only(message.from_user.id):
+                    db.set_support_conversation_admin(user_id, message.from_user.id)
                 db.add_support_message(user_id, "admin", message.text)
             await message.answer("✅ پاسخ ارسال شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
         except Exception:

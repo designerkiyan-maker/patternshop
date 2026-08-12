@@ -130,12 +130,19 @@ class Database:
     # threadpool مینی‌اپ مشترک باشد.
 
     def _connect(self):
-        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         # WAL باعث می‌شود خواندن‌ها همزمان با نوشتن قفل نشوند (بات + مینی‌اپ + پنل ادمین)
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA synchronous = NORMAL")
+        # بدون busy_timeout، وقتی بات و مینی‌اپ (دو پروسه‌ی جدا) هم‌زمان روی همین
+        # فایل دیتابیس می‌نویسند، هر کوئری که با یک نوشتن هم‌زمان تداخل کند فوراً
+        # با خطای «database is locked» شکست می‌خورد به‌جای اینکه چند میلی‌ثانیه صبر
+        # کند. چون خطا داخل هندلر کلیدها/کالبک‌ها catch نمی‌شد، دکمه از دید کاربر
+        # بی‌واکنش/فریز به‌نظر می‌رسید. این مقدار به SQLite می‌گوید تا ۵ ثانیه صبر
+        # و دوباره تلاش کند قبل از اینکه خطا بدهد.
+        conn.execute("PRAGMA busy_timeout = 5000")
         return conn
 
     @contextmanager
@@ -285,7 +292,19 @@ class Database:
                     sender TEXT NOT NULL,
                     message TEXT NOT NULL,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    is_read_by_user INTEGER DEFAULT 0
+                    is_read_by_user INTEGER DEFAULT 0,
+                    is_read_by_admin INTEGER DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS support_conversations (
+                    user_id INTEGER PRIMARY KEY,
+                    assigned_admin_id INTEGER,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS admin_presence (
+                    telegram_id INTEGER PRIMARY KEY,
+                    last_seen TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS tickets (
@@ -293,6 +312,7 @@ class Database:
                     user_id INTEGER NOT NULL,
                     subject TEXT NOT NULL,
                     status TEXT DEFAULT 'open',
+                    claimed_by INTEGER,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
@@ -370,6 +390,8 @@ class Database:
             ("configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
             ("products", "low_stock_alert_sent", "INTEGER DEFAULT 0"),
             ("admins", "role", "TEXT DEFAULT 'admin'"),
+            ("support_messages", "is_read_by_admin", "INTEGER DEFAULT 0"),
+            ("tickets", "claimed_by", "INTEGER"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -1488,9 +1510,14 @@ class Database:
         """sender باید 'user' یا 'admin' باشد."""
         with self._get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO support_messages (user_id, sender, message, is_read_by_user) "
-                "VALUES (?, ?, ?, ?)",
-                (user_id, sender, message, 1 if sender == "user" else 0),
+                "INSERT INTO support_messages (user_id, sender, message, is_read_by_user, is_read_by_admin) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (user_id, sender, message, 1 if sender == "user" else 0, 1 if sender == "admin" else 0),
+            )
+            conn.execute(
+                "INSERT INTO support_conversations (user_id, updated_at) VALUES (?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(user_id) DO UPDATE SET updated_at=CURRENT_TIMESTAMP",
+                (user_id,),
             )
             return cur.lastrowid
 
@@ -1507,6 +1534,109 @@ class Database:
                 "UPDATE support_messages SET is_read_by_user=1 WHERE user_id=? AND is_read_by_user=0",
                 (user_id,),
             )
+
+    def mark_support_read_by_admin(self, user_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE support_messages SET is_read_by_admin=1 WHERE user_id=? AND is_read_by_admin=0",
+                (user_id,),
+            )
+
+    # -----------------------------------------------------------------------
+    # آنلاین‌بودن ادمین‌ها (برای مسیریابی چت زنده به اولین ادمین/مالک آنلاین)
+    # -----------------------------------------------------------------------
+
+    PRESENCE_ONLINE_SECONDS = 90
+
+    def touch_admin_presence(self, tg_id: int):
+        """باید در هر تعامل ادمین (پیام/کلیک در بات، یا درخواست API مینی‌اپ) صدا زده شود."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO admin_presence (telegram_id, last_seen) VALUES (?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(telegram_id) DO UPDATE SET last_seen=CURRENT_TIMESTAMP",
+                (tg_id,),
+            )
+
+    def get_online_admin_ids(self, timeout_seconds: int = None) -> list:
+        timeout_seconds = timeout_seconds or self.PRESENCE_ONLINE_SECONDS
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT telegram_id FROM admin_presence WHERE last_seen >= datetime('now', ?)",
+                (f"-{timeout_seconds} seconds",),
+            ).fetchall()
+            return [r["telegram_id"] for r in rows]
+
+    def is_admin_online(self, tg_id: int, timeout_seconds: int = None) -> bool:
+        return tg_id in self.get_online_admin_ids(timeout_seconds)
+
+    # -----------------------------------------------------------------------
+    # مسیریابی مکالمه‌ی چت زنده (به اولین ادمین/مالک آنلاین)
+    # -----------------------------------------------------------------------
+
+    def get_support_conversation(self, user_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM support_conversations WHERE user_id=?", (user_id,)
+            ).fetchone()
+
+    def set_support_conversation_admin(self, user_id: int, admin_id):
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO support_conversations (user_id, assigned_admin_id, updated_at) "
+                "VALUES (?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(user_id) DO UPDATE SET assigned_admin_id=excluded.assigned_admin_id, "
+                "updated_at=CURRENT_TIMESTAMP",
+                (user_id, admin_id),
+            )
+
+    def resolve_support_admin_for_message(self, user_id: int):
+        """موقع رسیدن پیام جدید کاربر صدا زده می‌شود. اگر مکالمه قبلاً به ادمینی
+        اختصاص یافته و آن ادمین همچنان آنلاین است، همان برگردانده می‌شود (یعنی پیام
+        فقط برای همان یک نفر ارسال شود). در غیر این صورت اولین ادمین/مالک آنلاین
+        انتخاب و مکالمه به او اختصاص داده می‌شود. اگر هیچ‌کس آنلاین نباشد None
+        برمی‌گردد (یعنی طبق روال قدیم به همه‌ی ادمین‌ها اطلاع داده شود)."""
+        conv = self.get_support_conversation(user_id)
+        online_ids = set(self.get_online_admin_ids())
+        current = conv["assigned_admin_id"] if conv else None
+        if current and current in online_ids:
+            return current
+        if not online_ids:
+            return None
+        role_order = {"owner": 0, "admin": 1, "mid": 2, "support": 3}
+        admins = self.list_admins_with_roles()
+        candidates = [a for a in admins if a["telegram_id"] in online_ids]
+        candidates.sort(key=lambda a: (role_order.get(a["role"], 9), a["telegram_id"]))
+        chosen = candidates[0]["telegram_id"] if candidates else None
+        if chosen:
+            self.set_support_conversation_admin(user_id, chosen)
+        return chosen
+
+    def list_support_conversations(self):
+        """لیست مکالمات چت زنده برای تب «پشتیبانی زنده» در پنل ادمین، جدیدترین اول."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT user_id, MAX(id) AS last_id, MAX(created_at) AS last_at, "
+                "SUM(CASE WHEN sender='user' AND is_read_by_admin=0 THEN 1 ELSE 0 END) AS unread "
+                "FROM support_messages GROUP BY user_id ORDER BY last_at DESC"
+            ).fetchall()
+            result = []
+            for r in rows:
+                last_msg = conn.execute(
+                    "SELECT sender, message FROM support_messages WHERE user_id=? ORDER BY id DESC LIMIT 1",
+                    (r["user_id"],),
+                ).fetchone()
+                conv = conn.execute(
+                    "SELECT assigned_admin_id FROM support_conversations WHERE user_id=?", (r["user_id"],)
+                ).fetchone()
+                result.append({
+                    "user_id": r["user_id"],
+                    "last_at": r["last_at"],
+                    "unread": r["unread"] or 0,
+                    "last_message": last_msg["message"] if last_msg else "",
+                    "last_sender": last_msg["sender"] if last_msg else "",
+                    "assigned_admin_id": conv["assigned_admin_id"] if conv else None,
+                })
+            return result
 
     # -----------------------------------------------------------------------
     # سیستم تیکت (مستقل از چت مستقیم بالا - یک راه ارتباطی جداگانه و رسمی‌تر
@@ -1544,6 +1674,16 @@ class Database:
     def get_ticket(self, ticket_id: int):
         with self._get_conn() as conn:
             return conn.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)).fetchone()
+
+    def claim_ticket_if_open(self, ticket_id: int, admin_id: int):
+        """اولین ادمین یا مالکی که به تیکت پاسخ می‌دهد، مالک آن پاسخ‌گویی می‌شود؛
+        تا وقتی claimed_by خالی است این تابع آن را قفل می‌کند و از این پس فقط
+        همان ادمین (و همیشه مالک اصلی بات) اجازه‌ی پاسخ‌دادن به این تیکت را دارند."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE tickets SET claimed_by=? WHERE id=? AND claimed_by IS NULL",
+                (admin_id, ticket_id),
+            )
 
     def add_ticket_message(self, ticket_id: int, sender: str, message: str) -> int:
         """sender باید 'user' یا 'admin' باشد. وضعیت تیکت را هم خودکار به‌روز می‌کند:
