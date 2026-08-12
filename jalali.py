@@ -58,6 +58,58 @@ def gregorian_to_jalali(gy: int, gm: int, gd: int):
     return jy, jm, jd
 
 
+def jalali_to_gregorian(jy: int, jm: int, jd: int):
+    """معکوس gregorian_to_jalali؛ برای تبدیل تاریخ انتخاب‌شده‌ی شمسی (مثلاً در فیلتر
+    بازه‌ی زمانی) به میلادی، جهت استفاده در پرس‌وجوهای دیتابیس."""
+    j_days_in_month = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 29]
+    g_days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+    jy2 = jy - 979
+    jm2 = jm - 1
+    jd2 = jd - 1
+
+    j_day_no = 365 * jy2 + _div(jy2, 33) * 8 + _div(jy2 % 33 + 3, 4)
+    for i in range(jm2):
+        j_day_no += j_days_in_month[i]
+    j_day_no += jd2
+
+    g_day_no = j_day_no + 79
+
+    gy = 1600 + 400 * _div(g_day_no, 146097)
+    g_day_no %= 146097
+
+    leap = True
+    if g_day_no >= 36525:
+        g_day_no -= 1
+        gy += 100 * _div(g_day_no, 36524)
+        g_day_no %= 36524
+        if g_day_no >= 365:
+            g_day_no += 1
+        else:
+            leap = False
+
+    gy += 4 * _div(g_day_no, 1461)
+    g_day_no %= 1461
+
+    if g_day_no >= 366:
+        leap = False
+        g_day_no -= 1
+        gy += _div(g_day_no, 365)
+        g_day_no %= 365
+
+    gm, gd = 1, g_day_no + 1
+    days = g_day_no
+    for i in range(12):
+        dim = g_days_in_month[i] + (1 if i == 1 and ((gy % 4 == 0 and gy % 100 != 0) or gy % 400 == 0) else 0)
+        if days < dim:
+            gm = i + 1
+            gd = days + 1
+            break
+        days -= dim
+
+    return gy, gm, gd
+
+
 def _coerce_datetime(value):
     if value is None or value == "":
         return None
