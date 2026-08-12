@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import aiohttp
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form, Depends, Query
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -43,6 +43,7 @@ from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, resolve_db_p
 from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER
 from miniapp.auth import validate_init_data
 from sub_info import fetch_sub_info
+from jalali import to_jalali_str
 
 app = FastAPI(title="V2Ray Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -1356,9 +1357,54 @@ def api_admin_delete_discount(discount_id: int, auth=Depends(require_admin)):
 # ---------------------------------------------------------------------------
 
 @app.get("/api/admin/dashboard")
-def api_admin_dashboard(days: int = Query(14, ge=7, le=30), auth=Depends(require_admin)):
+def api_admin_dashboard(
+    start_date: str = Query(None), end_date: str = Query(None), auth=Depends(require_admin)
+):
     _, db, _ = auth
-    return db.get_dashboard_stats(days=days)
+    return db.get_sales_stats(start_date=start_date, end_date=end_date)
+
+
+@app.get("/api/admin/orders/export")
+def api_admin_orders_export(
+    start_date: str = Query(None), end_date: str = Query(None), auth=Depends(require_admin)
+):
+    _, db, _ = auth
+    rows = db.get_orders_for_export(start_date=start_date, end_date=end_date)
+
+    status_fa = {"approved": "تاییدشده", "pending": "در انتظار", "rejected": "ردشده"}
+    lines = [
+        "\ufeff" + ",".join([
+            "شناسه سفارش", "تاریخ ثبت (شمسی)", "وضعیت", "آیدی کاربر", "یوزرنیم", "نام",
+            "محصول", "مبلغ نهایی", "مبلغ از کیف‌پول", "تخفیف",
+        ])
+    ]
+    for r in rows:
+        row = [
+            str(r["id"]),
+            to_jalali_str(r["created_at"], with_time=True),
+            status_fa.get(r["status"], r["status"]),
+            str(r["user_id"]),
+            (r["username"] or ""),
+            (r["first_name"] or ""),
+            (r["product_name"] or ""),
+            str(r["amount"] or 0),
+            str(r["wallet_used"] or 0),
+            str(r["discount_amount"] or 0),
+        ]
+
+        def _csv_cell(v):
+            v = v.replace('"', '""')
+            return f'"{v}"' if ("," in v or '"' in v) else v
+
+        lines.append(",".join(_csv_cell(c) for c in row))
+
+    csv_content = "\n".join(lines)
+    filename = f"orders_{rows[0]['created_at'][:10] if rows else 'export'}.csv"
+    return Response(
+        content=csv_content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ---------------------------------------------------------------------------
