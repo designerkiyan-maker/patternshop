@@ -14,6 +14,7 @@ from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
+from aiogram.exceptions import TelegramBadRequest
 
 import keyboards as kb
 from database import Database
@@ -73,6 +74,29 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def deny_mid(call: CallbackQuery):
         await call.answer("⛔️ این بخش فقط برای مالک و مدیر کامل در دسترس است.", show_alert=True)
 
+    async def safe_edit(call: CallbackQuery, text: str, reply_markup=None, parse_mode=None) -> bool:
+        """ویرایش امن پیام؛ خطای message is not modified نباید کل callback را خراب کند."""
+        try:
+            kwargs = {"reply_markup": reply_markup}
+            if parse_mode is not None:
+                kwargs["parse_mode"] = parse_mode
+            await call.message.edit_text(text, **kwargs)
+            return True
+        except TelegramBadRequest as exc:
+            if "message is not modified" in str(exc).lower():
+                return True
+            raise
+
+    def callback_id(data: str, prefix: str):
+        """استخراج امن ID از callback_data؛ callback خراب نباید ValueError تولید کند."""
+        try:
+            value = data.split(":", 1)[1]
+            if not value.isdigit():
+                return None
+            return int(value)
+        except (IndexError, AttributeError, ValueError):
+            return None
+
     # -------------------------------------------------------------------
     # ورود به پنل
     # -------------------------------------------------------------------
@@ -104,31 +128,48 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_categories(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        categories = db.get_categories(active_only=False)
-        await call.message.edit_text("📂 مدیریت دسته‌بندی‌ها:", reply_markup=kb.admin_categories_kb(categories))
-        await call.answer()
+        try:
+            categories = db.get_categories(active_only=False)
+            await safe_edit(call, "📂 مدیریت دسته‌بندی‌ها:", kb.admin_categories_kb(categories))
+            await call.answer()
+        except Exception:
+            await call.answer("⚠️ بارگذاری دسته‌بندی‌ها ناموفق بود. دوباره تلاش کنید.", show_alert=True)
 
     @router.callback_query(F.data.startswith("adm_cat_toggle:"))
     async def cb_admin_cat_toggle(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        cat_id = int(call.data.split(":")[1])
-        db.toggle_category(cat_id)
-        db.log_admin_action(call.from_user.id, "category_toggle", f"دسته‌بندی #{cat_id}")
-        categories = db.get_categories(active_only=False)
-        await call.message.edit_text("📂 مدیریت دسته‌بندی‌ها:", reply_markup=kb.admin_categories_kb(categories))
-        await call.answer("وضعیت تغییر کرد.")
+        cat_id = callback_id(call.data, "adm_cat_toggle")
+        if cat_id is None:
+            return await call.answer("⚠️ درخواست نامعتبر است.", show_alert=True)
+        try:
+            if db.get_category(cat_id) is None:
+                return await call.answer("⚠️ این دسته‌بندی دیگر وجود ندارد.", show_alert=True)
+            db.toggle_category(cat_id)
+            db.log_admin_action(call.from_user.id, "category_toggle", f"دسته‌بندی #{cat_id}")
+            categories = db.get_categories(active_only=False)
+            await safe_edit(call, "📂 مدیریت دسته‌بندی‌ها:", kb.admin_categories_kb(categories))
+            await call.answer("وضعیت تغییر کرد.")
+        except Exception:
+            await call.answer("⚠️ تغییر وضعیت دسته‌بندی ناموفق بود. دوباره تلاش کنید.", show_alert=True)
 
     @router.callback_query(F.data.startswith("adm_cat_del:"))
     async def cb_admin_cat_del(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        cat_id = int(call.data.split(":")[1])
-        db.delete_category(cat_id)
-        db.log_admin_action(call.from_user.id, "category_delete", f"دسته‌بندی #{cat_id}")
-        categories = db.get_categories(active_only=False)
-        await call.message.edit_text("📂 مدیریت دسته‌بندی‌ها:", reply_markup=kb.admin_categories_kb(categories))
-        await call.answer("دسته‌بندی حذف شد.")
+        cat_id = callback_id(call.data, "adm_cat_del")
+        if cat_id is None:
+            return await call.answer("⚠️ درخواست نامعتبر است.", show_alert=True)
+        try:
+            if db.get_category(cat_id) is None:
+                return await call.answer("⚠️ این دسته‌بندی قبلاً حذف شده است.", show_alert=True)
+            db.delete_category(cat_id)
+            db.log_admin_action(call.from_user.id, "category_delete", f"دسته‌بندی #{cat_id}")
+            categories = db.get_categories(active_only=False)
+            await safe_edit(call, "📂 مدیریت دسته‌بندی‌ها:", kb.admin_categories_kb(categories))
+            await call.answer("دسته‌بندی حذف شد.")
+        except Exception:
+            await call.answer("⚠️ حذف دسته‌بندی ناموفق بود. دوباره تلاش کنید.", show_alert=True)
 
     @router.callback_query(F.data == "adm_cat_add")
     async def cb_admin_cat_add(call: CallbackQuery, state: FSMContext):
@@ -142,11 +183,20 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def process_add_category(message: Message, state: FSMContext):
         if not admin_only(message.from_user.id):
             return
-        name = message.text.strip()
-        db.add_category(name)
-        db.log_admin_action(message.from_user.id, "category_add", f"دسته‌بندی «{name}»")
-        await state.clear()
-        await message.answer("✅ دسته‌بندی اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+        name = (message.text or "").strip()
+        if not name:
+            await message.answer("لطفاً نام دسته‌بندی را وارد کنید.")
+            return
+        if len(name) > 100:
+            await message.answer("نام دسته‌بندی نباید بیشتر از ۱۰۰ کاراکتر باشد.")
+            return
+        try:
+            db.add_category(name)
+            db.log_admin_action(message.from_user.id, "category_add", f"دسته‌بندی «{name}»")
+            await state.clear()
+            await message.answer("✅ دسته‌بندی اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+        except Exception:
+            await message.answer("⚠️ افزودن دسته‌بندی ناموفق بود. دوباره تلاش کنید.")
 
     # -------------------------------------------------------------------
     # مدیریت محصولات
@@ -1318,18 +1368,30 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_admins_menu")
     async def cb_admin_admins_menu(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
-        await call.message.edit_text("👤 مدیریت ادمین‌ها:", reply_markup=kb.admin_admins_menu_kb())
-        await call.answer()
+        if not owner_only(call.from_user.id):
+            return await call.answer("⛔️ مدیریت ادمین‌ها فقط برای مالک اصلی در دسترس است.", show_alert=True)
+        try:
+            await safe_edit(call, "👤 مدیریت ادمین‌ها:", kb.admin_admins_menu_kb())
+            await call.answer()
+        except Exception:
+            await call.answer("⚠️ باز کردن مدیریت ادمین‌ها ناموفق بود.", show_alert=True)
 
     @router.callback_query(F.data == "adm_admins_list")
     async def cb_admin_admins_list(call: CallbackQuery):
-        admins = db.list_admins_with_roles()
-        lines = [f"- `{a['telegram_id']}` — {kb.ADMIN_ROLE_LABELS.get(a['role'], a['role'])}" for a in admins]
-        text = "لیست ادمین‌ها:\n" + "\n".join(lines)
-        await call.message.edit_text(text, parse_mode="Markdown", reply_markup=kb.admin_back_kb("adm_admins_menu"))
-        await call.answer()
+        if not owner_only(call.from_user.id):
+            return await call.answer("⛔️ فقط مالک اصلی می‌تواند لیست ادمین‌ها را ببیند.", show_alert=True)
+        try:
+            admins = db.list_admins_with_roles()
+            if not admins:
+                text = "📃 هیچ ادمینی ثبت نشده است."
+            else:
+                # برای جلوگیری از خطاهای Markdown، لیست را بدون parse_mode ارسال می‌کنیم.
+                lines = [f"• {a['telegram_id']} — {kb.ADMIN_ROLE_LABELS.get(a['role'], a['role'])}" for a in admins]
+                text = "📃 لیست ادمین‌ها و نقش‌ها:\n\n" + "\n".join(lines)
+            await safe_edit(call, text, kb.admin_back_kb("adm_admins_menu"))
+            await call.answer()
+        except Exception:
+            await call.answer("⚠️ دریافت لیست ادمین‌ها ناموفق بود. دوباره تلاش کنید.", show_alert=True)
 
     @router.callback_query(F.data == "adm_admin_add")
     async def cb_admin_admin_add(call: CallbackQuery, state: FSMContext):
@@ -1343,19 +1405,21 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.message(AdminAddAdmin.waiting_id)
     async def process_add_admin(message: Message, state: FSMContext):
-        if not message.text.strip().isdigit():
+        raw = (message.text or "").strip()
+        if not raw.isdigit():
             await message.answer("لطفاً فقط آیدی عددی ارسال کنید.")
             return
-        target_id = int(message.text.strip())
-        await state.clear()
+        target_id = int(raw)
         if db.is_admin(target_id):
+            await state.clear()
             await message.answer(
                 "این کاربر از قبل ادمین است. برای تغییر نقشش از «🔄 تغییر نقش ادمین» استفاده کن.",
                 reply_markup=kb.admin_panel_kb(db, is_main_bot),
             )
             return
+        await state.clear()
         await message.answer(
-            f"نقش کاربر `{target_id}` چه باشد؟", parse_mode="Markdown",
+            f"نقش کاربر {target_id} چه باشد?",
             reply_markup=kb.admin_role_pick_kb(target_id, "add"),
         )
 
@@ -1363,17 +1427,24 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_add_admin_role(call: CallbackQuery):
         if not owner_only(call.from_user.id):
             return await call.answer("⛔️ فقط مالک اصلی می‌تواند ادمین اضافه کند.", show_alert=True)
-        _, target_id, role = call.data.split(":")
-        db.add_admin(int(target_id), role=role)
-        db.log_admin_action(
-            call.from_user.id, "admin_add",
-            f"کاربر {target_id} | نقش: {kb.ADMIN_ROLE_LABELS.get(role, role)}",
-        )
-        await call.message.edit_text(
-            f"✅ کاربر `{target_id}` با نقش «{kb.ADMIN_ROLE_LABELS.get(role, role)}» اضافه شد.",
-            parse_mode="Markdown", reply_markup=kb.admin_back_kb("adm_admins_menu"),
-        )
-        await call.answer()
+        try:
+            parts = (call.data or "").split(":")
+            if len(parts) != 3 or not parts[1].isdigit() or parts[2] not in ("admin", "mid", "support"):
+                return await call.answer("⚠️ درخواست نامعتبر است.", show_alert=True)
+            target_id, role = int(parts[1]), parts[2]
+            db.add_admin(target_id, role=role)
+            db.log_admin_action(
+                call.from_user.id, "admin_add",
+                f"کاربر {target_id} | نقش: {kb.ADMIN_ROLE_LABELS.get(role, role)}",
+            )
+            await safe_edit(
+                call,
+                f"✅ کاربر {target_id} با نقش «{kb.ADMIN_ROLE_LABELS.get(role, role)}» اضافه شد.",
+                kb.admin_back_kb("adm_admins_menu"),
+            )
+            await call.answer("ادمین اضافه شد.")
+        except Exception:
+            await call.answer("⚠️ افزودن ادمین ناموفق بود. دوباره تلاش کنید.", show_alert=True)
 
     @router.callback_query(F.data == "adm_admin_role_change")
     async def cb_admin_role_change_start(call: CallbackQuery, state: FSMContext):
@@ -1388,10 +1459,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.message(AdminChangeRole.waiting_id)
     async def process_change_role_id(message: Message, state: FSMContext):
-        if not message.text.strip().isdigit():
+        raw = (message.text or "").strip()
+        if not raw.isdigit():
             await message.answer("لطفاً فقط آیدی عددی ارسال کنید.")
             return
-        target_id = int(message.text.strip())
+        target_id = int(raw)
         await state.clear()
         role = db.get_admin_role(target_id)
         if role is None:
@@ -1401,30 +1473,34 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("نقش مالک اصلی قابل تغییر نیست.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
             return
         await message.answer(
-            f"نقش جدید کاربر `{target_id}` (نقش فعلی: {kb.ADMIN_ROLE_LABELS.get(role, role)}) چه باشد؟",
-            parse_mode="Markdown", reply_markup=kb.admin_role_pick_kb(target_id, "setrole"),
+            f"نقش جدید کاربر {target_id} (نقش فعلی: {kb.ADMIN_ROLE_LABELS.get(role, role)}) چه باشد؟",
+            reply_markup=kb.admin_role_pick_kb(target_id, "setrole"),
         )
 
     @router.callback_query(F.data.startswith("adm_change_role_set:"))
     async def cb_admin_change_role_set(call: CallbackQuery):
         if not owner_only(call.from_user.id):
             return await call.answer("⛔️ فقط مالک اصلی می‌تواند نقش ادمین‌ها را تغییر دهد.", show_alert=True)
-        _, target_id, role = call.data.split(":")
-        ok = db.set_admin_role(int(target_id), role)
-        if ok:
+        try:
+            parts = (call.data or "").split(":")
+            if len(parts) != 3 or not parts[1].isdigit() or parts[2] not in ("admin", "mid", "support"):
+                return await call.answer("⚠️ درخواست نامعتبر است.", show_alert=True)
+            target_id, role = int(parts[1]), parts[2]
+            ok = db.set_admin_role(target_id, role)
+            if not ok:
+                return await call.answer("⛔️ تغییر نقش ناموفق بود.", show_alert=True)
             db.log_admin_action(
                 call.from_user.id, "admin_role_change",
                 f"کاربر {target_id} | نقش جدید: {kb.ADMIN_ROLE_LABELS.get(role, role)}",
             )
-            await call.message.edit_text(
-                f"✅ نقش کاربر `{target_id}` به «{kb.ADMIN_ROLE_LABELS.get(role, role)}» تغییر کرد.",
-                parse_mode="Markdown", reply_markup=kb.admin_back_kb("adm_admins_menu"),
+            await safe_edit(
+                call,
+                f"✅ نقش کاربر {target_id} به «{kb.ADMIN_ROLE_LABELS.get(role, role)}» تغییر کرد.",
+                kb.admin_back_kb("adm_admins_menu"),
             )
-        else:
-            await call.message.edit_text(
-                "⛔️ تغییر نقش ناموفق بود.", reply_markup=kb.admin_back_kb("adm_admins_menu")
-            )
-        await call.answer()
+            await call.answer("نقش تغییر کرد.")
+        except Exception:
+            await call.answer("⚠️ تغییر نقش ناموفق بود. دوباره تلاش کنید.", show_alert=True)
 
     @router.callback_query(F.data == "adm_admin_remove")
     async def cb_admin_admin_remove(call: CallbackQuery, state: FSMContext):
@@ -1438,17 +1514,30 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.message(AdminRemoveAdmin.waiting_id)
     async def process_remove_admin(message: Message, state: FSMContext):
-        if not message.text.strip().isdigit():
+        raw = (message.text or "").strip()
+        if not raw.isdigit():
             await message.answer("لطفاً فقط آیدی عددی ارسال کنید.")
             return
-        target_id = int(message.text.strip())
-        ok = db.remove_admin(target_id)
-        await state.clear()
-        if ok:
-            db.log_admin_action(message.from_user.id, "admin_remove", f"کاربر {target_id}")
-            await message.answer("✅ ادمین حذف شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
-        else:
-            await message.answer("⛔️ این ادمین قابل حذف نیست.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+        target_id = int(raw)
+        try:
+            if not db.is_admin(target_id):
+                await state.clear()
+                await message.answer("⛔️ این کاربر ادمین نیست.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+                return
+            if db.get_admin_role(target_id) == "owner":
+                await state.clear()
+                await message.answer("⛔️ مالک اصلی قابل حذف نیست.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+                return
+            ok = db.remove_admin(target_id)
+            await state.clear()
+            if ok:
+                db.log_admin_action(message.from_user.id, "admin_remove", f"کاربر {target_id}")
+                await message.answer("✅ ادمین حذف شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+            else:
+                await message.answer("⛔️ حذف ادمین ناموفق بود.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+        except Exception:
+            await state.clear()
+            await message.answer("⚠️ حذف ادمین ناموفق بود. دوباره تلاش کنید.")
 
     # -------------------------------------------------------------------
     # پیام همگانی

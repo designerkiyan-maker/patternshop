@@ -13,6 +13,7 @@
 import sqlite3
 import secrets
 import threading
+import time
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 
@@ -142,7 +143,7 @@ class Database:
         # کند. چون خطا داخل هندلر کلیدها/کالبک‌ها catch نمی‌شد، دکمه از دید کاربر
         # بی‌واکنش/فریز به‌نظر می‌رسید. این مقدار به SQLite می‌گوید تا ۵ ثانیه صبر
         # و دوباره تلاش کند قبل از اینکه خطا بدهد.
-        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA busy_timeout = 30000")
         return conn
 
     @contextmanager
@@ -590,6 +591,21 @@ class Database:
         with self._get_conn() as conn:
             return conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
 
+    def _sqlite_retry(self, operation, attempts: int = 4, delay: float = 0.15):
+        """اجرای عملیات SQLite با retry کوتاه برای برخوردهای موقت database is locked/busy."""
+        last_error = None
+        for attempt in range(attempts):
+            try:
+                return operation()
+            except sqlite3.OperationalError as exc:
+                last_error = exc
+                if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
+                    raise
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(delay * (attempt + 1))
+        raise last_error
+
     # -----------------------------------------------------------------------
     # ادمین‌ها
     # -----------------------------------------------------------------------
@@ -623,33 +639,39 @@ class Database:
     def add_admin(self, tg_id: int, role: str = "admin"):
         if role not in ("admin", "mid", "support"):
             role = "admin"
-        with self._get_conn() as conn:
-            conn.execute(
-                "INSERT INTO admins (telegram_id, role) VALUES (?, ?) "
-                "ON CONFLICT(telegram_id) DO UPDATE SET role=excluded.role",
-                (tg_id, role),
-            )
+        def op():
+            with self._get_conn() as conn:
+                conn.execute(
+                    "INSERT INTO admins (telegram_id, role) VALUES (?, ?) "
+                    "ON CONFLICT(telegram_id) DO UPDATE SET role=excluded.role",
+                    (tg_id, role),
+                )
+        return self._sqlite_retry(op)
 
     def set_admin_role(self, tg_id: int, role: str) -> bool:
         """تغییر نقش یک ادمین موجود. نقش «owner» هرگز از این مسیر قابل واگذاری نیست."""
         if role not in ("admin", "mid", "support"):
             return False
-        with self._get_conn() as conn:
-            row = conn.execute("SELECT role FROM admins WHERE telegram_id=?", (tg_id,)).fetchone()
-            if not row or row["role"] == "owner":
-                return False
-            conn.execute("UPDATE admins SET role=? WHERE telegram_id=?", (role, tg_id))
-        return True
+        def op():
+            with self._get_conn() as conn:
+                row = conn.execute("SELECT role FROM admins WHERE telegram_id=?", (tg_id,)).fetchone()
+                if not row or row["role"] == "owner":
+                    return False
+                conn.execute("UPDATE admins SET role=? WHERE telegram_id=?", (role, tg_id))
+            return True
+        return self._sqlite_retry(op)
 
     def remove_admin(self, tg_id: int, protected_owner_id: int = None) -> bool:
         if protected_owner_id is not None and tg_id == protected_owner_id:
             return False
-        with self._get_conn() as conn:
-            row = conn.execute("SELECT role FROM admins WHERE telegram_id=?", (tg_id,)).fetchone()
-            if row and row["role"] == "owner":
-                return False
-            conn.execute("DELETE FROM admins WHERE telegram_id=?", (tg_id,))
-        return True
+        def op():
+            with self._get_conn() as conn:
+                row = conn.execute("SELECT role FROM admins WHERE telegram_id=?", (tg_id,)).fetchone()
+                if row and row["role"] == "owner":
+                    return False
+                conn.execute("DELETE FROM admins WHERE telegram_id=?", (tg_id,))
+            return True
+        return self._sqlite_retry(op)
 
     def list_admins(self):
         with self._get_conn() as conn:
@@ -696,9 +718,11 @@ class Database:
     # -----------------------------------------------------------------------
 
     def add_category(self, name: str) -> int:
-        with self._get_conn() as conn:
-            cur = conn.execute("INSERT INTO categories (name) VALUES (?)", (name,))
-            return cur.lastrowid
+        def op():
+            with self._get_conn() as conn:
+                cur = conn.execute("INSERT INTO categories (name) VALUES (?)", (name,))
+                return cur.lastrowid
+        return self._sqlite_retry(op)
 
     def get_categories(self, active_only=True):
         with self._get_conn() as conn:
@@ -715,19 +739,26 @@ class Database:
             return conn.execute("SELECT * FROM categories WHERE id=?", (cat_id,)).fetchone()
 
     def toggle_category(self, cat_id: int):
-        with self._get_conn() as conn:
-            row = conn.execute("SELECT is_active FROM categories WHERE id=?", (cat_id,)).fetchone()
-            if row:
-                new_val = 0 if row["is_active"] else 1
-                conn.execute("UPDATE categories SET is_active=? WHERE id=?", (new_val, cat_id))
+        def op():
+            with self._get_conn() as conn:
+                row = conn.execute("SELECT is_active FROM categories WHERE id=?", (cat_id,)).fetchone()
+                if row:
+                    new_val = 0 if row["is_active"] else 1
+                    conn.execute("UPDATE categories SET is_active=? WHERE id=?", (new_val, cat_id))
+                    return True
+                return False
+        return self._sqlite_retry(op)
 
     def edit_category(self, cat_id: int, name: str):
         with self._get_conn() as conn:
             conn.execute("UPDATE categories SET name=? WHERE id=?", (name, cat_id))
 
     def delete_category(self, cat_id: int):
-        with self._get_conn() as conn:
-            conn.execute("DELETE FROM categories WHERE id=?", (cat_id,))
+        def op():
+            with self._get_conn() as conn:
+                cur = conn.execute("DELETE FROM categories WHERE id=?", (cat_id,))
+                return cur.rowcount > 0
+        return self._sqlite_retry(op)
 
     # -----------------------------------------------------------------------
     # محصولات
