@@ -1217,9 +1217,12 @@ const STYLE_OPTIONS = [
   { value: "danger", label: "🔴 قرمز" },
 ];
 
-let adminSection = "stats"; // stats | menu | branding | catalog | tickets | sales | users | resellers
+let adminSection = "stats"; // stats | menu | branding | catalog | tickets | livechat | sales | users | resellers
 let adminCatalogView = { level: "categories" }; // categories | products | configs
 let adminTicketView = { level: "list" }; // list | thread
+let adminLiveChatView = { level: "list" }; // list | thread
+let adminPresenceTimer = null;
+let adminLiveChatPollTimer = null;
 
 const ADMIN_TABS = [
   { key: "stats", label: "آمار", fullOnly: true, seniorOnly: true },
@@ -1228,6 +1231,7 @@ const ADMIN_TABS = [
   { key: "catalog", label: "محصولات", fullOnly: true, seniorOnly: true },
   { key: "users", label: "مدیریت کاربران", fullOnly: true },
   { key: "sales", label: "فروش", fullOnly: true, seniorOnly: true },
+  { key: "livechat", label: "پشتیبانی زنده", fullOnly: false },
   { key: "tickets", label: "تیکت‌ها", fullOnly: false },
   { key: "adminlog", label: "لاگ ادمین", fullOnly: true, seniorOnly: true },
   { key: "backup", label: "بکاپ", fullOnly: true, ownerOnly: true },
@@ -1276,19 +1280,27 @@ async function renderAdmin() {
   }
   document.querySelectorAll("#admin-section-tabs .seg-btn").forEach((b) => {
     b.onclick = () => {
+      if (adminSection !== "livechat") clearInterval(adminLiveChatPollTimer);
       adminSection = b.dataset.section;
       if (adminSection === "catalog") adminCatalogView = { level: "categories" };
       if (adminSection === "tickets") adminTicketView = { level: "list" };
+      if (adminSection === "livechat") adminLiveChatView = { level: "list" };
       if (adminSection === "users") adminUserView = { level: "list", filter: "all", query: "" };
       renderAdmin();
     };
   });
+  if (adminSection !== "livechat") clearInterval(adminLiveChatPollTimer);
+  // با هر بار باز بودن پنل ادمین، حضور آنلاین ادمین به‌صورت دوره‌ای ثبت می‌شود
+  // تا پیام‌های پشتیبانی زنده‌ی جدید به او مسیریابی شوند.
+  clearInterval(adminPresenceTimer);
+  adminPresenceTimer = setInterval(() => { api("/api/admin/check").catch(() => {}); }, 20000);
   if (adminSection === "stats") await renderAdminStatsSection();
   else if (adminSection === "menu") await renderAdminMenuSection();
   else if (adminSection === "branding") await renderAdminBrandingSection();
   else if (adminSection === "catalog") await renderAdminCatalogSection();
   else if (adminSection === "users") await renderAdminUsersSection();
   else if (adminSection === "sales") await renderAdminSalesSection();
+  else if (adminSection === "livechat") await renderAdminLiveChatSection();
   else if (adminSection === "tickets") await renderAdminTicketsSection();
   else if (adminSection === "adminlog") await renderAdminLogSection();
   else if (adminSection === "resellers" && isMainBot && isSenior) await renderAdminResellersSection();
@@ -2564,6 +2576,129 @@ async function renderAdminSalesSection() {
 }
 
 // ---------------------------------------------------------------------------
+// تب مدیریت > پشتیبانی زنده
+// ---------------------------------------------------------------------------
+
+async function renderAdminLiveChatSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  clearInterval(adminLiveChatPollTimer);
+  try {
+    if (adminLiveChatView.level === "list") {
+      await renderAdminLiveChatList(body);
+      adminLiveChatPollTimer = setInterval(() => {
+        if (adminLiveChatView.level === "list") renderAdminLiveChatList(body).catch(() => {});
+      }, 6000);
+    } else {
+      await renderAdminLiveChatThread(body);
+    }
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+async function renderAdminLiveChatList(body) {
+  const convs = await api("/api/admin/support/conversations");
+  body.innerHTML = `
+    <div class="card">
+      ${convs.length === 0 ? `<div class="hint-text" style="margin:0">هنوز گفتگویی ثبت نشده.</div>` : convs.map((c) => `
+        <div class="admin-list-row" data-open-chat="${c.user_id}" style="cursor:pointer">
+          <div class="admin-list-row-main">
+            <span>${c.user_name || "کاربر"} (@${c.user_username || "---"})${c.unread ? ` <span class="badge">${c.unread}</span>` : ""}</span>
+            <span class="hint-text" style="margin:0">${c.last_sender === "admin" ? "شما: " : ""}${(c.last_message || "").slice(0, 40)}${c.locked_for_me ? " · 🔒 پاسخ توسط ادمین دیگر" : ""}</span>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+  body.querySelectorAll("[data-open-chat]").forEach((el) => {
+    el.onclick = () => {
+      clearInterval(adminLiveChatPollTimer);
+      adminLiveChatView = { level: "thread", userId: Number(el.dataset.openChat) };
+      renderAdminLiveChatSection();
+    };
+  });
+}
+
+let adminChatThreadLastId = 0;
+
+async function renderAdminLiveChatThread(body) {
+  const { userId } = adminLiveChatView;
+  const data = await api(`/api/admin/support/${userId}/messages`);
+  const { user, messages } = data;
+  adminChatThreadLastId = messages.length ? messages[messages.length - 1].id : 0;
+  body.innerHTML = `
+    <button class="btn outline small" id="back-to-admin-chats" style="width:auto;margin-bottom:12px">→ بازگشت به لیست گفتگوها</button>
+    <div class="eyebrow" style="margin-top:0">${user.user_name || "کاربر"} (@${user.user_username || "---"}) · شناسه: ${user.user_id}</div>
+    ${user.locked_for_me ? `<p class="hint-text">🔒 این گفتگو در حال حاضر توسط ادمین دیگری پاسخ داده می‌شود.</p>` : ""}
+    <div class="chat-wrap">
+      <div class="chat-messages" id="admin-chat-messages"></div>
+      ${user.locked_for_me
+        ? ""
+        : `<form class="chat-input-row" id="admin-chat-form">
+            <input type="text" id="admin-chat-input" placeholder="پاسخ خود را بنویسید..." autocomplete="off" />
+            <button type="submit" class="chat-send-btn" aria-label="ارسال">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 12 20 4l-6 16-3-7-7-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+            </button>
+          </form>`}
+    </div>
+  `;
+  document.getElementById("back-to-admin-chats").onclick = () => {
+    clearInterval(adminLiveChatPollTimer);
+    adminLiveChatView = { level: "list" };
+    renderAdminLiveChatSection();
+  };
+  const box = document.getElementById("admin-chat-messages");
+  if (messages.length === 0) {
+    box.innerHTML = `<div class="state-msg"><span class="ic">💬</span>پیامی هنوز ثبت نشده.</div>`;
+  }
+  messages.forEach((m) => appendAdminChatMessage(box, m));
+  box.scrollTop = box.scrollHeight;
+
+  if (!user.locked_for_me) {
+    const form = document.getElementById("admin-chat-form");
+    const input = document.getElementById("admin-chat-input");
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      appendAdminChatMessage(box, { sender: "admin", message: text, created_at: new Date().toISOString() });
+      box.scrollTop = box.scrollHeight;
+      try {
+        await api(`/api/admin/support/${userId}/messages`, { method: "POST", body: JSON.stringify({ message: text }) });
+      } catch (e2) {
+        notify("خطا: " + e2.message);
+      }
+    };
+  }
+
+  clearInterval(adminLiveChatPollTimer);
+  adminLiveChatPollTimer = setInterval(async () => {
+    if (adminLiveChatView.level !== "thread" || adminLiveChatView.userId !== userId) return;
+    try {
+      const fresh = await api(`/api/admin/support/${userId}/messages?since_id=${adminChatThreadLastId}`);
+      fresh.messages.forEach((m) => appendAdminChatMessage(box, m));
+      if (fresh.messages.length) box.scrollTop = box.scrollHeight;
+    } catch (e) {
+      // در پس‌زمینه صامت
+    }
+  }, 4000);
+}
+
+function appendAdminChatMessage(box, m) {
+  if (!box) return;
+  if (box.querySelector(".state-msg")) box.innerHTML = "";
+  if (m.id) adminChatThreadLastId = Math.max(adminChatThreadLastId, m.id);
+  const time = new Date(m.created_at).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+  const bubble = document.createElement("div");
+  bubble.className = `chat-bubble ${m.sender === "admin" ? "mine" : "admin"}`;
+  bubble.innerHTML = `<div class="chat-text"></div><div class="chat-time">${time}</div>`;
+  bubble.querySelector(".chat-text").textContent = m.message;
+  box.appendChild(bubble);
+}
+
+// ---------------------------------------------------------------------------
 // تب مدیریت > تیکت‌ها
 // ---------------------------------------------------------------------------
 
@@ -2586,7 +2721,7 @@ async function renderAdminTicketsList(body) {
         <div class="admin-list-row" data-open-admin-ticket="${t.id}" style="cursor:pointer">
           <div class="admin-list-row-main">
             <span>${t.subject}</span>
-            <span class="hint-text" style="margin:0">${t.user_name || "کاربر"} (@${t.user_username || "---"}) · ${TICKET_STATUS_LABEL[t.status] || t.status}</span>
+            <span class="hint-text" style="margin:0">${t.user_name || "کاربر"} (@${t.user_username || "---"}) · ${TICKET_STATUS_LABEL[t.status] || t.status}${t.locked_for_me ? " · 🔒 پاسخ توسط ادمین دیگر" : ""}</span>
           </div>
         </div>
       `).join("")}
@@ -2605,14 +2740,18 @@ async function renderAdminTicketThread(body) {
   const data = await api(`/api/admin/tickets/${ticketId}/messages`);
   const { ticket, messages } = data;
   const closed = ticket.status === "closed";
+  const locked = ticket.locked_for_me;
   body.innerHTML = `
     <button class="btn outline small" id="back-to-admin-tickets" style="width:auto;margin-bottom:12px">→ بازگشت به لیست تیکت‌ها</button>
     <div class="eyebrow" style="margin-top:0">${ticket.subject}</div>
     <p class="hint-text">${ticket.user_name || "کاربر"} (@${ticket.user_username || "---"}) · شناسه: ${ticket.user_id} · ${TICKET_STATUS_LABEL[ticket.status] || ""}</p>
+    ${locked ? `<p class="hint-text">🔒 این تیکت توسط ادمین دیگری claim شده و فقط برای او (و مالک) فعال است.</p>` : ""}
     <div class="chat-wrap">
       <div class="chat-messages" id="admin-ticket-messages"></div>
       ${closed
         ? `<p class="hint-text" style="text-align:center">این تیکت بسته شده است.</p>`
+        : locked
+        ? ""
         : `<form class="chat-input-row" id="admin-ticket-form">
             <input type="text" id="admin-ticket-input" placeholder="پاسخ خود را بنویسید..." autocomplete="off" />
             <button type="submit" class="chat-send-btn" aria-label="ارسال">
@@ -2641,7 +2780,7 @@ async function renderAdminTicketThread(body) {
   });
   box.scrollTop = box.scrollHeight;
 
-  if (!closed) {
+  if (!closed && !locked) {
     const form = document.getElementById("admin-ticket-form");
     const input = document.getElementById("admin-ticket-input");
     form.onsubmit = async (e) => {
@@ -2788,6 +2927,10 @@ const tabs = {
 function switchTab(name) {
   document.querySelectorAll("#tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   if (name !== "support") clearInterval(supportPollTimer);
+  if (name !== "admin") {
+    clearInterval(adminPresenceTimer);
+    clearInterval(adminLiveChatPollTimer);
+  }
   content.classList.remove("fade-in");
   void content.offsetWidth; // ری‌استارت انیمیشن
   tabs[name]();
