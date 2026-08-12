@@ -1912,31 +1912,101 @@ async function renderAdminUserDetail(body) {
 const ADMIN_ACTION_LABELS = {
   wallet_adjust: "✏️ تغییر موجودی کیف‌پول",
   product_price_edit: "💲 ویرایش قیمت محصول",
+  order_approve: "✅ تایید سفارش",
+  order_reject: "❌ رد سفارش",
+  topup_approve: "✅ تایید شارژ کیف‌پول",
+  topup_reject: "❌ رد شارژ کیف‌پول",
+  admin_add: "➕ افزودن ادمین",
+  admin_remove: "➖ حذف ادمین",
+  admin_role_change: "🔄 تغییر نقش ادمین",
+  card_change: "💳 تغییر شماره کارت",
+  backup_create: "🗄 دریافت بکاپ",
+  backup_restore: "♻️ بازیابی بکاپ",
+  category_add: "📂 افزودن دسته‌بندی",
+  category_toggle: "📂 تغییر وضعیت دسته‌بندی",
+  category_delete: "🗑 حذف دسته‌بندی",
+  product_add: "📦 افزودن محصول",
+  product_toggle: "📦 تغییر وضعیت محصول",
+  product_delete: "🗑 حذف محصول",
+  discount_add: "🎟 افزودن کد تخفیف",
+  discount_toggle: "🎟 تغییر وضعیت کد تخفیف",
+  discount_delete: "🗑 حذف کد تخفیف",
+  broadcast: "📢 ارسال پیام همگانی",
 };
+
+let adminLogSelectedId = "";
+
+function _renderAdminLogRows(logs) {
+  if (logs.length === 0) return `<div class="hint-text" style="margin:0">هنوز رخدادی برای این ادمین ثبت نشده.</div>`;
+  return logs.map((l) => `
+    <div class="admin-list-row">
+      <div class="admin-list-row-main">
+        <span>${ADMIN_ACTION_LABELS[l.action] || l.action}</span>
+        <span class="hint-text" style="margin:0">${escHtml(l.details)}</span>
+        <span class="hint-text" style="margin:0">👤 ${escHtml(l.admin_name)} (${l.admin_id}) · ${toJalaliStr(l.created_at, true)}</span>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function searchAdminLogById() {
+  const input = document.getElementById("adminlog-id-input");
+  const resultsBox = document.getElementById("adminlog-results");
+  const id = (input.value || "").trim();
+  if (!id || !/^\d+$/.test(id)) {
+    resultsBox.innerHTML = `<div class="hint-text" style="margin:0">لطفاً آیدی عددی ادمین را وارد کن.</div>`;
+    return;
+  }
+  adminLogSelectedId = id;
+  resultsBox.innerHTML = skeleton(3);
+  try {
+    const data = await api(`/api/admin/logs?limit=100&offset=0&admin_id=${id}`);
+    resultsBox.innerHTML = `
+      <div class="card" style="margin-top:10px">
+        ${_renderAdminLogRows(data.logs)}
+      </div>
+      ${data.total > data.logs.length ? `<p class="hint-text" style="text-align:center">${data.logs.length} از ${data.total} رخداد نمایش داده شد.</p>` : ""}
+    `;
+  } catch (e) {
+    resultsBox.innerHTML = errorState(e.message);
+  }
+}
 
 async function renderAdminLogSection() {
   const body = document.getElementById("admin-section-body");
   body.innerHTML = skeleton(4);
   try {
-    const data = await api("/api/admin/logs?limit=50&offset=0");
+    const adminsData = await api("/api/admin/logs/admins");
+    const admins = adminsData.admins || [];
     body.innerHTML = `
       <div class="card">
         <div class="eyebrow" style="margin-top:0">📜 لاگ فعالیت ادمین</div>
-        <p class="hint-text">هرگونه تغییر موجودی کیف‌پول کاربران یا قیمت محصولات، همراه با نام ادمین انجام‌دهنده ثبت می‌شود.</p>
-      </div>
-      <div class="card">
-        ${data.logs.length === 0 ? `<div class="hint-text" style="margin:0">هنوز رخدادی ثبت نشده.</div>` : data.logs.map((l) => `
-          <div class="admin-list-row">
-            <div class="admin-list-row-main">
-              <span>${ADMIN_ACTION_LABELS[l.action] || l.action}</span>
-              <span class="hint-text" style="margin:0">${escHtml(l.details)}</span>
-              <span class="hint-text" style="margin:0">👤 ${escHtml(l.admin_name)} · ${toJalaliStr(l.created_at, true)}</span>
-            </div>
+        <p class="hint-text">تایید/رد سفارش و شارژ کیف‌پول، تغییر موجودی، مدیریت ادمین‌ها، محصولات، بکاپ و سایر اقدامات هر ادمین اینجا با آیدی عددی همان ادمین ثبت و نمایش داده می‌شود.</p>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <input type="text" inputmode="numeric" id="adminlog-id-input" placeholder="آیدی عددی ادمین را وارد کن" value="${escHtml(adminLogSelectedId)}" style="flex:1" />
+          <button class="btn small" id="adminlog-search-btn" style="width:auto">جستجو</button>
+        </div>
+        ${admins.length ? `
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+            ${admins.map((a) => `<button class="btn small outline adminlog-chip" data-admin-id="${a.telegram_id}" style="width:auto">${escHtml(a.name) || a.telegram_id} (${a.telegram_id})</button>`).join("")}
           </div>
-        `).join("")}
+        ` : ""}
       </div>
-      ${data.total > data.logs.length ? `<p class="hint-text" style="text-align:center">${data.logs.length} از ${data.total} رخداد نمایش داده شد.</p>` : ""}
+      <div id="adminlog-results">
+        ${adminLogSelectedId ? "" : `<div class="card"><div class="hint-text" style="margin:0">برای مشاهده‌ی لاگ، آیدی عددی یک ادمین را وارد کن یا از لیست بالا انتخاب کن.</div></div>`}
+      </div>
     `;
+    document.getElementById("adminlog-search-btn").addEventListener("click", searchAdminLogById);
+    document.getElementById("adminlog-id-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") searchAdminLogById();
+    });
+    document.querySelectorAll(".adminlog-chip").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.getElementById("adminlog-id-input").value = btn.dataset.adminId;
+        searchAdminLogById();
+      });
+    });
+    if (adminLogSelectedId) await searchAdminLogById();
   } catch (e) {
     body.innerHTML = errorState(e.message);
   }
@@ -1950,28 +2020,10 @@ async function downloadAdminBackup() {
   const btn = document.getElementById("admin-backup-create-btn");
   const status = document.getElementById("admin-backup-status");
   if (btn) btn.disabled = true;
-  status.innerHTML = `<span class="hint-text">⏳ در حال آماده‌سازی بکاپ...</span>`;
+  status.innerHTML = `<span class="hint-text">⏳ در حال آماده‌سازی و ارسال بکاپ به چت بات...</span>`;
   try {
-    const res = await fetch(withTenant("/api/admin/backup/create"), {
-      headers: { "X-Init-Data": initData },
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: "خطا" }));
-      throw new Error(err.detail || "خطای ناشناخته");
-    }
-    const disposition = res.headers.get("Content-Disposition") || "";
-    const match = disposition.match(/filename="?([^"]+)"?/);
-    const filename = match ? match[1] : "backup.db";
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    status.innerHTML = `<span class="hint-text">✅ بکاپ دانلود شد: ${escHtml(filename)}</span>`;
+    const result = await api("/api/admin/backup/create", { method: "POST" });
+    status.innerHTML = `<span class="hint-text">✅ بکاپ (${escHtml(result.filename)}) به چت بات ارسال شد. برای دریافت فایل، چت بات خودت را در تلگرام باز کن.</span>`;
   } catch (e) {
     status.innerHTML = errorState(e.message);
   } finally {
