@@ -657,17 +657,17 @@ const VPN_APPS = {
   ios: [
     {
       key: "shadowrocket", name: "Shadowrocket", icon: "🚀",
-      store: "https://apps.apple.com/us/app/shadowrocket/id932747118",
+      store: "https://apps.apple.com/app/id932747118",
       deepLink: (sub, remark) => `shadowrocket://add/sub/${btoa(unescape(encodeURIComponent(sub)))}?remark=${encodeURIComponent(remark)}`,
     },
     {
       key: "streisand", name: "Streisand", icon: "🎗",
-      store: "https://apps.apple.com/us/app/streisand/id6450534064",
+      store: "https://apps.apple.com/app/id6450534064",
       deepLink: (sub) => `streisand://import/${encodeURIComponent(sub)}`,
     },
     {
       key: "v2box", name: "V2Box", icon: "📦",
-      store: "https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690",
+      store: "https://apps.apple.com/app/id6446814690",
       deepLink: (sub, remark) => `v2box://install-sub?url=${encodeURIComponent(sub)}&name=${encodeURIComponent(remark)}`,
     },
   ],
@@ -731,94 +731,86 @@ function addToAppListHtml(orderId, platform) {
 }
 
 function tryOpenAppOrStore(deepLink, storeUrl, androidPackage = "") {
-  const ua = navigator.userAgent || "";
-  const isAndroid = /Android/i.test(ua);
-  const isIOS =
-    /iPhone|iPad|iPod/i.test(ua) ||
-    (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+  const isAndroid = /Android/i.test(navigator.userAgent || "");
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
+    (/Macintosh/i.test(navigator.userAgent || "") && navigator.maxTouchPoints > 1);
 
-  const openStore = () => {
+  const openHttp = (url) => {
     try {
-      // Use a normal HTTPS App Store / Play Store URL. Telegram can open this
-      // externally, and it remains usable even when the native store app is
-      // unavailable.
       if (tg && typeof tg.openLink === "function") {
-        tg.openLink(storeUrl);
+        tg.openLink(url);
       } else {
-        window.location.href = storeUrl;
+        window.open(url, "_blank", "noopener,noreferrer");
       }
     } catch (e) {
-      try { window.location.href = storeUrl; } catch (_) {}
+      try { window.open(url, "_blank", "noopener,noreferrer"); } catch (_) {}
     }
   };
 
-  // Android: let Android resolve the app first. If the package is not
-  // installed, browser_fallback_url sends the user to the Play Store.
+  // Android:
+  // Let Android itself decide whether the target app is installed.
+  // If it is installed, the app opens and receives the deep-link.
+  // If it is NOT installed, Android follows browser_fallback_url.
+  //
+  // IMPORTANT: Do NOT run a JavaScript timer fallback here. A timer cannot
+  // reliably tell whether an Android app was opened from a Telegram WebView,
+  // and was causing the Play Store to open even when the app was installed.
   if (isAndroid && androidPackage) {
     try {
       const u = new URL(deepLink);
-      const scheme = u.protocol.replace(":", "");
-      const body = `${u.host}${u.pathname}${u.search}${u.hash}`;
+      const scheme = u.protocol.slice(0, -1);
+
+      // Keep the complete deep-link, including #fragment (e.g. Hiddify name).
+      const body =
+        `${u.host}${u.pathname}${u.search}${u.hash}`;
+
       const intentUrl =
         `intent://${body}` +
         `#Intent;scheme=${scheme};package=${androidPackage};` +
         `S.browser_fallback_url=${encodeURIComponent(storeUrl)};end`;
 
+      // Navigation to an Android intent URL is handled by the Android
+      // WebView/OS. It must NOT be converted to the HTTP store URL by JS.
       window.location.href = intentUrl;
       return;
     } catch (e) {
-      openStore();
+      // If the intent cannot be constructed, use the store as a safe fallback.
+      openHttp(storeUrl);
       return;
     }
   }
 
-  // iOS: trigger the custom URL scheme through a real user-initiated anchor
-  // click. This is more reliable inside WKWebView / Telegram Mini Apps than
-  // assigning window.location directly. If iOS does not switch to the app,
-  // pagehide/visibilitychange/blur are not observed and we fall back to the
-  // App Store after a short delay.
+  // iOS / non-Android:
+  // There is no Android-style intent:// mechanism. Try the app scheme first;
+  // if the app does not take over the page, open the App Store after a delay.
   if (isIOS) {
-    let leftPage = false;
-    let timer = null;
+    let appOpened = false;
 
-    const markLeftPage = () => { leftPage = true; };
+    const markAppOpened = () => { appOpened = true; };
     const cleanup = () => {
-      document.removeEventListener("visibilitychange", markLeftPage);
-      window.removeEventListener("blur", markLeftPage);
-      window.removeEventListener("pagehide", markLeftPage);
-      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", markAppOpened);
+      window.removeEventListener("blur", markAppOpened);
     };
 
-    document.addEventListener("visibilitychange", markLeftPage, { once: false });
-    window.addEventListener("blur", markLeftPage, { once: false });
-    window.addEventListener("pagehide", markLeftPage, { once: false });
-
-    const a = document.createElement("a");
-    a.href = deepLink;
-    a.style.display = "none";
-    a.setAttribute("aria-hidden", "true");
-    document.body.appendChild(a);
+    document.addEventListener("visibilitychange", markAppOpened);
+    window.addEventListener("blur", markAppOpened);
 
     try {
-      a.click();
-    } catch (e) {
-      try { window.location.href = deepLink; } catch (_) {}
-    }
+      window.location.href = deepLink;
+    } catch (e) {}
 
-    timer = setTimeout(() => {
-      a.remove();
+    setTimeout(() => {
       cleanup();
-      if (!leftPage) openStore();
+      if (!appOpened) openHttp(storeUrl);
     }, 1800);
-
     return;
   }
 
-  // Desktop / unknown platform: just try the app scheme.
+  // Desktop / unknown platform.
   try {
     window.location.href = deepLink;
   } catch (e) {
-    openStore();
+    openHttp(storeUrl);
   }
 }
 function wireAddToAppButtons(root) {
