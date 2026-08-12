@@ -71,6 +71,77 @@ function toJalaliMonthDay(value) {
   return `${pad(jm)}/${pad(jd)}`;
 }
 
+function jalaliToGregorian(jy, jm, jd) {
+  const j_d_m = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 29];
+  const g_d_m = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const div = (a, b) => Math.floor(a / b);
+
+  const jy2 = jy - 979, jm2 = jm - 1, jd2 = jd - 1;
+  let j_day_no = 365 * jy2 + div(jy2, 33) * 8 + div((jy2 % 33) + 3, 4);
+  for (let i = 0; i < jm2; i++) j_day_no += j_d_m[i];
+  j_day_no += jd2;
+
+  let g_day_no = j_day_no + 79;
+
+  let gy = 1600 + 400 * div(g_day_no, 146097);
+  g_day_no %= 146097;
+
+  if (g_day_no >= 36525) {
+    g_day_no -= 1;
+    gy += 100 * div(g_day_no, 36524);
+    g_day_no %= 36524;
+    if (g_day_no >= 365) g_day_no += 1;
+  }
+
+  gy += 4 * div(g_day_no, 1461);
+  g_day_no %= 1461;
+
+  if (g_day_no >= 366) {
+    g_day_no -= 1;
+    gy += div(g_day_no, 365);
+    g_day_no %= 365;
+  }
+
+  let gm = 1, gd = g_day_no + 1;
+  let days = g_day_no;
+  for (let i = 0; i < 12; i++) {
+    const dim = g_d_m[i] + (i === 1 && ((gy % 4 === 0 && gy % 100 !== 0) || gy % 400 === 0) ? 1 : 0);
+    if (days < dim) { gm = i + 1; gd = days + 1; break; }
+    days -= dim;
+  }
+  return [gy, gm, gd];
+}
+
+function jalaliToISO(jy, jm, jd) {
+  const [gy, gm, gd] = jalaliToGregorian(jy, jm, jd);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${gy}-${pad(gm)}-${pad(gd)}`;
+}
+
+function isoToJalaliYMD(iso) {
+  const d = new Date(iso);
+  return gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate());
+}
+
+function jalaliDateSelectHtml(idPrefix, jy, jm, jd) {
+  const dayOptions = Array.from({ length: 31 }, (_, i) => i + 1)
+    .map((d) => `<option value="${d}" ${d === jd ? "selected" : ""}>${d}</option>`).join("");
+  const monthOptions = JALALI_MONTH_NAMES
+    .map((name, i) => `<option value="${i + 1}" ${i + 1 === jm ? "selected" : ""}>${name}</option>`).join("");
+  const yearOptions = Array.from({ length: 6 }, (_, i) => jy - 4 + i)
+    .map((y) => `<option value="${y}" ${y === jy ? "selected" : ""}>${y}</option>`).join("");
+  return `
+    <select class="input" id="${idPrefix}-d" style="flex:0 0 25%;padding:8px 4px">${dayOptions}</select>
+    <select class="input" id="${idPrefix}-m" style="flex:0 0 38%;padding:8px 4px">${monthOptions}</select>
+    <select class="input" id="${idPrefix}-y" style="flex:0 0 30%;padding:8px 4px">${yearOptions}</select>
+  `;
+}
+
+const JALALI_MONTH_NAMES = [
+  "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
+  "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند",
+];
+
 function notify(message) {
   if (tg.showAlert) tg.showAlert(message);
   else alert(message);
@@ -1001,18 +1072,23 @@ async function renderAdminStatsSection() {
     const s = await api(`/api/admin/dashboard?start_date=${start}&end_date=${end}`);
     const maxRevenue = Math.max(...s.daily_series.map((d) => d.revenue), 1);
     const presets = [7, 14, 30, 90];
+    const [sJy, sJm, sJd] = isoToJalaliYMD(start);
+    const [eJy, eJm, eJd] = isoToJalaliYMD(end);
 
     body.innerHTML = `
       <div class="card">
         <div class="segmented" style="margin-bottom:10px">
           ${presets.map((p) => `<button class="seg-btn ${!adminStatsRange.startDate && adminStatsRange.preset === p ? "active" : ""}" data-stats-preset="${p}">${p} روز اخیر</button>`).join("")}
         </div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input class="input" id="stats-start-date" type="date" value="${start}" style="flex:1" />
-          <span class="hint-text" style="margin:0">تا</span>
-          <input class="input" id="stats-end-date" type="date" value="${end}" style="flex:1" />
+        <p class="hint-text" style="margin:0 0 4px">از تاریخ</p>
+        <div style="display:flex;gap:4px;margin-bottom:10px">
+          ${jalaliDateSelectHtml("stats-start", sJy, sJm, sJd)}
         </div>
-        <button class="btn small outline" id="stats-apply-range" style="width:auto;margin-top:8px">اعمال بازه‌ی دلخواه</button>
+        <p class="hint-text" style="margin:0 0 4px">تا تاریخ</p>
+        <div style="display:flex;gap:4px">
+          ${jalaliDateSelectHtml("stats-end", eJy, eJm, eJd)}
+        </div>
+        <button class="btn small outline" id="stats-apply-range" style="width:auto;margin-top:10px">اعمال بازه‌ی دلخواه</button>
         <p class="hint-text">بازه‌ی نمایش‌داده‌شده: ${toJalaliStr(s.start_date)} تا ${toJalaliStr(s.end_date)}</p>
       </div>
 
@@ -1087,9 +1163,14 @@ async function renderAdminStatsSection() {
       };
     });
     document.getElementById("stats-apply-range").onclick = () => {
-      const sd = document.getElementById("stats-start-date").value;
-      const ed = document.getElementById("stats-end-date").value;
-      if (!sd || !ed) { notify("هر دو تاریخ را انتخاب کن."); return; }
+      const sJyv = Number(document.getElementById("stats-start-y").value);
+      const sJmv = Number(document.getElementById("stats-start-m").value);
+      const sJdv = Number(document.getElementById("stats-start-d").value);
+      const eJyv = Number(document.getElementById("stats-end-y").value);
+      const eJmv = Number(document.getElementById("stats-end-m").value);
+      const eJdv = Number(document.getElementById("stats-end-d").value);
+      const sd = jalaliToISO(sJyv, sJmv, sJdv);
+      const ed = jalaliToISO(eJyv, eJmv, eJdv);
       if (sd > ed) { notify("تاریخ شروع باید قبل از تاریخ پایان باشد."); return; }
       adminStatsRange = { preset: 0, startDate: sd, endDate: ed };
       renderAdminStatsSection();
