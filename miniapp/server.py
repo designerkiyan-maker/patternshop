@@ -976,7 +976,7 @@ class ConfigsAdd(BaseModel):
 
 
 @app.get("/api/admin/categories")
-def api_admin_list_categories(auth=Depends(require_admin)):
+def api_admin_list_categories(auth=Depends(require_senior_admin)):
     _, db, _ = auth
     cats = db.get_categories(active_only=False)
     result = []
@@ -990,7 +990,7 @@ def api_admin_list_categories(auth=Depends(require_admin)):
 
 
 @app.post("/api/admin/categories")
-def api_admin_create_category(body: CategoryCreate, auth=Depends(require_full_admin)):
+def api_admin_create_category(body: CategoryCreate, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if not body.name.strip():
         raise HTTPException(status_code=400, detail="نام دسته‌بندی نمی‌تواند خالی باشد.")
@@ -999,7 +999,7 @@ def api_admin_create_category(body: CategoryCreate, auth=Depends(require_full_ad
 
 
 @app.patch("/api/admin/categories/{cat_id}")
-def api_admin_edit_category(cat_id: int, body: CategoryUpdate, auth=Depends(require_full_admin)):
+def api_admin_edit_category(cat_id: int, body: CategoryUpdate, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if not db.get_category(cat_id):
         raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
@@ -1010,7 +1010,7 @@ def api_admin_edit_category(cat_id: int, body: CategoryUpdate, auth=Depends(requ
 
 
 @app.post("/api/admin/categories/{cat_id}/toggle")
-def api_admin_toggle_category(cat_id: int, auth=Depends(require_full_admin)):
+def api_admin_toggle_category(cat_id: int, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if not db.get_category(cat_id):
         raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
@@ -1019,7 +1019,7 @@ def api_admin_toggle_category(cat_id: int, auth=Depends(require_full_admin)):
 
 
 @app.delete("/api/admin/categories/{cat_id}")
-def api_admin_delete_category(cat_id: int, auth=Depends(require_full_admin)):
+def api_admin_delete_category(cat_id: int, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if not db.get_category(cat_id):
         raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
@@ -1028,7 +1028,7 @@ def api_admin_delete_category(cat_id: int, auth=Depends(require_full_admin)):
 
 
 @app.get("/api/admin/categories/{cat_id}/products")
-def api_admin_list_products(cat_id: int, auth=Depends(require_admin)):
+def api_admin_list_products(cat_id: int, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     products = db.get_products(cat_id, active_only=False)
     return [
@@ -1042,7 +1042,7 @@ def api_admin_list_products(cat_id: int, auth=Depends(require_admin)):
 
 
 @app.post("/api/admin/products")
-def api_admin_create_product(body: ProductCreate, auth=Depends(require_full_admin)):
+def api_admin_create_product(body: ProductCreate, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if not db.get_category(body.category_id):
         raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
@@ -1055,7 +1055,7 @@ def api_admin_create_product(body: ProductCreate, auth=Depends(require_full_admi
 
 
 @app.patch("/api/admin/products/{product_id}")
-def api_admin_edit_product(product_id: int, body: ProductUpdate, auth=Depends(require_full_admin)):
+def api_admin_edit_product(product_id: int, body: ProductUpdate, auth=Depends(require_senior_admin)):
     admin_id, db, _ = auth
     old_product = db.get_product(product_id)
     if not old_product:
@@ -1078,7 +1078,7 @@ def api_admin_edit_product(product_id: int, body: ProductUpdate, auth=Depends(re
 
 
 @app.post("/api/admin/products/{product_id}/toggle")
-def api_admin_toggle_product(product_id: int, auth=Depends(require_full_admin)):
+def api_admin_toggle_product(product_id: int, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if not db.get_product(product_id):
         raise HTTPException(status_code=404, detail="محصول یافت نشد.")
@@ -1087,7 +1087,7 @@ def api_admin_toggle_product(product_id: int, auth=Depends(require_full_admin)):
 
 
 @app.delete("/api/admin/products/{product_id}")
-def api_admin_delete_product(product_id: int, auth=Depends(require_full_admin)):
+def api_admin_delete_product(product_id: int, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if not db.get_product(product_id):
         raise HTTPException(status_code=404, detail="محصول یافت نشد.")
@@ -1096,7 +1096,7 @@ def api_admin_delete_product(product_id: int, auth=Depends(require_full_admin)):
 
 
 @app.get("/api/admin/products/{product_id}/configs")
-def api_admin_list_configs(product_id: int, auth=Depends(require_admin)):
+def api_admin_list_configs(product_id: int, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if not db.get_product(product_id):
         raise HTTPException(status_code=404, detail="محصول یافت نشد.")
@@ -1105,7 +1105,7 @@ def api_admin_list_configs(product_id: int, auth=Depends(require_admin)):
 
 
 @app.post("/api/admin/products/{product_id}/configs")
-def api_admin_add_configs(product_id: int, body: ConfigsAdd, auth=Depends(require_full_admin)):
+def api_admin_add_configs(product_id: int, body: ConfigsAdd, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if not db.get_product(product_id):
         raise HTTPException(status_code=404, detail="محصول یافت نشد.")
@@ -1117,7 +1117,7 @@ def api_admin_add_configs(product_id: int, body: ConfigsAdd, auth=Depends(requir
 
 
 @app.delete("/api/admin/configs/{config_id}")
-def api_admin_delete_config(config_id: int, auth=Depends(require_full_admin)):
+def api_admin_delete_config(config_id: int, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     db.delete_config(config_id)
     return {"status": "ok"}
@@ -1549,7 +1549,7 @@ class BrandingUpdate(BaseModel):
 
 
 @app.get("/api/admin/settings/branding")
-def api_admin_get_branding(auth=Depends(require_full_admin)):
+def api_admin_get_branding(auth=Depends(require_senior_admin)):
     _, db, _ = auth
     theme = db.get_setting("miniapp_theme", "synthwave")
     if theme not in MINIAPP_THEMES:
@@ -1564,7 +1564,7 @@ def api_admin_get_branding(auth=Depends(require_full_admin)):
 
 
 @app.post("/api/admin/settings/branding")
-def api_admin_set_branding(body: BrandingUpdate, auth=Depends(require_full_admin)):
+def api_admin_set_branding(body: BrandingUpdate, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     store_name = body.store_name.strip()
     banner_text = body.banner_text.strip()
@@ -1586,7 +1586,7 @@ class ThemeUpdate(BaseModel):
 
 
 @app.post("/api/admin/settings/theme")
-def api_admin_set_theme(body: ThemeUpdate, auth=Depends(require_full_admin)):
+def api_admin_set_theme(body: ThemeUpdate, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if body.theme not in MINIAPP_THEMES:
         raise HTTPException(status_code=400, detail="این تم معتبر نیست.")
@@ -1595,7 +1595,7 @@ def api_admin_set_theme(body: ThemeUpdate, auth=Depends(require_full_admin)):
 
 
 @app.post("/api/admin/settings/header-image")
-async def api_admin_set_header_image(photo: UploadFile = File(...), auth=Depends(require_full_admin)):
+async def api_admin_set_header_image(photo: UploadFile = File(...), auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if not photo.content_type or not photo.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="فقط فایل عکس پذیرفته می‌شود.")
@@ -1608,7 +1608,7 @@ async def api_admin_set_header_image(photo: UploadFile = File(...), auth=Depends
 
 
 @app.delete("/api/admin/settings/header-image")
-def api_admin_delete_header_image(auth=Depends(require_full_admin)):
+def api_admin_delete_header_image(auth=Depends(require_senior_admin)):
     _, db, _ = auth
     db.set_setting("header_image_data", "")
     return {"status": "ok"}
@@ -1621,7 +1621,7 @@ def api_admin_delete_header_image(auth=Depends(require_full_admin)):
 @app.get("/api/admin/users")
 def api_admin_list_users(
     query: str = "", status: str = "all", limit: int = 30, offset: int = 0,
-    auth=Depends(require_admin),
+    auth=Depends(require_full_admin),
 ):
     _, db, _ = auth
     if status not in ("all", "active", "expired", "blocked"):
@@ -1643,7 +1643,7 @@ def api_admin_list_users(
 
 
 @app.get("/api/admin/users/{telegram_id}")
-def api_admin_get_user(telegram_id: int, auth=Depends(require_admin)):
+def api_admin_get_user(telegram_id: int, auth=Depends(require_full_admin)):
     _, db, _ = auth
     user = db.get_user(telegram_id)
     if not user:
@@ -1667,7 +1667,7 @@ class UserBlockUpdate(BaseModel):
 
 
 @app.post("/api/admin/users/{telegram_id}/block")
-def api_admin_set_user_blocked(telegram_id: int, body: UserBlockUpdate, auth=Depends(require_admin)):
+def api_admin_set_user_blocked(telegram_id: int, body: UserBlockUpdate, auth=Depends(require_full_admin)):
     _, db, _ = auth
     user = db.get_user(telegram_id)
     if not user:
@@ -1810,7 +1810,7 @@ def api_admin_adjust_wallet(body: WalletAdjust, auth=Depends(require_full_admin)
 # ---------------------------------------------------------------------------
 
 @app.post("/api/admin/products/{product_id}/take-random-config")
-def api_admin_take_random_config(product_id: int, auth=Depends(require_full_admin)):
+def api_admin_take_random_config(product_id: int, auth=Depends(require_senior_admin)):
     tg_id, db, _ = auth
     if not db.get_product(product_id):
         raise HTTPException(status_code=404, detail="محصول یافت نشد.")
