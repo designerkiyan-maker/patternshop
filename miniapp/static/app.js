@@ -692,7 +692,7 @@ const VPN_APPS = {
     },
     {
       key: "v2rayng", name: "v2rayNG", icon: "🔷",
-      store: "https://play.google.com/store/apps/details?id=com.v2ray.ang",
+      store: "https://github.com/2dust/v2rayNG/releases/latest",
       androidPackage: "com.v2ray.ang",
       deepLink: (sub, remark) => `v2rayng://install-sub?url=${encodeURIComponent(sub)}&name=${encodeURIComponent(remark)}`,
     },
@@ -735,6 +735,21 @@ function tryOpenAppOrStore(deepLink, storeUrl, androidPackage = "") {
   const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
     (/Macintosh/i.test(navigator.userAgent || "") && navigator.maxTouchPoints > 1);
 
+  let appOpened = false;
+  let finished = false;
+
+  const markAppOpened = () => {
+    appOpened = true;
+  };
+
+  const cleanup = () => {
+    document.removeEventListener("visibilitychange", markAppOpened);
+    window.removeEventListener("blur", markAppOpened);
+  };
+
+  document.addEventListener("visibilitychange", markAppOpened);
+  window.addEventListener("blur", markAppOpened);
+
   const openHttp = (url) => {
     try {
       if (tg && typeof tg.openLink === "function") {
@@ -747,72 +762,61 @@ function tryOpenAppOrStore(deepLink, storeUrl, androidPackage = "") {
     }
   };
 
-  // Android:
-  // Let Android itself decide whether the target app is installed.
-  // If it is installed, the app opens and receives the deep-link.
-  // If it is NOT installed, Android follows browser_fallback_url.
-  //
-  // IMPORTANT: Do NOT run a JavaScript timer fallback here. A timer cannot
-  // reliably tell whether an Android app was opened from a Telegram WebView,
-  // and was causing the Play Store to open even when the app was installed.
+  const openByAnchor = (url) => {
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.style.position = "fixed";
+      a.style.left = "-9999px";
+      a.style.width = "1px";
+      a.style.height = "1px";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => a.remove(), 1500);
+    } catch (e) {}
+  };
+
+  // Android: use intent:// with an OS-level fallback URL.
+  // If the app exists, Android opens it. If it does not exist, Android
+  // opens the supplied Play Store/App Store web URL instead of showing
+  // ERR_UNKNOWN_URL_SCHEME inside the Mini App.
   if (isAndroid && androidPackage) {
     try {
       const u = new URL(deepLink);
       const scheme = u.protocol.slice(0, -1);
+      const body = `${u.host}${u.pathname}${u.search}`;
+      const fallback = encodeURIComponent(storeUrl);
+      const intentUrl = `intent://${body}#Intent;scheme=${scheme};package=${androidPackage};S.browser_fallback_url=${fallback};end`;
+      openByAnchor(intentUrl);
 
-      // Keep the complete deep-link, including #fragment (e.g. Hiddify name).
-      const body =
-        `${u.host}${u.pathname}${u.search}${u.hash}`;
-
-      const intentUrl =
-        `intent://${body}` +
-        `#Intent;scheme=${scheme};package=${androidPackage};` +
-        `S.browser_fallback_url=${encodeURIComponent(storeUrl)};end`;
-
-      // Navigation to an Android intent URL is handled by the Android
-      // WebView/OS. It must NOT be converted to the HTTP store URL by JS.
-      window.location.href = intentUrl;
+      setTimeout(() => {
+        if (!finished && !appOpened) {
+          finished = true;
+          cleanup();
+          openHttp(storeUrl);
+        }
+      }, 1800);
       return;
     } catch (e) {
-      // If the intent cannot be constructed, use the store as a safe fallback.
-      openHttp(storeUrl);
-      return;
+      // Fall through to the generic method below.
     }
   }
 
-  // iOS / non-Android:
-  // There is no Android-style intent:// mechanism. Try the app scheme first;
-  // if the app does not take over the page, open the App Store after a delay.
-  if (isIOS) {
-    let appOpened = false;
+  // iOS / generic: try the app URL first. If the app is not installed,
+  // Telegram stays in the Mini App and the normal HTTP App Store URL is
+  // opened after a short delay.
+  openByAnchor(deepLink);
 
-    const markAppOpened = () => { appOpened = true; };
-    const cleanup = () => {
-      document.removeEventListener("visibilitychange", markAppOpened);
-      window.removeEventListener("blur", markAppOpened);
-    };
-
-    document.addEventListener("visibilitychange", markAppOpened);
-    window.addEventListener("blur", markAppOpened);
-
-    try {
-      window.location.href = deepLink;
-    } catch (e) {}
-
-    setTimeout(() => {
-      cleanup();
-      if (!appOpened) openHttp(storeUrl);
-    }, 1800);
-    return;
-  }
-
-  // Desktop / unknown platform.
-  try {
-    window.location.href = deepLink;
-  } catch (e) {
-    openHttp(storeUrl);
-  }
+  setTimeout(() => {
+    if (finished) return;
+    finished = true;
+    cleanup();
+    if (!appOpened) openHttp(storeUrl);
+  }, isIOS ? 1400 : 1800);
 }
+
 function wireAddToAppButtons(root) {
   root.querySelectorAll(".add-to-app-toggle").forEach((btn) => {
     btn.onclick = () => {
