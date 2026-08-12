@@ -1010,6 +1010,7 @@ async function renderAdmin() {
       <button class="seg-btn ${adminSection === "users" ? "active" : ""}" data-section="users">مدیریت کاربران</button>
       <button class="seg-btn ${adminSection === "sales" ? "active" : ""}" data-section="sales">فروش</button>
       <button class="seg-btn ${adminSection === "tickets" ? "active" : ""}" data-section="tickets">تیکت‌ها</button>
+      <button class="seg-btn ${adminSection === "adminlog" ? "active" : ""}" data-section="adminlog">لاگ ادمین</button>
       ${isMainBot ? `<button class="seg-btn ${adminSection === "resellers" ? "active" : ""}" data-section="resellers">نمایندگی‌ها</button>` : ""}
     </div>
     <div id="admin-section-body">${skeleton(4)}</div>
@@ -1036,6 +1037,7 @@ async function renderAdmin() {
   else if (adminSection === "users") await renderAdminUsersSection();
   else if (adminSection === "sales") await renderAdminSalesSection();
   else if (adminSection === "tickets") await renderAdminTicketsSection();
+  else if (adminSection === "adminlog") await renderAdminLogSection();
   else if (adminSection === "resellers" && isMainBot) await renderAdminResellersSection();
 }
 
@@ -1879,6 +1881,43 @@ async function renderAdminUserDetail(body) {
       document.getElementById("detail-message-text").value = "";
     } catch (e) { notify("⚠️ " + e.message); }
   };
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > لاگ فعالیت ادمین
+// ---------------------------------------------------------------------------
+
+const ADMIN_ACTION_LABELS = {
+  wallet_adjust: "✏️ تغییر موجودی کیف‌پول",
+  product_price_edit: "💲 ویرایش قیمت محصول",
+};
+
+async function renderAdminLogSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(4);
+  try {
+    const data = await api("/api/admin/logs?limit=50&offset=0");
+    body.innerHTML = `
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">📜 لاگ فعالیت ادمین</div>
+        <p class="hint-text">هرگونه تغییر موجودی کیف‌پول کاربران یا قیمت محصولات، همراه با نام ادمین انجام‌دهنده ثبت می‌شود.</p>
+      </div>
+      <div class="card">
+        ${data.logs.length === 0 ? `<div class="hint-text" style="margin:0">هنوز رخدادی ثبت نشده.</div>` : data.logs.map((l) => `
+          <div class="admin-list-row">
+            <div class="admin-list-row-main">
+              <span>${ADMIN_ACTION_LABELS[l.action] || l.action}</span>
+              <span class="hint-text" style="margin:0">${escHtml(l.details)}</span>
+              <span class="hint-text" style="margin:0">👤 ${escHtml(l.admin_name)} · ${toJalaliStr(l.created_at, true)}</span>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+      ${data.total > data.logs.length ? `<p class="hint-text" style="text-align:center">${data.logs.length} از ${data.total} رخداد نمایش داده شد.</p>` : ""}
+    `;
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
 }
 
 // ---------------------------------------------------------------------------
