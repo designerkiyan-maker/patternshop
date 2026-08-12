@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 
 import aiohttp
 
+from jalali import to_jalali_str
+
 _TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 
@@ -88,7 +90,7 @@ def format_sub_info_fa(info: dict) -> str:
     if info["expire"]:
         exp_dt = datetime.fromtimestamp(info["expire"], tz=timezone.utc)
         days_left = (exp_dt - datetime.now(timezone.utc)).days
-        lines.append(f"📅 انقضا: {exp_dt.strftime('%Y-%m-%d')} ({max(0, days_left)} روز مانده)")
+        lines.append(f"📅 انقضا: {to_jalali_str(exp_dt)} ({max(0, days_left)} روز مانده)")
     else:
         lines.append("📅 انقضا: نامحدود")
 

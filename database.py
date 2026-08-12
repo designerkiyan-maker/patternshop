@@ -821,66 +821,156 @@ class Database:
                 "revenue": revenue,
             }
 
-    def get_dashboard_stats(self, days: int = 14):
-        """آماری کامل‌تر برای داشبورد Mini App: کارت‌های خلاصه + روند فروش روزانه."""
+    def get_sales_stats(self, start_date: str = None, end_date: str = None):
+        """آمار فروش کامل برای یک بازه‌ی زمانی دلخواه.
+        start_date/end_date به فرمت 'YYYY-MM-DD' (شامل خود آن روزها).
+        اگر داده نشوند، پیش‌فرض ۱۴ روز اخیر است.
+        شامل: کارت‌های خلاصه، مقایسه با بازه‌ی هم‌طول قبلی، نرخ تبدیل، میانگین سبد خرید،
+        روند روزانه، تفکیک درآمد بر اساس دسته‌بندی، سهم رفرال در مقابل خرید مستقیم،
+        و پرفروش‌ترین محصولات (همه محدود به همان بازه)."""
         with self._get_conn() as conn:
-            users_c = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
-            today_users_c = conn.execute(
-                "SELECT COUNT(*) c FROM users WHERE date(joined_at)=date('now')"
+            if not end_date:
+                end_date = conn.execute("SELECT date('now') d").fetchone()["d"]
+            if not start_date:
+                start_date = conn.execute("SELECT date(?, '-13 days') d", (end_date,)).fetchone()["d"]
+
+            length_days = conn.execute(
+                "SELECT CAST(julianday(?) - julianday(?) AS INTEGER) + 1 d", (end_date, start_date)
+            ).fetchone()["d"]
+            if length_days < 1:
+                length_days = 1
+
+            prev_end = conn.execute("SELECT date(?, '-1 day') d", (start_date,)).fetchone()["d"]
+            prev_start = conn.execute(
+                "SELECT date(?, ?) d", (prev_end, f"-{length_days - 1} days")
+            ).fetchone()["d"]
+
+            def _period_totals(s, e):
+                row = conn.execute(
+                    "SELECT "
+                    "SUM(CASE WHEN o.status='approved' THEN 1 ELSE 0 END) approved_c, "
+                    "SUM(CASE WHEN o.status='pending' THEN 1 ELSE 0 END) pending_c, "
+                    "SUM(CASE WHEN o.status='rejected' THEN 1 ELSE 0 END) rejected_c, "
+                    "COALESCE(SUM(CASE WHEN o.status='approved' THEN COALESCE(o.final_price, p.price) ELSE 0 END),0) revenue "
+                    "FROM orders o JOIN products p ON o.product_id=p.id "
+                    "WHERE date(o.created_at) BETWEEN ? AND ?",
+                    (s, e),
+                ).fetchone()
+                approved = row["approved_c"] or 0
+                pending = row["pending_c"] or 0
+                rejected = row["rejected_c"] or 0
+                revenue = row["revenue"] or 0
+                decided = approved + rejected
+                conversion = round(approved / decided * 100, 1) if decided else 0.0
+                aov = round(revenue / approved) if approved else 0
+                return {
+                    "approved": approved, "pending": pending, "rejected": rejected,
+                    "revenue": revenue, "conversion_rate": conversion, "aov": aov,
+                }
+
+            current = _period_totals(start_date, end_date)
+            previous = _period_totals(prev_start, prev_end)
+
+            def _pct_change(cur, prev):
+                if prev == 0:
+                    return None if cur == 0 else 100.0
+                return round((cur - prev) / prev * 100, 1)
+
+            current["revenue_change_pct"] = _pct_change(current["revenue"], previous["revenue"])
+            current["orders_change_pct"] = _pct_change(current["approved"], previous["approved"])
+            current["prev_revenue"] = previous["revenue"]
+            current["prev_approved"] = previous["approved"]
+
+            new_users = conn.execute(
+                "SELECT COUNT(*) c FROM users WHERE date(joined_at) BETWEEN ? AND ?", (start_date, end_date)
             ).fetchone()["c"]
-            pending_c = conn.execute("SELECT COUNT(*) c FROM orders WHERE status='pending'").fetchone()["c"]
-            approved_c = conn.execute("SELECT COUNT(*) c FROM orders WHERE status='approved'").fetchone()["c"]
-            rejected_c = conn.execute("SELECT COUNT(*) c FROM orders WHERE status='rejected'").fetchone()["c"]
-            total_revenue = conn.execute(
-                "SELECT COALESCE(SUM(COALESCE(o.final_price, p.price)),0) s FROM orders o "
-                "JOIN products p ON o.product_id=p.id WHERE o.status='approved'"
-            ).fetchone()["s"]
-            today_revenue = conn.execute(
-                "SELECT COALESCE(SUM(COALESCE(o.final_price, p.price)),0) s FROM orders o "
-                "JOIN products p ON o.product_id=p.id "
-                "WHERE o.status='approved' AND date(o.updated_at)=date('now')"
-            ).fetchone()["s"]
-            active_configs_c = conn.execute("SELECT COUNT(*) c FROM configs WHERE is_used=1").fetchone()["c"]
-            wallet_total = conn.execute("SELECT COALESCE(SUM(referral_credit),0) s FROM users").fetchone()["s"]
-            open_tickets_c = conn.execute(
-                "SELECT COUNT(*) c FROM tickets WHERE status IN ('open','answered')"
-            ).fetchone()["c"]
+            current["new_users"] = new_users
 
             daily_rows = conn.execute(
-                "SELECT date(o.updated_at) d, COALESCE(SUM(COALESCE(o.final_price, p.price)),0) s, COUNT(*) c "
+                "SELECT date(o.created_at) d, "
+                "COALESCE(SUM(CASE WHEN o.status='approved' THEN COALESCE(o.final_price, p.price) ELSE 0 END),0) revenue, "
+                "SUM(CASE WHEN o.status='approved' THEN 1 ELSE 0 END) orders "
                 "FROM orders o JOIN products p ON o.product_id=p.id "
-                "WHERE o.status='approved' AND o.updated_at >= date('now', ?) "
-                "GROUP BY date(o.updated_at) ORDER BY d",
-                (f"-{days - 1} days",),
+                "WHERE date(o.created_at) BETWEEN ? AND ? "
+                "GROUP BY date(o.created_at)",
+                (start_date, end_date),
             ).fetchall()
-            daily_map = {r["d"]: {"revenue": r["s"], "orders": r["c"]} for r in daily_rows}
-
+            daily_map = {r["d"]: {"revenue": r["revenue"], "orders": r["orders"]} for r in daily_rows}
             daily_series = []
-            for i in range(days - 1, -1, -1):
-                d = conn.execute("SELECT date('now', ?) d", (f"-{i} days",)).fetchone()["d"]
+            for i in range(length_days):
+                d = conn.execute("SELECT date(?, ?) d", (start_date, f"+{i} days")).fetchone()["d"]
                 entry = daily_map.get(d, {"revenue": 0, "orders": 0})
                 daily_series.append({"date": d, "revenue": entry["revenue"], "orders": entry["orders"]})
+
+            category_rows = conn.execute(
+                "SELECT c.name name, COUNT(*) orders, COALESCE(SUM(COALESCE(o.final_price, p.price)),0) revenue "
+                "FROM orders o JOIN products p ON o.product_id=p.id JOIN categories c ON p.category_id=c.id "
+                "WHERE o.status='approved' AND date(o.created_at) BETWEEN ? AND ? "
+                "GROUP BY c.id ORDER BY revenue DESC",
+                (start_date, end_date),
+            ).fetchall()
+            category_breakdown = [
+                {"name": r["name"], "orders": r["orders"], "revenue": r["revenue"]} for r in category_rows
+            ]
+
+            referral_row = conn.execute(
+                "SELECT "
+                "COALESCE(SUM(CASE WHEN u.referred_by IS NOT NULL THEN COALESCE(o.final_price, p.price) ELSE 0 END),0) referral_revenue, "
+                "COALESCE(SUM(CASE WHEN u.referred_by IS NULL THEN COALESCE(o.final_price, p.price) ELSE 0 END),0) direct_revenue "
+                "FROM orders o JOIN products p ON o.product_id=p.id JOIN users u ON o.user_id=u.telegram_id "
+                "WHERE o.status='approved' AND date(o.created_at) BETWEEN ? AND ?",
+                (start_date, end_date),
+            ).fetchone()
+            current["referral_revenue"] = referral_row["referral_revenue"] or 0
+            current["direct_revenue"] = referral_row["direct_revenue"] or 0
 
             top_products = conn.execute(
                 "SELECT p.name name, COUNT(*) c, COALESCE(SUM(COALESCE(o.final_price, p.price)),0) s "
                 "FROM orders o JOIN products p ON o.product_id=p.id "
-                "WHERE o.status='approved' GROUP BY p.id ORDER BY c DESC LIMIT 5"
+                "WHERE o.status='approved' AND date(o.created_at) BETWEEN ? AND ? "
+                "GROUP BY p.id ORDER BY c DESC LIMIT 5",
+                (start_date, end_date),
             ).fetchall()
 
-            return {
-                "users": users_c,
-                "today_users": today_users_c,
-                "pending_orders": pending_c,
-                "approved_orders": approved_c,
-                "rejected_orders": rejected_c,
-                "total_revenue": total_revenue,
-                "today_revenue": today_revenue,
+            total_users = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
+            active_configs_c = conn.execute("SELECT COUNT(*) c FROM configs WHERE is_used=1").fetchone()["c"]
+            open_tickets_c = conn.execute(
+                "SELECT COUNT(*) c FROM tickets WHERE status IN ('open','answered')"
+            ).fetchone()["c"]
+            wallet_total = conn.execute("SELECT COALESCE(SUM(referral_credit),0) s FROM users").fetchone()["s"]
+
+            current.update({
+                "start_date": start_date,
+                "end_date": end_date,
+                "total_users": total_users,
                 "active_configs": active_configs_c,
-                "wallet_total": wallet_total,
                 "open_tickets": open_tickets_c,
+                "wallet_total": wallet_total,
                 "daily_series": daily_series,
+                "category_breakdown": category_breakdown,
                 "top_products": [{"name": r["name"], "orders": r["c"], "revenue": r["s"]} for r in top_products],
-            }
+            })
+            return current
+
+    def get_orders_for_export(self, start_date: str = None, end_date: str = None):
+        """لیست خام سفارش‌ها برای خروجی CSV، در بازه‌ی زمانی داده‌شده."""
+        with self._get_conn() as conn:
+            if not end_date:
+                end_date = conn.execute("SELECT date('now') d").fetchone()["d"]
+            if not start_date:
+                start_date = conn.execute("SELECT date(?, '-13 days') d", (end_date,)).fetchone()["d"]
+            rows = conn.execute(
+                "SELECT o.id, o.created_at, o.status, o.user_id, u.username, u.first_name, "
+                "p.name as product_name, COALESCE(o.final_price, p.price) as amount, "
+                "o.wallet_used, o.discount_amount "
+                "FROM orders o "
+                "JOIN products p ON o.product_id=p.id "
+                "LEFT JOIN users u ON o.user_id=u.telegram_id "
+                "WHERE date(o.created_at) BETWEEN ? AND ? "
+                "ORDER BY o.id DESC",
+                (start_date, end_date),
+            ).fetchall()
+            return rows
 
     # -----------------------------------------------------------------------
     # زیرمجموعه‌گیری (رفرال) و کیف پول اعتباری

@@ -18,6 +18,7 @@ import keyboards as kb
 from database import Database
 from config import RESELLER_DBS_DIR, resolve_db_path
 from config_delivery import deliver_config_to_user
+from jalali import to_jalali_str
 from states import (
     AdminAddCategory,
     AdminAddProduct,
@@ -297,7 +298,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not result:
             await call.answer("کانفیگ آزادی برای این محصول موجود نیست.", show_alert=True)
             return
-        expires_display = (result.get("expires_at") or "")[:10] or "-"
+        expires_display = to_jalali_str(result.get("expires_at"))
         text = (
             f"🎲 یک کانفیگ رندوم از انبار «{product['name'] if product else 'محصول'}» برداشته و از انبار کم شد:\n\n"
             f"`{result['link']}`\n\n"

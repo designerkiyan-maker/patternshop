@@ -16,6 +16,8 @@ import qrcode
 from aiogram import Bot
 from aiogram.types import BufferedInputFile
 
+from jalali import to_jalali_str
+
 
 def _build_qr_photo(link: str, filename: str = "config_qr.png") -> BufferedInputFile:
     """ساخت عکس QR کد از روی لینک اشتراک و برگرداندن آن به‌صورت فایل قابل ارسال در تلگرام."""
@@ -47,7 +49,7 @@ async def deliver_config_to_user(
     ارسال حرفه‌ای کانفیگ خریداری‌شده به کاربر: عکس QR کد لینک اشتراک + مشخصات
     کامل سفارش + پیام تشکر، و در پیام بعدی خودِ لینک به‌صورت متنی و قابل کپی.
     """
-    jalali_ready_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+    jalali_ready_date = to_jalali_str(datetime.now(), with_time=True)
 
     caption = "🎉 با تشکر از خرید شما!\n\n"
     caption += "✅ کانفیگ شما با موفقیت صادر و آماده استفاده است.\n\n"

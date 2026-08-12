@@ -14,6 +14,7 @@ import logging
 from datetime import datetime, timezone
 
 from sub_info import fetch_sub_info
+from jalali import to_jalali_str
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,10 @@ async def _send_single_reminder(bot, db, row) -> None:
 
     code, discount_expires_at, percent, expiry_hours = db.generate_renewal_discount_code(user_id)
 
-    days_line = f"⌛ حدود {days_left} روز از سرویس شما باقی مانده.\n\n" if days_left is not None else ""
+    days_line = (
+        f"⌛ حدود {days_left} روز از سرویس شما باقی مانده (انقضا: {to_jalali_str(exp_dt)}).\n\n"
+        if days_left is not None else ""
+    )
 
     text = (
         "⏰ یادآوری اتمام سرویس\n\n"
