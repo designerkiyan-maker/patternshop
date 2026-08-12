@@ -720,10 +720,14 @@ function addToAppPlatformPickerHtml(orderId) {
 function addToAppListHtml(orderId, platform) {
   const apps = VPN_APPS[platform] || [];
   return `
-    <p class="hint-text" style="margin:0 0 8px">برنامه‌ات رو انتخاب کن؛ اگر نصب باشه اشتراک خودکار اضافه می‌شه، وگرنه صفحه‌ی دانلودش باز می‌شه.</p>
+    <p class="hint-text" style="margin:0 0 8px">برنامه‌ات رو انتخاب کن: «دانلود» صفحه‌ی برنامه رو تو مارکت باز می‌کنه، «افزودن» اگه نصب باشه اشتراک رو مستقیم بهش می‌فرسته.</p>
     <div style="display:flex;flex-direction:column;gap:6px">
       ${apps.map((a) => `
-        <button class="btn small outline add-to-app-pick" data-order-id="${orderId}" data-platform="${platform}" data-app="${a.key}" style="width:100%;text-align:right">${a.icon} ${a.name}</button>
+        <div class="add-to-app-row" style="display:flex;align-items:center;gap:6px">
+          <span style="flex:1;text-align:right;font-size:12.5px;color:var(--text-dim,#c9c4e0);padding:0 4px">${a.icon} ${a.name}</span>
+          <button class="btn small outline add-to-app-download" data-platform="${platform}" data-app="${a.key}" style="flex:0 0 auto">⬇️ دانلود</button>
+          <button class="btn small add-to-app-pick" data-order-id="${orderId}" data-platform="${platform}" data-app="${a.key}" style="flex:0 0 auto">📲 افزودن</button>
+        </div>
       `).join("")}
     </div>
     <button class="btn small outline add-to-app-back" data-order-id="${orderId}" style="width:100%;margin-top:8px">⬅️ بازگشت</button>
@@ -834,6 +838,20 @@ function wireAddToAppButtons(root) {
       if (!panel) return;
       panel.innerHTML = addToAppPlatformPickerHtml(orderId);
       wireAddToAppButtons(panel);
+    };
+  });
+  root.querySelectorAll(".add-to-app-download").forEach((btn) => {
+    btn.onclick = () => {
+      const platform = btn.dataset.platform;
+      const appKey = btn.dataset.app;
+      const app = (VPN_APPS[platform] || []).find((a) => a.key === appKey);
+      if (!app) return;
+      tg.HapticFeedback.notificationOccurred("success");
+      if (tg && typeof tg.openLink === "function") {
+        tg.openLink(app.store);
+      } else {
+        window.open(app.store, "_blank", "noopener,noreferrer");
+      }
     };
   });
   root.querySelectorAll(".add-to-app-pick").forEach((btn) => {
