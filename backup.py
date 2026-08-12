@@ -12,6 +12,7 @@
 
 import os
 import glob
+import shutil
 import sqlite3
 import asyncio
 import logging
@@ -94,3 +95,70 @@ async def backup_loop(bot, db, db_path: str, interval_seconds: int = 86400, keep
         except Exception:
             logger.exception("خطا در چرخه‌ی بکاپ‌گیری خودکار برای %s", db_path)
         await asyncio.sleep(interval_seconds)
+
+
+def is_valid_sqlite_db(file_path: str) -> bool:
+    """بررسی سطحی که فایل آپلودشده واقعاً یک دیتابیس sqlite سالم است، نه یک
+    فایل دلخواه/خراب. برای جلوگیری از این‌که یک فایل اشتباه جایگزین دیتابیس
+    اصلی شود و کل بات را از کار بیندازد."""
+    if not os.path.exists(file_path) or os.path.getsize(file_path) < 100:
+        return False
+    try:
+        with open(file_path, "rb") as f:
+            header = f.read(16)
+        if header != b"SQLite format 3\x00":
+            return False
+        conn = sqlite3.connect(file_path)
+        try:
+            # integrity_check کامل روی فایل‌های بزرگ کند است؛ همین که فایل
+            # باز می‌شود و حداقل یک جدول قابل‌خواندن دارد کافی است.
+            conn.execute("SELECT name FROM sqlite_master LIMIT 1")
+            return True
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+
+
+def restore_backup(db, db_path: str, uploaded_file_path: str) -> str:
+    """دیتابیس فعلی را با فایل بکاپ آپلودشده جایگزین می‌کند.
+
+    قبل از جایگزینی، از دیتابیس فعلی هم یک نسخه‌ی «قبل از بازیابی» گرفته
+    می‌شود تا در صورت اشتباه قابل برگشت باشد. مسیر همان نسخه‌ی پیشین را
+    برمی‌گرداند.
+    """
+    if not is_valid_sqlite_db(uploaded_file_path):
+        raise ValueError("فایل ارسالی یک دیتابیس sqlite معتبر نیست.")
+
+    backup_dir = os.path.join(os.path.dirname(os.path.abspath(db_path)), "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    pre_restore_path = os.path.join(backup_dir, f"pre_restore_{timestamp}.db")
+
+    # اتصال persistent باز فعلی را می‌بندیم تا فایل دیتابیس قفل نباشد و
+    # جایگزینی فایل با خطا مواجه نشود.
+    db.close()
+
+    if os.path.exists(db_path):
+        src = sqlite3.connect(db_path)
+        try:
+            dst = sqlite3.connect(pre_restore_path)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
+
+    # پاک‌کردن فایل‌های کمکی WAL دیتابیس فعلی، وگرنه ممکن است داده‌ی commit‌نشده
+    # قدیمی با دیتابیس جدید قاطی شود
+    for suffix in ("-wal", "-shm"):
+        stale = db_path + suffix
+        if os.path.exists(stale):
+            os.remove(stale)
+
+    shutil.copyfile(uploaded_file_path, db_path)
+
+    # اتصال بعدی که db._get_conn() صدا زده شود، خودش یک اتصال تازه به فایل
+    # جدید باز می‌کند (چون db.close() آن را None کرده).
+    return pre_restore_path

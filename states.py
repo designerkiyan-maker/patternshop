@@ -108,3 +108,8 @@ class AdminRenewalSettings(StatesGroup):
 
 class AdminStockAlertSettings(StatesGroup):
     waiting_threshold = State()
+
+
+class AdminRestoreBackup(StatesGroup):
+    waiting_file = State()
+    waiting_confirm = State()

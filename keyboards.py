@@ -220,6 +220,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_admins_menu", "👤 مدیریت ادمین‌ها", "adm_admins_menu"),
     ("adm_broadcast", "📢 پیام همگانی", "adm_broadcast"),
     ("adm_stats", "📊 آمار فروش", "adm_stats"),
+    ("adm_backup_menu", "🗄 بکاپ و بازیابی", "adm_backup_menu"),
 ]
 
 
@@ -238,6 +239,23 @@ def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
         rows.append([_styled_inline(db, label, callback_data, f"{key}_style")])
     rows.append([InlineKeyboardButton(text="🎨 رنگ‌آمیزی دکمه‌های پنل", callback_data="adm_panel_colors_menu")])
     rows.append([InlineKeyboardButton(text="🎨 رنگ‌آمیزی دکمه‌های خرید", callback_data="adm_buyflow_colors_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_backup_menu_kb() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="📥 دریافت بکاپ فوری", callback_data="adm_backup_now")],
+        [InlineKeyboardButton(text="♻️ بازیابی از فایل بکاپ", callback_data="adm_restore_start")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_restore_confirm_kb() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="✅ بله، جایگزین کن", callback_data="adm_restore_confirm")],
+        [InlineKeyboardButton(text="❌ انصراف", callback_data="adm_restore_cancel")],
+    ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

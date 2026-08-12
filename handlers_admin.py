@@ -8,9 +8,10 @@
 
 import os
 import asyncio
+import tempfile
 
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
 
@@ -20,6 +21,7 @@ from config import RESELLER_DBS_DIR, resolve_db_path
 from config_delivery import deliver_config_to_user
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
+from backup import create_backup, restore_backup, is_valid_sqlite_db
 from states import (
     AdminAddCategory,
     AdminAddProduct,
@@ -40,6 +42,7 @@ from states import (
     AdminWheelSettings,
     AdminRenewalSettings,
     AdminStockAlertSettings,
+    AdminRestoreBackup,
 )
 
 
@@ -1471,6 +1474,129 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             f"💰 مجموع فروش: {stats['revenue']:,} تومان"
         )
         await call.message.edit_text(text, reply_markup=kb.admin_back_kb())
+        await call.answer()
+
+    # -------------------------------------------------------------------
+    # بکاپ و بازیابی
+    # -------------------------------------------------------------------
+    # فقط مالک اصلی بات (owner_only) به این بخش دسترسی دارد، چون بازیابی
+    # یعنی جایگزینی کامل دیتابیس فعلی و برگشت‌ناپذیر است.
+
+    @router.callback_query(F.data == "adm_backup_menu")
+    async def cb_backup_menu(call: CallbackQuery, state: FSMContext):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        await state.clear()
+        await call.message.edit_text(
+            "🗄 بکاپ و بازیابی دیتابیس\n\n"
+            "• «دریافت بکاپ فوری» یک نسخه از دیتابیس فعلی را همین الان برایت می‌فرستد.\n"
+            "• «بازیابی از فایل بکاپ» دیتابیس فعلی را با فایلی که آپلود می‌کنی جایگزین می‌کند "
+            "(این کار قابل بازگشت نیست مگر با بکاپ دیگری).",
+            reply_markup=kb.admin_backup_menu_kb(),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_backup_now")
+    async def cb_backup_now(call: CallbackQuery):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        await call.answer("⏳ در حال گرفتن بکاپ...")
+        backup_dir = os.path.join(os.path.dirname(os.path.abspath(db.db_path)), "backups")
+        try:
+            backup_path = await asyncio.to_thread(create_backup, db.db_path, backup_dir, 14)
+        except Exception:
+            return await call.message.answer("❌ گرفتن بکاپ ناموفق بود.")
+        if not backup_path:
+            return await call.message.answer("❌ فایل دیتابیس پیدا نشد.")
+        await call.message.answer_document(
+            FSInputFile(backup_path), caption="🗄 بکاپ فوری دیتابیس"
+        )
+
+    @router.callback_query(F.data == "adm_restore_start")
+    async def cb_restore_start(call: CallbackQuery, state: FSMContext):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        await state.set_state(AdminRestoreBackup.waiting_file)
+        await call.message.edit_text(
+            "♻️ فایل بکاپ (.db) را همین‌جا به‌صورت Document ارسال کن.\n\n"
+            "⚠️ توجه: بعد از تایید، کل دیتابیس فعلی با این فایل جایگزین می‌شود.",
+        )
+        await call.answer()
+
+    @router.message(AdminRestoreBackup.waiting_file, F.document)
+    async def on_restore_file(message: Message, state: FSMContext):
+        if not owner_only(message.from_user.id):
+            return
+        doc = message.document
+        if not doc.file_name.lower().endswith((".db", ".sqlite", ".sqlite3")):
+            return await message.answer("❌ فایل باید پسوند .db یا .sqlite داشته باشد. دوباره ارسال کن.")
+
+        tmp_dir = tempfile.mkdtemp(prefix="restore_")
+        tmp_path = os.path.join(tmp_dir, "uploaded.db")
+        file = await message.bot.get_file(doc.file_id)
+        await message.bot.download_file(file.file_path, destination=tmp_path)
+
+        if not is_valid_sqlite_db(tmp_path):
+            return await message.answer("❌ این فایل یک دیتابیس sqlite معتبر نیست. عملیات لغو شد.")
+
+        await state.update_data(restore_tmp_path=tmp_path)
+        await state.set_state(AdminRestoreBackup.waiting_confirm)
+        size_mb = os.path.getsize(tmp_path) / (1024 * 1024)
+        await message.answer(
+            f"📦 فایل دریافت شد ({size_mb:.1f} مگابایت).\n\n"
+            "⚠️ با تایید، دیتابیس فعلی جایگزین می‌شود (یک نسخه از وضعیت فعلی هم قبلش ذخیره می‌شود). "
+            "مطمئنی؟",
+            reply_markup=kb.admin_restore_confirm_kb(),
+        )
+
+    @router.message(AdminRestoreBackup.waiting_file)
+    async def on_restore_file_wrong_type(message: Message):
+        if not owner_only(message.from_user.id):
+            return
+        await message.answer("❌ باید فایل بکاپ را به‌صورت Document ارسال کنی، نه متن یا عکس.")
+
+    @router.callback_query(AdminRestoreBackup.waiting_confirm, F.data == "adm_restore_confirm")
+    async def cb_restore_confirm(call: CallbackQuery, state: FSMContext):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        data = await state.get_data()
+        tmp_path = data.get("restore_tmp_path")
+        await state.clear()
+        if not tmp_path or not os.path.exists(tmp_path):
+            return await call.message.edit_text("❌ فایل موقت پیدا نشد، دوباره تلاش کن.")
+
+        await call.message.edit_text("⏳ در حال بازیابی...")
+        try:
+            await asyncio.to_thread(restore_backup, db, db.db_path, tmp_path)
+        except Exception as e:
+            return await call.message.edit_text(f"❌ بازیابی ناموفق بود: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+                os.rmdir(os.path.dirname(tmp_path))
+            except OSError:
+                pass
+
+        await call.message.edit_text(
+            "✅ دیتابیس با موفقیت بازیابی شد.\n"
+            "از نسخه‌ی قبلی هم یک بکاپ ایمن (pre_restore) کنار دیتابیس ذخیره شد."
+        )
+        await call.answer()
+
+    @router.callback_query(AdminRestoreBackup.waiting_confirm, F.data == "adm_restore_cancel")
+    async def cb_restore_cancel(call: CallbackQuery, state: FSMContext):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        data = await state.get_data()
+        tmp_path = data.get("restore_tmp_path")
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+                os.rmdir(os.path.dirname(tmp_path))
+            except OSError:
+                pass
+        await state.clear()
+        await call.message.edit_text("❌ بازیابی لغو شد.", reply_markup=kb.admin_back_kb())
         await call.answer()
 
     # -------------------------------------------------------------------

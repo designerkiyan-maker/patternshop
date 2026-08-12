@@ -150,6 +150,19 @@ class Database:
                 self._conn.rollback()
                 raise
 
+    def close(self):
+        """اتصال persistent فعلی را می‌بندد و کش تنظیمات را پاک می‌کند. فراخوانی
+        بعدی هر متدی خودش دوباره یک اتصال تازه باز می‌کند. لازم قبل از
+        جایگزین‌کردن فایل دیتابیس (بازیابی بکاپ)."""
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
+            self._settings_cache = None
+
     def init_db(self, owner_id: int):
         """owner_id: آیدی عددی کسی که مالک/ادمین اصلی همین یک نمونه از بات است
         (برای بات اصلی همان مالک بات، برای هر بات نمایندگی همان نماینده)."""
