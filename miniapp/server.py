@@ -21,6 +21,7 @@ import random
 import base64
 import html as html_lib
 import asyncio
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
@@ -30,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import aiohttp
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form, Depends, Query
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -43,6 +44,7 @@ from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, resolve_db_p
 from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER
 from miniapp.auth import validate_init_data
 from sub_info import fetch_sub_info
+from backup import create_backup, restore_backup, is_valid_sqlite_db
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
 
@@ -165,6 +167,15 @@ def require_main_admin(auth=Depends(get_verified_user)):
         raise HTTPException(status_code=403, detail="این بخش فقط در بات اصلی در دسترس است.")
     if not db.is_admin(tg_id):
         raise HTTPException(status_code=403, detail="دسترسی ادمین لازم است.")
+    return auth
+
+
+def require_owner(auth=Depends(get_verified_user)):
+    """فقط مالک اصلی همان مستأجر (بات اصلی یا همان نماینده)؛ برای عملیات حساس
+    مثل بازیابی کامل دیتابیس."""
+    tg_id, db, tenant = auth
+    if not db.is_owner(tg_id):
+        raise HTTPException(status_code=403, detail="این بخش فقط برای مالک بات در دسترس است.")
     return auth
 
 
@@ -1782,6 +1793,55 @@ def api_admin_take_random_config(product_id: int, auth=Depends(require_full_admi
     if not result:
         raise HTTPException(status_code=400, detail="کانفیگ آزادی برای این محصول موجود نیست.")
     return result
+
+
+# ---------------------------------------------------------------------------
+# بکاپ و بازیابی دیتابیس (فقط مالک اصلی همین مستأجر)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/backup/create")
+def api_admin_backup_create(auth=Depends(require_owner)):
+    _, db, _ = auth
+    backup_dir = os.path.join(os.path.dirname(os.path.abspath(db.db_path)), "backups")
+    backup_path = create_backup(db.db_path, backup_dir, keep=14)
+    if not backup_path:
+        raise HTTPException(status_code=404, detail="فایل دیتابیس پیدا نشد.")
+    return FileResponse(
+        backup_path, filename=os.path.basename(backup_path), media_type="application/octet-stream"
+    )
+
+
+@app.post("/api/admin/backup/restore")
+async def api_admin_backup_restore(file: UploadFile = File(...), auth=Depends(require_owner)):
+    _, db, _ = auth
+    if not file.filename or not file.filename.lower().endswith((".db", ".sqlite", ".sqlite3")):
+        raise HTTPException(status_code=400, detail="فایل باید پسوند .db یا .sqlite داشته باشد.")
+
+    tmp_dir = tempfile.mkdtemp(prefix="restore_")
+    tmp_path = os.path.join(tmp_dir, "uploaded.db")
+    content = await file.read()
+    with open(tmp_path, "wb") as f:
+        f.write(content)
+
+    if not is_valid_sqlite_db(tmp_path):
+        os.remove(tmp_path)
+        os.rmdir(tmp_dir)
+        raise HTTPException(status_code=400, detail="این فایل یک دیتابیس sqlite معتبر نیست.")
+
+    try:
+        pre_restore_path = await asyncio.to_thread(restore_backup, db, db.db_path, tmp_path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"بازیابی ناموفق بود: {e}")
+    finally:
+        try:
+            os.remove(tmp_path)
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
+
+    return {"status": "ok", "pre_restore_backup": os.path.basename(pre_restore_path)}
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
