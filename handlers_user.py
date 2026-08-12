@@ -22,6 +22,7 @@ from config import MAX_TEST_PER_USER
 from config_delivery import deliver_config_to_user
 from force_join import is_channel_member, CHECK_CALLBACK
 from sub_info import fetch_sub_info, format_sub_info_fa
+from stock_alerts import check_and_notify_low_stock
 
 
 def create_user_router(db) -> Router:
@@ -291,7 +292,7 @@ def create_user_router(db) -> Router:
                 return
 
             db.approve_order(order_id, result["id"])
-
+            await check_and_notify_low_stock(bot.send_message, db, product_id)
             reward_info = db.reward_referrer_if_first_purchase(call.from_user.id, order["base_price"])
             if reward_info:
                 reward_amount, referrer_id = reward_info

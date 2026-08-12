@@ -80,9 +80,11 @@ DEFAULT_SETTINGS = {
     # یادآوری اتمام سرویس + کد تخفیف تشویقی تمدید
     "renewal_reminder_enabled": "1",
     "renewal_reminder_days_before": "5",  # چند روز قبل از اتمام سرویس یادآوری ارسال شود
+    "low_stock_threshold": "3",  # وقتی موجودی یک محصول به این عدد یا کمتر برسد، به ادمین‌ها هشدار داده می‌شود
     "renewal_discount_percent": "20",  # درصد تخفیف کد تشویقی تمدید
     "renewal_discount_expiry_hours": "24",  # اعتبار کد تشویقی تمدید (ساعت)
     "adm_renewal_settings_style": "success",
+    "adm_stock_alert_settings_style": "",
     # چیدمان دکمه‌های منوی اصلی (ترتیب و نمایش) - آرایه JSON از کلیدها
     "menu_order": '["miniapp","btn_buy","btn_test","btn_my_orders","btn_wallet","btn_referral","btn_wheel","btn_contact","btn_admin_panel"]',
 }
@@ -298,6 +300,7 @@ class Database:
             ("products", "duration_days", "INTEGER DEFAULT 30"),
             ("configs", "expires_at", "TEXT"),
             ("configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
+            ("products", "low_stock_alert_sent", "INTEGER DEFAULT 0"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -628,6 +631,22 @@ class Database:
                 "SELECT COUNT(*) c FROM configs WHERE product_id=? AND is_used=0", (product_id,)
             ).fetchone()
             return row["c"]
+
+    def check_low_stock_alert_state(self, product_id: int, stock: int, threshold: int) -> bool:
+        """مدیریت وضعیت هشدار موجودی کم برای یک محصول.
+        فقط یک‌بار برای هر افت زیر آستانه هشدار می‌دهد (True برمی‌گرداند)، و وقتی موجودی
+        دوباره از آستانه بیشتر شد، وضعیت را ریست می‌کند تا برای افت بعدی دوباره هشدار بدهد."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT low_stock_alert_sent FROM products WHERE id=?", (product_id,)
+            ).fetchone()
+            already_sent = bool(row["low_stock_alert_sent"]) if row else False
+            if stock <= threshold and not already_sent:
+                conn.execute("UPDATE products SET low_stock_alert_sent=1 WHERE id=?", (product_id,))
+                return True
+            if stock > threshold and already_sent:
+                conn.execute("UPDATE products SET low_stock_alert_sent=0 WHERE id=?", (product_id,))
+            return False
 
     def get_unused_configs(self, product_id: int):
         with self._get_conn() as conn:

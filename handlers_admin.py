@@ -19,6 +19,7 @@ from database import Database
 from config import RESELLER_DBS_DIR, resolve_db_path
 from config_delivery import deliver_config_to_user
 from jalali import to_jalali_str
+from stock_alerts import check_and_notify_low_stock
 from states import (
     AdminAddCategory,
     AdminAddProduct,
@@ -37,6 +38,7 @@ from states import (
     AdminAddResellerBot,
     AdminWheelSettings,
     AdminRenewalSettings,
+    AdminStockAlertSettings,
 )
 
 
@@ -468,6 +470,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
 
         db.approve_order(order_id, result["id"])
+        await check_and_notify_low_stock(bot.send_message, db, order["product_id"])
 
         reward_info = db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or product["price"])
         if reward_info:
@@ -870,6 +873,39 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return await call.answer()
         await call.message.edit_text("🔔 یادآوری تمدید سرویس:", reply_markup=kb.renewal_settings_kb(db))
         await call.answer()
+
+    @router.callback_query(F.data == "adm_stock_alert_settings")
+    async def cb_admin_stock_alert_settings(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        await call.message.edit_text(
+            "📦 آستانه‌ی هشدار موجودی:\n\nوقتی موجودی یک محصول به این عدد یا کمتر برسد، همه‌ی ادمین‌ها یک‌بار پیام هشدار می‌گیرند.",
+            reply_markup=kb.stock_alert_settings_kb(db),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_stock_alert_edit")
+    async def cb_admin_stock_alert_edit(call: CallbackQuery, state: FSMContext):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        await state.set_state(AdminStockAlertSettings.waiting_threshold)
+        await call.message.edit_text(
+            "آستانه‌ی هشدار موجودی چند کانفیگ باشد؟ (فقط عدد، مثلاً 3):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminStockAlertSettings.waiting_threshold)
+    async def process_stock_alert_threshold(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) < 0:
+            await message.answer("لطفاً یک عدد صحیح غیرمنفی ارسال کنید.")
+            return
+        db.set_setting("low_stock_threshold", text)
+        await state.clear()
+        await message.answer(
+            f"✅ آستانه‌ی هشدار موجودی روی {text} کانفیگ تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot)
+        )
 
     @router.callback_query(F.data == "adm_renewal_toggle")
     async def cb_admin_renewal_toggle(call: CallbackQuery):

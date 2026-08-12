@@ -100,3 +100,7 @@ class AdminRenewalSettings(StatesGroup):
     waiting_days_before = State()
     waiting_percent = State()
     waiting_expiry_hours = State()
+
+
+class AdminStockAlertSettings(StatesGroup):
+    waiting_threshold = State()

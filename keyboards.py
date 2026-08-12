@@ -211,6 +211,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_discounts_menu", "🎟 مدیریت کدهای تخفیف", "adm_discounts_menu"),
     ("adm_wheel_settings", "🎡 مدیریت گردونه شانس", "adm_wheel_settings"),
     ("adm_renewal_settings", "🔔 یادآوری تمدید سرویس", "adm_renewal_settings"),
+    ("adm_stock_alert_settings", "📦 آستانه‌ی هشدار موجودی", "adm_stock_alert_settings"),
     ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
     ("adm_resellers_menu", "🏪 مدیریت بات‌های نمایندگی", "adm_resellers_menu"),
     ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
@@ -533,6 +534,16 @@ def renewal_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✏️ تغییر تعداد روز یادآوری", callback_data="adm_renewal_edit_days")],
         [InlineKeyboardButton(text="✏️ تغییر درصد تخفیف", callback_data="adm_renewal_edit_percent")],
         [InlineKeyboardButton(text="✏️ تغییر اعتبار کد (ساعت)", callback_data="adm_renewal_edit_hours")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def stock_alert_settings_kb(db) -> InlineKeyboardMarkup:
+    threshold = db.get_setting("low_stock_threshold", "3")
+    rows = [
+        [InlineKeyboardButton(text=f"📦 آستانه‌ی فعلی: {threshold} کانفیگ باقی‌مانده", callback_data="noop")],
+        [InlineKeyboardButton(text="✏️ تغییر آستانه", callback_data="adm_stock_alert_edit")],
         [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
