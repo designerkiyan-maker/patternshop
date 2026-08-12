@@ -675,21 +675,25 @@ const VPN_APPS = {
     {
       key: "hiddify", name: "Hiddify Next", icon: "🛡",
       store: "https://play.google.com/store/apps/details?id=app.hiddify.com",
-      deepLink: (sub, remark) => `hiddify://install-sub?url=${encodeURIComponent(sub)}#${encodeURIComponent(remark)}`,
+      androidPackage: "app.hiddify.com",
+      deepLink: (sub, remark) => `hiddify://import/${encodeURIComponent(sub)}#${encodeURIComponent(remark)}`,
     },
     {
       key: "v2raytun", name: "v2RayTun", icon: "⚡",
       store: "https://play.google.com/store/apps/details?id=com.v2raytun.android",
+      androidPackage: "com.v2raytun.android",
       deepLink: (sub) => `v2raytun://import/${encodeURIComponent(sub)}`,
     },
     {
       key: "v2box", name: "V2Box", icon: "📦",
       store: "https://play.google.com/store/apps/details?id=dev.hexasoftware.v2box",
+      androidPackage: "dev.hexasoftware.v2box",
       deepLink: (sub, remark) => `v2box://install-sub?url=${encodeURIComponent(sub)}&name=${encodeURIComponent(remark)}`,
     },
     {
       key: "v2rayng", name: "v2rayNG", icon: "🔷",
       store: "https://github.com/2dust/v2rayNG/releases/latest",
+      androidPackage: "com.v2ray.ang",
       deepLink: (sub, remark) => `v2rayng://install-sub?url=${encodeURIComponent(sub)}&name=${encodeURIComponent(remark)}`,
     },
   ],
@@ -726,20 +730,75 @@ function addToAppListHtml(orderId, platform) {
   `;
 }
 
-function tryOpenAppOrStore(deepLink, storeUrl) {
+function tryOpenAppOrStore(deepLink, storeUrl, androidPackage = "") {
+  // Telegram Mini Apps cannot use tg.openLink() for arbitrary custom schemes:
+  // Telegram documents that openLink is restricted to allowed URL schemes.
+  // Also, assigning window.location to hiddify:// / v2rayng:// navigates the
+  // Telegram WebView and produces ERR_UNKNOWN_URL_SCHEME.
+  //
+  // So we first ask the OS URL handler through a real anchor click. On
+  // Android, if that is intercepted by the WebView, we make a second attempt
+  // with an Android intent:// URL bound to the app package.
   let backgrounded = false;
+  let settled = false;
+  let intentTried = false;
+
   const markBackgrounded = () => { backgrounded = true; };
-  document.addEventListener("visibilitychange", markBackgrounded);
-  window.addEventListener("blur", markBackgrounded);
-  window.location.href = deepLink;
-  setTimeout(() => {
+  const cleanup = () => {
     document.removeEventListener("visibilitychange", markBackgrounded);
     window.removeEventListener("blur", markBackgrounded);
+  };
+  const isAndroid = /Android/i.test(navigator.userAgent || "");
+
+  document.addEventListener("visibilitychange", markBackgrounded);
+  window.addEventListener("blur", markBackgrounded);
+
+  const launch = (url) => {
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    try { a.click(); } catch (e) {}
+    setTimeout(() => { try { a.remove(); } catch (e) {} }, 1000);
+  };
+
+  // First attempt: direct custom-scheme URL.
+  launch(deepLink);
+
+  // Android fallback: intent:// lets Android resolve the package without
+  // navigating the Telegram WebView to the custom scheme itself.
+  const tryIntent = () => {
+    if (settled || backgrounded || !isAndroid || !androidPackage || intentTried) return;
+    intentTried = true;
+    try {
+      const u = new URL(deepLink);
+      let body = `${u.host}${u.pathname}${u.search}`;
+      // The fragment is optional for these import links and conflicts with
+      // Android's #Intent separator, so omit it in the package fallback.
+      const intentUrl = `intent://${body}#Intent;scheme=${u.protocol.slice(0, -1)};package=${androidPackage};end`;
+      launch(intentUrl);
+    } catch (e) {}
+  };
+
+  setTimeout(tryIntent, 350);
+
+  const fallback = () => {
+    if (settled) return;
+    settled = true;
+    cleanup();
     if (!backgrounded) {
-      if (tg && tg.openLink) tg.openLink(storeUrl);
-      else window.open(storeUrl, "_blank");
+      if (tg && typeof tg.openLink === "function") {
+        tg.openLink(storeUrl);
+      } else {
+        window.open(storeUrl, "_blank", "noopener,noreferrer");
+      }
     }
-  }, 1600);
+  };
+
+  // Allow enough time for the OS to switch to the installed app.
+  setTimeout(fallback, 2200);
 }
 
 function wireAddToAppButtons(root) {
@@ -789,7 +848,7 @@ function wireAddToAppButtons(root) {
       const app = (VPN_APPS[platform] || []).find((a) => a.key === appKey);
       if (!app) return;
       tg.HapticFeedback.notificationOccurred("success");
-      tryOpenAppOrStore(app.deepLink(link, name), app.store);
+      tryOpenAppOrStore(app.deepLink(link, name), app.store, app.androidPackage);
     };
   });
 }
