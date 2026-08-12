@@ -20,6 +20,7 @@ from database import Database
 from handlers_user import create_user_router
 from handlers_admin import create_admin_router
 from renewal_reminders import renewal_reminder_loop
+from backup import backup_loop
 from force_join import ForceJoinMiddleware
 from blocked_user import BlockedUserMiddleware
 import keyboards as kb
@@ -74,9 +75,11 @@ class BotManager:
         await self._sync_menu_button(bot, db)
         task = asyncio.create_task(dp.start_polling(bot))
         reminder_task = asyncio.create_task(renewal_reminder_loop(bot, db))
+        backup_task = asyncio.create_task(backup_loop(bot, db, db_path))
 
         self.instances[token] = {
-            "bot": bot, "dp": dp, "task": task, "reminder_task": reminder_task, "db_path": db_path,
+            "bot": bot, "dp": dp, "task": task, "reminder_task": reminder_task,
+            "backup_task": backup_task, "db_path": db_path,
         }
         logger.info("بات با db_path=%s راه‌اندازی شد.", db_path)
         return True
@@ -95,6 +98,13 @@ class BotManager:
             reminder_task.cancel()
             try:
                 await reminder_task
+            except Exception:
+                pass
+        backup_task = inst.get("backup_task")
+        if backup_task:
+            backup_task.cancel()
+            try:
+                await backup_task
             except Exception:
                 pass
         try:

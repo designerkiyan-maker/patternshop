@@ -269,6 +269,14 @@ class Database:
                     is_read_by_user INTEGER DEFAULT 0,
                     is_read_by_admin INTEGER DEFAULT 0
                 );
+
+                CREATE TABLE IF NOT EXISTS admin_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    admin_id INTEGER NOT NULL,
+                    action TEXT NOT NULL,
+                    details TEXT DEFAULT '',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
                 """
             )
 
@@ -511,6 +519,26 @@ class Database:
         with self._get_conn() as conn:
             rows = conn.execute("SELECT telegram_id FROM admins").fetchall()
             return [r["telegram_id"] for r in rows]
+
+    # -----------------------------------------------------------------------
+    # لاگ فعالیت ادمین (audit log)
+    # -----------------------------------------------------------------------
+
+    def log_admin_action(self, admin_id: int, action: str, details: str = ""):
+        """ثبت یک رخداد حساس (تغییر موجودی کیف‌پول، ویرایش قیمت و ...) در لاگ فعالیت ادمین."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO admin_logs (admin_id, action, details, created_at) VALUES (?,?,?,?)",
+                (admin_id, action, details, datetime.utcnow().isoformat()),
+            )
+
+    def get_admin_logs(self, limit: int = 50, offset: int = 0):
+        with self._get_conn() as conn:
+            total = conn.execute("SELECT COUNT(*) c FROM admin_logs").fetchone()["c"]
+            rows = conn.execute(
+                "SELECT * FROM admin_logs ORDER BY id DESC LIMIT ? OFFSET ?", (limit, offset)
+            ).fetchall()
+            return rows, total
 
     # -----------------------------------------------------------------------
     # دسته‌بندی‌ها
