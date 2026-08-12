@@ -93,21 +93,26 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             raise
 
     async def replace_admin_view(call: CallbackQuery, text: str, reply_markup=None, parse_mode=None) -> bool:
-        """نمایش منوی جدید با پیام جدید تا تلگرام خودکار به پایین چت برود."""
+        """تغییر منوی ادمین روی همان پیام؛ بدون حذف/ارسال مجدد پیام."""
         if call.message is None:
             return False
-
-        try:
-            await call.message.delete()
-        except Exception:
-            # اگر حذف پیام ممکن نبود، منوی جدید را همچنان ارسال می‌کنیم.
-            pass
 
         kwargs = {"reply_markup": reply_markup}
         if parse_mode is not None:
             kwargs["parse_mode"] = parse_mode
-        await call.message.answer(text, **kwargs)
-        return True
+
+        try:
+            await call.message.edit_text(text, **kwargs)
+            return True
+        except TelegramBadRequest as exc:
+            error = str(exc).lower()
+            if any(phrase in error for phrase in (
+                "message is not modified",
+                "message can't be edited",
+                "message to edit not found",
+            )):
+                return False
+            raise
 
     def callback_id(data: str, prefix: str):
         """استخراج امن ID از callback_data و بررسی پیشوند."""
