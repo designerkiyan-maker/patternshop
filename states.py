@@ -69,6 +69,10 @@ class AdminRemoveAdmin(StatesGroup):
     waiting_id = State()
 
 
+class AdminChangeRole(StatesGroup):
+    waiting_id = State()
+
+
 class AdminEditWelcome(StatesGroup):
     waiting_text = State()
 

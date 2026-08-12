@@ -31,6 +31,7 @@ from states import (
     AdminBroadcast,
     AdminAddAdmin,
     AdminRemoveAdmin,
+    AdminChangeRole,
     AdminEditWelcome,
     AdminReplyFlow,
     AdminCreateDiscount,
@@ -47,6 +48,18 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     def admin_only(user_id: int) -> bool:
         return db.is_admin(user_id)
+
+    def full_admin_only(user_id: int) -> bool:
+        """دسترسی کامل: مالک یا مدیر. ادمین با نقش «پشتیبان» اجازه‌ی این اقدامات
+        (تنظیمات، مالی، مدیریت محصولات/موجودی) را ندارد."""
+        return db.is_full_admin(user_id)
+
+    def owner_only(user_id: int) -> bool:
+        """فقط مالک اصلی بات (تعیین‌شده در env)؛ برای مدیریت خود ادمین‌ها."""
+        return db.is_owner(user_id)
+
+    async def deny_support(call: CallbackQuery):
+        await call.answer("⛔️ این بخش فقط برای مدیران کامل در دسترس است.", show_alert=True)
 
     # -------------------------------------------------------------------
     # ورود به پنل
@@ -77,16 +90,16 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_categories")
     async def cb_admin_categories(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         categories = db.get_categories(active_only=False)
         await call.message.edit_text("📂 مدیریت دسته‌بندی‌ها:", reply_markup=kb.admin_categories_kb(categories))
         await call.answer()
 
     @router.callback_query(F.data.startswith("adm_cat_toggle:"))
     async def cb_admin_cat_toggle(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         cat_id = int(call.data.split(":")[1])
         db.toggle_category(cat_id)
         categories = db.get_categories(active_only=False)
@@ -95,8 +108,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_cat_del:"))
     async def cb_admin_cat_del(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         cat_id = int(call.data.split(":")[1])
         db.delete_category(cat_id)
         categories = db.get_categories(active_only=False)
@@ -105,8 +118,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_cat_add")
     async def cb_admin_cat_add(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminAddCategory.waiting_name)
         await call.message.edit_text("نام دسته‌بندی جدید را ارسال کنید:", reply_markup=kb.admin_back_kb())
         await call.answer()
@@ -125,8 +138,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_products")
     async def cb_admin_products(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         categories = db.get_categories(active_only=False)
         await call.message.edit_text(
             "📦 مدیریت محصولات - ابتدا دسته‌بندی را انتخاب کنید:",
@@ -136,8 +149,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_prod_cat:"))
     async def cb_admin_prod_cat(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         cat_id = int(call.data.split(":")[1])
         products = db.get_products(cat_id, active_only=False)
         if not products:
@@ -148,8 +161,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_prod_toggle:"))
     async def cb_admin_prod_toggle(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         product_id = int(call.data.split(":")[1])
         db.toggle_product(product_id)
         product = db.get_product(product_id)
@@ -159,8 +172,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_prod_del:"))
     async def cb_admin_prod_del(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         product_id = int(call.data.split(":")[1])
         product = db.get_product(product_id)
         cat_id = product["category_id"] if product else None
@@ -172,8 +185,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_prod_add")
     async def cb_admin_prod_add(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         categories = db.get_categories(active_only=True)
         if not categories:
             await call.answer("ابتدا باید حداقل یک دسته‌بندی فعال بسازید.", show_alert=True)
@@ -236,8 +249,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_add_configs")
     async def cb_admin_add_configs(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         products = db.get_all_products()
         if not products:
             await call.answer("ابتدا باید یک محصول بسازید.", show_alert=True)
@@ -278,8 +291,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_random_cfg")
     async def cb_admin_random_cfg(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         products = db.get_all_products()
         if not products:
             await call.answer("ابتدا باید یک محصول بسازید.", show_alert=True)
@@ -292,8 +305,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_randomcfg_prod:"))
     async def cb_admin_random_cfg_pick(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         product_id = int(call.data.split(":")[1])
         product = db.get_product(product_id)
         result = db.admin_take_random_config(product_id, call.from_user.id)
@@ -315,15 +328,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_test_menu")
     async def cb_admin_test_menu(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await call.message.edit_text("🧪 مدیریت کانفیگ تست:", reply_markup=kb.admin_test_menu_kb(db))
         await call.answer()
 
     @router.callback_query(F.data == "adm_test_toggle")
     async def cb_admin_test_toggle(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         current = db.get_setting("test_enabled", "1")
         db.set_setting("test_enabled", "0" if current == "1" else "1")
         await call.message.edit_text("🧪 مدیریت کانفیگ تست:", reply_markup=kb.admin_test_menu_kb(db))
@@ -331,8 +344,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_test_add")
     async def cb_admin_test_add(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminAddTestConfigs.waiting_links)
         await call.message.edit_text(
             "لینک‌های کانفیگ تست را ارسال کنید (هر لینک در یک خط):", reply_markup=kb.admin_back_kb()
@@ -352,8 +365,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_forcejoin_menu")
     async def cb_admin_forcejoin_menu(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await call.message.edit_text(
             "📢 عضویت اجباری در کانال:\n\n"
             "کاربران قبل از استفاده از بات باید عضو کانال شما باشند. "
@@ -364,8 +377,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_forcejoin_toggle")
     async def cb_admin_forcejoin_toggle(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         settings = db.get_force_join_settings()
         if not settings["enabled"] and not settings["channel"]:
             await call.answer("اول باید آیدی کانال را تنظیم کنی.", show_alert=True)
@@ -377,8 +390,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_forcejoin_set_channel")
     async def cb_admin_forcejoin_set_channel(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminForceJoin.waiting_channel)
         await call.message.edit_text(
             "آیدی عددی یا یوزرنیم کانال را ارسال کن.\n\n"
@@ -544,8 +557,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_pending_topups")
     async def cb_admin_pending_topups(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         topups = db.get_pending_topups()
         if not topups:
             await call.answer("درخواست شارژ در انتظاری وجود ندارد.", show_alert=True)
@@ -555,8 +568,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("view_topup:"))
     async def cb_view_topup(call: CallbackQuery, bot: Bot):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         topup_id = int(call.data.split(":")[1])
         topup = db.get_topup(topup_id)
         if not topup:
@@ -571,8 +584,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("topup_approve:"))
     async def cb_topup_approve(call: CallbackQuery, bot: Bot):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
 
         topup_id = int(call.data.split(":")[1])
         topup = db.get_topup(topup_id)
@@ -606,8 +619,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("topup_reject:"))
     async def cb_topup_reject(call: CallbackQuery, bot: Bot):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
 
         topup_id = int(call.data.split(":")[1])
         topup = db.get_topup(topup_id)
@@ -642,16 +655,16 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_discounts_menu")
     async def cb_admin_discounts_menu(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         codes = db.list_discount_codes()
         await call.message.edit_text("🎟 مدیریت کدهای تخفیف:", reply_markup=kb.discount_codes_kb(codes))
         await call.answer()
 
     @router.callback_query(F.data.startswith("adm_disc_toggle:"))
     async def cb_admin_disc_toggle(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         code_id = int(call.data.split(":")[1])
         db.toggle_discount_code(code_id)
         codes = db.list_discount_codes()
@@ -660,8 +673,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_disc_del:"))
     async def cb_admin_disc_del(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         code_id = int(call.data.split(":")[1])
         db.delete_discount_code(code_id)
         codes = db.list_discount_codes()
@@ -670,8 +683,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_disc_add")
     async def cb_admin_disc_add(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminCreateDiscount.waiting_code)
         await call.message.edit_text(
             "نام کد تخفیف را ارسال کنید (مثلاً WELCOME20، بدون فاصله):", reply_markup=kb.admin_back_kb()
@@ -728,15 +741,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_referral_settings")
     async def cb_admin_referral_settings(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await call.message.edit_text("🤝 تنظیمات زیرمجموعه‌گیری:", reply_markup=kb.referral_settings_kb(db))
         await call.answer()
 
     @router.callback_query(F.data == "adm_referral_toggle")
     async def cb_admin_referral_toggle(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         current = db.get_setting("referral_enabled", "1")
         db.set_setting("referral_enabled", "0" if current == "1" else "1")
         await call.message.edit_text("🤝 تنظیمات زیرمجموعه‌گیری:", reply_markup=kb.referral_settings_kb(db))
@@ -744,8 +757,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_referral_percent_edit")
     async def cb_admin_referral_percent_edit(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminReferralPercent.waiting_value)
         await call.message.edit_text(
             "درصد پورسانت جدید را وارد کنید (عددی بین 0 تا 100):", reply_markup=kb.admin_back_kb()
@@ -768,15 +781,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_wheel_settings")
     async def cb_admin_wheel_settings(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await call.message.edit_text("🎡 مدیریت گردونه شانس:", reply_markup=kb.wheel_settings_kb(db))
         await call.answer()
 
     @router.callback_query(F.data == "adm_wheel_toggle")
     async def cb_admin_wheel_toggle(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         current = db.get_setting("wheel_enabled", "1")
         db.set_setting("wheel_enabled", "0" if current == "1" else "1")
         await call.message.edit_text("🎡 مدیریت گردونه شانس:", reply_markup=kb.wheel_settings_kb(db))
@@ -784,8 +797,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_wheel_edit_percent")
     async def cb_admin_wheel_edit_percent(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminWheelSettings.waiting_win_percent)
         await call.message.edit_text(
             "درصد احتمال برد را وارد کنید (عددی بین 0 تا 100، مثلاً 10):", reply_markup=kb.admin_back_kb()
@@ -804,8 +817,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_wheel_edit_prizes")
     async def cb_admin_wheel_edit_prizes(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminWheelSettings.waiting_prizes)
         await call.message.edit_text(
             "درصدهای تخفیف ممکن را با کاما جدا کرده و ارسال کنید (مثلاً: 10,20,30,50):",
@@ -825,8 +838,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_wheel_edit_expiry")
     async def cb_admin_wheel_edit_expiry(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminWheelSettings.waiting_expiry)
         await call.message.edit_text(
             "کد جایزه چند ساعت اعتبار داشته باشد؟ (فقط عدد، مثلاً 24):", reply_markup=kb.admin_back_kb()
@@ -845,8 +858,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_wheel_edit_cooldown")
     async def cb_admin_wheel_edit_cooldown(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminWheelSettings.waiting_cooldown)
         await call.message.edit_text(
             "فاصله مجاز بین دو چرخش هر کاربر چند ساعت باشد؟ (فقط عدد، مثلاً 24):", reply_markup=kb.admin_back_kb()
@@ -869,15 +882,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_renewal_settings")
     async def cb_admin_renewal_settings(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await call.message.edit_text("🔔 یادآوری تمدید سرویس:", reply_markup=kb.renewal_settings_kb(db))
         await call.answer()
 
     @router.callback_query(F.data == "adm_stock_alert_settings")
     async def cb_admin_stock_alert_settings(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await call.message.edit_text(
             "📦 آستانه‌ی هشدار موجودی:\n\nوقتی موجودی یک محصول به این عدد یا کمتر برسد، همه‌ی ادمین‌ها یک‌بار پیام هشدار می‌گیرند.",
             reply_markup=kb.stock_alert_settings_kb(db),
@@ -886,8 +899,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_stock_alert_edit")
     async def cb_admin_stock_alert_edit(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminStockAlertSettings.waiting_threshold)
         await call.message.edit_text(
             "آستانه‌ی هشدار موجودی چند کانفیگ باشد؟ (فقط عدد، مثلاً 3):",
@@ -909,8 +922,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_renewal_toggle")
     async def cb_admin_renewal_toggle(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         current = db.get_setting("renewal_reminder_enabled", "1")
         db.set_setting("renewal_reminder_enabled", "0" if current == "1" else "1")
         await call.message.edit_text("🔔 یادآوری تمدید سرویس:", reply_markup=kb.renewal_settings_kb(db))
@@ -918,8 +931,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_renewal_edit_days")
     async def cb_admin_renewal_edit_days(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminRenewalSettings.waiting_days_before)
         await call.message.edit_text(
             "چند روز قبل از اتمام سرویس، یادآوری ارسال شود؟ (فقط عدد، مثلاً 5):",
@@ -941,8 +954,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_renewal_edit_percent")
     async def cb_admin_renewal_edit_percent(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminRenewalSettings.waiting_percent)
         await call.message.edit_text(
             "درصد تخفیف کد تشویقی تمدید چقدر باشد؟ (عددی بین 1 تا 100، مثلاً 20):",
@@ -962,8 +975,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_renewal_edit_hours")
     async def cb_admin_renewal_edit_hours(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminRenewalSettings.waiting_expiry_hours)
         await call.message.edit_text(
             "کد تخفیف تشویقی چند ساعت اعتبار داشته باشد؟ (فقط عدد، مثلاً 24):",
@@ -994,16 +1007,16 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
         @router.callback_query(F.data == "adm_resellers_menu")
         async def cb_admin_resellers_menu(call: CallbackQuery):
-            if not admin_only(call.from_user.id):
-                return await call.answer()
+            if not full_admin_only(call.from_user.id):
+                return await deny_support(call)
             bots = db.list_reseller_bots()
             await call.message.edit_text("🏪 مدیریت بات‌های نمایندگی:", reply_markup=kb.resellers_kb(bots))
             await call.answer()
 
         @router.callback_query(F.data.startswith("adm_resbot_toggle:"))
         async def cb_admin_resbot_toggle(call: CallbackQuery):
-            if not admin_only(call.from_user.id):
-                return await call.answer()
+            if not full_admin_only(call.from_user.id):
+                return await deny_support(call)
             bot_id = int(call.data.split(":")[1])
             reseller_bot = db.get_reseller_bot(bot_id)
             if not reseller_bot:
@@ -1027,8 +1040,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
         @router.callback_query(F.data.startswith("adm_resbot_del:"))
         async def cb_admin_resbot_del(call: CallbackQuery):
-            if not admin_only(call.from_user.id):
-                return await call.answer()
+            if not full_admin_only(call.from_user.id):
+                return await deny_support(call)
             bot_id = int(call.data.split(":")[1])
             reseller_bot = db.get_reseller_bot(bot_id)
             if reseller_bot and bot_manager:
@@ -1043,8 +1056,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
         @router.callback_query(F.data == "adm_resbot_add")
         async def cb_admin_resbot_add(call: CallbackQuery, state: FSMContext):
-            if not admin_only(call.from_user.id):
-                return await call.answer()
+            if not full_admin_only(call.from_user.id):
+                return await deny_support(call)
             await state.set_state(AdminAddResellerBot.waiting_token)
             await call.message.edit_text(
                 "توکن بات نماینده را ارسال کنید (همانی که از @BotFather گرفته):",
@@ -1133,8 +1146,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_edit_buttons")
     async def cb_admin_edit_buttons(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await call.message.edit_text("کدام دکمه ویرایش شود؟", reply_markup=kb.admin_edit_buttons_kb(db))
         await call.answer()
 
@@ -1218,8 +1231,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_set_card")
     async def cb_admin_set_card(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminSetCard.waiting_number)
         await call.message.edit_text("شماره کارت جدید را ارسال کنید:", reply_markup=kb.admin_back_kb())
         await call.answer()
@@ -1244,8 +1257,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_edit_welcome")
     async def cb_admin_edit_welcome(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminEditWelcome.waiting_text)
         current = db.get_setting("welcome_text")
         await call.message.edit_text(f"متن فعلی:\n{current}\n\nمتن جدید را ارسال کنید:", reply_markup=kb.admin_back_kb())
@@ -1270,15 +1283,16 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_admins_list")
     async def cb_admin_admins_list(call: CallbackQuery):
-        admins = db.list_admins()
-        text = "لیست ادمین‌ها:\n" + "\n".join([f"- `{a}`" for a in admins])
+        admins = db.list_admins_with_roles()
+        lines = [f"- `{a['telegram_id']}` — {kb.ADMIN_ROLE_LABELS.get(a['role'], a['role'])}" for a in admins]
+        text = "لیست ادمین‌ها:\n" + "\n".join(lines)
         await call.message.edit_text(text, parse_mode="Markdown", reply_markup=kb.admin_back_kb("adm_admins_menu"))
         await call.answer()
 
     @router.callback_query(F.data == "adm_admin_add")
     async def cb_admin_admin_add(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not owner_only(call.from_user.id):
+            return await call.answer("⛔️ فقط مالک اصلی می‌تواند ادمین اضافه کند.", show_alert=True)
         await state.set_state(AdminAddAdmin.waiting_id)
         await call.message.edit_text(
             "آیدی عددی کاربر جدید برای افزودن به ادمین‌ها را ارسال کنید:", reply_markup=kb.admin_back_kb("adm_admins_menu")
@@ -1290,14 +1304,82 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not message.text.strip().isdigit():
             await message.answer("لطفاً فقط آیدی عددی ارسال کنید.")
             return
-        db.add_admin(int(message.text.strip()))
+        target_id = int(message.text.strip())
         await state.clear()
-        await message.answer("✅ ادمین جدید اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+        if db.is_admin(target_id):
+            await message.answer(
+                "این کاربر از قبل ادمین است. برای تغییر نقشش از «🔄 تغییر نقش ادمین» استفاده کن.",
+                reply_markup=kb.admin_panel_kb(db, is_main_bot),
+            )
+            return
+        await message.answer(
+            f"نقش کاربر `{target_id}` چه باشد؟", parse_mode="Markdown",
+            reply_markup=kb.admin_role_pick_kb(target_id, "add"),
+        )
+
+    @router.callback_query(F.data.startswith("adm_add_admin_role:"))
+    async def cb_admin_add_admin_role(call: CallbackQuery):
+        if not owner_only(call.from_user.id):
+            return await call.answer("⛔️ فقط مالک اصلی می‌تواند ادمین اضافه کند.", show_alert=True)
+        _, target_id, role = call.data.split(":")
+        db.add_admin(int(target_id), role=role)
+        await call.message.edit_text(
+            f"✅ کاربر `{target_id}` با نقش «{kb.ADMIN_ROLE_LABELS.get(role, role)}» اضافه شد.",
+            parse_mode="Markdown", reply_markup=kb.admin_back_kb("adm_admins_menu"),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_admin_role_change")
+    async def cb_admin_role_change_start(call: CallbackQuery, state: FSMContext):
+        if not owner_only(call.from_user.id):
+            return await call.answer("⛔️ فقط مالک اصلی می‌تواند نقش ادمین‌ها را تغییر دهد.", show_alert=True)
+        await state.set_state(AdminChangeRole.waiting_id)
+        await call.message.edit_text(
+            "آیدی عددی ادمینی که می‌خواهی نقشش را تغییر دهی را ارسال کن:",
+            reply_markup=kb.admin_back_kb("adm_admins_menu"),
+        )
+        await call.answer()
+
+    @router.message(AdminChangeRole.waiting_id)
+    async def process_change_role_id(message: Message, state: FSMContext):
+        if not message.text.strip().isdigit():
+            await message.answer("لطفاً فقط آیدی عددی ارسال کنید.")
+            return
+        target_id = int(message.text.strip())
+        await state.clear()
+        role = db.get_admin_role(target_id)
+        if role is None:
+            await message.answer("این کاربر ادمین نیست.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+            return
+        if role == "owner":
+            await message.answer("نقش مالک اصلی قابل تغییر نیست.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+            return
+        await message.answer(
+            f"نقش جدید کاربر `{target_id}` (نقش فعلی: {kb.ADMIN_ROLE_LABELS.get(role, role)}) چه باشد؟",
+            parse_mode="Markdown", reply_markup=kb.admin_role_pick_kb(target_id, "setrole"),
+        )
+
+    @router.callback_query(F.data.startswith("adm_change_role_set:"))
+    async def cb_admin_change_role_set(call: CallbackQuery):
+        if not owner_only(call.from_user.id):
+            return await call.answer("⛔️ فقط مالک اصلی می‌تواند نقش ادمین‌ها را تغییر دهد.", show_alert=True)
+        _, target_id, role = call.data.split(":")
+        ok = db.set_admin_role(int(target_id), role)
+        if ok:
+            await call.message.edit_text(
+                f"✅ نقش کاربر `{target_id}` به «{kb.ADMIN_ROLE_LABELS.get(role, role)}» تغییر کرد.",
+                parse_mode="Markdown", reply_markup=kb.admin_back_kb("adm_admins_menu"),
+            )
+        else:
+            await call.message.edit_text(
+                "⛔️ تغییر نقش ناموفق بود.", reply_markup=kb.admin_back_kb("adm_admins_menu")
+            )
+        await call.answer()
 
     @router.callback_query(F.data == "adm_admin_remove")
     async def cb_admin_admin_remove(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not owner_only(call.from_user.id):
+            return await call.answer("⛔️ فقط مالک اصلی می‌تواند ادمین حذف کند.", show_alert=True)
         await state.set_state(AdminRemoveAdmin.waiting_id)
         await call.message.edit_text(
             "آیدی عددی ادمینی که باید حذف شود را ارسال کنید:", reply_markup=kb.admin_back_kb("adm_admins_menu")
@@ -1322,8 +1404,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_broadcast")
     async def cb_admin_broadcast(call: CallbackQuery, state: FSMContext):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         await state.set_state(AdminBroadcast.waiting_message)
         await call.message.edit_text("متن پیام همگانی را ارسال کنید (برای همه کاربران ارسال می‌شود):", reply_markup=kb.admin_back_kb())
         await call.answer()
@@ -1377,8 +1459,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_stats")
     async def cb_admin_stats(call: CallbackQuery):
-        if not admin_only(call.from_user.id):
-            return await call.answer()
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
         stats = db.get_stats()
         text = (
             "📊 آمار فروشگاه:\n\n"

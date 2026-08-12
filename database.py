@@ -286,6 +286,9 @@ class Database:
                 c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
 
             self._migrate_columns(conn)
+            # اطمینان از این‌که همیشه مالک اصلی (از env) نقش «owner» را داشته باشد،
+            # چه در نصب تازه و چه در ارتقای نصب‌های قدیمی‌تر که این ستون را نداشتند.
+            conn.execute("UPDATE admins SET role='owner' WHERE telegram_id=?", (owner_id,))
 
     def _column_exists(self, conn, table: str, column: str) -> bool:
         cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
@@ -309,6 +312,7 @@ class Database:
             ("configs", "expires_at", "TEXT"),
             ("configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
             ("products", "low_stock_alert_sent", "INTEGER DEFAULT 0"),
+            ("admins", "role", "TEXT DEFAULT 'admin'"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -504,14 +508,48 @@ class Database:
             row = conn.execute("SELECT 1 FROM admins WHERE telegram_id=?", (tg_id,)).fetchone()
             return row is not None
 
-    def add_admin(self, tg_id: int):
+    def get_admin_role(self, tg_id: int):
+        """نقش ادمین را برمی‌گرداند: 'owner' | 'admin' | 'support' | None (اگر ادمین نباشد)."""
         with self._get_conn() as conn:
-            conn.execute("INSERT OR IGNORE INTO admins (telegram_id) VALUES (?)", (tg_id,))
+            row = conn.execute("SELECT role FROM admins WHERE telegram_id=?", (tg_id,)).fetchone()
+            return row["role"] if row else None
+
+    def is_full_admin(self, tg_id: int) -> bool:
+        """دسترسی کامل: مالک یا مدیر (برخلاف پشتیبان که دسترسی محدود دارد)."""
+        role = self.get_admin_role(tg_id)
+        return role in ("owner", "admin")
+
+    def is_owner(self, tg_id: int) -> bool:
+        return self.get_admin_role(tg_id) == "owner"
+
+    def add_admin(self, tg_id: int, role: str = "admin"):
+        if role not in ("admin", "support"):
+            role = "admin"
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO admins (telegram_id, role) VALUES (?, ?) "
+                "ON CONFLICT(telegram_id) DO UPDATE SET role=excluded.role",
+                (tg_id, role),
+            )
+
+    def set_admin_role(self, tg_id: int, role: str) -> bool:
+        """تغییر نقش یک ادمین موجود. نقش «owner» هرگز از این مسیر قابل واگذاری نیست."""
+        if role not in ("admin", "support"):
+            return False
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT role FROM admins WHERE telegram_id=?", (tg_id,)).fetchone()
+            if not row or row["role"] == "owner":
+                return False
+            conn.execute("UPDATE admins SET role=? WHERE telegram_id=?", (role, tg_id))
+        return True
 
     def remove_admin(self, tg_id: int, protected_owner_id: int = None) -> bool:
         if protected_owner_id is not None and tg_id == protected_owner_id:
             return False
         with self._get_conn() as conn:
+            row = conn.execute("SELECT role FROM admins WHERE telegram_id=?", (tg_id,)).fetchone()
+            if row and row["role"] == "owner":
+                return False
             conn.execute("DELETE FROM admins WHERE telegram_id=?", (tg_id,))
         return True
 
@@ -519,6 +557,12 @@ class Database:
         with self._get_conn() as conn:
             rows = conn.execute("SELECT telegram_id FROM admins").fetchall()
             return [r["telegram_id"] for r in rows]
+
+    def list_admins_with_roles(self):
+        with self._get_conn() as conn:
+            rows = conn.execute("SELECT telegram_id, role FROM admins ORDER BY "
+                                 "CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, telegram_id").fetchall()
+            return [{"telegram_id": r["telegram_id"], "role": r["role"] or "admin"} for r in rows]
 
     # -----------------------------------------------------------------------
     # لاگ فعالیت ادمین (audit log)

@@ -418,10 +418,25 @@ def admin_color_picker_kb(key: str, back_callback: str = "adm_edit_buttons") -> 
 
 def admin_admins_menu_kb() -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="📃 لیست ادمین‌ها", callback_data="adm_admins_list")],
+        [InlineKeyboardButton(text="📃 لیست ادمین‌ها و نقش‌ها", callback_data="adm_admins_list")],
         [InlineKeyboardButton(text="➕ افزودن ادمین", callback_data="adm_admin_add")],
+        [InlineKeyboardButton(text="🔄 تغییر نقش ادمین", callback_data="adm_admin_role_change")],
         [InlineKeyboardButton(text="➖ حذف ادمین", callback_data="adm_admin_remove")],
         [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+ADMIN_ROLE_LABELS = {"owner": "👑 مالک", "admin": "🛡 مدیر کامل", "support": "🎧 پشتیبان"}
+
+
+def admin_role_pick_kb(target_tg_id: int, action: str) -> InlineKeyboardMarkup:
+    """action: 'add' یا 'setrole' - پیشوند callback_data برای تمایز دو مسیر."""
+    prefix = "adm_add_admin_role" if action == "add" else "adm_change_role_set"
+    rows = [
+        [InlineKeyboardButton(text="🛡 مدیر کامل (دسترسی کامل)", callback_data=f"{prefix}:{target_tg_id}:admin")],
+        [InlineKeyboardButton(text="🎧 پشتیبان (فقط تیکت و سفارش)", callback_data=f"{prefix}:{target_tg_id}:support")],
+        [InlineKeyboardButton(text="⬅️ انصراف", callback_data="adm_admins_menu")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
