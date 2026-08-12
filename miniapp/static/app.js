@@ -17,6 +17,60 @@ function withTenant(path) {
   return `${path}${sep}b=${encodeURIComponent(TENANT_ID)}`;
 }
 
+// ---------------------------------------------------------------------------
+// تبدیل میلادی به شمسی (فقط برای نمایش؛ منطق داخلی همچنان میلادی/ISO است)
+// ---------------------------------------------------------------------------
+function gregorianToJalali(gy, gm, gd) {
+  const g_d_m = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const j_d_m = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 29];
+  const div = (a, b) => Math.floor(a / b);
+
+  const gy2 = gy - 1600, gm2 = gm - 1, gd2 = gd - 1;
+  let g_day_no = 365 * gy2 + div(gy2 + 3, 4) - div(gy2 + 99, 100) + div(gy2 + 399, 400);
+  for (let i = 0; i < gm2; i++) g_day_no += g_d_m[i];
+  if (gm2 > 1 && ((gy % 4 === 0 && gy % 100 !== 0) || gy % 400 === 0)) g_day_no += 1;
+  g_day_no += gd2;
+
+  let j_day_no = g_day_no - 79;
+  const j_np = div(j_day_no, 12053);
+  j_day_no %= 12053;
+
+  let jy = 979 + 33 * j_np + 4 * div(j_day_no, 1461);
+  j_day_no %= 1461;
+
+  if (j_day_no >= 366) {
+    jy += div(j_day_no - 1, 365);
+    j_day_no = (j_day_no - 1) % 365;
+  }
+
+  let jm = 12, jd = j_day_no + 1;
+  for (let i = 0; i < 11; i++) {
+    if (j_day_no < j_d_m[i]) { jm = i + 1; jd = j_day_no + 1; break; }
+    j_day_no -= j_d_m[i];
+  }
+  return [jy, jm, jd];
+}
+
+function toJalaliStr(value, withTime = false) {
+  if (!value) return "-";
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d.getTime())) return String(value);
+  const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  const pad = (n) => String(n).padStart(2, "0");
+  let out = `${jy}/${pad(jm)}/${pad(jd)}`;
+  if (withTime) out += ` - ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return out;
+}
+
+function toJalaliMonthDay(value) {
+  if (!value) return "-";
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d.getTime())) return String(value);
+  const [, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(jm)}/${pad(jd)}`;
+}
+
 function notify(message) {
   if (tg.showAlert) tg.showAlert(message);
   else alert(message);
@@ -507,7 +561,7 @@ function referralCard(r) {
 }
 
 function orderCard(o) {
-  const exp = o.expires_at ? o.expires_at.slice(0, 10) : "نامحدود";
+  const exp = o.expires_at ? toJalaliStr(o.expires_at) : "نامحدود";
   return `
     <div class="order-block">
       <div class="stat-row"><span>${o.product_name}</span><span class="badge approved">فعال تا ${exp}</span></div>
@@ -554,7 +608,7 @@ async function loadSubInfo(orderId, link) {
     if (info.expire) {
       const expDate = new Date(info.expire * 1000);
       const daysLeft = Math.max(0, Math.ceil((expDate - new Date()) / 86400000));
-      expiryHtml = `<div class="sub-info-row"><span>انقضا</span><b>${expDate.toISOString().slice(0, 10)} (${daysLeft} روز مانده)</b></div>`;
+      expiryHtml = `<div class="sub-info-row"><span>انقضا</span><b>${toJalaliStr(expDate)} (${daysLeft} روز مانده)</b></div>`;
     }
     box.innerHTML = usageHtml + expiryHtml;
   } catch (e) {
@@ -918,49 +972,128 @@ async function renderAdmin() {
 // تب مدیریت > آمار (داشبورد)
 // ---------------------------------------------------------------------------
 
+let adminStatsRange = { preset: 14, startDate: "", endDate: "" };
+
+function _statsRangeDates() {
+  if (adminStatsRange.startDate && adminStatsRange.endDate) {
+    return { start: adminStatsRange.startDate, end: adminStatsRange.endDate };
+  }
+  const end = new Date();
+  const start = new Date();
+  start.setDate(end.getDate() - (adminStatsRange.preset - 1));
+  const toISO = (d) => d.toISOString().slice(0, 10);
+  return { start: toISO(start), end: toISO(end) };
+}
+
+function _changeBadge(pct) {
+  if (pct === null || pct === undefined) return `<span class="hint-text" style="margin:0">—</span>`;
+  const up = pct >= 0;
+  const color = up ? "var(--cyan)" : "var(--danger)";
+  const arrow = up ? "▲" : "▼";
+  return `<span style="color:${color};font-weight:700;font-size:12px">${arrow} ${Math.abs(pct)}٪</span>`;
+}
+
 async function renderAdminStatsSection() {
   const body = document.getElementById("admin-section-body");
   body.innerHTML = skeleton(4);
   try {
-    const s = await api("/api/admin/dashboard?days=14");
+    const { start, end } = _statsRangeDates();
+    const s = await api(`/api/admin/dashboard?start_date=${start}&end_date=${end}`);
     const maxRevenue = Math.max(...s.daily_series.map((d) => d.revenue), 1);
+    const presets = [7, 14, 30, 90];
 
     body.innerHTML = `
+      <div class="card">
+        <div class="segmented" style="margin-bottom:10px">
+          ${presets.map((p) => `<button class="seg-btn ${!adminStatsRange.startDate && adminStatsRange.preset === p ? "active" : ""}" data-stats-preset="${p}">${p} روز اخیر</button>`).join("")}
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="input" id="stats-start-date" type="date" value="${start}" style="flex:1" />
+          <span class="hint-text" style="margin:0">تا</span>
+          <input class="input" id="stats-end-date" type="date" value="${end}" style="flex:1" />
+        </div>
+        <button class="btn small outline" id="stats-apply-range" style="width:auto;margin-top:8px">اعمال بازه‌ی دلخواه</button>
+        <p class="hint-text">بازه‌ی نمایش‌داده‌شده: ${toJalaliStr(s.start_date)} تا ${toJalaliStr(s.end_date)}</p>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">💰 درآمد این بازه</div>
+        <div class="stat-row"><span>مبلغ</span><b>${fmt(s.revenue)} تومان</b></div>
+        <div class="stat-row"><span>نسبت به بازه‌ی قبل</span>${_changeBadge(s.revenue_change_pct)}</div>
+      </div>
+
       <div class="stat-grid">
-        <div class="stat-card"><span class="stat-num">${fmt(s.users)}</span><span class="stat-label">کل کاربران</span></div>
-        <div class="stat-card"><span class="stat-num">+${fmt(s.today_users)}</span><span class="stat-label">کاربر جدید امروز</span></div>
-        <div class="stat-card"><span class="stat-num">${fmt(s.total_revenue)}</span><span class="stat-label">درآمد کل (تومان)</span></div>
-        <div class="stat-card"><span class="stat-num">${fmt(s.today_revenue)}</span><span class="stat-label">درآمد امروز (تومان)</span></div>
-        <div class="stat-card"><span class="stat-num">${fmt(s.pending_orders)}</span><span class="stat-label">سفارش در انتظار</span></div>
-        <div class="stat-card"><span class="stat-num">${fmt(s.approved_orders)}</span><span class="stat-label">سفارش تاییدشده</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.total_users)}</span><span class="stat-label">کل کاربران</span></div>
+        <div class="stat-card"><span class="stat-num">+${fmt(s.new_users)}</span><span class="stat-label">کاربر جدید این بازه</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.approved)}</span><span class="stat-label">سفارش تاییدشده</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.pending)}</span><span class="stat-label">سفارش در انتظار</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.rejected)}</span><span class="stat-label">سفارش ردشده</span></div>
+        <div class="stat-card"><span class="stat-num">${s.conversion_rate}٪</span><span class="stat-label">نرخ تبدیل</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.aov)}</span><span class="stat-label">میانگین سبد خرید (تومان)</span></div>
         <div class="stat-card"><span class="stat-num">${fmt(s.active_configs)}</span><span class="stat-label">کانفیگ فعال</span></div>
         <div class="stat-card"><span class="stat-num">${fmt(s.open_tickets)}</span><span class="stat-label">تیکت باز</span></div>
       </div>
 
       <div class="card">
-        <div class="eyebrow" style="margin-top:0">📈 روند درآمد ۱۴ روز اخیر</div>
+        <div class="eyebrow" style="margin-top:0">📈 روند درآمد در بازه</div>
         <div class="bar-chart">
           ${s.daily_series.map((d) => `
             <div class="bar-chart-col">
               <div class="bar-chart-bar" style="height:${Math.max((d.revenue / maxRevenue) * 100, 3)}%" title="${fmt(d.revenue)} تومان"></div>
-              <span class="bar-chart-label">${d.date.slice(5)}</span>
+              <span class="bar-chart-label">${toJalaliMonthDay(d.date)}</span>
             </div>
           `).join("")}
         </div>
       </div>
 
       <div class="card">
-        <div class="eyebrow" style="margin-top:0">🏆 پرفروش‌ترین محصولات</div>
+        <div class="eyebrow" style="margin-top:0">🗂 تفکیک درآمد بر اساس دسته‌بندی</div>
+        ${s.category_breakdown.length === 0 ? `<div class="hint-text" style="margin:0">فروشی در این بازه ثبت نشده.</div>` : s.category_breakdown.map((c) => `
+          <div class="admin-list-row">
+            <div class="admin-list-row-main">
+              <span>${escHtml(c.name)}</span>
+              <span class="hint-text" style="margin:0">${c.orders} سفارش</span>
+            </div>
+            <div class="admin-list-row-actions"><b>${fmt(c.revenue)} تومان</b></div>
+          </div>
+        `).join("")}
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🤝 رفرال در مقابل خرید مستقیم</div>
+        <div class="stat-row"><span>از طریق رفرال</span><b>${fmt(s.referral_revenue)} تومان</b></div>
+        <div class="stat-row"><span>خرید مستقیم</span><b>${fmt(s.direct_revenue)} تومان</b></div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🏆 پرفروش‌ترین محصولات این بازه</div>
         ${s.top_products.length === 0 ? `<div class="hint-text" style="margin:0">هنوز فروشی ثبت نشده.</div>` : s.top_products.map((p, i) => `
           <div class="admin-list-row">
             <div class="admin-list-row-main">
-              <span>${i + 1}. ${p.name}</span>
+              <span>${i + 1}. ${escHtml(p.name)}</span>
               <span class="hint-text" style="margin:0">${p.orders} فروش · ${fmt(p.revenue)} تومان</span>
             </div>
           </div>
         `).join("")}
       </div>
+
+      <a class="btn outline small" style="width:auto;display:inline-block;text-decoration:none;text-align:center" href="${withTenant(`/api/admin/orders/export?start_date=${s.start_date}&end_date=${s.end_date}`)}" target="_blank">📤 خروجی اکسل سفارش‌های این بازه (CSV)</a>
     `;
+
+    body.querySelectorAll("[data-stats-preset]").forEach((el) => {
+      el.onclick = () => {
+        adminStatsRange = { preset: Number(el.dataset.statsPreset), startDate: "", endDate: "" };
+        renderAdminStatsSection();
+      };
+    });
+    document.getElementById("stats-apply-range").onclick = () => {
+      const sd = document.getElementById("stats-start-date").value;
+      const ed = document.getElementById("stats-end-date").value;
+      if (!sd || !ed) { notify("هر دو تاریخ را انتخاب کن."); return; }
+      if (sd > ed) { notify("تاریخ شروع باید قبل از تاریخ پایان باشد."); return; }
+      adminStatsRange = { preset: 0, startDate: sd, endDate: ed };
+      renderAdminStatsSection();
+    };
   } catch (e) {
     body.innerHTML = errorState(e.message);
   }
@@ -1569,7 +1702,7 @@ async function renderAdminUserDetail(body) {
       <div class="admin-list-row">
         <div class="admin-list-row-main">
           <span>${escHtml(o.product_name || "نامشخص")} — ${fmt(o.final_price ?? o.base_price ?? 0)} تومان</span>
-          <span class="hint-text" style="margin:0">#${o.id} · ${o.created_at ? o.created_at.slice(0, 16).replace("T", " ") : ""}${o.config_link ? " · دارای کانفیگ" : ""}</span>
+          <span class="hint-text" style="margin:0">#${o.id} · ${o.created_at ? toJalaliStr(o.created_at, true) : ""}${o.config_link ? " · دارای کانفیگ" : ""}</span>
         </div>
         <div class="admin-list-row-actions">
           <span class="badge ${o.status === "approved" ? "approved" : o.status === "pending" ? "pending" : "rejected"}">${o.status === "approved" ? "تاییدشده" : o.status === "pending" ? "در انتظار" : "ردشده"}</span>
@@ -1583,7 +1716,7 @@ async function renderAdminUserDetail(body) {
       <div class="admin-list-row">
         <div class="admin-list-row-main">
           <span>${fmt(t.amount)} تومان</span>
-          <span class="hint-text" style="margin:0">${t.created_at ? t.created_at.slice(0, 16).replace("T", " ") : ""}</span>
+          <span class="hint-text" style="margin:0">${t.created_at ? toJalaliStr(t.created_at, true) : ""}</span>
         </div>
         <div class="admin-list-row-actions">
           <span class="badge ${t.status === "approved" ? "approved" : t.status === "pending" ? "pending" : "rejected"}">${t.status === "approved" ? "تاییدشده" : t.status === "pending" ? "در انتظار" : "ردشده"}</span>
@@ -1597,7 +1730,7 @@ async function renderAdminUserDetail(body) {
     <div class="card">
       <div class="eyebrow" style="margin-top:0">${escHtml(u.first_name || "بدون نام")}${u.username ? " (@" + escHtml(u.username) + ")" : ""}</div>
       <div class="stat-row"><span>🆔 آیدی عددی</span><span>${u.telegram_id}</span></div>
-      <div class="stat-row"><span>📅 تاریخ عضویت</span><span>${u.joined_at ? u.joined_at.slice(0, 10) : "---"}</span></div>
+      <div class="stat-row"><span>📅 تاریخ عضویت</span><span>${u.joined_at ? toJalaliStr(u.joined_at) : "---"}</span></div>
       <div class="stat-row"><span>👛 موجودی کیف‌پول</span><span>${fmt(u.wallet_credit)} تومان</span></div>
       <div class="stat-row"><span>وضعیت سرویس</span>${statusLine}</div>
       <button class="btn ${u.is_blocked ? "" : "outline"} small" id="toggle-block-btn" style="width:auto;margin-top:10px">
