@@ -231,14 +231,27 @@ def _styled_inline(db, text: str, callback_data: str, style_key: str) -> InlineK
 
 
 def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
+    """کیبورد پنل مدیریت با چیدمان دو ستونه برای کاهش ارتفاع منو."""
     rows = []
+    current_row = []
+
     for key, label, callback_data in ADMIN_PANEL_ITEMS:
         if key == "adm_resellers_menu" and not is_main_bot:
             # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده ندارند
             continue
-        rows.append([_styled_inline(db, label, callback_data, f"{key}_style")])
-    rows.append([InlineKeyboardButton(text="🎨 رنگ‌آمیزی دکمه‌های پنل", callback_data="adm_panel_colors_menu")])
-    rows.append([InlineKeyboardButton(text="🎨 رنگ‌آمیزی دکمه‌های خرید", callback_data="adm_buyflow_colors_menu")])
+
+        current_row.append(_styled_inline(db, label, callback_data, f"{key}_style"))
+        if len(current_row) == 2:
+            rows.append(current_row)
+            current_row = []
+
+    if current_row:
+        rows.append(current_row)
+
+    rows.append([
+        InlineKeyboardButton(text="🎨 رنگ‌آمیزی دکمه‌های پنل", callback_data="adm_panel_colors_menu"),
+        InlineKeyboardButton(text="🎨 رنگ‌آمیزی دکمه‌های خرید", callback_data="adm_buyflow_colors_menu"),
+    ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
