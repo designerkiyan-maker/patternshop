@@ -145,10 +145,12 @@ def get_verified_user(x_init_data: str = Header(...), tenant: Tenant = Depends(g
 
 
 def require_admin(auth=Depends(get_verified_user)):
-    """مثل get_verified_user، ولی فقط اگر کاربر ادمین همان مستأجر باشد اجازه می‌دهد."""
+    """مثل get_verified_user، ولی فقط اگر کاربر ادمین همان مستأجر باشد اجازه می‌دهد.
+    همچنین حضور آنلاین ادمین را ثبت می‌کند (برای مسیریابی چت زنده به اولین ادمین آنلاین)."""
     tg_id, db, tenant = auth
     if not db.is_admin(tg_id):
         raise HTTPException(status_code=403, detail="دسترسی ادمین لازم است.")
+    db.touch_admin_presence(tg_id)
     return auth
 
 
@@ -157,6 +159,7 @@ def require_full_admin(auth=Depends(get_verified_user)):
     tg_id, db, tenant = auth
     if not db.is_full_admin(tg_id):
         raise HTTPException(status_code=403, detail="این بخش فقط برای مدیران کامل در دسترس است.")
+    db.touch_admin_presence(tg_id)
     return auth
 
 
@@ -462,10 +465,13 @@ async def api_support_send(body: SupportMessageCreate, auth=Depends(get_verified
         f"🆔 `{tg_id}`\n\n"
         f"✉️ {text}"
     )
-    admin_ids = db.list_admins()
     reply_markup = {
         "inline_keyboard": [[{"text": "↩️ پاسخ", "callback_data": f"reply_user:{tg_id}"}]]
     }
+    # فقط به اولین ادمین/مالک آنلاین اطلاع بده تا مکالمه به او اختصاص یابد؛
+    # اگر هیچ‌کس آنلاین نبود، طبق روال قدیم به همه‌ی ادمین‌ها اطلاع بده.
+    target_admin = db.resolve_support_admin_for_message(tg_id)
+    admin_ids = [target_admin] if target_admin else db.list_admins()
     async with aiohttp.ClientSession() as session:
         for admin_id in admin_ids:
             try:
@@ -498,6 +504,7 @@ class TicketMessageCreate(BaseModel):
 def _ticket_to_dict(t):
     return {
         "id": t["id"], "subject": t["subject"], "status": t["status"],
+        "claimed_by": t["claimed_by"],
         "created_at": t["created_at"], "updated_at": t["updated_at"],
     }
 
@@ -895,7 +902,12 @@ class MenuLayoutUpdate(BaseModel):
 @app.get("/api/admin/check")
 def api_admin_check(auth=Depends(get_verified_user)):
     tg_id, db, _ = auth
-    return {"is_admin": db.is_admin(tg_id), "admin_role": db.get_admin_role(tg_id)}
+    is_admin = db.is_admin(tg_id)
+    if is_admin:
+        # این اندپوینت هنگام باز شدن پنل ادمین و به‌صورت دوره‌ای (heartbeat) از
+        # سمت مینی‌اپ صدا زده می‌شود؛ همین‌جا حضور آنلاین ادمین را هم ثبت می‌کنیم.
+        db.touch_admin_presence(tg_id)
+    return {"is_admin": is_admin, "admin_role": db.get_admin_role(tg_id)}
 
 
 @app.get("/api/admin/menu")
@@ -1464,7 +1476,8 @@ class AdminTicketMessageCreate(BaseModel):
 
 @app.get("/api/admin/tickets")
 def api_admin_list_tickets(status: Optional[str] = None, auth=Depends(require_admin)):
-    _, db, _ = auth
+    tg_id, db, _ = auth
+    is_owner = db.is_owner(tg_id)
     rows = db.get_all_tickets(status=status)
     result = []
     for t in rows:
@@ -1474,25 +1487,30 @@ def api_admin_list_tickets(status: Optional[str] = None, auth=Depends(require_ad
             "user_id": t["user_id"],
             "user_name": (user["first_name"] if user else "") or "",
             "user_username": (user["username"] if user else "") or "",
+            "claimed_by_me": t["claimed_by"] == tg_id,
+            "locked_for_me": bool(t["claimed_by"]) and t["claimed_by"] != tg_id and not is_owner,
         })
     return result
 
 
 @app.get("/api/admin/tickets/{ticket_id}/messages")
 def api_admin_get_ticket_messages(ticket_id: int, since_id: int = 0, auth=Depends(require_admin)):
-    _, db, _ = auth
+    tg_id, db, _ = auth
     ticket = db.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
     db.mark_ticket_read_by_admin(ticket_id)
     rows = db.get_ticket_messages(ticket_id, since_id=since_id)
     user = db.get_user(ticket["user_id"])
+    is_owner = db.is_owner(tg_id)
     return {
         "ticket": {
             **_ticket_to_dict(ticket),
             "user_id": ticket["user_id"],
             "user_name": (user["first_name"] if user else "") or "",
             "user_username": (user["username"] if user else "") or "",
+            "claimed_by_me": ticket["claimed_by"] == tg_id,
+            "locked_for_me": bool(ticket["claimed_by"]) and ticket["claimed_by"] != tg_id and not is_owner,
         },
         "messages": [
             {"id": m["id"], "sender": m["sender"], "message": m["message"], "created_at": m["created_at"]}
@@ -1503,16 +1521,19 @@ def api_admin_get_ticket_messages(ticket_id: int, since_id: int = 0, auth=Depend
 
 @app.post("/api/admin/tickets/{ticket_id}/messages")
 async def api_admin_send_ticket_message(ticket_id: int, body: AdminTicketMessageCreate, auth=Depends(require_admin)):
-    _, db, tenant = auth
+    tg_id, db, tenant = auth
     ticket = db.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
+    if ticket["claimed_by"] and ticket["claimed_by"] != tg_id and not db.is_owner(tg_id):
+        raise HTTPException(status_code=403, detail="این تیکت قبلاً توسط ادمین دیگری پاسخ داده شده و فقط برای او (و مالک) فعال است.")
     text = (body.message or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="پیام نمی‌تواند خالی باشد.")
     if len(text) > 2000:
         raise HTTPException(status_code=400, detail="پیام بیش از حد طولانی است.")
 
+    db.claim_ticket_if_open(ticket_id, tg_id)
     msg_id = db.add_ticket_message(ticket_id, "admin", text)
 
     try:
@@ -1537,6 +1558,97 @@ def api_admin_close_ticket(ticket_id: int, auth=Depends(require_admin)):
         raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
     db.close_ticket(ticket_id)
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# چت زنده پشتیبانی - سمت ادمین (پاسخ‌دادن از داخل مینی‌اپ)
+# ---------------------------------------------------------------------------
+
+class AdminSupportMessageCreate(BaseModel):
+    message: str
+
+
+@app.get("/api/admin/support/conversations")
+def api_admin_list_support_conversations(auth=Depends(require_admin)):
+    tg_id, db, _ = auth
+    is_owner = db.is_owner(tg_id)
+    convs = db.list_support_conversations()
+    result = []
+    for c in convs:
+        user = db.get_user(c["user_id"])
+        result.append({
+            **c,
+            "user_name": (user["first_name"] if user else "") or "",
+            "user_username": (user["username"] if user else "") or "",
+            "assigned_to_me": c["assigned_admin_id"] == tg_id,
+            "locked_for_me": bool(c["assigned_admin_id"]) and c["assigned_admin_id"] != tg_id and not is_owner,
+        })
+    return result
+
+
+@app.get("/api/admin/support/{user_id}/messages")
+def api_admin_get_support_messages(user_id: int, since_id: int = 0, auth=Depends(require_admin)):
+    tg_id, db, _ = auth
+    is_owner = db.is_owner(tg_id)
+    user = db.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد.")
+    db.mark_support_read_by_admin(user_id)
+    rows = db.get_support_messages(user_id, since_id=since_id)
+    conv = db.get_support_conversation(user_id)
+    assigned_admin_id = conv["assigned_admin_id"] if conv else None
+    return {
+        "user": {
+            "user_id": user_id,
+            "user_name": (user["first_name"] if user else "") or "",
+            "user_username": (user["username"] if user else "") or "",
+            "assigned_admin_id": assigned_admin_id,
+            "assigned_to_me": assigned_admin_id == tg_id,
+            "locked_for_me": bool(assigned_admin_id) and assigned_admin_id != tg_id and not is_owner,
+        },
+        "messages": [
+            {"id": m["id"], "sender": m["sender"], "message": m["message"], "created_at": m["created_at"]}
+            for m in rows
+        ],
+    }
+
+
+@app.post("/api/admin/support/{user_id}/messages")
+async def api_admin_send_support_message(user_id: int, body: AdminSupportMessageCreate, auth=Depends(require_admin)):
+    tg_id, db, tenant = auth
+    user = db.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد.")
+    conv = db.get_support_conversation(user_id)
+    assigned_admin_id = conv["assigned_admin_id"] if conv else None
+    if assigned_admin_id and assigned_admin_id != tg_id and not db.is_owner(tg_id):
+        raise HTTPException(
+            status_code=403,
+            detail="این گفتگو در حال حاضر توسط ادمین دیگری پاسخ داده می‌شود و فقط برای او (و مالک) فعال است.",
+        )
+    text = (body.message or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="پیام نمی‌تواند خالی باشد.")
+    if len(text) > 2000:
+        raise HTTPException(status_code=400, detail="پیام بیش از حد طولانی است.")
+
+    # پاسخ‌دادن یعنی از این پس این مکالمه مال همین ادمین است (مگر مالک باشد که
+    # همیشه بدون قفل‌شدن مکالمه اجازه‌ی پاسخ دارد).
+    if not db.is_owner(tg_id):
+        db.set_support_conversation_admin(user_id, tg_id)
+
+    msg_id = db.add_support_message(user_id, "admin", text)
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                json={"chat_id": user_id, "text": f"📩 پاسخ پشتیبانی:\n\n{text}"},
+            )
+    except Exception:
+        pass
+
+    return {"id": msg_id, "sender": "admin", "message": text}
 
 
 # ---------------------------------------------------------------------------
