@@ -259,6 +259,13 @@ def admin_restore_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def admin_restore_waiting_kb() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="❌ انصراف", callback_data="adm_restore_cancel_wait")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def admin_panel_colors_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
     rows = []
     for key, label, _ in ADMIN_PANEL_ITEMS:

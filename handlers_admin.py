@@ -1562,7 +1562,16 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await call.message.edit_text(
             "♻️ فایل بکاپ (.db) را همین‌جا به‌صورت Document ارسال کن.\n\n"
             "⚠️ توجه: بعد از تایید، کل دیتابیس فعلی با این فایل جایگزین می‌شود.",
+            reply_markup=kb.admin_restore_waiting_kb(),
         )
+        await call.answer()
+
+    @router.callback_query(AdminRestoreBackup.waiting_file, F.data == "adm_restore_cancel_wait")
+    async def cb_restore_cancel_wait(call: CallbackQuery, state: FSMContext):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        await state.clear()
+        await call.message.edit_text("❌ بازیابی لغو شد.", reply_markup=kb.admin_back_kb())
         await call.answer()
 
     @router.message(AdminRestoreBackup.waiting_file, F.document)
