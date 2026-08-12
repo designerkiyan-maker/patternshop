@@ -731,74 +731,90 @@ function addToAppListHtml(orderId, platform) {
 }
 
 function tryOpenAppOrStore(deepLink, storeUrl, androidPackage = "") {
-  // Telegram Mini Apps cannot use tg.openLink() for arbitrary custom schemes:
-  // Telegram documents that openLink is restricted to allowed URL schemes.
-  // Also, assigning window.location to hiddify:// / v2rayng:// navigates the
-  // Telegram WebView and produces ERR_UNKNOWN_URL_SCHEME.
-  //
-  // So we first ask the OS URL handler through a real anchor click. On
-  // Android, if that is intercepted by the WebView, we make a second attempt
-  // with an Android intent:// URL bound to the app package.
-  let backgrounded = false;
-  let settled = false;
-  let intentTried = false;
-
-  const markBackgrounded = () => { backgrounded = true; };
-  const cleanup = () => {
-    document.removeEventListener("visibilitychange", markBackgrounded);
-    window.removeEventListener("blur", markBackgrounded);
-  };
   const isAndroid = /Android/i.test(navigator.userAgent || "");
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
+    (/Macintosh/i.test(navigator.userAgent || "") && navigator.maxTouchPoints > 1);
 
-  document.addEventListener("visibilitychange", markBackgrounded);
-  window.addEventListener("blur", markBackgrounded);
+  let appOpened = false;
+  let finished = false;
 
-  const launch = (url) => {
-    const a = document.createElement("a");
-    a.href = url;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a.style.display = "none";
-    document.body.appendChild(a);
-    try { a.click(); } catch (e) {}
-    setTimeout(() => { try { a.remove(); } catch (e) {} }, 1000);
+  const markAppOpened = () => {
+    appOpened = true;
   };
 
-  // First attempt: direct custom-scheme URL.
-  launch(deepLink);
+  const cleanup = () => {
+    document.removeEventListener("visibilitychange", markAppOpened);
+    window.removeEventListener("blur", markAppOpened);
+  };
 
-  // Android fallback: intent:// lets Android resolve the package without
-  // navigating the Telegram WebView to the custom scheme itself.
-  const tryIntent = () => {
-    if (settled || backgrounded || !isAndroid || !androidPackage || intentTried) return;
-    intentTried = true;
+  document.addEventListener("visibilitychange", markAppOpened);
+  window.addEventListener("blur", markAppOpened);
+
+  const openHttp = (url) => {
     try {
-      const u = new URL(deepLink);
-      let body = `${u.host}${u.pathname}${u.search}`;
-      // The fragment is optional for these import links and conflicts with
-      // Android's #Intent separator, so omit it in the package fallback.
-      const intentUrl = `intent://${body}#Intent;scheme=${u.protocol.slice(0, -1)};package=${androidPackage};end`;
-      launch(intentUrl);
-    } catch (e) {}
-  };
-
-  setTimeout(tryIntent, 350);
-
-  const fallback = () => {
-    if (settled) return;
-    settled = true;
-    cleanup();
-    if (!backgrounded) {
       if (tg && typeof tg.openLink === "function") {
-        tg.openLink(storeUrl);
+        tg.openLink(url);
       } else {
-        window.open(storeUrl, "_blank", "noopener,noreferrer");
+        window.open(url, "_blank", "noopener,noreferrer");
       }
+    } catch (e) {
+      try { window.open(url, "_blank", "noopener,noreferrer"); } catch (_) {}
     }
   };
 
-  // Allow enough time for the OS to switch to the installed app.
-  setTimeout(fallback, 2200);
+  const openByAnchor = (url) => {
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.style.position = "fixed";
+      a.style.left = "-9999px";
+      a.style.width = "1px";
+      a.style.height = "1px";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => a.remove(), 1500);
+    } catch (e) {}
+  };
+
+  // Android: use intent:// with an OS-level fallback URL.
+  // If the app exists, Android opens it. If it does not exist, Android
+  // opens the supplied Play Store/App Store web URL instead of showing
+  // ERR_UNKNOWN_URL_SCHEME inside the Mini App.
+  if (isAndroid && androidPackage) {
+    try {
+      const u = new URL(deepLink);
+      const scheme = u.protocol.slice(0, -1);
+      const body = `${u.host}${u.pathname}${u.search}`;
+      const fallback = encodeURIComponent(storeUrl);
+      const intentUrl = `intent://${body}#Intent;scheme=${scheme};package=${androidPackage};S.browser_fallback_url=${fallback};end`;
+      openByAnchor(intentUrl);
+
+      setTimeout(() => {
+        if (!finished && !appOpened) {
+          finished = true;
+          cleanup();
+          openHttp(storeUrl);
+        }
+      }, 1800);
+      return;
+    } catch (e) {
+      // Fall through to the generic method below.
+    }
+  }
+
+  // iOS / generic: try the app URL first. If the app is not installed,
+  // Telegram stays in the Mini App and the normal HTTP App Store URL is
+  // opened after a short delay.
+  openByAnchor(deepLink);
+
+  setTimeout(() => {
+    if (finished) return;
+    finished = true;
+    cleanup();
+    if (!appOpened) openHttp(storeUrl);
+  }, isIOS ? 1400 : 1800);
 }
 
 function wireAddToAppButtons(root) {
