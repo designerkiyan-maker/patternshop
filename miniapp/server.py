@@ -44,6 +44,7 @@ from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER
 from miniapp.auth import validate_init_data
 from sub_info import fetch_sub_info
 from jalali import to_jalali_str
+from stock_alerts import check_and_notify_low_stock
 
 app = FastAPI(title="V2Ray Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -613,8 +614,8 @@ class OrderCreate(BaseModel):
 
 
 @app.post("/api/orders")
-def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
+async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
+    tg_id, db, tenant = auth
     user_row = db.get_user(tg_id)
     if user_row and user_row["is_blocked"]:
         raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
@@ -652,6 +653,16 @@ def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
             db.reject_order(order_id)
             raise HTTPException(status_code=409, detail="موجودی هم‌زمان تمام شد؛ مبلغ بازگردانده شد.")
         db.approve_order(order_id, result["id"])
+
+        async def _send_admin_msg(admin_id, text):
+            async with aiohttp.ClientSession() as session:
+                await session.post(
+                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                    json={"chat_id": admin_id, "text": text},
+                )
+
+        await check_and_notify_low_stock(_send_admin_msg, db, body.product_id)
+
         db.reward_referrer_if_first_purchase(tg_id, order["final_price"] or product["price"])
         order = db.get_order(order_id)
         cfg = db.get_config_by_id(order["config_id"])
