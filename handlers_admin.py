@@ -105,6 +105,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return await deny_support(call)
         cat_id = int(call.data.split(":")[1])
         db.toggle_category(cat_id)
+        db.log_admin_action(call.from_user.id, "category_toggle", f"دسته‌بندی #{cat_id}")
         categories = db.get_categories(active_only=False)
         await call.message.edit_text("📂 مدیریت دسته‌بندی‌ها:", reply_markup=kb.admin_categories_kb(categories))
         await call.answer("وضعیت تغییر کرد.")
@@ -115,6 +116,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return await deny_support(call)
         cat_id = int(call.data.split(":")[1])
         db.delete_category(cat_id)
+        db.log_admin_action(call.from_user.id, "category_delete", f"دسته‌بندی #{cat_id}")
         categories = db.get_categories(active_only=False)
         await call.message.edit_text("📂 مدیریت دسته‌بندی‌ها:", reply_markup=kb.admin_categories_kb(categories))
         await call.answer("دسته‌بندی حذف شد.")
@@ -131,7 +133,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def process_add_category(message: Message, state: FSMContext):
         if not admin_only(message.from_user.id):
             return
-        db.add_category(message.text.strip())
+        name = message.text.strip()
+        db.add_category(name)
+        db.log_admin_action(message.from_user.id, "category_add", f"دسته‌بندی «{name}»")
         await state.clear()
         await message.answer("✅ دسته‌بندی اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -169,6 +173,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         product_id = int(call.data.split(":")[1])
         db.toggle_product(product_id)
         product = db.get_product(product_id)
+        db.log_admin_action(call.from_user.id, "product_toggle", f"محصول «{product['name'] if product else product_id}»")
         products = db.get_products(product["category_id"], active_only=False)
         await call.message.edit_text("لیست محصولات این دسته‌بندی:", reply_markup=kb.admin_products_list_kb(db, products))
         await call.answer("وضعیت تغییر کرد.")
@@ -181,6 +186,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         product = db.get_product(product_id)
         cat_id = product["category_id"] if product else None
         db.delete_product(product_id)
+        db.log_admin_action(call.from_user.id, "product_delete", f"محصول «{product['name'] if product else product_id}»")
         if cat_id:
             products = db.get_products(cat_id, active_only=False)
             await call.message.edit_text("لیست محصولات این دسته‌بندی:", reply_markup=kb.admin_products_list_kb(db, products))
@@ -243,6 +249,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         data = await state.get_data()
         db.add_product(data["category_id"], data["name"], data["price"], data["description"], int(text))
+        db.log_admin_action(message.from_user.id, "product_add", f"محصول «{data['name']}» | قیمت: {data['price']:,}")
         await state.clear()
         await message.answer("✅ محصول با موفقیت اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -486,6 +493,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
 
         db.approve_order(order_id, result["id"])
+        db.log_admin_action(
+            call.from_user.id, "order_approve",
+            f"سفارش #{order_id} | کاربر {order['user_id']} | محصول «{product['name'] if product else '---'}» | مبلغ: {(order['final_price'] or (product['price'] if product else 0)):,}",
+        )
         await check_and_notify_low_stock(bot.send_message, db, order["product_id"])
 
         reward_info = db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or product["price"])
@@ -537,6 +548,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
 
         db.reject_order(order_id)
+        db.log_admin_action(
+            call.from_user.id, "order_reject",
+            f"سفارش #{order_id} | کاربر {order['user_id']}",
+        )
         try:
             await bot.send_message(
                 order["user_id"],
@@ -601,6 +616,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
         db.approve_topup(topup_id)
         new_balance = db.get_wallet_credit(topup["user_id"])
+        db.log_admin_action(
+            call.from_user.id, "topup_approve",
+            f"شارژ #{topup_id} | کاربر {topup['user_id']} | مبلغ: {topup['amount']:,} | موجودی جدید: {new_balance:,}",
+        )
 
         try:
             await bot.send_message(
@@ -635,6 +654,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
 
         db.reject_topup(topup_id)
+        db.log_admin_action(
+            call.from_user.id, "topup_reject",
+            f"شارژ #{topup_id} | کاربر {topup['user_id']} | مبلغ: {topup['amount']:,}",
+        )
         try:
             await bot.send_message(
                 topup["user_id"],
@@ -670,6 +693,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return await deny_support(call)
         code_id = int(call.data.split(":")[1])
         db.toggle_discount_code(code_id)
+        db.log_admin_action(call.from_user.id, "discount_toggle", f"کد تخفیف #{code_id}")
         codes = db.list_discount_codes()
         await call.message.edit_text("🎟 مدیریت کدهای تخفیف:", reply_markup=kb.discount_codes_kb(codes))
         await call.answer("وضعیت تغییر کرد.")
@@ -680,6 +704,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return await deny_support(call)
         code_id = int(call.data.split(":")[1])
         db.delete_discount_code(code_id)
+        db.log_admin_action(call.from_user.id, "discount_delete", f"کد تخفیف #{code_id}")
         codes = db.list_discount_codes()
         await call.message.edit_text("🎟 مدیریت کدهای تخفیف:", reply_markup=kb.discount_codes_kb(codes))
         await call.answer("کد حذف شد.")
@@ -735,6 +760,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         db.create_discount_code(
             data["disc_code"], percent=data.get("disc_percent"), fixed_amount=data.get("disc_fixed"), max_uses=max_uses
         )
+        db.log_admin_action(message.from_user.id, "discount_add", f"کد «{data['disc_code']}»")
         await state.clear()
         await message.answer(f"✅ کد تخفیف «{data['disc_code']}» ساخته شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -1252,6 +1278,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         db.set_setting("card_number", data["card_number"])
         db.set_setting("card_holder", message.text.strip())
         await state.clear()
+        db.log_admin_action(
+            message.from_user.id, "card_change",
+            f"شماره کارت جدید: {data['card_number']} | به نام: {message.text.strip()}",
+        )
         await message.answer("✅ اطلاعات کارت به‌روزرسانی شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
     # -------------------------------------------------------------------
@@ -1326,6 +1356,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return await call.answer("⛔️ فقط مالک اصلی می‌تواند ادمین اضافه کند.", show_alert=True)
         _, target_id, role = call.data.split(":")
         db.add_admin(int(target_id), role=role)
+        db.log_admin_action(
+            call.from_user.id, "admin_add",
+            f"کاربر {target_id} | نقش: {kb.ADMIN_ROLE_LABELS.get(role, role)}",
+        )
         await call.message.edit_text(
             f"✅ کاربر `{target_id}` با نقش «{kb.ADMIN_ROLE_LABELS.get(role, role)}» اضافه شد.",
             parse_mode="Markdown", reply_markup=kb.admin_back_kb("adm_admins_menu"),
@@ -1369,6 +1403,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         _, target_id, role = call.data.split(":")
         ok = db.set_admin_role(int(target_id), role)
         if ok:
+            db.log_admin_action(
+                call.from_user.id, "admin_role_change",
+                f"کاربر {target_id} | نقش جدید: {kb.ADMIN_ROLE_LABELS.get(role, role)}",
+            )
             await call.message.edit_text(
                 f"✅ نقش کاربر `{target_id}` به «{kb.ADMIN_ROLE_LABELS.get(role, role)}» تغییر کرد.",
                 parse_mode="Markdown", reply_markup=kb.admin_back_kb("adm_admins_menu"),
@@ -1394,9 +1432,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not message.text.strip().isdigit():
             await message.answer("لطفاً فقط آیدی عددی ارسال کنید.")
             return
-        ok = db.remove_admin(int(message.text.strip()))
+        target_id = int(message.text.strip())
+        ok = db.remove_admin(target_id)
         await state.clear()
         if ok:
+            db.log_admin_action(message.from_user.id, "admin_remove", f"کاربر {target_id}")
             await message.answer("✅ ادمین حذف شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
         else:
             await message.answer("⛔️ این ادمین قابل حذف نیست.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
@@ -1424,6 +1464,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             except Exception:
                 failed += 1
         await state.clear()
+        db.log_admin_action(message.from_user.id, "broadcast", f"ارسال به {len(user_ids)} کاربر | موفق: {success} | ناموفق: {failed}")
         await message.answer(
             f"📢 پیام همگانی ارسال شد.\n✅ موفق: {success}\n❌ ناموفق: {failed}", reply_markup=kb.admin_panel_kb(db, is_main_bot)
         )
@@ -1508,6 +1549,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return await call.message.answer("❌ گرفتن بکاپ ناموفق بود.")
         if not backup_path:
             return await call.message.answer("❌ فایل دیتابیس پیدا نشد.")
+        db.log_admin_action(call.from_user.id, "backup_create", "دریافت بکاپ فوری از طریق بات")
         await call.message.answer_document(
             FSInputFile(backup_path), caption="🗄 بکاپ فوری دیتابیس"
         )
@@ -1570,6 +1612,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await asyncio.to_thread(restore_backup, db, db.db_path, tmp_path)
         except Exception as e:
             return await call.message.edit_text(f"❌ بازیابی ناموفق بود: {e}")
+        else:
+            db.log_admin_action(call.from_user.id, "backup_restore", "بازیابی دیتابیس از فایل بکاپ آپلودی")
         finally:
             try:
                 os.remove(tmp_path)

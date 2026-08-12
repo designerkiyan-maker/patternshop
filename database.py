@@ -645,12 +645,21 @@ class Database:
                 (admin_id, action, details, datetime.utcnow().isoformat()),
             )
 
-    def get_admin_logs(self, limit: int = 50, offset: int = 0):
+    def get_admin_logs(self, limit: int = 50, offset: int = 0, admin_id: int = None):
         with self._get_conn() as conn:
-            total = conn.execute("SELECT COUNT(*) c FROM admin_logs").fetchone()["c"]
-            rows = conn.execute(
-                "SELECT * FROM admin_logs ORDER BY id DESC LIMIT ? OFFSET ?", (limit, offset)
-            ).fetchall()
+            if admin_id is not None:
+                total = conn.execute(
+                    "SELECT COUNT(*) c FROM admin_logs WHERE admin_id = ?", (admin_id,)
+                ).fetchone()["c"]
+                rows = conn.execute(
+                    "SELECT * FROM admin_logs WHERE admin_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+                    (admin_id, limit, offset),
+                ).fetchall()
+            else:
+                total = conn.execute("SELECT COUNT(*) c FROM admin_logs").fetchone()["c"]
+                rows = conn.execute(
+                    "SELECT * FROM admin_logs ORDER BY id DESC LIMIT ? OFFSET ?", (limit, offset)
+                ).fetchall()
             return rows, total
 
     # -----------------------------------------------------------------------
