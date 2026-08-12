@@ -452,7 +452,7 @@ def admin_admins_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-ADMIN_ROLE_LABELS = {"owner": "👑 مالک", "admin": "🛡 مدیر کامل", "support": "🎧 پشتیبان"}
+ADMIN_ROLE_LABELS = {"owner": "👑 مالک", "admin": "🛡 مدیر کامل", "mid": "🥈 ادمین میانی", "support": "🎧 پشتیبان"}
 
 
 def admin_role_pick_kb(target_tg_id: int, action: str) -> InlineKeyboardMarkup:
@@ -460,6 +460,7 @@ def admin_role_pick_kb(target_tg_id: int, action: str) -> InlineKeyboardMarkup:
     prefix = "adm_add_admin_role" if action == "add" else "adm_change_role_set"
     rows = [
         [InlineKeyboardButton(text="🛡 مدیر کامل (دسترسی کامل)", callback_data=f"{prefix}:{target_tg_id}:admin")],
+        [InlineKeyboardButton(text="🥈 ادمین میانی (بدون آمار/فروش/نمایندگی)", callback_data=f"{prefix}:{target_tg_id}:mid")],
         [InlineKeyboardButton(text="🎧 پشتیبان (فقط تیکت و سفارش)", callback_data=f"{prefix}:{target_tg_id}:support")],
         [InlineKeyboardButton(text="⬅️ انصراف", callback_data="adm_admins_menu")],
     ]

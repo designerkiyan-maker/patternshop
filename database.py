@@ -578,13 +578,19 @@ class Database:
             return row is not None
 
     def get_admin_role(self, tg_id: int):
-        """نقش ادمین را برمی‌گرداند: 'owner' | 'admin' | 'support' | None (اگر ادمین نباشد)."""
+        """نقش ادمین را برمی‌گرداند: 'owner' | 'admin' | 'mid' | 'support' | None (اگر ادمین نباشد)."""
         with self._get_conn() as conn:
             row = conn.execute("SELECT role FROM admins WHERE telegram_id=?", (tg_id,)).fetchone()
             return row["role"] if row else None
 
     def is_full_admin(self, tg_id: int) -> bool:
-        """دسترسی کامل: مالک یا مدیر (برخلاف پشتیبان که دسترسی محدود دارد)."""
+        """دسترسی کامل عملیاتی: مالک، مدیر یا ادمین میانی (برخلاف پشتیبان که دسترسی محدود دارد)."""
+        role = self.get_admin_role(tg_id)
+        return role in ("owner", "admin", "mid")
+
+    def is_senior_admin(self, tg_id: int) -> bool:
+        """فقط مالک یا مدیر کامل؛ برای بخش‌های حساس که حتی ادمین میانی هم به آن‌ها دسترسی ندارد
+        (آمار فروش، چیدمان منو، تنظیمات کمپین‌ها/تخفیف، لاگ ادمین، نمایندگی‌ها)."""
         role = self.get_admin_role(tg_id)
         return role in ("owner", "admin")
 
@@ -592,7 +598,7 @@ class Database:
         return self.get_admin_role(tg_id) == "owner"
 
     def add_admin(self, tg_id: int, role: str = "admin"):
-        if role not in ("admin", "support"):
+        if role not in ("admin", "mid", "support"):
             role = "admin"
         with self._get_conn() as conn:
             conn.execute(
@@ -603,7 +609,7 @@ class Database:
 
     def set_admin_role(self, tg_id: int, role: str) -> bool:
         """تغییر نقش یک ادمین موجود. نقش «owner» هرگز از این مسیر قابل واگذاری نیست."""
-        if role not in ("admin", "support"):
+        if role not in ("admin", "mid", "support"):
             return False
         with self._get_conn() as conn:
             row = conn.execute("SELECT role FROM admins WHERE telegram_id=?", (tg_id,)).fetchone()
@@ -630,7 +636,7 @@ class Database:
     def list_admins_with_roles(self):
         with self._get_conn() as conn:
             rows = conn.execute("SELECT telegram_id, role FROM admins ORDER BY "
-                                 "CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, telegram_id").fetchall()
+                                 "CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'mid' THEN 2 ELSE 3 END, telegram_id").fetchall()
             return [{"telegram_id": r["telegram_id"], "role": r["role"] or "admin"} for r in rows]
 
     # -----------------------------------------------------------------------
