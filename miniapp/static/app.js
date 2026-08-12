@@ -997,21 +997,40 @@ let adminSection = "stats"; // stats | menu | branding | catalog | tickets | sal
 let adminCatalogView = { level: "categories" }; // categories | products | configs
 let adminTicketView = { level: "list" }; // list | thread
 
+const ADMIN_TABS = [
+  { key: "stats", label: "آمار", fullOnly: true },
+  { key: "menu", label: "چیدمان منو", fullOnly: true },
+  { key: "branding", label: "برندینگ", fullOnly: true },
+  { key: "catalog", label: "محصولات", fullOnly: true },
+  { key: "users", label: "مدیریت کاربران", fullOnly: false },
+  { key: "sales", label: "فروش", fullOnly: true },
+  { key: "tickets", label: "تیکت‌ها", fullOnly: false },
+  { key: "adminlog", label: "لاگ ادمین", fullOnly: true },
+];
+
 async function renderAdmin() {
   const isMainBot = !TENANT_ID;
+
+  let adminRole = "admin";
+  try {
+    const check = await api("/api/admin/check");
+    adminRole = check.admin_role || "admin";
+  } catch (e) {
+    // در صورت خطا محتاطانه فرض می‌کنیم دسترسی کامل نیست
+  }
+  const isSupport = adminRole === "support";
+  const visibleTabs = ADMIN_TABS.filter((t) => !isSupport || !t.fullOnly);
+  if (isSupport && !visibleTabs.some((t) => t.key === adminSection)) {
+    adminSection = visibleTabs[0].key;
+  }
+
   const prevTabsEl = document.getElementById("admin-section-tabs");
   const prevScrollLeft = prevTabsEl ? prevTabsEl.scrollLeft : 0;
   content.innerHTML = `
+    ${isSupport ? `<div class="banner" style="margin-bottom:10px"><div class="banner-title"><span class="ic">🎧</span>نقش شما: پشتیبان (دسترسی محدود)</div></div>` : ""}
     <div class="segmented" id="admin-section-tabs">
-      <button class="seg-btn ${adminSection === "stats" ? "active" : ""}" data-section="stats">آمار</button>
-      <button class="seg-btn ${adminSection === "menu" ? "active" : ""}" data-section="menu">چیدمان منو</button>
-      <button class="seg-btn ${adminSection === "branding" ? "active" : ""}" data-section="branding">برندینگ</button>
-      <button class="seg-btn ${adminSection === "catalog" ? "active" : ""}" data-section="catalog">محصولات</button>
-      <button class="seg-btn ${adminSection === "users" ? "active" : ""}" data-section="users">مدیریت کاربران</button>
-      <button class="seg-btn ${adminSection === "sales" ? "active" : ""}" data-section="sales">فروش</button>
-      <button class="seg-btn ${adminSection === "tickets" ? "active" : ""}" data-section="tickets">تیکت‌ها</button>
-      <button class="seg-btn ${adminSection === "adminlog" ? "active" : ""}" data-section="adminlog">لاگ ادمین</button>
-      ${isMainBot ? `<button class="seg-btn ${adminSection === "resellers" ? "active" : ""}" data-section="resellers">نمایندگی‌ها</button>` : ""}
+      ${visibleTabs.map((t) => `<button class="seg-btn ${adminSection === t.key ? "active" : ""}" data-section="${t.key}">${t.label}</button>`).join("")}
+      ${(!isSupport && isMainBot) ? `<button class="seg-btn ${adminSection === "resellers" ? "active" : ""}" data-section="resellers">نمایندگی‌ها</button>` : ""}
     </div>
     <div id="admin-section-body">${skeleton(4)}</div>
   `;
@@ -1038,7 +1057,7 @@ async function renderAdmin() {
   else if (adminSection === "sales") await renderAdminSalesSection();
   else if (adminSection === "tickets") await renderAdminTicketsSection();
   else if (adminSection === "adminlog") await renderAdminLogSection();
-  else if (adminSection === "resellers" && isMainBot) await renderAdminResellersSection();
+  else if (adminSection === "resellers" && isMainBot && !isSupport) await renderAdminResellersSection();
 }
 
 // ---------------------------------------------------------------------------
