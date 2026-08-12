@@ -1006,6 +1006,7 @@ const ADMIN_TABS = [
   { key: "sales", label: "فروش", fullOnly: true },
   { key: "tickets", label: "تیکت‌ها", fullOnly: false },
   { key: "adminlog", label: "لاگ ادمین", fullOnly: true },
+  { key: "backup", label: "بکاپ", fullOnly: true, ownerOnly: true },
 ];
 
 async function renderAdmin() {
@@ -1019,7 +1020,8 @@ async function renderAdmin() {
     // در صورت خطا محتاطانه فرض می‌کنیم دسترسی کامل نیست
   }
   const isSupport = adminRole === "support";
-  const visibleTabs = ADMIN_TABS.filter((t) => !isSupport || !t.fullOnly);
+  const isOwner = adminRole === "owner";
+  const visibleTabs = ADMIN_TABS.filter((t) => (!isSupport || !t.fullOnly) && (!t.ownerOnly || isOwner));
   if (isSupport && !visibleTabs.some((t) => t.key === adminSection)) {
     adminSection = visibleTabs[0].key;
   }
@@ -1058,6 +1060,7 @@ async function renderAdmin() {
   else if (adminSection === "tickets") await renderAdminTicketsSection();
   else if (adminSection === "adminlog") await renderAdminLogSection();
   else if (adminSection === "resellers" && isMainBot && !isSupport) await renderAdminResellersSection();
+  else if (adminSection === "backup") await renderAdminBackupSection();
 }
 
 // ---------------------------------------------------------------------------
@@ -1937,6 +1940,91 @@ async function renderAdminLogSection() {
   } catch (e) {
     body.innerHTML = errorState(e.message);
   }
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > بکاپ و بازیابی (فقط مالک اصلی)
+// ---------------------------------------------------------------------------
+
+async function downloadAdminBackup() {
+  const btn = document.getElementById("admin-backup-create-btn");
+  const status = document.getElementById("admin-backup-status");
+  if (btn) btn.disabled = true;
+  status.innerHTML = `<span class="hint-text">⏳ در حال آماده‌سازی بکاپ...</span>`;
+  try {
+    const res = await fetch(withTenant("/api/admin/backup/create"), {
+      headers: { "X-Init-Data": initData },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "خطا" }));
+      throw new Error(err.detail || "خطای ناشناخته");
+    }
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match ? match[1] : "backup.db";
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    status.innerHTML = `<span class="hint-text">✅ بکاپ دانلود شد: ${escHtml(filename)}</span>`;
+  } catch (e) {
+    status.innerHTML = errorState(e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function uploadAdminRestore(file) {
+  const status = document.getElementById("admin-restore-status");
+  if (!file) return;
+  if (!/\.(db|sqlite|sqlite3)$/i.test(file.name)) {
+    status.innerHTML = errorState("فایل باید پسوند .db یا .sqlite داشته باشد.");
+    return;
+  }
+  if (!confirm(
+    "⚠️ با این کار کل دیتابیس فعلی با این فایل جایگزین می‌شود.\n" +
+    "یک نسخه از وضعیت فعلی هم قبلش ذخیره می‌شود، ولی این عملیات نباید بی‌دقت انجام شود.\n\n" +
+    "مطمئنی می‌خواهی ادامه بدهی؟"
+  )) return;
+
+  status.innerHTML = `<span class="hint-text">⏳ در حال بازیابی...</span>`;
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const result = await apiUpload("/api/admin/backup/restore", formData);
+    status.innerHTML = `<span class="hint-text">✅ دیتابیس با موفقیت بازیابی شد. نسخه‌ی قبلی هم به‌عنوان «${escHtml(result.pre_restore_backup)}» کنار دیتابیس ذخیره شد. صفحه را رفرش کن.</span>`;
+  } catch (e) {
+    status.innerHTML = errorState(e.message);
+  }
+}
+
+async function renderAdminBackupSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = `
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">📥 دریافت بکاپ فوری</div>
+      <p class="hint-text">یک نسخه‌ی کامل از دیتابیس فعلی همین الان ساخته و دانلود می‌شود.</p>
+      <button class="btn" id="admin-backup-create-btn">📥 دریافت بکاپ فوری</button>
+      <div id="admin-backup-status" style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">♻️ بازیابی از فایل بکاپ</div>
+      <p class="hint-text">⚠️ با آپلود یک فایل بکاپ (.db)، دیتابیس فعلی کامل با آن جایگزین می‌شود. این کار قابل بازگشت نیست مگر با بکاپ دیگری. قبل از جایگزینی، یک نسخه‌ی ایمن از وضعیت فعلی هم خودکار ذخیره می‌شود.</p>
+      <input type="file" id="admin-restore-file" accept=".db,.sqlite,.sqlite3" style="margin-bottom:10px" />
+      <div id="admin-restore-status"></div>
+    </div>
+  `;
+  document.getElementById("admin-backup-create-btn").onclick = downloadAdminBackup;
+  document.getElementById("admin-restore-file").onchange = (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    uploadAdminRestore(file);
+  };
 }
 
 // ---------------------------------------------------------------------------
