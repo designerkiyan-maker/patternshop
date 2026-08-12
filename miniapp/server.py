@@ -153,20 +153,30 @@ def require_admin(auth=Depends(get_verified_user)):
 
 
 def require_full_admin(auth=Depends(get_verified_user)):
-    """مثل require_admin، ولی نقش «پشتیبان» را رد می‌کند؛ فقط مالک یا مدیر کامل."""
+    """مثل require_admin، ولی نقش «پشتیبان» را رد می‌کند؛ مالک، مدیر کامل یا ادمین میانی."""
     tg_id, db, tenant = auth
     if not db.is_full_admin(tg_id):
         raise HTTPException(status_code=403, detail="این بخش فقط برای مدیران کامل در دسترس است.")
     return auth
 
 
+def require_senior_admin(auth=Depends(get_verified_user)):
+    """مثل require_full_admin، ولی نقش «ادمین میانی» را هم رد می‌کند؛ فقط مالک یا مدیر کامل
+    (برای بخش‌های حساس: آمار فروش، چیدمان منو، تنظیمات کمپین‌ها/تخفیف، لاگ ادمین، نمایندگی‌ها)."""
+    tg_id, db, tenant = auth
+    if not db.is_senior_admin(tg_id):
+        raise HTTPException(status_code=403, detail="این بخش فقط برای مالک و مدیر کامل در دسترس است.")
+    return auth
+
+
 def require_main_admin(auth=Depends(get_verified_user)):
-    """مثل require_admin، ولی فقط برای بات اصلی مجاز است (نه بات‌های نمایندگی)."""
+    """مدیریت بات‌های نمایندگی: فقط مالک یا مدیر کامل بات اصلی (نه ادمین میانی/پشتیبان،
+    نه بات‌های نمایندگی)."""
     tg_id, db, tenant = auth
     if tenant.tenant_id:
         raise HTTPException(status_code=403, detail="این بخش فقط در بات اصلی در دسترس است.")
-    if not db.is_admin(tg_id):
-        raise HTTPException(status_code=403, detail="دسترسی ادمین لازم است.")
+    if not db.is_senior_admin(tg_id):
+        raise HTTPException(status_code=403, detail="این بخش فقط برای مالک و مدیر کامل در دسترس است.")
     return auth
 
 
@@ -889,7 +899,7 @@ def api_admin_check(auth=Depends(get_verified_user)):
 
 
 @app.get("/api/admin/menu")
-def api_admin_get_menu(auth=Depends(require_full_admin)):
+def api_admin_get_menu(auth=Depends(require_senior_admin)):
     _, db, _ = auth
     settings = db.get_all_settings()
     order = db.get_menu_order()
@@ -917,7 +927,7 @@ def api_admin_get_menu(auth=Depends(require_full_admin)):
 
 
 @app.post("/api/admin/menu")
-def api_admin_save_menu(body: MenuLayoutUpdate, auth=Depends(require_full_admin)):
+def api_admin_save_menu(body: MenuLayoutUpdate, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     for btn in body.buttons:
         meta = MENU_BUTTON_META.get(btn.key)
@@ -1265,7 +1275,7 @@ class RenewalSettingsUpdate(BaseModel):
 
 
 @app.get("/api/admin/settings/referral")
-def api_admin_get_referral_settings(auth=Depends(require_full_admin)):
+def api_admin_get_referral_settings(auth=Depends(require_senior_admin)):
     _, db, _ = auth
     return {
         "enabled": db.get_setting("referral_enabled", "1") == "1",
@@ -1274,7 +1284,7 @@ def api_admin_get_referral_settings(auth=Depends(require_full_admin)):
 
 
 @app.post("/api/admin/settings/referral")
-def api_admin_set_referral_settings(body: ReferralSettingsUpdate, auth=Depends(require_full_admin)):
+def api_admin_set_referral_settings(body: ReferralSettingsUpdate, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if body.percent < 0 or body.percent > 100:
         raise HTTPException(status_code=400, detail="درصد باید بین ۰ تا ۱۰۰ باشد.")
@@ -1284,13 +1294,13 @@ def api_admin_set_referral_settings(body: ReferralSettingsUpdate, auth=Depends(r
 
 
 @app.get("/api/admin/settings/wheel")
-def api_admin_get_wheel_settings(auth=Depends(require_full_admin)):
+def api_admin_get_wheel_settings(auth=Depends(require_senior_admin)):
     _, db, _ = auth
     return db.get_wheel_settings()
 
 
 @app.post("/api/admin/settings/wheel")
-def api_admin_set_wheel_settings(body: WheelSettingsUpdate, auth=Depends(require_full_admin)):
+def api_admin_set_wheel_settings(body: WheelSettingsUpdate, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if body.win_percent < 0 or body.win_percent > 100:
         raise HTTPException(status_code=400, detail="درصد برد باید بین ۰ تا ۱۰۰ باشد.")
@@ -1307,13 +1317,13 @@ def api_admin_set_wheel_settings(body: WheelSettingsUpdate, auth=Depends(require
 
 
 @app.get("/api/admin/settings/renewal")
-def api_admin_get_renewal_settings(auth=Depends(require_full_admin)):
+def api_admin_get_renewal_settings(auth=Depends(require_senior_admin)):
     _, db, _ = auth
     return db.get_renewal_settings()
 
 
 @app.post("/api/admin/settings/renewal")
-def api_admin_set_renewal_settings(body: RenewalSettingsUpdate, auth=Depends(require_full_admin)):
+def api_admin_set_renewal_settings(body: RenewalSettingsUpdate, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if body.discount_percent < 0 or body.discount_percent > 100:
         raise HTTPException(status_code=400, detail="درصد تخفیف باید بین ۰ تا ۱۰۰ باشد.")
@@ -1347,13 +1357,13 @@ def _discount_to_dict(d):
 
 
 @app.get("/api/admin/discounts")
-def api_admin_list_discounts(auth=Depends(require_full_admin)):
+def api_admin_list_discounts(auth=Depends(require_senior_admin)):
     _, db, _ = auth
     return [_discount_to_dict(d) for d in db.list_discount_codes()]
 
 
 @app.post("/api/admin/discounts")
-def api_admin_create_discount(body: DiscountCreate, auth=Depends(require_full_admin)):
+def api_admin_create_discount(body: DiscountCreate, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     code = (body.code or "").strip().upper()
     if not code:
@@ -1372,7 +1382,7 @@ def api_admin_create_discount(body: DiscountCreate, auth=Depends(require_full_ad
 
 
 @app.post("/api/admin/discounts/{discount_id}/toggle")
-def api_admin_toggle_discount(discount_id: int, auth=Depends(require_full_admin)):
+def api_admin_toggle_discount(discount_id: int, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if not db.get_discount_code_by_id(discount_id):
         raise HTTPException(status_code=404, detail="کد تخفیف یافت نشد.")
@@ -1381,7 +1391,7 @@ def api_admin_toggle_discount(discount_id: int, auth=Depends(require_full_admin)
 
 
 @app.delete("/api/admin/discounts/{discount_id}")
-def api_admin_delete_discount(discount_id: int, auth=Depends(require_full_admin)):
+def api_admin_delete_discount(discount_id: int, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     if not db.get_discount_code_by_id(discount_id):
         raise HTTPException(status_code=404, detail="کد تخفیف یافت نشد.")
@@ -1395,7 +1405,7 @@ def api_admin_delete_discount(discount_id: int, auth=Depends(require_full_admin)
 
 @app.get("/api/admin/dashboard")
 def api_admin_dashboard(
-    start_date: str = Query(None), end_date: str = Query(None), auth=Depends(require_full_admin)
+    start_date: str = Query(None), end_date: str = Query(None), auth=Depends(require_senior_admin)
 ):
     _, db, _ = auth
     return db.get_sales_stats(start_date=start_date, end_date=end_date)
@@ -1403,7 +1413,7 @@ def api_admin_dashboard(
 
 @app.get("/api/admin/orders/export")
 def api_admin_orders_export(
-    start_date: str = Query(None), end_date: str = Query(None), auth=Depends(require_full_admin)
+    start_date: str = Query(None), end_date: str = Query(None), auth=Depends(require_senior_admin)
 ):
     _, db, _ = auth
     rows = db.get_orders_for_export(start_date=start_date, end_date=end_date)
@@ -1722,7 +1732,7 @@ async def api_admin_broadcast_expired(body: BroadcastExpiredSend, tenant: Tenant
 # ---------------------------------------------------------------------------
 
 @app.get("/api/admin/logs")
-def api_admin_logs(limit: int = 50, offset: int = 0, admin_id: int = None, auth=Depends(require_full_admin)):
+def api_admin_logs(limit: int = 50, offset: int = 0, admin_id: int = None, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     limit = max(1, min(limit, 100))
     rows, total = db.get_admin_logs(limit=limit, offset=offset, admin_id=admin_id)
@@ -1741,7 +1751,7 @@ def api_admin_logs(limit: int = 50, offset: int = 0, admin_id: int = None, auth=
 
 
 @app.get("/api/admin/logs/admins")
-def api_admin_logs_admin_list(auth=Depends(require_full_admin)):
+def api_admin_logs_admin_list(auth=Depends(require_senior_admin)):
     _, db, _ = auth
     admins = db.list_admins_with_roles()
     out = []
