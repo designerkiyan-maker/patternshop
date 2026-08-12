@@ -12,6 +12,7 @@
 
 import sqlite3
 import secrets
+import threading
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 
@@ -110,21 +111,44 @@ DEFAULT_MENU_ORDER = ["miniapp", "btn_buy", "btn_test", "btn_my_orders", "btn_wa
 class Database:
     def __init__(self, db_path: str):
         self.db_path = db_path
+        self._conn = None
+        self._settings_cache = None
+        # مینی‌اپ (FastAPI) توابع sync را در threadpool اجرا می‌کند، یعنی
+        # ممکن است چند ریکوئست هم‌زمان از تردهای مختلف به همین یک Database
+        # (مثلاً main_db) دسترسی داشته باشند. بات‌های aiogram هم در یک
+        # event loop تک‌رشته‌ای هستند، پس این لاک برای آن‌ها overhead
+        # واقعی ندارد ولی برای مینی‌اپ لازم است.
+        self._lock = threading.Lock()
 
     # -----------------------------------------------------------------------
     # اتصال
     # -----------------------------------------------------------------------
+    # به‌جای باز و بسته‌کردن یک اتصال جدید sqlite در هر کوئری (که overhead
+    # قابل توجهی داشت، مخصوصاً چون فیلترهای روتر aiogram به ازای هر پیام
+    # ورودی صدا زده می‌شوند)، یک اتصال persistent نگه می‌داریم.
+    # check_same_thread=False + لاک، چون همین نمونه ممکن است بین تردهای
+    # threadpool مینی‌اپ مشترک باشد.
+
+    def _connect(self):
+        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        # WAL باعث می‌شود خواندن‌ها همزمان با نوشتن قفل نشوند (بات + مینی‌اپ + پنل ادمین)
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        return conn
 
     @contextmanager
     def _get_conn(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
+        with self._lock:
+            if self._conn is None:
+                self._conn = self._connect()
+            try:
+                yield self._conn
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     def init_db(self, owner_id: int):
         """owner_id: آیدی عددی کسی که مالک/ادمین اصلی همین یک نمونه از بات است
@@ -277,6 +301,26 @@ class Database:
                     details TEXT DEFAULT '',
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id);
+                CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by);
+                CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
+                CREATE INDEX IF NOT EXISTS idx_configs_product_id ON configs(product_id);
+                CREATE INDEX IF NOT EXISTS idx_configs_product_unused ON configs(product_id, is_used);
+                CREATE INDEX IF NOT EXISTS idx_configs_assigned_user_id ON configs(assigned_user_id);
+                CREATE INDEX IF NOT EXISTS idx_test_configs_unused ON test_configs(is_used);
+                CREATE INDEX IF NOT EXISTS idx_test_configs_assigned_user_id ON test_configs(assigned_user_id);
+                CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
+                CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+                CREATE INDEX IF NOT EXISTS idx_orders_product_id ON orders(product_id);
+                CREATE INDEX IF NOT EXISTS idx_discount_codes_code ON discount_codes(code);
+                CREATE INDEX IF NOT EXISTS idx_wallet_topups_user_id ON wallet_topups(user_id);
+                CREATE INDEX IF NOT EXISTS idx_wallet_topups_status ON wallet_topups(status);
+                CREATE INDEX IF NOT EXISTS idx_support_messages_user_id ON support_messages(user_id);
+                CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets(user_id);
+                CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
+                CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket_id ON ticket_messages(ticket_id);
+                CREATE INDEX IF NOT EXISTS idx_reseller_bots_active ON reseller_bots(is_active);
                 """
             )
 
@@ -323,9 +367,19 @@ class Database:
     # -----------------------------------------------------------------------
 
     def get_setting(self, key: str, default: str = "") -> str:
+        # تنظیمات در حافظه کش می‌شوند چون به ازای هر پیام ورودی (فیلترهای
+        # روتر در handlers_user.py) چندین بار خوانده می‌شوند؛ خواندن از dict
+        # به‌جای query جدید sqlite تفاوت محسوسی در سرعت پاسخ‌گویی ایجاد می‌کند.
+        if self._settings_cache is None:
+            self._load_settings_cache()
+        return self._settings_cache.get(key, default)
+
+    def _load_settings_cache(self):
         with self._get_conn() as conn:
-            row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-            return row["value"] if row else default
+            rows = conn.execute("SELECT key, value FROM settings").fetchall()
+            cache = {r["key"]: r["value"] for r in rows}
+        with self._lock:
+            self._settings_cache = cache
 
     def set_setting(self, key: str, value: str):
         with self._get_conn() as conn:
@@ -334,11 +388,13 @@ class Database:
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, value),
             )
+        if self._settings_cache is not None:
+            self._settings_cache[key] = value
 
     def get_all_settings(self) -> dict:
-        with self._get_conn() as conn:
-            rows = conn.execute("SELECT key, value FROM settings").fetchall()
-            return {r["key"]: r["value"] for r in rows}
+        if self._settings_cache is None:
+            self._load_settings_cache()
+        return dict(self._settings_cache)
 
     # -----------------------------------------------------------------------
     # چیدمان منوی اصلی (ترتیب دکمه‌ها)
