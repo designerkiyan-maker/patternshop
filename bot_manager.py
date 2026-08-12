@@ -14,7 +14,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import MenuButtonWebApp, MenuButtonDefault, WebAppInfo
+from aiogram.types import MenuButtonWebApp, MenuButtonDefault, WebAppInfo, ErrorEvent
 
 from database import Database
 from handlers_user import create_user_router
@@ -26,6 +26,27 @@ from blocked_user import BlockedUserMiddleware
 import keyboards as kb
 
 logger = logging.getLogger(__name__)
+
+
+async def _global_error_handler(event: ErrorEvent) -> bool:
+    """هندلر سراسری خطا.
+
+    بدون این، وقتی هندلر یک دکمه‌ی شیشه‌ای (callback_query) با یک خطای
+    پیش‌بینی‌نشده مواجه می‌شود (مثلاً callback_data مربوط به یک محصول/سفارش/کد
+    تخفیفی که دیگر وجود ندارد)، await call.answer() هرگز اجرا نمی‌شود و از
+    دید کاربر دکمه فقط «لودینگ» می‌ماند و بعد بدون هیچ واکنشی متوقف می‌شود —
+    یعنی دقیقاً همان «کلید کار نمی‌کند». این هندلر خطا را لاگ می‌کند و در صورت
+    امکان همان callback را با یک پیام کوتاه answer می‌کند تا کاربر دست‌کم
+    بفهمد خطایی رخ داده، نه اینکه بات فریز کرده.
+    """
+    logger.error("خطای پردازش‌نشده در آپدیت: %s", event.exception, exc_info=event.exception)
+    cq = event.update.callback_query
+    if cq is not None:
+        try:
+            await cq.answer("⚠️ خطایی رخ داد، دوباره تلاش کنید.", show_alert=False)
+        except Exception:
+            pass
+    return True
 
 
 class BotManager:
@@ -59,6 +80,7 @@ class BotManager:
 
         bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         dp = Dispatcher(storage=MemoryStorage())
+        dp.errors.register(_global_error_handler)
 
         blocked_mw = BlockedUserMiddleware(db)
         dp.message.outer_middleware(blocked_mw)

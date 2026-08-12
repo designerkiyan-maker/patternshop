@@ -14,6 +14,7 @@ from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
+from aiogram.exceptions import TelegramRetryAfter
 
 import keyboards as kb
 from database import Database
@@ -1455,19 +1456,42 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.message(AdminBroadcast.waiting_message)
     async def process_broadcast(message: Message, state: FSMContext, bot: Bot):
-        user_ids = db.get_all_user_ids()
-        success, failed = 0, 0
-        for uid in user_ids:
-            try:
-                await message.copy_to(uid)
-                success += 1
-            except Exception:
-                failed += 1
         await state.clear()
-        db.log_admin_action(message.from_user.id, "broadcast", f"ارسال به {len(user_ids)} کاربر | موفق: {success} | ناموفق: {failed}")
-        await message.answer(
-            f"📢 پیام همگانی ارسال شد.\n✅ موفق: {success}\n❌ ناموفق: {failed}", reply_markup=kb.admin_panel_kb(db, is_main_bot)
+        user_ids = db.get_all_user_ids()
+        total = len(user_ids)
+        status_msg = await message.answer(f"📢 در حال ارسال پیام همگانی به {total} کاربر...")
+
+        # تلگرام محدودیت سراسری تقریباً ۳۰ پیام در ثانیه دارد (مستقل از چت).
+        # ارسال بدون تاخیر باعث فلود-لیمیت‌شدن کل توکن بات می‌شود که در آن حین
+        # حتی پاسخ به دکمه‌های شیشه‌ای (answerCallbackQuery) هم کند/بی‌پاسخ
+        # می‌ماند - یعنی از دید کاربر «بات کند شده / کلیدها کار نمی‌کنند».
+        # با تاخیر ~۰.۰۵ ثانیه (~۲۰ پیام/ثانیه) زیر سقف مجاز می‌مانیم و اگر
+        # باز هم RetryAfter گرفتیم، دقیقاً به همان مدت صبر می‌کنیم.
+        success, failed = 0, 0
+        for i, uid in enumerate(user_ids, start=1):
+            for attempt in range(2):
+                try:
+                    await message.copy_to(uid)
+                    success += 1
+                    break
+                except TelegramRetryAfter as e:
+                    await asyncio.sleep(e.retry_after + 0.5)
+                    continue
+                except Exception:
+                    failed += 1
+                    break
+            await asyncio.sleep(0.05)
+            if i % 50 == 0 or i == total:
+                try:
+                    await status_msg.edit_text(f"📢 در حال ارسال... {i}/{total}")
+                except Exception:
+                    pass
+
+        db.log_admin_action(message.from_user.id, "broadcast", f"ارسال به {total} کاربر | موفق: {success} | ناموفق: {failed}")
+        await status_msg.edit_text(
+            f"📢 پیام همگانی ارسال شد.\n✅ موفق: {success}\n❌ ناموفق: {failed}"
         )
+        await message.answer("بازگشت به پنل مدیریت:", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
     # -------------------------------------------------------------------
     # پاسخ به پیام پشتیبانی کاربر
