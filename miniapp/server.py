@@ -1026,8 +1026,9 @@ def api_admin_create_product(body: ProductCreate, auth=Depends(require_admin)):
 
 @app.patch("/api/admin/products/{product_id}")
 def api_admin_edit_product(product_id: int, body: ProductUpdate, auth=Depends(require_admin)):
-    _, db, _ = auth
-    if not db.get_product(product_id):
+    admin_id, db, _ = auth
+    old_product = db.get_product(product_id)
+    if not old_product:
         raise HTTPException(status_code=404, detail="محصول یافت نشد.")
     if body.price is not None and body.price < 0:
         raise HTTPException(status_code=400, detail="قیمت نامعتبر است.")
@@ -1038,6 +1039,11 @@ def api_admin_edit_product(product_id: int, body: ProductUpdate, auth=Depends(re
         description=body.description,
         duration_days=body.duration_days,
     )
+    if body.price is not None and body.price != old_product["price"]:
+        db.log_admin_action(
+            admin_id, "product_price_edit",
+            f"محصول «{old_product['name']}» (#{product_id}) | قیمت قبلی: {old_product['price']:,} | قیمت جدید: {body.price:,}",
+        )
     return {"status": "ok"}
 
 
@@ -1692,8 +1698,28 @@ async def api_admin_broadcast_expired(body: BroadcastExpiredSend, tenant: Tenant
 
 
 # ---------------------------------------------------------------------------
-# ویرایش موجودی کیف‌پول کاربر (ادمین)
+# لاگ فعالیت ادمین (audit log)
 # ---------------------------------------------------------------------------
+
+@app.get("/api/admin/logs")
+def api_admin_logs(limit: int = 50, offset: int = 0, auth=Depends(require_admin)):
+    _, db, _ = auth
+    limit = max(1, min(limit, 100))
+    rows, total = db.get_admin_logs(limit=limit, offset=offset)
+    logs = []
+    for r in rows:
+        admin_user = db.get_user(r["admin_id"])
+        logs.append({
+            "id": r["id"],
+            "admin_id": r["admin_id"],
+            "admin_name": (admin_user["first_name"] if admin_user else "") or str(r["admin_id"]),
+            "action": r["action"],
+            "details": r["details"],
+            "created_at": r["created_at"],
+        })
+    return {"logs": logs, "total": total, "limit": limit, "offset": offset}
+
+
 
 @app.get("/api/admin/wallet/lookup")
 def api_admin_wallet_lookup(telegram_id: int, auth=Depends(require_admin)):
@@ -1715,7 +1741,7 @@ class WalletAdjust(BaseModel):
 
 @app.post("/api/admin/wallet/adjust")
 def api_admin_adjust_wallet(body: WalletAdjust, auth=Depends(require_admin)):
-    _, db, _ = auth
+    admin_id, db, _ = auth
     if body.amount == 0:
         raise HTTPException(status_code=400, detail="مقدار تغییر نمی‌تواند صفر باشد.")
     user = db.get_user(body.telegram_id)
@@ -1723,6 +1749,10 @@ def api_admin_adjust_wallet(body: WalletAdjust, auth=Depends(require_admin)):
         raise HTTPException(status_code=404, detail="کاربری با این آیدی عددی پیدا نشد.")
     db.add_wallet_credit(body.telegram_id, body.amount)
     new_balance = db.get_wallet_credit(body.telegram_id)
+    db.log_admin_action(
+        admin_id, "wallet_adjust",
+        f"کاربر {body.telegram_id} ({user['first_name'] or ''}) | تغییر: {body.amount:+} | موجودی جدید: {new_balance}",
+    )
     return {
         "status": "ok",
         "user_name": user["first_name"] or "",
