@@ -2031,36 +2031,74 @@ async function downloadAdminBackup() {
   }
 }
 
-async function uploadAdminRestore(file) {
+let adminRestorePendingFile = null;
+
+function renderAdminRestoreUploadUI() {
   const status = document.getElementById("admin-restore-status");
-  if (!file) return;
-  if (!/\.(db|sqlite|sqlite3)$/i.test(file.name)) {
-    status.innerHTML = errorState("فایل باید پسوند .db یا .sqlite داشته باشد.");
+  const fileInput = document.getElementById("admin-restore-file");
+  if (!adminRestorePendingFile) {
+    status.innerHTML = "";
+    if (fileInput) fileInput.style.display = "";
     return;
   }
-  if (!confirm(
-    "⚠️ با این کار کل دیتابیس فعلی با این فایل جایگزین می‌شود.\n" +
-    "یک نسخه از وضعیت فعلی هم قبلش ذخیره می‌شود، ولی این عملیات نباید بی‌دقت انجام شود.\n\n" +
-    "مطمئنی می‌خواهی ادامه بدهی؟"
-  )) return;
+  if (fileInput) fileInput.style.display = "none";
+  const sizeMb = (adminRestorePendingFile.size / (1024 * 1024)).toFixed(1);
+  status.innerHTML = `
+    <div class="card" style="margin-top:0">
+      <p class="hint-text" style="margin:0 0 8px">📦 فایل انتخاب‌شده: ${escHtml(adminRestorePendingFile.name)} (${sizeMb} مگابایت)</p>
+      <p class="hint-text" style="margin:0 0 10px">⚠️ با تایید، دیتابیس فعلی جایگزین می‌شود (یک نسخه از وضعیت فعلی هم قبلش ذخیره می‌شود).</p>
+      <div style="display:flex;gap:8px">
+        <button class="btn small" id="admin-restore-confirm-btn" style="width:auto">✅ تایید و جایگزینی</button>
+        <button class="btn small outline" id="admin-restore-cancel-btn" style="width:auto">❌ انصراف</button>
+      </div>
+    </div>
+  `;
+  document.getElementById("admin-restore-confirm-btn").onclick = confirmAdminRestore;
+  document.getElementById("admin-restore-cancel-btn").onclick = cancelAdminRestore;
+}
 
+function cancelAdminRestore() {
+  adminRestorePendingFile = null;
+  const fileInput = document.getElementById("admin-restore-file");
+  if (fileInput) fileInput.value = "";
+  renderAdminRestoreUploadUI();
+}
+
+async function confirmAdminRestore() {
+  const file = adminRestorePendingFile;
+  const status = document.getElementById("admin-restore-status");
+  if (!file) return;
   status.innerHTML = `<span class="hint-text">⏳ در حال بازیابی...</span>`;
   try {
     const formData = new FormData();
     formData.append("file", file);
     const result = await apiUpload("/api/admin/backup/restore", formData);
+    adminRestorePendingFile = null;
     status.innerHTML = `<span class="hint-text">✅ دیتابیس با موفقیت بازیابی شد. نسخه‌ی قبلی هم به‌عنوان «${escHtml(result.pre_restore_backup)}» کنار دیتابیس ذخیره شد. صفحه را رفرش کن.</span>`;
+    const fileInput = document.getElementById("admin-restore-file");
+    if (fileInput) { fileInput.value = ""; fileInput.style.display = ""; }
   } catch (e) {
     status.innerHTML = errorState(e.message);
   }
 }
 
+function selectAdminRestoreFile(file) {
+  if (!file) return;
+  if (!/\.(db|sqlite|sqlite3)$/i.test(file.name)) {
+    document.getElementById("admin-restore-status").innerHTML = errorState("فایل باید پسوند .db یا .sqlite داشته باشد.");
+    return;
+  }
+  adminRestorePendingFile = file;
+  renderAdminRestoreUploadUI();
+}
+
 async function renderAdminBackupSection() {
+  adminRestorePendingFile = null;
   const body = document.getElementById("admin-section-body");
   body.innerHTML = `
     <div class="card">
       <div class="eyebrow" style="margin-top:0">📥 دریافت بکاپ فوری</div>
-      <p class="hint-text">یک نسخه‌ی کامل از دیتابیس فعلی همین الان ساخته و دانلود می‌شود.</p>
+      <p class="hint-text">یک نسخه‌ی کامل از دیتابیس فعلی همین الان ساخته و به چت بات ارسال می‌شود.</p>
       <button class="btn" id="admin-backup-create-btn">📥 دریافت بکاپ فوری</button>
       <div id="admin-backup-status" style="margin-top:10px"></div>
     </div>
@@ -2074,8 +2112,7 @@ async function renderAdminBackupSection() {
   document.getElementById("admin-backup-create-btn").onclick = downloadAdminBackup;
   document.getElementById("admin-restore-file").onchange = (e) => {
     const file = e.target.files[0];
-    e.target.value = "";
-    uploadAdminRestore(file);
+    selectAdminRestoreFile(file);
   };
 }
 
