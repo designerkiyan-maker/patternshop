@@ -1224,9 +1224,9 @@ let adminTicketView = { level: "list" }; // list | thread
 const ADMIN_TABS = [
   { key: "stats", label: "آمار", fullOnly: true, seniorOnly: true },
   { key: "menu", label: "چیدمان منو", fullOnly: true, seniorOnly: true },
-  { key: "branding", label: "برندینگ", fullOnly: true },
-  { key: "catalog", label: "محصولات", fullOnly: true },
-  { key: "users", label: "مدیریت کاربران", fullOnly: false },
+  { key: "branding", label: "برندینگ", fullOnly: true, seniorOnly: true },
+  { key: "catalog", label: "محصولات", fullOnly: true, seniorOnly: true },
+  { key: "users", label: "مدیریت کاربران", fullOnly: true },
   { key: "sales", label: "فروش", fullOnly: true, seniorOnly: true },
   { key: "tickets", label: "تیکت‌ها", fullOnly: false },
   { key: "adminlog", label: "لاگ ادمین", fullOnly: true, seniorOnly: true },
@@ -1261,7 +1261,7 @@ async function renderAdmin() {
   const prevScrollLeft = prevTabsEl ? prevTabsEl.scrollLeft : 0;
   content.innerHTML = `
     ${isSupport ? `<div class="banner" style="margin-bottom:10px"><div class="banner-title"><span class="ic">🎧</span>نقش شما: پشتیبان (دسترسی محدود)</div></div>` : ""}
-    ${isMid ? `<div class="banner" style="margin-bottom:10px"><div class="banner-title"><span class="ic">🥈</span>نقش شما: ادمین میانی (بدون آمار/فروش/نمایندگی)</div></div>` : ""}
+    ${isMid ? `<div class="banner" style="margin-bottom:10px"><div class="banner-title"><span class="ic">🥈</span>نقش شما: ادمین میانی (بدون آمار/فروش/نمایندگی/برندینگ/محصولات)</div></div>` : ""}
     <div class="segmented" id="admin-section-tabs">
       ${visibleTabs.map((t) => `<button class="seg-btn ${adminSection === t.key ? "active" : ""}" data-section="${t.key}">${t.label}</button>`).join("")}
       ${(isSenior && isMainBot) ? `<button class="seg-btn ${adminSection === "resellers" ? "active" : ""}" data-section="resellers">نمایندگی‌ها</button>` : ""}
