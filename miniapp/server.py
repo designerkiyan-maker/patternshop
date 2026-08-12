@@ -1722,10 +1722,10 @@ async def api_admin_broadcast_expired(body: BroadcastExpiredSend, tenant: Tenant
 # ---------------------------------------------------------------------------
 
 @app.get("/api/admin/logs")
-def api_admin_logs(limit: int = 50, offset: int = 0, auth=Depends(require_full_admin)):
+def api_admin_logs(limit: int = 50, offset: int = 0, admin_id: int = None, auth=Depends(require_full_admin)):
     _, db, _ = auth
     limit = max(1, min(limit, 100))
-    rows, total = db.get_admin_logs(limit=limit, offset=offset)
+    rows, total = db.get_admin_logs(limit=limit, offset=offset, admin_id=admin_id)
     logs = []
     for r in rows:
         admin_user = db.get_user(r["admin_id"])
@@ -1738,6 +1738,21 @@ def api_admin_logs(limit: int = 50, offset: int = 0, auth=Depends(require_full_a
             "created_at": r["created_at"],
         })
     return {"logs": logs, "total": total, "limit": limit, "offset": offset}
+
+
+@app.get("/api/admin/logs/admins")
+def api_admin_logs_admin_list(auth=Depends(require_full_admin)):
+    _, db, _ = auth
+    admins = db.list_admins_with_roles()
+    out = []
+    for a in admins:
+        u = db.get_user(a["telegram_id"])
+        out.append({
+            "telegram_id": a["telegram_id"],
+            "role": a["role"],
+            "name": (u["first_name"] if u else "") or "",
+        })
+    return {"admins": out}
 
 
 
@@ -1799,16 +1814,36 @@ def api_admin_take_random_config(product_id: int, auth=Depends(require_full_admi
 # بکاپ و بازیابی دیتابیس (فقط مالک اصلی همین مستأجر)
 # ---------------------------------------------------------------------------
 
-@app.get("/api/admin/backup/create")
-def api_admin_backup_create(auth=Depends(require_owner)):
-    _, db, _ = auth
+@app.post("/api/admin/backup/create")
+async def api_admin_backup_create(auth=Depends(require_owner)):
+    tg_id, db, tenant = auth
     backup_dir = os.path.join(os.path.dirname(os.path.abspath(db.db_path)), "backups")
     backup_path = create_backup(db.db_path, backup_dir, keep=14)
     if not backup_path:
         raise HTTPException(status_code=404, detail="فایل دیتابیس پیدا نشد.")
-    return FileResponse(
-        backup_path, filename=os.path.basename(backup_path), media_type="application/octet-stream"
-    )
+
+    filename = os.path.basename(backup_path)
+    with open(backup_path, "rb") as f:
+        file_bytes = f.read()
+
+    form = aiohttp.FormData()
+    form.add_field("chat_id", str(tg_id))
+    form.add_field("caption", "🗄 بکاپ فوری دیتابیس")
+    form.add_field("document", file_bytes, filename=filename, content_type="application/octet-stream")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"https://api.telegram.org/bot{tenant.bot_token}/sendDocument", data=form
+            ) as resp:
+                data = await resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="ارسال فایل بکاپ به تلگرام ناموفق بود. دوباره تلاش کن.")
+
+    if not data.get("ok"):
+        raise HTTPException(status_code=502, detail=f"ارسال فایل بکاپ ناموفق بود: {data.get('description', '')}")
+
+    db.log_admin_action(tg_id, "backup_create", "دریافت بکاپ فوری از طریق میان‌اپ")
+    return {"status": "ok", "filename": filename}
 
 
 @app.post("/api/admin/backup/restore")
