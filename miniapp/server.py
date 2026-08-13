@@ -40,7 +40,7 @@ import sqlite3
 
 logging.basicConfig(level=logging.INFO)
 
-from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, resolve_db_path, RESELLER_DBS_DIR
+from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, resolve_db_path, RESELLER_DBS_DIR, MINIAPP_URL
 from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER
 from miniapp.auth import validate_init_data
 from sub_info import fetch_sub_info
@@ -1179,6 +1179,14 @@ class ResellerUpdate(BaseModel):
     owner_name: Optional[str] = None
 
 
+def _reseller_miniapp_link(reseller_id: int) -> Optional[str]:
+    """لینک اختصاصی مینی‌اپ همین نماینده (همان که در دکمه‌ی منوی بات نماینده استفاده می‌شود)."""
+    if not MINIAPP_URL:
+        return None
+    sep = "&" if "?" in MINIAPP_URL else "?"
+    return f"{MINIAPP_URL}{sep}b={reseller_id}"
+
+
 @app.get("/api/admin/resellers")
 def api_admin_list_resellers(auth=Depends(require_main_admin)):
     _, db, _ = auth
@@ -1187,6 +1195,8 @@ def api_admin_list_resellers(auth=Depends(require_main_admin)):
         {
             "id": r["id"], "bot_username": r["bot_username"], "owner_telegram_id": r["owner_telegram_id"],
             "owner_name": r["owner_name"], "is_active": bool(r["is_active"]), "created_at": r["created_at"],
+            "miniapp_link": _reseller_miniapp_link(r["id"]),
+            "bot_link": f"https://t.me/{r['bot_username']}",
         }
         for r in rows
     ]
