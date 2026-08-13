@@ -2968,12 +2968,18 @@ async function renderAdminResellersSection() {
       <p class="hint-text">تغییرات فعال/غیرفعال‌کردن یا حذف، حداکثر تا ۱۰ ثانیه دیگر روی بات واقعی اعمال می‌شود.</p>
       <div class="card">
         ${resellers.length === 0 ? `<div class="hint-text" style="margin:0">هنوز نماینده‌ای ثبت نشده.</div>` : resellers.map((r) => `
-          <div class="admin-list-row">
+          <div class="admin-list-row" style="flex-wrap:wrap">
             <div class="admin-list-row-main">
               <span>@${r.bot_username}</span>
               <span class="hint-text" style="margin:0">${r.owner_name || "بدون نام"} · شناسه: ${r.owner_telegram_id} ${r.is_active ? "" : "· غیرفعال"}</span>
+              ${r.miniapp_link ? `
+                <div class="hint-text" style="margin:6px 0 0;display:flex;align-items:center;gap:6px;direction:ltr;text-align:left;word-break:break-all">
+                  <span style="opacity:.85">${r.miniapp_link}</span>
+                </div>
+              ` : `<div class="hint-text" style="margin:6px 0 0;color:var(--danger,#ff5a7a)">⚠️ آدرس MINIAPP_URL روی سرور تنظیم نشده - لینک ساخته نمی‌شود.</div>`}
             </div>
             <div class="admin-list-row-actions">
+              ${r.miniapp_link ? `<button class="btn small outline" data-copy-res-link="${r.id}">🔗 کپی لینک</button>` : ""}
               <button class="btn small outline" data-edit-res="${r.id}">✏️</button>
               <button class="btn small outline" data-toggle-res="${r.id}">${r.is_active ? "⛔️" : "✅"}</button>
               <button class="btn small outline danger" data-del-res="${r.id}">🗑️</button>
@@ -2993,6 +2999,18 @@ async function renderAdminResellersSection() {
         </div>
       </div>
     `;
+    body.querySelectorAll("[data-copy-res-link]").forEach((el) => {
+      el.onclick = async () => {
+        const r = resellers.find((x) => x.id === Number(el.dataset.copyResLink));
+        if (!r || !r.miniapp_link) return;
+        try {
+          await navigator.clipboard.writeText(r.miniapp_link);
+          notify("لینک مینی‌اپ کپی شد ✅");
+        } catch (e) {
+          prompt("کپی خودکار ممکن نشد؛ لینک را دستی کپی کن:", r.miniapp_link);
+        }
+      };
+    });
     body.querySelectorAll("[data-edit-res]").forEach((el) => {
       el.onclick = async () => {
         const r = resellers.find((x) => x.id === Number(el.dataset.editRes));
