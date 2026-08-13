@@ -2968,22 +2968,24 @@ async function renderAdminResellersSection() {
       <p class="hint-text">تغییرات فعال/غیرفعال‌کردن یا حذف، حداکثر تا ۱۰ ثانیه دیگر روی بات واقعی اعمال می‌شود.</p>
       <div class="card">
         ${resellers.length === 0 ? `<div class="hint-text" style="margin:0">هنوز نماینده‌ای ثبت نشده.</div>` : resellers.map((r) => `
-          <div class="admin-list-row" style="flex-wrap:wrap">
-            <div class="admin-list-row-main">
-              <span>@${r.bot_username}</span>
-              <span class="hint-text" style="margin:0">${r.owner_name || "بدون نام"} · شناسه: ${r.owner_telegram_id} ${r.is_active ? "" : "· غیرفعال"}</span>
-              ${r.miniapp_link ? `
-                <div class="hint-text" style="margin:6px 0 0;display:flex;align-items:center;gap:6px;direction:ltr;text-align:left;word-break:break-all">
-                  <span style="opacity:.85">${r.miniapp_link}</span>
-                </div>
-              ` : `<div class="hint-text" style="margin:6px 0 0;color:var(--danger,#ff5a7a)">⚠️ آدرس MINIAPP_URL روی سرور تنظیم نشده - لینک ساخته نمی‌شود.</div>`}
+          <div class="reseller-row" style="${resellers.indexOf(r) > 0 ? "border-top:1px solid var(--border,rgba(255,255,255,.08));padding-top:12px;margin-top:12px" : ""}">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:6px;direction:ltr">
+                <span style="font-weight:600">@${r.bot_username}</span>
+                ${r.is_active ? `<span class="badge" style="background:rgba(60,220,140,.15);color:#3cdc8c">فعال</span>` : `<span class="badge" style="background:rgba(255,90,122,.15);color:var(--danger,#ff5a7a)">غیرفعال</span>`}
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                ${r.miniapp_link ? `<button class="btn small outline" data-copy-res-link="${r.id}">🔗 کپی لینک</button>` : ""}
+                <button class="btn small outline" data-edit-res="${r.id}">✏️ ویرایش</button>
+                <button class="btn small outline" data-change-res-token="${r.id}">🔄 تغییر لینک/بات</button>
+                <button class="btn small outline" data-toggle-res="${r.id}">${r.is_active ? "⛔️ غیرفعال" : "✅ فعال"}</button>
+                <button class="btn small outline danger" data-del-res="${r.id}">🗑️ حذف</button>
+              </div>
             </div>
-            <div class="admin-list-row-actions">
-              ${r.miniapp_link ? `<button class="btn small outline" data-copy-res-link="${r.id}">🔗 کپی لینک</button>` : ""}
-              <button class="btn small outline" data-edit-res="${r.id}">✏️</button>
-              <button class="btn small outline" data-toggle-res="${r.id}">${r.is_active ? "⛔️" : "✅"}</button>
-              <button class="btn small outline danger" data-del-res="${r.id}">🗑️</button>
-            </div>
+            <div class="hint-text" style="margin:8px 0 0">👤 ${r.owner_name || "بدون نام"} &nbsp;·&nbsp; شناسه: ${r.owner_telegram_id}</div>
+            ${r.miniapp_link ? `
+              <div class="hint-text" style="margin:4px 0 0;direction:ltr;text-align:left;word-break:break-all;opacity:.85">${r.miniapp_link}</div>
+            ` : `<div class="hint-text" style="margin:4px 0 0;color:var(--danger,#ff5a7a)">⚠️ آدرس MINIAPP_URL روی سرور تنظیم نشده - لینک ساخته نمی‌شود.</div>`}
           </div>
         `).join("")}
       </div>
@@ -3023,6 +3025,22 @@ async function renderAdminResellersSection() {
             method: "PATCH",
             body: JSON.stringify({ owner_telegram_id: Number(ownerId), owner_name: ownerName.trim() }),
           });
+          renderAdmin();
+        } catch (e) { notify(e.message); }
+      };
+    });
+    body.querySelectorAll("[data-change-res-token]").forEach((el) => {
+      el.onclick = async () => {
+        const r = resellers.find((x) => x.id === Number(el.dataset.changeResToken));
+        const newToken = prompt(`توکن جدید بات را وارد کن (از BotFather).\nبات فعلی: @${r.bot_username}\n\n⚠️ با این کار بات نمایندگی از توکن فعلی جدا و به بات جدید وصل می‌شود.`, "");
+        if (newToken === null || !newToken.trim()) return;
+        try {
+          const res = await api(`/api/admin/resellers/${r.id}/token`, {
+            method: "PATCH",
+            body: JSON.stringify({ token: newToken.trim() }),
+          });
+          tg.HapticFeedback.notificationOccurred("success");
+          notify(`✅ لینک نماینده به @${res.username} تغییر کرد. ${res.note || ""}`);
           renderAdmin();
         } catch (e) { notify(e.message); }
       };
