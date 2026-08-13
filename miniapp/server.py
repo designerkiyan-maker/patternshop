@@ -1179,6 +1179,10 @@ class ResellerUpdate(BaseModel):
     owner_name: Optional[str] = None
 
 
+class ResellerTokenUpdate(BaseModel):
+    token: str
+
+
 def _reseller_miniapp_link(reseller_id: int) -> Optional[str]:
     """لینک اختصاصی مینی‌اپ همین نماینده (همان که در دکمه‌ی منوی بات نماینده استفاده می‌شود)."""
     if not MINIAPP_URL:
@@ -1260,6 +1264,37 @@ def api_admin_edit_reseller(reseller_id: int, body: ResellerUpdate, auth=Depends
         owner_name=body.owner_name.strip() if body.owner_name else None,
     )
     return {"status": "ok"}
+
+
+@app.patch("/api/admin/resellers/{reseller_id}/token")
+async def api_admin_change_reseller_token(reseller_id: int, body: ResellerTokenUpdate, auth=Depends(require_main_admin)):
+    _, db, _ = auth
+    reseller_bot = db.get_reseller_bot(reseller_id)
+    if not reseller_bot:
+        raise HTTPException(status_code=404, detail="نماینده یافت نشد.")
+    token = body.token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="توکن نمی‌تواند خالی باشد.")
+    for r in db.list_reseller_bots():
+        if r["id"] != reseller_id and r["bot_token"] == token:
+            raise HTTPException(status_code=400, detail="این توکن قبلاً برای نماینده‌ی دیگری ثبت شده است.")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"https://api.telegram.org/bot{token}/getMe", timeout=10) as resp:
+                data = await resp.json()
+                if not data.get("ok"):
+                    raise HTTPException(status_code=400, detail="این توکن معتبر نیست.")
+                username = data["result"]["username"]
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="این توکن معتبر نیست یا تلگرام در دسترس نیست.")
+    db.edit_reseller_bot(reseller_id, bot_token=token, bot_username=username)
+    return {
+        "status": "ok",
+        "username": username,
+        "note": "توکن بات نماینده تغییر کرد. حداکثر تا ۱۰ ثانیه دیگر بات قدیمی متوقف و بات جدید روشن می‌شود.",
+    }
 
 
 @app.post("/api/admin/resellers/{reseller_id}/toggle")
