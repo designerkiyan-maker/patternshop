@@ -550,7 +550,10 @@ async function renderHome() {
           : active.map(orderCard).join("")}
       </div>
     `;
-    active.filter((o) => o.link).forEach((o) => loadSubInfo(o.id, o.link));
+    active.filter((o) => o.link).forEach((o) => {
+      const links = (o.links && o.links.length) ? o.links : [o.link];
+      links.forEach((link, idx) => loadSubInfo(`${o.id}-${idx}`, link));
+    });
     wireAddToAppButtons(content);
   } catch (e) {
     content.innerHTML = errorState(e.message);
@@ -640,7 +643,7 @@ function orderCard(o) {
       <div class="stat-row"><span>${o.product_name}${o.quantity > 1 ? ` × ${o.quantity}` : ""}</span><span class="badge approved">فعال تا ${exp}</span></div>
       ${links.map((link, idx) => `
       ${links.length > 1 ? `<div class="hint-text" style="margin:8px 0 4px">🔢 کانفیگ ${idx + 1} از ${links.length}</div>` : ""}
-      ${idx === 0 ? `<div class="sub-info" id="sub-info-${o.id}"><div class="sub-info-loading">در حال دریافت اطلاعات مصرف...</div></div>` : ""}
+      <div class="sub-info" id="sub-info-${o.id}-${idx}"><div class="sub-info-loading">در حال دریافت اطلاعات مصرف...</div></div>
       <div class="link-box">${link}</div>
       <div class="qr-row">
         <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(link)}" width="96" height="96" alt="QR" />
