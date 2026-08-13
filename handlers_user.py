@@ -124,6 +124,19 @@ def create_user_router(db) -> Router:
         await call.message.edit_text("یک محصول را انتخاب کنید:", reply_markup=kb.products_kb(db, products, cat_id))
         await call.answer()
 
+    def _product_confirm_text(product, quantity: int, stock: int, wallet_credit: int) -> str:
+        text = (
+            f"📦 {product['name']}\n"
+            f"💰 قیمت واحد: {product['price']:,} تومان\n"
+            f"📝 توضیحات: {product['description'] or '---'}\n"
+            f"📊 موجودی: {stock} عدد\n"
+        )
+        if quantity > 1:
+            text += f"\n🔢 تعداد انتخابی: {quantity} عدد\n💵 جمع کل: {product['price'] * quantity:,} تومان\n"
+        if wallet_credit > 0:
+            text += f"\n👛 موجودی کیف پول شما: {wallet_credit:,} تومان (به‌صورت خودکار در پرداخت اعمال می‌شود)\n"
+        return text
+
     @router.callback_query(F.data.startswith("prod:"))
     async def cb_product(call: CallbackQuery):
         product_id = int(call.data.split(":")[1])
@@ -133,26 +146,49 @@ def create_user_router(db) -> Router:
             return
         stock = db.count_available_configs(product_id)
         wallet_credit = db.get_wallet_credit(call.from_user.id)
-        text = (
-            f"📦 {product['name']}\n"
-            f"💰 قیمت: {product['price']:,} تومان\n"
-            f"📝 توضیحات: {product['description'] or '---'}\n"
-            f"📊 موجودی: {stock} عدد\n"
-        )
-        if wallet_credit > 0:
-            text += f"\n👛 موجودی کیف پول شما: {wallet_credit:,} تومان (به‌صورت خودکار در پرداخت اعمال می‌شود)\n"
         if stock <= 0:
+            text = _product_confirm_text(product, 1, stock, wallet_credit)
             text += "\n⛔️ در حال حاضر موجودی این محصول تمام شده است."
             await call.message.edit_text(text)
             await call.answer()
             return
-        await call.message.edit_text(text, reply_markup=kb.product_confirm_kb(db, product_id))
+        text = _product_confirm_text(product, 1, stock, wallet_credit)
+        await call.message.edit_text(text, reply_markup=kb.product_confirm_kb(db, product_id, 1, stock))
+        await call.answer()
+
+    async def _cb_qty_change(call: CallbackQuery, delta: int):
+        _, product_id, quantity = call.data.split(":")
+        product_id, quantity = int(product_id), int(quantity)
+        product = db.get_product(product_id)
+        if not product:
+            await call.answer("محصول یافت نشد.", show_alert=True)
+            return
+        stock = db.count_available_configs(product_id)
+        if stock <= 0:
+            await call.answer("این محصول در حال حاضر موجود نیست.", show_alert=True)
+            return
+        quantity = max(1, min(quantity + delta, stock))
+        wallet_credit = db.get_wallet_credit(call.from_user.id)
+        text = _product_confirm_text(product, quantity, stock, wallet_credit)
+        await call.message.edit_text(text, reply_markup=kb.product_confirm_kb(db, product_id, quantity, stock))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("qty_inc:"))
+    async def cb_qty_inc(call: CallbackQuery):
+        await _cb_qty_change(call, 1)
+
+    @router.callback_query(F.data.startswith("qty_dec:"))
+    async def cb_qty_dec(call: CallbackQuery):
+        await _cb_qty_change(call, -1)
+
+    @router.callback_query(F.data == "noop")
+    async def cb_noop(call: CallbackQuery):
         await call.answer()
 
     @router.callback_query(F.data.startswith("enter_code:"))
     async def cb_enter_code(call: CallbackQuery, state: FSMContext):
-        product_id = int(call.data.split(":")[1])
-        await state.update_data(discount_product_id=product_id)
+        _, product_id, quantity = call.data.split(":")
+        await state.update_data(discount_product_id=int(product_id), discount_quantity=int(quantity))
         await state.set_state(DiscountEntry.waiting_code)
         await call.message.edit_text("🎟 کد تخفیف را ارسال کنید:", reply_markup=kb.cancel_kb())
         await call.answer()
@@ -161,11 +197,15 @@ def create_user_router(db) -> Router:
     async def process_discount_code(message: Message, state: FSMContext):
         data = await state.get_data()
         product_id = data.get("discount_product_id")
+        quantity = data.get("discount_quantity", 1)
         product = db.get_product(product_id) if product_id else None
         if not product:
             await message.answer("محصول معتبر نیست. لطفاً دوباره از منو شروع کنید.")
             await state.clear()
             return
+
+        stock = db.count_available_configs(product_id)
+        quantity = max(1, min(quantity, stock)) if stock > 0 else quantity
 
         code_row = db.get_discount_code(message.text.strip())
         if not db.is_discount_code_valid(code_row):
@@ -175,20 +215,21 @@ def create_user_router(db) -> Router:
             )
             return
 
-        discount_amount = db.compute_discount_amount(code_row, product["price"])
+        total_price = product["price"] * quantity
+        discount_amount = db.compute_discount_amount(code_row, total_price)
         await state.update_data(discount_code_id=code_row["id"], discount_amount=discount_amount)
         await state.set_state(None)
 
-        stock = db.count_available_configs(product_id)
         wallet_credit = db.get_wallet_credit(message.from_user.id)
-        price_after_code = product["price"] - discount_amount
+        price_after_code = total_price - discount_amount
         wallet_used_preview = min(wallet_credit, price_after_code)
         final_preview = price_after_code - wallet_used_preview
 
         text = (
             f"✅ کد تخفیف اعمال شد!\n\n"
             f"📦 {product['name']}\n"
-            f"💰 قیمت اصلی: {product['price']:,} تومان\n"
+            f"🔢 تعداد: {quantity} عدد\n"
+            f"💰 قیمت کل: {total_price:,} تومان\n"
             f"🎟 تخفیف کد: {discount_amount:,} تومان\n"
         )
         if wallet_used_preview > 0:
@@ -196,7 +237,7 @@ def create_user_router(db) -> Router:
         text += f"💵 مبلغ نهایی قابل پرداخت: {final_preview:,} تومان\n"
         text += f"📊 موجودی: {stock} عدد"
 
-        await message.answer(text, reply_markup=kb.product_confirm_kb(db, product_id))
+        await message.answer(text, reply_markup=kb.product_confirm_kb(db, product_id, quantity, max(stock, quantity)))
 
     async def _notify_admins_of_order(bot: Bot, order_id: int, receipt_file_id: str = None):
         order = db.get_order(order_id)
@@ -205,12 +246,14 @@ def create_user_router(db) -> Router:
         username = user_row["username"] if user_row else ""
         first_name = user_row["first_name"] if user_row else ""
 
+        quantity = order["quantity"] or 1
         caption = (
             f"🧾 سفارش #{order_id}\n"
             f"👤 کاربر: {first_name or ''} (@{username or '---'})\n"
             f"🆔 آیدی عددی: `{order['user_id']}`\n"
-            f"📦 محصول: {product['name']}\n"
-            f"💰 قیمت پایه: {order['base_price']:,} تومان\n"
+            f"📦 محصول: {product['name']}"
+            + (f" × {quantity}\n" if quantity > 1 else "\n")
+            + f"💰 قیمت پایه: {order['base_price']:,} تومان\n"
         )
         if order["discount_amount"]:
             caption += f"🎟 تخفیف کد: {order['discount_amount']:,} تومان\n"
@@ -244,18 +287,26 @@ def create_user_router(db) -> Router:
 
     @router.callback_query(F.data.startswith("buy_start:"))
     async def cb_buy_start(call: CallbackQuery, state: FSMContext, bot: Bot):
-        product_id = int(call.data.split(":")[1])
+        _, product_id, quantity = call.data.split(":")
+        product_id, quantity = int(product_id), int(quantity)
         product = db.get_product(product_id)
-        if not product or db.count_available_configs(product_id) <= 0:
+        stock = db.count_available_configs(product_id)
+        if not product or stock <= 0:
             await call.answer("این محصول در حال حاضر موجود نیست.", show_alert=True)
+            return
+        if quantity < 1:
+            quantity = 1
+        if quantity > stock:
+            await call.answer(f"موجودی کافی نیست. فقط {stock} عدد موجود است.", show_alert=True)
             return
 
         data = await state.get_data()
         discount_code_id = data.get("discount_code_id")
         discount_amount = data.get("discount_amount", 0) or 0
 
+        total_price = product["price"] * quantity
         wallet_credit = db.get_wallet_credit(call.from_user.id)
-        price_after_code = max(product["price"] - discount_amount, 0)
+        price_after_code = max(total_price - discount_amount, 0)
         wallet_used = min(wallet_credit, price_after_code)
 
         if wallet_used > 0:
@@ -266,10 +317,11 @@ def create_user_router(db) -> Router:
         order_id = db.create_order(
             call.from_user.id,
             product_id,
-            base_price=product["price"],
+            base_price=total_price,
             wallet_used=wallet_used,
             discount_code_id=discount_code_id,
             discount_amount=discount_amount,
+            quantity=quantity,
         )
         order = db.get_order(order_id)
         await state.update_data(order_id=order_id)
@@ -278,8 +330,8 @@ def create_user_router(db) -> Router:
         if order["final_price"] <= 0:
             await state.clear()
 
-            result = db.take_unused_config(product_id, call.from_user.id)
-            if not result:
+            results = db.take_unused_configs(product_id, call.from_user.id, quantity)
+            if not results:
                 # موجودی تمام شده: مبلغ کسرشده از کیف پول/کد تخفیف را برگردان و به ادمین اطلاع بده
                 db.reject_order(order_id)
                 await _notify_admins_of_order(bot, order_id)
@@ -291,7 +343,7 @@ def create_user_router(db) -> Router:
                 await call.answer()
                 return
 
-            db.approve_order(order_id, result["id"])
+            db.approve_order(order_id, [r["id"] for r in results])
             await check_and_notify_low_stock(bot.send_message, db, product_id)
             reward_info = db.reward_referrer_if_first_purchase(call.from_user.id, order["base_price"])
             if reward_info:
@@ -319,7 +371,7 @@ def create_user_router(db) -> Router:
                 bot,
                 call.from_user.id,
                 product["name"],
-                result["link"],
+                [r["link"] for r in results],
                 final_price=0,
                 order_id=order_id,
             )
@@ -333,6 +385,8 @@ def create_user_router(db) -> Router:
         after_buy_text = db.get_setting("after_buy_text")
 
         text = f"{after_buy_text}\n\n"
+        if quantity > 1:
+            text += f"🔢 تعداد: {quantity} عدد\n"
         text += f"💳 شماره کارت: `{card_number}`\n"
         text += f"👤 به نام: {card_holder}\n"
         if discount_amount:
@@ -422,12 +476,18 @@ def create_user_router(db) -> Router:
         for o in orders:
             product = db.get_product(o["product_id"])
             pname = product["name"] if product else "نامشخص"
-            line = f"#{o['id']} | {pname} | {status_map.get(o['status'], o['status'])}"
-            if o["status"] == "approved" and o["config_id"]:
-                cfg = db.get_config_by_id(o["config_id"])
-                if cfg:
-                    line += f"\n🔗 `{cfg['link']}`"
-                    approved.append((pname, cfg["link"]))
+            qty = o["quantity"] or 1
+            line = f"#{o['id']} | {pname}" + (f" × {qty}" if qty > 1 else "") + f" | {status_map.get(o['status'], o['status'])}"
+            if o["status"] == "approved":
+                configs = db.get_order_configs(o["id"])
+                links = [c["link"] for c in configs] if configs else None
+                if not links and o["config_id"]:
+                    cfg = db.get_config_by_id(o["config_id"])
+                    links = [cfg["link"]] if cfg else []
+                for i, link in enumerate(links or [], start=1):
+                    prefix = f"\n🔗 کانفیگ {i}: " if len(links) > 1 else "\n🔗 "
+                    line += f"{prefix}`{link}`"
+                    approved.append((pname, link))
             lines.append(line)
         await message.answer("\n\n".join(lines), parse_mode="Markdown")
 

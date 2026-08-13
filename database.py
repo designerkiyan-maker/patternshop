@@ -393,10 +393,13 @@ class Database:
             ("admins", "role", "TEXT DEFAULT 'admin'"),
             ("support_messages", "is_read_by_admin", "INTEGER DEFAULT 0"),
             ("tickets", "claimed_by", "INTEGER"),
+            ("orders", "quantity", "INTEGER DEFAULT 1"),
+            ("configs", "order_id", "INTEGER"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_configs_order_id ON configs(order_id)")
 
     # -----------------------------------------------------------------------
     # تنظیمات (settings)
@@ -889,6 +892,32 @@ class Database:
             )
             return {"id": row["id"], "link": row["link"], "expires_at": expires_at}
 
+    def take_unused_configs(self, product_id: int, user_tg_id: int, quantity: int = 1):
+        """مثل take_unused_config ولی چند کانفیگ را یکجا برمی‌دارد. اگر موجودی کافی
+        نباشد، هیچ کانفیگی مصرف نمی‌شود و None برمی‌گردد."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, link FROM configs WHERE product_id=? AND is_used=0 ORDER BY id LIMIT ?",
+                (product_id, quantity),
+            ).fetchall()
+            if len(rows) < quantity:
+                return None
+            prod = conn.execute(
+                "SELECT duration_days FROM products WHERE id=?", (product_id,)
+            ).fetchone()
+            duration_days = (prod["duration_days"] if prod and prod["duration_days"] else 30)
+            now = datetime.utcnow()
+            expires_at = (now + timedelta(days=duration_days)).isoformat()
+            results = []
+            for row in rows:
+                conn.execute(
+                    "UPDATE configs SET is_used=1, assigned_user_id=?, assigned_at=?, expires_at=?, "
+                    "renewal_reminder_sent=0 WHERE id=?",
+                    (user_tg_id, now.isoformat(), expires_at, row["id"]),
+                )
+                results.append({"id": row["id"], "link": row["link"], "expires_at": expires_at})
+            return results
+
     def admin_take_random_config(self, product_id: int, admin_tg_id: int):
         """برای دکمه‌ی «دریافت کانفیگ رندوم» در پنل ادمین: برخلاف take_unused_config
         (که برای فروش واقعی به‌ترتیب FIFO عمل می‌کند)، این یکی از کانفیگ‌های آزاد را
@@ -973,13 +1002,14 @@ class Database:
         wallet_used: int = 0,
         discount_code_id: int = None,
         discount_amount: int = 0,
+        quantity: int = 1,
     ) -> int:
         final_price = max(base_price - wallet_used - discount_amount, 0)
         with self._get_conn() as conn:
             cur = conn.execute(
                 "INSERT INTO orders (user_id, product_id, status, base_price, wallet_used, "
-                "discount_code_id, discount_amount, final_price) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?)",
-                (user_tg_id, product_id, base_price, wallet_used, discount_code_id, discount_amount, final_price),
+                "discount_code_id, discount_amount, final_price, quantity) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
+                (user_tg_id, product_id, base_price, wallet_used, discount_code_id, discount_amount, final_price, quantity),
             )
             return cur.lastrowid
 
@@ -998,12 +1028,27 @@ class Database:
         with self._get_conn() as conn:
             return conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
 
-    def approve_order(self, order_id: int, config_id: int):
+    def approve_order(self, order_id: int, config_ids):
+        """config_ids می‌تواند یک id تکی یا لیستی از id ها باشد (برای سفارش با تعداد بیشتر از ۱).
+        config_id ستون سفارش برای سازگاری با کدهای قدیمی، همیشه اولین کانفیگ را نگه می‌دارد؛
+        برای گرفتن همه‌ی کانفیگ‌های یک سفارش از get_order_configs استفاده کن."""
+        if isinstance(config_ids, int):
+            config_ids = [config_ids]
         with self._get_conn() as conn:
             conn.execute(
                 "UPDATE orders SET status='approved', config_id=?, updated_at=? WHERE id=?",
-                (config_id, datetime.utcnow().isoformat(), order_id),
+                (config_ids[0], datetime.utcnow().isoformat(), order_id),
             )
+            conn.executemany(
+                "UPDATE configs SET order_id=? WHERE id=?",
+                [(order_id, cid) for cid in config_ids],
+            )
+
+    def get_order_configs(self, order_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM configs WHERE order_id=? ORDER BY id", (order_id,)
+            ).fetchall()
 
     def reject_order(self, order_id: int):
         order = self.get_order(order_id)
@@ -1191,7 +1236,7 @@ class Database:
             rows = conn.execute(
                 "SELECT o.id, o.created_at, o.status, o.user_id, u.username, u.first_name, "
                 "p.name as product_name, COALESCE(o.final_price, p.price) as amount, "
-                "o.wallet_used, o.discount_amount "
+                "o.wallet_used, o.discount_amount, COALESCE(o.quantity, 1) as quantity "
                 "FROM orders o "
                 "JOIN products p ON o.product_id=p.id "
                 "LEFT JOIN users u ON o.user_id=u.telegram_id "
@@ -1768,7 +1813,7 @@ class Database:
             now = datetime.utcnow().isoformat()
             return conn.execute(
                 "SELECT cf.id as config_id, cf.link, cf.expires_at, o.product_id "
-                "FROM configs cf JOIN orders o ON o.config_id = cf.id "
+                "FROM configs cf JOIN orders o ON (o.id = cf.order_id OR o.config_id = cf.id) "
                 "WHERE cf.assigned_user_id=? AND cf.is_used=1 AND cf.expires_at IS NOT NULL "
                 "AND cf.expires_at > ? AND cf.expires_at <= ? AND o.user_id=?",
                 (user_tg_id, now, threshold, user_tg_id),

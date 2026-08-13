@@ -159,10 +159,21 @@ def products_kb(db, products, category_id) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def product_confirm_kb(db, product_id) -> InlineKeyboardMarkup:
+def product_confirm_kb(db, product_id, quantity: int = 1, max_qty: int = 1) -> InlineKeyboardMarkup:
+    max_qty = max(max_qty, 1)
+    quantity = max(1, min(quantity, max_qty))
+
+    qty_row = []
+    if quantity > 1:
+        qty_row.append(InlineKeyboardButton(text="➖", callback_data=f"qty_dec:{product_id}:{quantity}"))
+    qty_row.append(InlineKeyboardButton(text=f"🔢 تعداد: {quantity}", callback_data="noop"))
+    if quantity < max_qty:
+        qty_row.append(InlineKeyboardButton(text="➕", callback_data=f"qty_inc:{product_id}:{quantity}"))
+
     rows = [
-        [_styled_inline(db, "✅ ادامه و ارسال رسید", f"buy_start:{product_id}", "btn_buy_continue_style")],
-        [_styled_inline(db, "🎟 وارد کردن کد تخفیف", f"enter_code:{product_id}", "btn_enter_code_style")],
+        qty_row,
+        [_styled_inline(db, "✅ ادامه و ارسال رسید", f"buy_start:{product_id}:{quantity}", "btn_buy_continue_style")],
+        [_styled_inline(db, "🎟 وارد کردن کد تخفیف", f"enter_code:{product_id}:{quantity}", "btn_enter_code_style")],
         [_styled_inline(db, "⬅️ بازگشت", "back_categories", "btn_buy_back_style")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)

@@ -575,7 +575,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer("سفارش یافت نشد.", show_alert=True)
             return
         product = db.get_product(order["product_id"])
+        qty = order["quantity"] or 1
         caption = f"سفارش #{order_id}\nکاربر: {order['user_id']}\nمحصول: {product['name'] if product else '---'}"
+        if qty > 1:
+            caption += f" × {qty}"
         if order["receipt_file_id"]:
             await bot.send_photo(call.from_user.id, order["receipt_file_id"], caption=caption, reply_markup=kb.order_review_kb(order_id))
         else:
@@ -600,12 +603,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
 
         product = db.get_product(order["product_id"])
-        result = db.take_unused_config(order["product_id"], order["user_id"])
-        if not result:
+        quantity = order["quantity"] or 1
+        results = db.take_unused_configs(order["product_id"], order["user_id"], quantity)
+        if not results:
             await call.answer("⛔️ موجودی این محصول تمام شده! ابتدا لینک جدید اضافه کنید.", show_alert=True)
             return
 
-        db.approve_order(order_id, result["id"])
+        db.approve_order(order_id, [r["id"] for r in results])
         db.log_admin_action(
             call.from_user.id, "order_approve",
             f"سفارش #{order_id} | کاربر {order['user_id']} | محصول «{product['name'] if product else '---'}» | مبلغ: {(order['final_price'] or (product['price'] if product else 0)):,}",
@@ -630,7 +634,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 bot,
                 order["user_id"],
                 product["name"],
-                result["link"],
+                [r["link"] for r in results],
                 final_price=order["final_price"],
                 order_id=order_id,
             )
