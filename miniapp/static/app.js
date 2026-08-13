@@ -1900,7 +1900,11 @@ async function renderAdminConfigs(body) {
   const configs = await api(`/api/admin/products/${productId}/configs`);
   const PAGE_SIZE = 10;
   let page = 0;
-  const totalPages = () => Math.max(1, Math.ceil(configs.length / PAGE_SIZE));
+  let query = "";
+  const filteredConfigs = () => query
+    ? configs.filter((c) => c.link.toLowerCase().includes(query.toLowerCase()))
+    : configs;
+  const totalPages = () => Math.max(1, Math.ceil(filteredConfigs().length / PAGE_SIZE));
 
   body.innerHTML = `
     <button class="btn outline small" id="back-to-prods" style="width:auto;margin-bottom:12px">→ بازگشت به محصولات «${categoryName}»</button>
@@ -1913,6 +1917,7 @@ async function renderAdminConfigs(body) {
     </div>
     <div class="card">
       <p class="hint-text" id="cfg-stock-count" style="margin:0 0 10px">موجودی فعلی: ${configs.length} کانفیگ استفاده‌نشده</p>
+      <input class="input" id="cfg-search" type="text" placeholder="🔍 جستجو در لینک کانفیگ‌ها..." style="direction:ltr;text-align:left;margin-bottom:10px" />
       <div id="cfg-list-box"></div>
       <div id="cfg-pagination" style="display:flex;align-items:center;justify-content:space-between;margin-top:10px"></div>
     </div>
@@ -1927,13 +1932,14 @@ async function renderAdminConfigs(body) {
   function renderCfgList() {
     const listBox = document.getElementById("cfg-list-box");
     const pagBox = document.getElementById("cfg-pagination");
+    const items = filteredConfigs();
     if (page >= totalPages()) page = totalPages() - 1;
     if (page < 0) page = 0;
     const start = page * PAGE_SIZE;
-    const pageItems = configs.slice(start, start + PAGE_SIZE);
+    const pageItems = items.slice(start, start + PAGE_SIZE);
 
-    listBox.innerHTML = configs.length === 0
-      ? `<div class="hint-text" style="margin:0">کانفیگی در انبار نیست.</div>`
+    listBox.innerHTML = items.length === 0
+      ? `<div class="hint-text" style="margin:0">${query ? "کانفیگی با این جستجو پیدا نشد." : "کانفیگی در انبار نیست."}</div>`
       : pageItems.map((c) => `
           <div class="admin-list-row">
             <div class="admin-list-row-main" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.link}</div>
@@ -1956,9 +1962,9 @@ async function renderAdminConfigs(body) {
       };
     });
 
-    pagBox.innerHTML = configs.length === 0 ? "" : `
+    pagBox.innerHTML = items.length === 0 ? "" : `
       <button class="btn small outline" id="cfg-prev-page" ${page === 0 ? "disabled" : ""}>◀ قبلی</button>
-      <span class="hint-text" style="margin:0">صفحه ${page + 1} از ${totalPages()}</span>
+      <span class="hint-text" style="margin:0">صفحه ${page + 1} از ${totalPages()}${query ? ` (${items.length} نتیجه)` : ""}</span>
       <button class="btn small outline" id="cfg-next-page" ${page >= totalPages() - 1 ? "disabled" : ""}>بعدی ▶</button>
     `;
     const prevBtn = document.getElementById("cfg-prev-page");
@@ -1968,6 +1974,16 @@ async function renderAdminConfigs(body) {
   }
 
   renderCfgList();
+
+  let searchDebounce;
+  document.getElementById("cfg-search").oninput = (e) => {
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => {
+      query = e.target.value.trim();
+      page = 0;
+      renderCfgList();
+    }, 200);
+  };
 
   document.getElementById("back-to-prods").onclick = () => {
     adminCatalogView = { level: "products", categoryId, categoryName };
