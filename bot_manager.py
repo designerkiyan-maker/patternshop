@@ -195,11 +195,50 @@ class BotManager:
                 for token, row in active_tokens.items():
                     if token not in self.instances:
                         resolved_path = resolve_db_path(row["db_path"])
+                        # قبل از استارت، شناسه‌ی تننت مینی‌اپ را sync کن - دقیقاً مثل
+                        # حلقه‌ی استارتاپ در main.py - وگرنه اگر این تنظیم روی
+                        # دیتابیس نماینده هنوز ست نشده باشد (مثلاً به‌خاطر تایمینگ
+                        # ثبت از پنل یا ری‌استور بکاپ)، دکمه‌ی منوی بات با لینک
+                        # مینی‌اپ بدون ?b= ساخته می‌شود و initData او با توکن بات
+                        # اصلی چک می‌شود (نه توکن خودش) -> خطای «initData نامعتبر است».
+                        try:
+                            reseller_db = Database(resolved_path)
+                            reseller_db.init_db(owner_id=row["owner_telegram_id"])
+                            reseller_db.set_setting("miniapp_tenant_id", str(row["id"]))
+                        except Exception:
+                            logger.exception(
+                                "همگام‌سازی miniapp_tenant_id برای @%s (reconcile) ناموفق بود.",
+                                row["bot_username"],
+                            )
                         started = await self.start_bot(
                             token, resolved_path, row["owner_telegram_id"], is_main_bot=False
                         )
                         if started:
                             logger.info("بات نمایندگی @%s توسط reconcile راه‌اندازی شد.", row["bot_username"])
+
+                # ترمیم یک‌بارهی بات‌های نمایندگی که از قبل در حال اجرا بودند: اگر
+                # miniapp_tenant_id روی دیتابیس‌شان درست نباشد یا Menu Button هنوز
+                # هیچ‌وقت با موفقیت sync نشده باشد، همین‌جا درستش کن - بدون نیاز به
+                # ری‌استارت بات. فقط یک‌بار به ازای هر توکن انجام می‌شود تا به
+                # Telegram API فشار اضافه وارد نشود.
+                for token, row in active_tokens.items():
+                    inst = self.instances.get(token)
+                    if not inst or inst.get("menu_checked"):
+                        continue
+                    try:
+                        resolved_path = resolve_db_path(row["db_path"])
+                        reseller_db = Database(resolved_path)
+                        current = reseller_db.get_setting("miniapp_tenant_id", "")
+                        if current != str(row["id"]):
+                            reseller_db.set_setting("miniapp_tenant_id", str(row["id"]))
+                            logger.warning(
+                                "miniapp_tenant_id برای @%s نادرست/خالی بود (%r) و اصلاح شد.",
+                                row["bot_username"], current,
+                            )
+                        await self._sync_menu_button(inst["bot"], reseller_db)
+                        inst["menu_checked"] = True
+                    except Exception:
+                        logger.exception("ترمیم Menu Button برای @%s ناموفق بود.", row["bot_username"])
 
                 for token in list(self.instances.keys()):
                     if token == main_bot_token:
