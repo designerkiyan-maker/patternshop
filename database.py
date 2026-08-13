@@ -1476,12 +1476,17 @@ class Database:
                     "UPDATE reseller_bots SET is_active=? WHERE id=?", (0 if row["is_active"] else 1, bot_id)
                 )
 
-    def edit_reseller_bot(self, bot_id: int, owner_telegram_id: int = None, owner_name: str = None):
+    def edit_reseller_bot(self, bot_id: int, owner_telegram_id: int = None, owner_name: str = None,
+                           bot_token: str = None, bot_username: str = None):
         fields, values = [], []
         if owner_telegram_id is not None:
             fields.append("owner_telegram_id=?"); values.append(owner_telegram_id)
         if owner_name is not None:
             fields.append("owner_name=?"); values.append(owner_name)
+        if bot_token is not None:
+            fields.append("bot_token=?"); values.append(bot_token)
+        if bot_username is not None:
+            fields.append("bot_username=?"); values.append(bot_username)
         if not fields:
             return
         values.append(bot_id)
