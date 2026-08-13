@@ -1898,6 +1898,10 @@ async function renderAdminProducts(body) {
 async function renderAdminConfigs(body) {
   const { productId, productName, categoryId, categoryName } = adminCatalogView;
   const configs = await api(`/api/admin/products/${productId}/configs`);
+  const PAGE_SIZE = 10;
+  let page = 0;
+  const totalPages = () => Math.max(1, Math.ceil(configs.length / PAGE_SIZE));
+
   body.innerHTML = `
     <button class="btn outline small" id="back-to-prods" style="width:auto;margin-bottom:12px">→ بازگشت به محصولات «${categoryName}»</button>
     <div class="eyebrow" style="margin-top:0">بانک کانفیگ «${productName}»</div>
@@ -1909,16 +1913,8 @@ async function renderAdminConfigs(body) {
     </div>
     <div class="card">
       <p class="hint-text" id="cfg-stock-count" style="margin:0 0 10px">موجودی فعلی: ${configs.length} کانفیگ استفاده‌نشده</p>
-      <div id="cfg-list-box">
-      ${configs.length === 0 ? `<div class="hint-text" style="margin:0">کانفیگی در انبار نیست.</div>` : configs.map((c) => `
-        <div class="admin-list-row">
-          <div class="admin-list-row-main" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.link}</div>
-          <div class="admin-list-row-actions">
-            <button class="btn small outline danger" data-del-cfg="${c.id}">🗑️</button>
-          </div>
-        </div>
-      `).join("")}
-      </div>
+      <div id="cfg-list-box"></div>
+      <div id="cfg-pagination" style="display:flex;align-items:center;justify-content:space-between;margin-top:10px"></div>
     </div>
     <div class="card">
       <div class="eyebrow" style="margin-top:0">افزودن دسته‌ای کانفیگ</div>
@@ -1927,6 +1923,52 @@ async function renderAdminConfigs(body) {
       <button class="btn" id="new-configs-save" style="margin-top:8px">➕ افزودن به انبار</button>
     </div>
   `;
+
+  function renderCfgList() {
+    const listBox = document.getElementById("cfg-list-box");
+    const pagBox = document.getElementById("cfg-pagination");
+    if (page >= totalPages()) page = totalPages() - 1;
+    if (page < 0) page = 0;
+    const start = page * PAGE_SIZE;
+    const pageItems = configs.slice(start, start + PAGE_SIZE);
+
+    listBox.innerHTML = configs.length === 0
+      ? `<div class="hint-text" style="margin:0">کانفیگی در انبار نیست.</div>`
+      : pageItems.map((c) => `
+          <div class="admin-list-row">
+            <div class="admin-list-row-main" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.link}</div>
+            <div class="admin-list-row-actions">
+              <button class="btn small outline danger" data-del-cfg="${c.id}">🗑️</button>
+            </div>
+          </div>
+        `).join("");
+
+    listBox.querySelectorAll("[data-del-cfg]").forEach((el) => {
+      el.onclick = async () => {
+        if (!confirm("این کانفیگ حذف شود؟")) return;
+        try {
+          await api(`/api/admin/configs/${el.dataset.delCfg}`, { method: "DELETE" });
+          const idx = configs.findIndex((c) => String(c.id) === el.dataset.delCfg);
+          if (idx !== -1) configs.splice(idx, 1);
+          document.getElementById("cfg-stock-count").textContent = `موجودی فعلی: ${configs.length} کانفیگ استفاده‌نشده`;
+          renderCfgList();
+        } catch (e2) { notify(e2.message); }
+      };
+    });
+
+    pagBox.innerHTML = configs.length === 0 ? "" : `
+      <button class="btn small outline" id="cfg-prev-page" ${page === 0 ? "disabled" : ""}>◀ قبلی</button>
+      <span class="hint-text" style="margin:0">صفحه ${page + 1} از ${totalPages()}</span>
+      <button class="btn small outline" id="cfg-next-page" ${page >= totalPages() - 1 ? "disabled" : ""}>بعدی ▶</button>
+    `;
+    const prevBtn = document.getElementById("cfg-prev-page");
+    const nextBtn = document.getElementById("cfg-next-page");
+    if (prevBtn) prevBtn.onclick = () => { page--; renderCfgList(); };
+    if (nextBtn) nextBtn.onclick = () => { page++; renderCfgList(); };
+  }
+
+  renderCfgList();
+
   document.getElementById("back-to-prods").onclick = () => {
     adminCatalogView = { level: "products", categoryId, categoryName };
     renderAdmin();
@@ -1943,27 +1985,8 @@ async function renderAdminConfigs(body) {
       // به‌جای رفرش کامل صفحه (که نتیجه‌ی بالا را پاک می‌کند)، فقط لیست و شمارنده را به‌روزرسانی می‌کنیم
       const idx = configs.findIndex((c) => c.id === res.id);
       if (idx !== -1) configs.splice(idx, 1);
-      const listBox = document.getElementById("cfg-list-box");
-      listBox.innerHTML = configs.length === 0
-        ? `<div class="hint-text" style="margin:0">کانفیگی در انبار نیست.</div>`
-        : configs.map((c) => `
-            <div class="admin-list-row">
-              <div class="admin-list-row-main" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.link}</div>
-              <div class="admin-list-row-actions">
-                <button class="btn small outline danger" data-del-cfg="${c.id}">🗑️</button>
-              </div>
-            </div>
-          `).join("");
-      listBox.querySelectorAll("[data-del-cfg]").forEach((el) => {
-        el.onclick = async () => {
-          if (!confirm("این کانفیگ حذف شود؟")) return;
-          try {
-            await api(`/api/admin/configs/${el.dataset.delCfg}`, { method: "DELETE" });
-            renderAdmin();
-          } catch (e2) { notify(e2.message); }
-        };
-      });
       document.getElementById("cfg-stock-count").textContent = `موجودی فعلی: ${configs.length} کانفیگ استفاده‌نشده`;
+      renderCfgList();
     } catch (e) {
       resultBox.innerHTML = `<div class="field-error" style="margin-top:10px">${e.message}</div>`;
     }
