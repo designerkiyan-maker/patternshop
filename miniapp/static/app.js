@@ -634,17 +634,20 @@ function referralCard(r) {
 
 function orderCard(o) {
   const exp = o.expires_at ? toJalaliStr(o.expires_at) : "نامحدود";
+  const links = (o.links && o.links.length) ? o.links : (o.link ? [o.link] : []);
   return `
     <div class="order-block">
-      <div class="stat-row"><span>${o.product_name}</span><span class="badge approved">فعال تا ${exp}</span></div>
-      ${o.link ? `
-      <div class="sub-info" id="sub-info-${o.id}"><div class="sub-info-loading">در حال دریافت اطلاعات مصرف...</div></div>
-      <div class="link-box">${o.link}</div>
+      <div class="stat-row"><span>${o.product_name}${o.quantity > 1 ? ` × ${o.quantity}` : ""}</span><span class="badge approved">فعال تا ${exp}</span></div>
+      ${links.map((link, idx) => `
+      ${links.length > 1 ? `<div class="hint-text" style="margin:8px 0 4px">🔢 کانفیگ ${idx + 1} از ${links.length}</div>` : ""}
+      ${idx === 0 ? `<div class="sub-info" id="sub-info-${o.id}"><div class="sub-info-loading">در حال دریافت اطلاعات مصرف...</div></div>` : ""}
+      <div class="link-box">${link}</div>
       <div class="qr-row">
-        <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(o.link)}" width="96" height="96" alt="QR" />
-        <button class="btn small outline" onclick="navigator.clipboard.writeText('${o.link}');tg.HapticFeedback.notificationOccurred('success')">📋 کپی لینک</button>
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(link)}" width="96" height="96" alt="QR" />
+        <button class="btn small outline" onclick="navigator.clipboard.writeText('${link}');tg.HapticFeedback.notificationOccurred('success')">📋 کپی لینک</button>
       </div>
-      ${renderAddToAppBlock(o.id, o.link, o.product_name)}` : ""}
+      ${renderAddToAppBlock(`${o.id}-${idx}`, link, o.product_name)}
+      `).join("")}
     </div>
   `;
 }
@@ -990,6 +993,8 @@ async function renderStore() {
       content.innerHTML = `<div class="state-msg"><span class="ic">◌</span>در حال حاضر محصولی موجود نیست.</div>`;
       return;
     }
+    window._storeProducts = {};
+    categories.forEach((c) => c.products.forEach((p) => { window._storeProducts[p.id] = p; }));
     content.innerHTML = categories.map((c) => `
       <div class="card">
         <h3><span class="ic">▣</span>${c.name}</h3>
@@ -1000,7 +1005,7 @@ async function renderStore() {
               <div class="price">${fmt(p.price)} تومان</div>
             </div>
             <button class="btn small" ${p.stock <= 0 ? "disabled" : ""}
-              onclick="buyProduct(${p.id}, ${p.price})">
+              onclick="openProductPurchase(${p.id})">
               ${p.stock <= 0 ? "ناموجود" : "خرید"}
             </button>
           </div>
@@ -1012,12 +1017,53 @@ async function renderStore() {
   }
 }
 
-async function buyProduct(productId) {
-  const code = prompt("کد تخفیف دارید؟ (اختیاری - خالی بگذارید و تایید کنید)");
+function openProductPurchase(productId) {
+  const p = (window._storeProducts || {})[productId];
+  if (!p) return;
+  renderPurchasePanel(productId, p, 1, null);
+}
+
+function renderPurchasePanel(productId, p, quantity, discountCode) {
+  quantity = Math.max(1, Math.min(quantity, p.stock));
+  const total = p.price * quantity;
+  content.innerHTML = `
+    <button class="btn outline small" id="back-to-store-btn" style="width:auto;margin-bottom:12px">→ بازگشت به فروشگاه</button>
+    <div class="eyebrow">خرید محصول</div>
+    <div class="card">
+      <h3><span class="ic">📦</span>${p.name}</h3>
+      <div class="stat-row"><span>قیمت واحد</span><b>${fmt(p.price)} تومان</b></div>
+      <div class="stat-row"><span>موجودی</span><b>${p.stock} عدد</b></div>
+      <div class="qty-stepper">
+        <button class="btn small outline" id="qty-dec-btn" ${quantity <= 1 ? "disabled" : ""}>➖</button>
+        <span class="qty-value">${quantity}</span>
+        <button class="btn small outline" id="qty-inc-btn" ${quantity >= p.stock ? "disabled" : ""}>➕</button>
+      </div>
+      <input class="input" id="purchase-discount-code" type="text" placeholder="کد تخفیف (اختیاری)"
+        value="${discountCode ? escHtml(discountCode) : ""}" style="direction:ltr;text-align:left;margin-top:10px" />
+      <div class="stat-row" style="margin-top:10px"><span>جمع کل</span><b>${fmt(total)} تومان</b></div>
+      <button class="btn" id="confirm-purchase-btn" style="margin-top:10px">✅ تایید و ادامه</button>
+    </div>
+  `;
+  document.getElementById("back-to-store-btn").onclick = renderStore;
+  document.getElementById("qty-dec-btn").onclick = () => {
+    const code = document.getElementById("purchase-discount-code").value.trim();
+    renderPurchasePanel(productId, p, quantity - 1, code);
+  };
+  document.getElementById("qty-inc-btn").onclick = () => {
+    const code = document.getElementById("purchase-discount-code").value.trim();
+    renderPurchasePanel(productId, p, quantity + 1, code);
+  };
+  document.getElementById("confirm-purchase-btn").onclick = () => {
+    const code = document.getElementById("purchase-discount-code").value.trim();
+    buyProduct(productId, quantity, code || null);
+  };
+}
+
+async function buyProduct(productId, quantity, code) {
   try {
     const result = await api("/api/orders", {
       method: "POST",
-      body: JSON.stringify({ product_id: productId, discount_code: code || null }),
+      body: JSON.stringify({ product_id: productId, quantity: quantity || 1, discount_code: code || null }),
     });
     if (result.status === "approved") {
       tg.HapticFeedback.notificationOccurred("success");

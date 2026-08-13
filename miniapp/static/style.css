@@ -306,6 +306,15 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
 }
 .product:last-child { border-bottom: none; }
 .product-name { font-size: 13.5px; font-weight: 700; }
+.qty-stepper {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  margin-top: 12px;
+}
+.qty-stepper .btn.small { padding: 8px 14px; }
+.qty-stepper .qty-value {
+  font-family: var(--font-mono); font-size: 17px; font-weight: 700;
+  min-width: 32px; text-align: center; color: var(--cyan);
+}
 .price {
   font-family: var(--font-mono); font-weight: 700; font-size: 13px;
   margin-top: 3px; direction: ltr;
