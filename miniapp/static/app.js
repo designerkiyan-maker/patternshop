@@ -2976,8 +2976,9 @@ async function renderAdminResellersSection() {
               </div>
               <div style="display:flex;gap:6px;flex-wrap:wrap">
                 ${r.miniapp_link ? `<button class="btn small outline" data-copy-res-link="${r.id}">🔗 کپی لینک</button>` : ""}
+                <button class="btn small outline" data-regen-res-link="${r.id}">🔁 تغییر لینک مینی‌اپ</button>
                 <button class="btn small outline" data-edit-res="${r.id}">✏️ ویرایش</button>
-                <button class="btn small outline" data-change-res-token="${r.id}">🔄 تغییر لینک/بات</button>
+                <button class="btn small outline" data-change-res-token="${r.id}">🔄 تغییر بات</button>
                 <button class="btn small outline" data-toggle-res="${r.id}">${r.is_active ? "⛔️ غیرفعال" : "✅ فعال"}</button>
                 <button class="btn small outline danger" data-del-res="${r.id}">🗑️ حذف</button>
               </div>
@@ -3025,6 +3026,23 @@ async function renderAdminResellersSection() {
             method: "PATCH",
             body: JSON.stringify({ owner_telegram_id: Number(ownerId), owner_name: ownerName.trim() }),
           });
+          renderAdmin();
+        } catch (e) { notify(e.message); }
+      };
+    });
+    body.querySelectorAll("[data-regen-res-link]").forEach((el) => {
+      el.onclick = async () => {
+        const ok = confirm("لینک فعلی مینی‌اپ این نماینده از کار می‌افتد و یک لینک تازه ساخته می‌شود.\nادامه می‌دی؟");
+        if (!ok) return;
+        try {
+          const res = await api(`/api/admin/resellers/${el.dataset.regenResLink}/regenerate-link`, { method: "POST" });
+          tg.HapticFeedback.notificationOccurred("success");
+          try {
+            await navigator.clipboard.writeText(res.miniapp_link);
+            notify("✅ لینک جدید ساخته و کپی شد.");
+          } catch (e) {
+            prompt("لینک جدید مینی‌اپ (کپی کن):", res.miniapp_link);
+          }
           renderAdmin();
         } catch (e) { notify(e.message); }
       };
