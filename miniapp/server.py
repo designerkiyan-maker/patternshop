@@ -391,10 +391,16 @@ async def api_sub_info(link: str = Query(...), auth=Depends(get_verified_user)):
     orders = db.get_user_orders(tg_id)
     owns_link = False
     for o in orders:
-        cfg = db.get_config_by_id(o["config_id"]) if o["config_id"] else None
-        if cfg and cfg["link"] == link:
-            owns_link = True
-            break
+        configs = db.get_order_configs(o["id"]) if o["status"] == "approved" else []
+        if configs:
+            if any(c["link"] == link for c in configs):
+                owns_link = True
+                break
+        else:
+            cfg = db.get_config_by_id(o["config_id"]) if o["config_id"] else None
+            if cfg and cfg["link"] == link:
+                owns_link = True
+                break
     if not owns_link:
         raise HTTPException(status_code=403, detail="forbidden")
 
