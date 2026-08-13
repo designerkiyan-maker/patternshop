@@ -292,6 +292,7 @@ class Database:
                     owner_name TEXT,
                     db_path TEXT NOT NULL,
                     is_active INTEGER DEFAULT 1,
+                    link_slug TEXT UNIQUE,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -404,6 +405,7 @@ class Database:
             ("tickets", "claimed_by", "INTEGER"),
             ("orders", "quantity", "INTEGER DEFAULT 1"),
             ("configs", "order_id", "INTEGER"),
+            ("reseller_bots", "link_slug", "TEXT"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -1467,6 +1469,14 @@ class Database:
     def get_reseller_bot(self, bot_id: int):
         with self._get_conn() as conn:
             return conn.execute("SELECT * FROM reseller_bots WHERE id=?", (bot_id,)).fetchone()
+
+    def get_reseller_bot_by_slug(self, slug: str):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM reseller_bots WHERE link_slug=?", (slug,)).fetchone()
+
+    def set_reseller_link_slug(self, bot_id: int, slug: str):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE reseller_bots SET link_slug=? WHERE id=?", (slug, bot_id))
 
     def toggle_reseller_bot(self, bot_id: int):
         with self._get_conn() as conn:
