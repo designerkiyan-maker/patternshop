@@ -1901,9 +1901,11 @@ async function renderAdminConfigs(body) {
   const PAGE_SIZE = 10;
   let page = 0;
   let query = "";
-  const filteredConfigs = () => query
-    ? configs.filter((c) => c.link.toLowerCase().includes(query.toLowerCase()))
-    : configs;
+  const stripInvisible = (s) => s.replace(/[\u200B\u200C\u200D\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "");
+  const filteredConfigs = () => {
+    const q = stripInvisible(query).toLowerCase();
+    return q ? configs.filter((c) => stripInvisible(c.link).toLowerCase().includes(q)) : configs;
+  };
   const totalPages = () => Math.max(1, Math.ceil(filteredConfigs().length / PAGE_SIZE));
 
   body.innerHTML = `
@@ -1917,7 +1919,7 @@ async function renderAdminConfigs(body) {
     </div>
     <div class="card">
       <p class="hint-text" id="cfg-stock-count" style="margin:0 0 10px">موجودی فعلی: ${configs.length} کانفیگ استفاده‌نشده</p>
-      <input class="input" id="cfg-search" type="text" placeholder="🔍 جستجو در لینک کانفیگ‌ها..." style="direction:ltr;text-align:left;margin-bottom:10px" />
+      <input class="input" id="cfg-search" type="text" dir="ltr" placeholder="🔍 جستجو در لینک کانفیگ‌ها..." style="direction:ltr;text-align:left;margin-bottom:10px" />
       <div id="cfg-list-box"></div>
       <div id="cfg-pagination" style="display:flex;align-items:center;justify-content:space-between;margin-top:10px"></div>
     </div>
