@@ -2414,10 +2414,11 @@ async function renderAdminSalesSection() {
   const body = document.getElementById("admin-section-body");
   body.innerHTML = skeleton(4);
   try {
-    const [referral, wheel, renewal, discounts] = await Promise.all([
+    const [referral, wheel, renewal, volumeRem, discounts] = await Promise.all([
       api("/api/admin/settings/referral"),
       api("/api/admin/settings/wheel"),
       api("/api/admin/settings/renewal"),
+      api("/api/admin/settings/volume-reminder"),
       api("/api/admin/discounts"),
     ]);
 
@@ -2469,6 +2470,30 @@ async function renderAdminSalesSection() {
         <input class="input" id="ren-expiry" type="number" placeholder="مثال: 24" value="${renewal.discount_expiry_hours}" style="margin-bottom:4px" />
         <div class="field-error" id="ren-error"></div>
         <button class="btn" id="ren-save" style="margin-top:8px">💾 ذخیره</button>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">📉 یادآوری اتمام حجم</div>
+        <p class="hint-text">وقتی حجم مصرفی کاربر به آستانه‌ی تعیین‌شده برسد، پیام یادآوری همراه با کد تخفیف تشویقی برای تمدید فرستاده می‌شود. این یادآوری مستقل از یادآوری تاریخ انقضاست و برای کانفیگ‌های با حجم نامحدود اعمال نمی‌شود.</p>
+        <div class="field-switch-row">
+          <span>یادآوری اتمام حجم فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="vol-enabled" ${volumeRem.enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">مبنای آستانه</label>
+        <select class="input" id="vol-mode" style="margin-bottom:10px">
+          <option value="percent" ${volumeRem.mode === "percent" ? "selected" : ""}>درصد مصرف</option>
+          <option value="gb" ${volumeRem.mode === "gb" ? "selected" : ""}>حجم باقی‌مانده (گیگابایت)</option>
+        </select>
+        <label class="field-label">وقتی چند درصد از حجم مصرف شد (حالت «درصد مصرف»)</label>
+        <input class="input" id="vol-percent" type="number" placeholder="مثال: 80" value="${volumeRem.percent}" style="margin-bottom:10px" />
+        <label class="field-label">وقتی چند گیگابایت باقی ماند (حالت «حجم باقی‌مانده»)</label>
+        <input class="input" id="vol-gb" type="number" step="0.1" placeholder="مثال: 2" value="${volumeRem.gb_left}" style="margin-bottom:10px" />
+        <label class="field-label">درصد تخفیف کد تشویقی (۰ تا ۱۰۰)</label>
+        <input class="input" id="vol-discount-percent" type="number" placeholder="مثال: 20" value="${volumeRem.discount_percent}" style="margin-bottom:10px" />
+        <label class="field-label">مدت اعتبار کد تشویقی (ساعت)</label>
+        <input class="input" id="vol-discount-expiry" type="number" placeholder="مثال: 24" value="${volumeRem.discount_expiry_hours}" style="margin-bottom:4px" />
+        <div class="field-error" id="vol-error"></div>
+        <button class="btn" id="vol-save" style="margin-top:8px">💾 ذخیره</button>
       </div>
 
       <div class="card">
@@ -2574,6 +2599,35 @@ async function renderAdminSalesSection() {
         });
         tg.HapticFeedback.notificationOccurred("success");
         notify("تنظیمات یادآوری تمدید ذخیره شد.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+
+    document.getElementById("vol-save").onclick = async () => {
+      const errBox = document.getElementById("vol-error");
+      errBox.textContent = "";
+      const mode = document.getElementById("vol-mode").value;
+      const percentRaw = document.getElementById("vol-percent").value.trim();
+      const gbRaw = document.getElementById("vol-gb").value.trim();
+      const discPercentRaw = document.getElementById("vol-discount-percent").value.trim();
+      const discExpiryRaw = document.getElementById("vol-discount-expiry").value.trim();
+      if (!percentRaw || !gbRaw || !discPercentRaw || !discExpiryRaw) { errBox.textContent = "همه‌ی کادرها باید پر شوند."; return; }
+      const percent = Number(percentRaw), gb = Number(gbRaw);
+      const discPercent = Number(discPercentRaw), discExpiry = Number(discExpiryRaw);
+      if (isNaN(percent) || percent <= 0 || percent >= 100) { errBox.textContent = "درصد آستانه باید عددی بین ۱ تا ۹۹ باشد."; return; }
+      if (isNaN(gb) || gb <= 0) { errBox.textContent = "آستانه‌ی گیگابایت باید عددی بزرگ‌تر از صفر باشد."; return; }
+      if (isNaN(discPercent) || discPercent < 0 || discPercent > 100) { errBox.textContent = "درصد تخفیف باید عددی بین ۰ تا ۱۰۰ باشد."; return; }
+      if (isNaN(discExpiry) || discExpiry <= 0) { errBox.textContent = "اعتبار کد باید عددی بزرگ‌تر از صفر باشد."; return; }
+      try {
+        await api("/api/admin/settings/volume-reminder", {
+          method: "POST",
+          body: JSON.stringify({
+            enabled: document.getElementById("vol-enabled").checked,
+            mode, percent, gb_left: gb,
+            discount_percent: discPercent, discount_expiry_hours: discExpiry,
+          }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("تنظیمات یادآوری اتمام حجم ذخیره شد.");
       } catch (e) { errBox.textContent = e.message; }
     };
 
