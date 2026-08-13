@@ -284,13 +284,17 @@ def api_orders(auth=Depends(get_verified_user)):
     for o in orders:
         product = db.get_product(o["product_id"])
         cfg = db.get_config_by_id(o["config_id"]) if o["config_id"] else None
+        configs = db.get_order_configs(o["id"]) if o["status"] == "approved" else []
+        links = [c["link"] for c in configs] if configs else ([cfg["link"]] if cfg else [])
         result.append({
             "id": o["id"],
             "product_name": product["name"] if product else "نامشخص",
+            "quantity": o["quantity"] or 1,
             "status": o["status"],
             "final_price": o["final_price"],
             "expires_at": cfg["expires_at"] if cfg else None,
             "link": cfg["link"] if cfg else None,
+            "links": links,
         })
     return result
 
@@ -647,6 +651,7 @@ async def send_photo_to_admins(db: Database, bot_token: str, caption: str, reply
 
 class OrderCreate(BaseModel):
     product_id: int
+    quantity: int = 1
     discount_code: Optional[str] = None
 
 
@@ -656,21 +661,26 @@ async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
     user_row = db.get_user(tg_id)
     if user_row and user_row["is_blocked"]:
         raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
+    quantity = max(1, body.quantity)
     product = db.get_product(body.product_id)
-    if not product or db.count_available_configs(body.product_id) <= 0:
+    stock = db.count_available_configs(body.product_id)
+    if not product or stock <= 0:
         raise HTTPException(status_code=400, detail="این محصول موجود نیست.")
+    if quantity > stock:
+        raise HTTPException(status_code=400, detail=f"موجودی کافی نیست. فقط {stock} عدد موجود است.")
 
+    total_price = product["price"] * quantity
     discount_code_id = None
     discount_amount = 0
     if body.discount_code:
         code_row = db.get_discount_code(body.discount_code)
         if not db.is_discount_code_valid(code_row):
             raise HTTPException(status_code=400, detail="کد تخفیف نامعتبر است.")
-        discount_amount = db.compute_discount_amount(code_row, product["price"])
+        discount_amount = db.compute_discount_amount(code_row, total_price)
         discount_code_id = code_row["id"]
 
     wallet_credit = db.get_wallet_credit(tg_id)
-    price_after_code = max(product["price"] - discount_amount, 0)
+    price_after_code = max(total_price - discount_amount, 0)
     wallet_used = min(wallet_credit, price_after_code)
 
     if wallet_used > 0:
@@ -679,17 +689,18 @@ async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
         db.increment_discount_usage(discount_code_id)
 
     order_id = db.create_order(
-        tg_id, body.product_id, base_price=product["price"],
+        tg_id, body.product_id, base_price=total_price,
         wallet_used=wallet_used, discount_code_id=discount_code_id, discount_amount=discount_amount,
+        quantity=quantity,
     )
     order = db.get_order(order_id)
 
     if order["final_price"] <= 0:
-        result = db.take_unused_config(body.product_id, tg_id)
-        if not result:
+        results = db.take_unused_configs(body.product_id, tg_id, quantity)
+        if not results:
             db.reject_order(order_id)
             raise HTTPException(status_code=409, detail="موجودی هم‌زمان تمام شد؛ مبلغ بازگردانده شد.")
-        db.approve_order(order_id, result["id"])
+        db.approve_order(order_id, [r["id"] for r in results])
 
         async def _send_admin_msg(admin_id, text):
             async with aiohttp.ClientSession() as session:
@@ -700,14 +711,20 @@ async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
 
         await check_and_notify_low_stock(_send_admin_msg, db, body.product_id)
 
-        db.reward_referrer_if_first_purchase(tg_id, order["final_price"] or product["price"])
+        db.reward_referrer_if_first_purchase(tg_id, order["final_price"] or total_price)
         order = db.get_order(order_id)
-        cfg = db.get_config_by_id(order["config_id"])
-        return {"status": "approved", "order_id": order_id, "link": cfg["link"], "expires_at": cfg["expires_at"]}
+        configs = db.get_order_configs(order_id)
+        links = [c["link"] for c in configs] if configs else [db.get_config_by_id(order["config_id"])["link"]]
+        return {
+            "status": "approved", "order_id": order_id,
+            "link": links[0], "links": links,
+            "expires_at": configs[0]["expires_at"] if configs else None,
+        }
 
     # مبلغی باقی مانده - کاربر باید مثل قبل از طریق بات رسید کارت‌به‌کارت بفرستد
     return {
         "status": "pending_payment", "order_id": order_id, "final_price": order["final_price"],
+        "quantity": quantity,
         "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
     }
 
@@ -845,11 +862,12 @@ async def api_order_receipt(
 
     product = db.get_product(order["product_id"])
     user = db.get_user(tg_id)
+    qty = order["quantity"] or 1
     caption = (
         f"🧾 سفارش #{order_id}\n"
         f"👤 کاربر: {(user['first_name'] if user else '') or ''} (@{(user['username'] if user else '') or '---'})\n"
         f"🆔 آیدی عددی: {tg_id}\n"
-        f"📦 محصول: {product['name'] if product else '---'}\n"
+        f"📦 محصول: {product['name'] if product else '---'}" + (f" × {qty}\n" if qty > 1 else "\n") +
         f"💰 قیمت پایه: {order['base_price']:,} تومان\n"
     )
     if order["discount_amount"]:
@@ -1434,7 +1452,7 @@ def api_admin_orders_export(
     lines = [
         "\ufeff" + ",".join([
             "شناسه سفارش", "تاریخ ثبت (شمسی)", "وضعیت", "آیدی کاربر", "یوزرنیم", "نام",
-            "محصول", "مبلغ نهایی", "مبلغ از کیف‌پول", "تخفیف",
+            "محصول", "تعداد", "مبلغ نهایی", "مبلغ از کیف‌پول", "تخفیف",
         ])
     ]
     for r in rows:
@@ -1446,6 +1464,7 @@ def api_admin_orders_export(
             (r["username"] or ""),
             (r["first_name"] or ""),
             (r["product_name"] or ""),
+            str(r["quantity"] or 1),
             str(r["amount"] or 0),
             str(r["wallet_used"] or 0),
             str(r["discount_amount"] or 0),
