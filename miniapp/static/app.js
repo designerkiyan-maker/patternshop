@@ -1901,30 +1901,10 @@ async function renderAdminConfigs(body) {
   const PAGE_SIZE = 10;
   let page = 0;
   let query = "";
-  // نرمال‌سازی رشته برای سرچ: تبدیل امن به رشته + یکسان‌سازی یونیکد + حذف کاراکترهای نامرئی/جهت‌دهی + حذف فاصله‌های اضافه
-  const normalizeForSearch = (s) => {
-    try {
-      return String(s ?? "")
-        .normalize("NFKC")
-        .replace(/[\u200B\u200C\u200D\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF\u00A0]/g, "") // انواع کاراکتر نامرئی/جهت‌دهی/نیم‌فاصله + فاصله چسبان
-        .replace(/\s+/g, "") // هر نوع فاصله/تب/شکست خط داخل رشته
-        .toLowerCase();
-    } catch (err) {
-      console.error("normalizeForSearch failed:", err, s);
-      return "";
-    }
-  };
+  const normalizeSearchText = (s) => s.normalize("NFKC").replace(/[\s\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "").toLowerCase();
   const filteredConfigs = () => {
-    const q = normalizeForSearch(query);
-    if (!q) return configs;
-    return configs.filter((c) => {
-      try {
-        return normalizeForSearch(c.link).includes(q);
-      } catch (err) {
-        console.error("search filter failed on item:", c, err);
-        return false;
-      }
-    });
+    const q = normalizeSearchText(query);
+    return q ? configs.filter((c) => normalizeSearchText(c.link).includes(q)) : configs;
   };
   const totalPages = () => Math.max(1, Math.ceil(filteredConfigs().length / PAGE_SIZE));
 
