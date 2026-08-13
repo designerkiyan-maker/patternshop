@@ -18,6 +18,7 @@ import sys
 import os
 import json
 import random
+import secrets
 import base64
 import html as html_lib
 import asyncio
@@ -90,15 +91,16 @@ class Tenant:
 _tenant_logger = logging.getLogger("miniapp.tenant")
 
 
-def get_tenant(b: str = Query("", description="شناسه‌ی نماینده؛ خالی یعنی بات اصلی")) -> Tenant:
+def get_tenant(b: str = Query("", description="شناسه یا اسلاگ لینک نماینده؛ خالی یعنی بات اصلی")) -> Tenant:
     b = (b or "").strip()
     if not b or b == "0":
         return Tenant(db=main_db, bot_token=BOT_TOKEN, tenant_id="")
-    if not b.isdigit():
-        raise HTTPException(status_code=400, detail="شناسه‌ی فروشگاه نامعتبر است.")
 
     try:
-        row = main_db.get_reseller_bot(int(b))
+        if b.isdigit():
+            row = main_db.get_reseller_bot(int(b))
+        else:
+            row = main_db.get_reseller_bot_by_slug(b)
     except sqlite3.OperationalError:
         _tenant_logger.exception(
             "خطای دیتابیس اصلی هنگام خواندن reseller_bots (b=%s). db_path=%s - احتمالاً جدول‌ها هنوز ساخته نشده‌اند.",
@@ -1183,12 +1185,13 @@ class ResellerTokenUpdate(BaseModel):
     token: str
 
 
-def _reseller_miniapp_link(reseller_id: int) -> Optional[str]:
+def _reseller_miniapp_link(reseller_row) -> Optional[str]:
     """لینک اختصاصی مینی‌اپ همین نماینده (همان که در دکمه‌ی منوی بات نماینده استفاده می‌شود)."""
     if not MINIAPP_URL:
         return None
+    b_value = reseller_row["link_slug"] or str(reseller_row["id"])
     sep = "&" if "?" in MINIAPP_URL else "?"
-    return f"{MINIAPP_URL}{sep}b={reseller_id}"
+    return f"{MINIAPP_URL}{sep}b={b_value}"
 
 
 @app.get("/api/admin/resellers")
@@ -1199,7 +1202,7 @@ def api_admin_list_resellers(auth=Depends(require_main_admin)):
         {
             "id": r["id"], "bot_username": r["bot_username"], "owner_telegram_id": r["owner_telegram_id"],
             "owner_name": r["owner_name"], "is_active": bool(r["is_active"]), "created_at": r["created_at"],
-            "miniapp_link": _reseller_miniapp_link(r["id"]),
+            "miniapp_link": _reseller_miniapp_link(r),
             "bot_link": f"https://t.me/{r['bot_username']}",
         }
         for r in rows
@@ -1294,6 +1297,29 @@ async def api_admin_change_reseller_token(reseller_id: int, body: ResellerTokenU
         "status": "ok",
         "username": username,
         "note": "توکن بات نماینده تغییر کرد. حداکثر تا ۱۰ ثانیه دیگر بات قدیمی متوقف و بات جدید روشن می‌شود.",
+    }
+
+
+@app.post("/api/admin/resellers/{reseller_id}/regenerate-link")
+def api_admin_regenerate_reseller_link(reseller_id: int, auth=Depends(require_main_admin)):
+    _, db, _ = auth
+    reseller_bot = db.get_reseller_bot(reseller_id)
+    if not reseller_bot:
+        raise HTTPException(status_code=404, detail="نماینده یافت نشد.")
+    if not MINIAPP_URL:
+        raise HTTPException(status_code=400, detail="آدرس MINIAPP_URL روی سرور تنظیم نشده است.")
+    for _ in range(5):
+        slug = secrets.token_urlsafe(8)
+        if not db.get_reseller_bot_by_slug(slug):
+            break
+    else:
+        raise HTTPException(status_code=500, detail="ساخت لینک یکتا ممکن نشد، دوباره تلاش کن.")
+    db.set_reseller_link_slug(reseller_id, slug)
+    reseller_bot = db.get_reseller_bot(reseller_id)
+    return {
+        "status": "ok",
+        "miniapp_link": _reseller_miniapp_link(reseller_bot),
+        "note": "لینک قبلی مینی‌اپ این نماینده دیگر کار نمی‌کند؛ فقط لینک جدید معتبر است.",
     }
 
 
