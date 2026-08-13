@@ -1304,6 +1304,15 @@ class RenewalSettingsUpdate(BaseModel):
     discount_expiry_hours: int
 
 
+class VolumeReminderSettingsUpdate(BaseModel):
+    enabled: bool
+    mode: str
+    percent: int
+    gb_left: float
+    discount_percent: int
+    discount_expiry_hours: int
+
+
 @app.get("/api/admin/settings/referral")
 def api_admin_get_referral_settings(auth=Depends(require_senior_admin)):
     _, db, _ = auth
@@ -1363,6 +1372,34 @@ def api_admin_set_renewal_settings(body: RenewalSettingsUpdate, auth=Depends(req
     db.set_setting("renewal_reminder_days_before", str(body.days_before))
     db.set_setting("renewal_discount_percent", str(body.discount_percent))
     db.set_setting("renewal_discount_expiry_hours", str(body.discount_expiry_hours))
+    return {"status": "ok"}
+
+
+@app.get("/api/admin/settings/volume-reminder")
+def api_admin_get_volume_reminder_settings(auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    return db.get_volume_reminder_settings()
+
+
+@app.post("/api/admin/settings/volume-reminder")
+def api_admin_set_volume_reminder_settings(body: VolumeReminderSettingsUpdate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    if body.mode not in ("percent", "gb"):
+        raise HTTPException(status_code=400, detail="مبنای آستانه باید percent یا gb باشد.")
+    if body.discount_percent < 0 or body.discount_percent > 100:
+        raise HTTPException(status_code=400, detail="درصد تخفیف باید بین ۰ تا ۱۰۰ باشد.")
+    if not (0 < body.percent < 100):
+        raise HTTPException(status_code=400, detail="درصد آستانه باید بین ۱ تا ۹۹ باشد.")
+    if body.gb_left <= 0:
+        raise HTTPException(status_code=400, detail="آستانه‌ی گیگابایت باید بزرگ‌تر از صفر باشد.")
+    if body.discount_expiry_hours <= 0:
+        raise HTTPException(status_code=400, detail="اعتبار کد تخفیف باید بزرگ‌تر از صفر باشد.")
+    db.set_setting("volume_reminder_enabled", "1" if body.enabled else "0")
+    db.set_setting("volume_reminder_mode", body.mode)
+    db.set_setting("volume_reminder_percent", str(body.percent))
+    db.set_setting("volume_reminder_gb_left", str(body.gb_left))
+    db.set_setting("volume_discount_percent", str(body.discount_percent))
+    db.set_setting("volume_discount_expiry_hours", str(body.discount_expiry_hours))
     return {"status": "ok"}
 
 
