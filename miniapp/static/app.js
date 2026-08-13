@@ -1944,7 +1944,7 @@ async function renderAdminConfigs(body) {
       ? `<div class="hint-text" style="margin:0">${query ? "کانفیگی با این جستجو پیدا نشد." : "کانفیگی در انبار نیست."}</div>`
       : pageItems.map((c) => `
           <div class="admin-list-row">
-            <div class="admin-list-row-main" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.link}</div>
+            <div class="admin-list-row-main" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:12px;word-break:break-all;white-space:normal;user-select:all">${c.link}</div>
             <div class="admin-list-row-actions">
               <button class="btn small outline danger" data-del-cfg="${c.id}">🗑️</button>
             </div>
@@ -1977,15 +1977,15 @@ async function renderAdminConfigs(body) {
 
   renderCfgList();
 
-  let searchDebounce;
-  document.getElementById("cfg-search").oninput = (e) => {
-    clearTimeout(searchDebounce);
-    searchDebounce = setTimeout(() => {
-      query = e.target.value.trim();
-      page = 0;
-      renderCfgList();
-    }, 200);
+  const searchInput = document.getElementById("cfg-search");
+  const applySearch = () => {
+    query = searchInput.value;
+    page = 0;
+    renderCfgList();
   };
+  searchInput.addEventListener("input", applySearch);
+  searchInput.addEventListener("keyup", applySearch);
+  searchInput.addEventListener("change", applySearch);
 
   document.getElementById("back-to-prods").onclick = () => {
     adminCatalogView = { level: "products", categoryId, categoryName };
