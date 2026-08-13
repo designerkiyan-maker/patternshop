@@ -42,6 +42,7 @@ from states import (
     AdminAddResellerBot,
     AdminWheelSettings,
     AdminRenewalSettings,
+    AdminVolumeReminderSettings,
     AdminStockAlertSettings,
     AdminRestoreBackup,
 )
@@ -1155,6 +1156,129 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
             return
         db.set_setting("renewal_discount_expiry_hours", text)
+        await state.clear()
+        await message.answer(
+            f"✅ اعتبار کد تخفیف تشویقی روی {text} ساعت تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot)
+        )
+
+    # -------------------------------------------------------------------
+    # یادآوری اتمام حجم + کد تخفیف تشویقی تمدید (مستقل از یادآوری تاریخ انقضا)
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_volume_reminder_settings")
+    async def cb_admin_volume_settings(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await replace_admin_view(call, "📉 یادآوری اتمام حجم:", reply_markup=kb.volume_reminder_settings_kb(db))
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_volume_toggle")
+    async def cb_admin_volume_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        current = db.get_setting("volume_reminder_enabled", "1")
+        db.set_setting("volume_reminder_enabled", "0" if current == "1" else "1")
+        await safe_edit(call, "📉 یادآوری اتمام حجم:", reply_markup=kb.volume_reminder_settings_kb(db))
+        await call.answer("وضعیت تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_volume_toggle_mode")
+    async def cb_admin_volume_toggle_mode(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        current = db.get_setting("volume_reminder_mode", "percent")
+        db.set_setting("volume_reminder_mode", "gb" if current == "percent" else "percent")
+        await safe_edit(call, "📉 یادآوری اتمام حجم:", reply_markup=kb.volume_reminder_settings_kb(db))
+        await call.answer("مبنای آستانه تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_volume_edit_percent")
+    async def cb_admin_volume_edit_percent(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminVolumeReminderSettings.waiting_percent)
+        await safe_edit(call,
+            "وقتی چند درصد از حجم مصرف شد، یادآوری ارسال شود؟ (عددی بین 1 تا 99، مثلاً 80):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminVolumeReminderSettings.waiting_percent)
+    async def process_volume_percent(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or not (0 < int(text) < 100):
+            await message.answer("لطفاً یک عدد بین 1 تا 99 ارسال کنید.")
+            return
+        db.set_setting("volume_reminder_percent", text)
+        await state.clear()
+        await message.answer(
+            f"✅ آستانه‌ی یادآوری حجم روی {text}٪ مصرف تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot)
+        )
+
+    @router.callback_query(F.data == "adm_volume_edit_gb")
+    async def cb_admin_volume_edit_gb(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminVolumeReminderSettings.waiting_gb_left)
+        await safe_edit(call,
+            "وقتی چند گیگابایت حجم باقی‌مانده شد، یادآوری ارسال شود؟ (عدد، مثلاً 2 یا 1.5):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminVolumeReminderSettings.waiting_gb_left)
+    async def process_volume_gb(message: Message, state: FSMContext):
+        text = message.text.strip().replace(",", ".")
+        try:
+            value = float(text)
+            if value <= 0:
+                raise ValueError
+        except ValueError:
+            await message.answer("لطفاً یک عدد مثبت ارسال کنید (مثلاً 2 یا 1.5).")
+            return
+        db.set_setting("volume_reminder_gb_left", str(value))
+        await state.clear()
+        await message.answer(
+            f"✅ آستانه‌ی یادآوری حجم روی {value} گیگ باقی‌مانده تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot)
+        )
+
+    @router.callback_query(F.data == "adm_volume_edit_discount_percent")
+    async def cb_admin_volume_edit_discount_percent(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminVolumeReminderSettings.waiting_discount_percent)
+        await safe_edit(call,
+            "درصد تخفیف کد تشویقی اتمام حجم چقدر باشد؟ (عددی بین 1 تا 100، مثلاً 20):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminVolumeReminderSettings.waiting_discount_percent)
+    async def process_volume_discount_percent(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or not (0 < int(text) <= 100):
+            await message.answer("لطفاً یک عدد بین 1 تا 100 ارسال کنید.")
+            return
+        db.set_setting("volume_discount_percent", text)
+        await state.clear()
+        await message.answer(f"✅ درصد تخفیف کد تشویقی روی {text}٪ تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    @router.callback_query(F.data == "adm_volume_edit_discount_hours")
+    async def cb_admin_volume_edit_discount_hours(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminVolumeReminderSettings.waiting_discount_hours)
+        await safe_edit(call,
+            "کد تخفیف تشویقی اتمام حجم چند ساعت اعتبار داشته باشد؟ (فقط عدد، مثلاً 24):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminVolumeReminderSettings.waiting_discount_hours)
+    async def process_volume_discount_hours(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
+            return
+        db.set_setting("volume_discount_expiry_hours", text)
         await state.clear()
         await message.answer(
             f"✅ اعتبار کد تخفیف تشویقی روی {text} ساعت تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot)

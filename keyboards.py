@@ -222,6 +222,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_discounts_menu", "🎟 مدیریت کدهای تخفیف", "adm_discounts_menu"),
     ("adm_wheel_settings", "🎡 مدیریت گردونه شانس", "adm_wheel_settings"),
     ("adm_renewal_settings", "🔔 یادآوری تمدید سرویس", "adm_renewal_settings"),
+    ("adm_volume_reminder_settings", "📉 یادآوری اتمام حجم", "adm_volume_reminder_settings"),
     ("adm_stock_alert_settings", "📦 آستانه‌ی هشدار موجودی", "adm_stock_alert_settings"),
     ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
     ("adm_resellers_menu", "🏪 مدیریت بات‌های نمایندگی", "adm_resellers_menu"),
@@ -599,6 +600,35 @@ def renewal_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✏️ تغییر تعداد روز یادآوری", callback_data="adm_renewal_edit_days")],
         [InlineKeyboardButton(text="✏️ تغییر درصد تخفیف", callback_data="adm_renewal_edit_percent")],
         [InlineKeyboardButton(text="✏️ تغییر اعتبار کد (ساعت)", callback_data="adm_renewal_edit_hours")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def volume_reminder_settings_kb(db) -> InlineKeyboardMarkup:
+    s = db.get_volume_reminder_settings()
+    toggle_text = "🔴 غیرفعال کردن یادآوری" if s["enabled"] else "🟢 فعال کردن یادآوری"
+    mode_text = "📊 مبنا: درصد مصرف" if s["mode"] == "percent" else "📦 مبنا: حجم باقی‌مانده (گیگ)"
+    rows = [
+        [InlineKeyboardButton(text=f"وضعیت: {'🟢 فعال' if s['enabled'] else '🔴 غیرفعال'}", callback_data="noop")],
+        [InlineKeyboardButton(text=mode_text, callback_data="adm_volume_toggle_mode")],
+    ]
+    if s["mode"] == "percent":
+        rows.append([InlineKeyboardButton(
+            text=f"📊 آستانه: وقتی {s['percent']}٪ مصرف شد", callback_data="noop")])
+        rows.append([InlineKeyboardButton(
+            text="✏️ تغییر درصد آستانه", callback_data="adm_volume_edit_percent")])
+    else:
+        rows.append([InlineKeyboardButton(
+            text=f"📦 آستانه: وقتی {s['gb_left']} گیگ باقی ماند", callback_data="noop")])
+        rows.append([InlineKeyboardButton(
+            text="✏️ تغییر آستانه (گیگ)", callback_data="adm_volume_edit_gb")])
+    rows += [
+        [InlineKeyboardButton(text=f"🎟 درصد تخفیف کد تشویقی: {s['discount_percent']}٪", callback_data="noop")],
+        [InlineKeyboardButton(text=f"⏳ اعتبار کد تشویقی: {s['discount_expiry_hours']} ساعت", callback_data="noop")],
+        [InlineKeyboardButton(text=toggle_text, callback_data="adm_volume_toggle")],
+        [InlineKeyboardButton(text="✏️ تغییر درصد تخفیف", callback_data="adm_volume_edit_discount_percent")],
+        [InlineKeyboardButton(text="✏️ تغییر اعتبار کد (ساعت)", callback_data="adm_volume_edit_discount_hours")],
         [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)

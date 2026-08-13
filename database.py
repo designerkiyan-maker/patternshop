@@ -87,6 +87,14 @@ DEFAULT_SETTINGS = {
     "renewal_discount_expiry_hours": "24",  # اعتبار کد تشویقی تمدید (ساعت)
     "adm_renewal_settings_style": "success",
     "adm_stock_alert_settings_style": "",
+    # یادآوری اتمام حجم + کد تخفیف تشویقی تمدید (مستقل از یادآوری تاریخ انقضا)
+    "volume_reminder_enabled": "1",
+    "volume_reminder_mode": "percent",  # "percent" یا "gb" - مبنای آستانه‌ی هشدار
+    "volume_reminder_percent": "80",  # وقتی درصد مصرف به این عدد رسید (mode=percent)
+    "volume_reminder_gb_left": "2",  # وقتی حجم باقی‌مانده به این تعداد گیگ رسید (mode=gb)
+    "volume_discount_percent": "20",  # درصد تخفیف کد تشویقی اتمام حجم
+    "volume_discount_expiry_hours": "24",  # اعتبار کد تشویقی اتمام حجم (ساعت)
+    "adm_volume_reminder_settings_style": "success",
     # چیدمان دکمه‌های منوی اصلی (ترتیب و نمایش) - آرایه JSON از کلیدها
     "menu_order": '["miniapp","btn_buy","btn_test","btn_my_orders","btn_wallet","btn_referral","btn_wheel","btn_contact","btn_admin_panel"]',
 }
@@ -389,6 +397,7 @@ class Database:
             ("products", "duration_days", "INTEGER DEFAULT 30"),
             ("configs", "expires_at", "TEXT"),
             ("configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
+            ("configs", "volume_reminder_sent", "INTEGER DEFAULT 0"),
             ("products", "low_stock_alert_sent", "INTEGER DEFAULT 0"),
             ("admins", "role", "TEXT DEFAULT 'admin'"),
             ("support_messages", "is_read_by_admin", "INTEGER DEFAULT 0"),
@@ -887,7 +896,7 @@ class Database:
             expires_at = (now + timedelta(days=duration_days)).isoformat()
             conn.execute(
                 "UPDATE configs SET is_used=1, assigned_user_id=?, assigned_at=?, expires_at=?, "
-                "renewal_reminder_sent=0 WHERE id=?",
+                "renewal_reminder_sent=0, volume_reminder_sent=0 WHERE id=?",
                 (user_tg_id, now.isoformat(), expires_at, row["id"]),
             )
             return {"id": row["id"], "link": row["link"], "expires_at": expires_at}
@@ -912,7 +921,7 @@ class Database:
             for row in rows:
                 conn.execute(
                     "UPDATE configs SET is_used=1, assigned_user_id=?, assigned_at=?, expires_at=?, "
-                    "renewal_reminder_sent=0 WHERE id=?",
+                    "renewal_reminder_sent=0, volume_reminder_sent=0 WHERE id=?",
                     (user_tg_id, now.isoformat(), expires_at, row["id"]),
                 )
                 results.append({"id": row["id"], "link": row["link"], "expires_at": expires_at})
@@ -937,7 +946,7 @@ class Database:
             expires_at = (now + timedelta(days=duration_days)).isoformat()
             conn.execute(
                 "UPDATE configs SET is_used=1, assigned_user_id=?, assigned_at=?, expires_at=?, "
-                "renewal_reminder_sent=0 WHERE id=?",
+                "renewal_reminder_sent=0, volume_reminder_sent=0 WHERE id=?",
                 (admin_tg_id, now.isoformat(), expires_at, row["id"]),
             )
             return {"id": row["id"], "link": row["link"], "expires_at": expires_at}
@@ -950,7 +959,7 @@ class Database:
         with self._get_conn() as conn:
             conn.execute(
                 "UPDATE configs SET is_used=0, assigned_user_id=NULL, assigned_at=NULL, "
-                "expires_at=NULL, renewal_reminder_sent=0 WHERE id=?",
+                "expires_at=NULL, renewal_reminder_sent=0, volume_reminder_sent=0 WHERE id=?",
                 (config_id,),
             )
 
@@ -1575,6 +1584,53 @@ class Database:
         code = f"RENEW{user_tg_id}{secrets.randbelow(9000) + 1000}"
         self.create_discount_code(
             code, percent=settings["discount_percent"], max_uses=1, expires_at=expires_at, source="renewal_reminder"
+        )
+        return code, expires_at, settings["discount_percent"], settings["discount_expiry_hours"]
+
+    # -----------------------------------------------------------------------
+    # یادآوری اتمام حجم + کد تخفیف تشویقی تمدید (مستقل از یادآوری تاریخ انقضا)
+    # -----------------------------------------------------------------------
+
+    def get_volume_reminder_settings(self) -> dict:
+        return {
+            "enabled": self.get_setting("volume_reminder_enabled", "1") == "1",
+            "mode": self.get_setting("volume_reminder_mode", "percent"),
+            "percent": int(self.get_setting("volume_reminder_percent", "80") or 80),
+            "gb_left": float(self.get_setting("volume_reminder_gb_left", "2") or 2),
+            "discount_percent": int(self.get_setting("volume_discount_percent", "20") or 20),
+            "discount_expiry_hours": int(self.get_setting("volume_discount_expiry_hours", "24") or 24),
+        }
+
+    def get_configs_due_for_volume_reminder(self):
+        """کانفیگ‌های فعال و بدون یادآوری حجم را برمی‌گرداند.
+
+        آستانه‌ی واقعی (درصد/گیگ) از روی مصرف زنده‌ی Subscription در
+        renewal_reminders.py بررسی می‌شود؛ اینجا فقط کاندیدها فیلتر می‌شوند.
+        """
+        settings = self.get_volume_reminder_settings()
+        if not settings["enabled"]:
+            return []
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT cf.id as config_id, cf.link, cf.assigned_user_id, "
+                "p.id as product_id, p.name as product_name "
+                "FROM configs cf JOIN products p ON cf.product_id = p.id "
+                "WHERE cf.is_used=1 AND cf.volume_reminder_sent=0 "
+                "AND cf.link IS NOT NULL AND TRIM(cf.link) != ''"
+            ).fetchall()
+
+    def mark_volume_reminder_sent(self, config_id: int):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE configs SET volume_reminder_sent=1 WHERE id=?", (config_id,))
+
+    def generate_volume_discount_code(self, user_tg_id: int) -> tuple:
+        """یک کد تخفیف یکبارمصرف و محدود به زمان برای یادآوری اتمام حجم کاربر می‌سازد.
+        خروجی: (code, expires_at, percent, expiry_hours)"""
+        settings = self.get_volume_reminder_settings()
+        expires_at = (datetime.utcnow() + timedelta(hours=settings["discount_expiry_hours"])).isoformat()
+        code = f"VOLUME{user_tg_id}{secrets.randbelow(9000) + 1000}"
+        self.create_discount_code(
+            code, percent=settings["discount_percent"], max_uses=1, expires_at=expires_at, source="volume_reminder"
         )
         return code, expires_at, settings["discount_percent"], settings["discount_expiry_hours"]
 

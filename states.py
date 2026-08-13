@@ -110,6 +110,13 @@ class AdminStockAlertSettings(StatesGroup):
     waiting_threshold = State()
 
 
+class AdminVolumeReminderSettings(StatesGroup):
+    waiting_percent = State()
+    waiting_gb_left = State()
+    waiting_discount_percent = State()
+    waiting_discount_hours = State()
+
+
 class AdminRestoreBackup(StatesGroup):
     waiting_file = State()
     waiting_confirm = State()

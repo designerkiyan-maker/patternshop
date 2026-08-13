@@ -104,11 +104,83 @@ async def check_and_send_renewal_reminders(bot, db) -> None:
         await _send_single_reminder(bot, db, row)
 
 
+async def _send_single_volume_reminder(bot, db, row) -> None:
+    user_id = row["assigned_user_id"]
+    if not user_id:
+        db.mark_volume_reminder_sent(row["config_id"])
+        return
+
+    settings = db.get_volume_reminder_settings()
+
+    info = await fetch_sub_info(row["link"])
+    if not info.get("ok"):
+        logger.warning(
+            "اطلاعات مصرف Subscription برای config=%s قابل دریافت نیست؛ "
+            "یادآوری حجم ارسال نمی‌شود.",
+            row["config_id"],
+        )
+        return
+
+    total = info.get("total") or 0
+    # کانفیگ‌های نامحدود مبنای حجمی ندارند؛ فقط یادآوری تاریخ انقضا برایشان معتبر است.
+    if total <= 0:
+        return
+
+    used = (info.get("upload") or 0) + (info.get("download") or 0)
+    remaining_gb = max(0, total - used) / (1024 ** 3)
+    percent_used = min(100, (used / total) * 100) if total else 0
+
+    if settings["mode"] == "gb":
+        due = remaining_gb <= settings["gb_left"]
+    else:
+        due = percent_used >= settings["percent"]
+
+    if not due:
+        return
+
+    code, discount_expires_at, percent, expiry_hours = db.generate_volume_discount_code(user_id)
+
+    text = (
+        "📉 یادآوری اتمام حجم\n\n"
+        f"📦 حجم سرویس «{row['product_name']}» شما رو به اتمام است.\n\n"
+        f"📊 حدود {remaining_gb:.2f} گیگابایت ({100 - round(percent_used)}٪) از حجم شما باقی مانده.\n\n"
+        f"🎁 برای اینکه دچار قطعی نشوید، یک کد تخفیف اختصاصی {percent}٪ برایتان صادر شد:\n"
+        f"🎟 کد تخفیف: `{code}`\n"
+        f"⏳ این کد فقط تا {expiry_hours} ساعت آینده معتبر است.\n\n"
+        "✅ اگر همین امروز تمدید کنید، از این تخفیف بهره‌مند خواهید شد.\n"
+        "برای تمدید، از منوی اصلی «🛒 خرید کانفیگ» را بزنید و هنگام خرید، دکمه‌ی "
+        "«🎟 وارد کردن کد تخفیف» را زده و این کد را وارد کنید."
+    )
+
+    try:
+        await bot.send_message(user_id, text, parse_mode="Markdown")
+    except Exception:
+        logger.warning("ارسال یادآوری اتمام حجم به کاربر %s ناموفق بود.", user_id)
+
+    db.mark_volume_reminder_sent(row["config_id"])
+
+
+async def check_and_send_volume_reminders(bot, db) -> None:
+    """یک بار کانفیگ‌ها را بررسی می‌کند و بر اساس مصرف زنده‌ی Subscription، یادآوری اتمام حجم می‌فرستد."""
+    try:
+        rows = db.get_configs_due_for_volume_reminder()
+    except Exception:
+        logger.exception("خطا در دریافت لیست یادآوری‌های اتمام حجم")
+        return
+
+    for row in rows:
+        await _send_single_volume_reminder(bot, db, row)
+
+
 async def renewal_reminder_loop(bot, db, interval_seconds: int = 3600) -> None:
-    """در پس‌زمینه، به‌صورت دوره‌ای (پیش‌فرض هر ۱ ساعت) بررسی و یادآوری ارسال می‌کند."""
+    """در پس‌زمینه، به‌صورت دوره‌ای (پیش‌فرض هر ۱ ساعت) بررسی و یادآوری‌های تاریخ انقضا و اتمام حجم را ارسال می‌کند."""
     while True:
         try:
             await check_and_send_renewal_reminders(bot, db)
         except Exception:
             logger.exception("خطا در چرخه‌ی یادآوری تمدید سرویس")
+        try:
+            await check_and_send_volume_reminders(bot, db)
+        except Exception:
+            logger.exception("خطا در چرخه‌ی یادآوری اتمام حجم")
         await asyncio.sleep(interval_seconds)
