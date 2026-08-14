@@ -124,3 +124,28 @@ class AdminVolumeReminderSettings(StatesGroup):
 class AdminRestoreBackup(StatesGroup):
     waiting_file = State()
     waiting_confirm = State()
+
+
+class AdminAddPanelServer(StatesGroup):
+    waiting_name = State()
+    waiting_url = State()
+    waiting_username = State()
+    waiting_password = State()
+    waiting_group = State()
+
+
+class AdminAddPricingTier(StatesGroup):
+    waiting_from_gb = State()
+    waiting_to_gb = State()
+    waiting_price = State()
+
+
+class AdminCustomConfigSettings(StatesGroup):
+    waiting_min_gb = State()
+    waiting_max_gb = State()
+
+
+class CustomConfigFlow(StatesGroup):
+    waiting_username = State()
+    waiting_volume = State()
+    waiting_receipt = State()
