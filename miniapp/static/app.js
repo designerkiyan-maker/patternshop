@@ -920,7 +920,7 @@ async function loadSubInfo(orderId, link) {
 // ---------------------------------------------------------------------------
 // کارت بانکی + آپلود رسید (مشترک بین «شارژ کیف پول» و «پرداخت سفارش»)
 // ---------------------------------------------------------------------------
-function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, successText }) {
+function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, successText, cryptoEnabled, createCryptoInvoice }) {
   box.innerHTML = `
     <h3><span class="ic">💳</span>واریز و ارسال رسید</h3>
     <div class="bank-card">
@@ -946,6 +946,16 @@ function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, s
     </label>
     <img id="receipt-preview" class="receipt-preview" style="display:none" />
     <button class="btn" id="send-receipt-btn" disabled>ارسال رسید برای تایید</button>
+
+    ${cryptoEnabled ? `
+      <div style="display:flex;align-items:center;gap:8px;margin:16px 0">
+        <div style="flex:1;height:1px;background:var(--border,rgba(255,255,255,.1))"></div>
+        <span class="hint-text" style="margin:0">یا</span>
+        <div style="flex:1;height:1px;background:var(--border,rgba(255,255,255,.1))"></div>
+      </div>
+      <button class="btn outline" id="pay-crypto-btn" style="width:100%">🪙 پرداخت با ارز دیجیتال (تایید آنی)</button>
+      <div id="crypto-pay-error" class="field-error"></div>
+    ` : ""}
   `;
 
   box.querySelector("#copy-card-btn").onclick = () => {
@@ -983,6 +993,34 @@ function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, s
       sendBtn.textContent = "ارسال رسید برای تایید";
     }
   };
+
+  if (cryptoEnabled) {
+    const cryptoBtn = box.querySelector("#pay-crypto-btn");
+    const cryptoErr = box.querySelector("#crypto-pay-error");
+    cryptoBtn.onclick = async () => {
+      cryptoErr.textContent = "";
+      cryptoBtn.disabled = true;
+      cryptoBtn.textContent = "در حال ساخت فاکتور...";
+      try {
+        const res = await createCryptoInvoice();
+        tg.HapticFeedback.notificationOccurred("success");
+        box.innerHTML = `
+          <div class="state-msg">
+            <span class="ic">🪙</span>
+            فاکتور پرداخت ساخته شد. روی دکمه‌ی زیر بزن، ارز و مبلغ رو انتخاب کن و پرداخت رو تکمیل کن.
+            <br/>به‌محض تایید تراکنش روی بلاک‌چین، به‌صورت خودکار سفارش/کیف‌پول شما تسویه می‌شود.
+          </div>
+          <button class="btn" id="open-invoice-btn" style="width:100%;margin-top:12px">🔗 رفتن به صفحه‌ی پرداخت</button>
+        `;
+        box.querySelector("#open-invoice-btn").onclick = () => tg.openLink(res.invoice_url);
+        tg.openLink(res.invoice_url);
+      } catch (e) {
+        cryptoErr.textContent = e.message;
+        cryptoBtn.disabled = false;
+        cryptoBtn.textContent = "🪙 پرداخت با ارز دیجیتال (تایید آنی)";
+      }
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1089,6 +1127,8 @@ async function buyProduct(productId, quantity, code) {
           fd.append("photo", file);
           await apiUpload(`/api/orders/${result.order_id}/receipt`, fd);
         },
+        cryptoEnabled: result.crypto_enabled,
+        createCryptoInvoice: async () => api(`/api/orders/${result.order_id}/crypto-invoice`, { method: "POST" }),
       });
     }
   } catch (e) {
@@ -1228,7 +1268,7 @@ async function renderWallet() {
       btn.disabled = true;
       try {
         const r = await api("/api/wallet/topup-request", { method: "POST", body: JSON.stringify({ amount }) });
-        renderTopupPaymentStep(r.topup_id, amount, r.card_number, r.card_holder);
+        renderTopupPaymentStep(r.topup_id, amount, r.card_number, r.card_holder, r.crypto_enabled);
       } catch (e) {
         notify("خطا: " + e.message);
         btn.disabled = false;
@@ -1239,7 +1279,7 @@ async function renderWallet() {
   }
 }
 
-function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder) {
+function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder, cryptoEnabled) {
   const box = document.getElementById("topup-card");
   renderReceiptCard(box, {
     amount, cardNumber, cardHolder,
@@ -1250,6 +1290,8 @@ function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder) {
       fd.append("photo", file);
       await apiUpload("/api/wallet/topup-receipt", fd);
     },
+    cryptoEnabled,
+    createCryptoInvoice: async () => api("/api/wallet/crypto-invoice", { method: "POST", body: JSON.stringify({ topup_id: topupId }) }),
   });
 }
 
@@ -2458,11 +2500,12 @@ async function renderAdminSalesSection() {
   const body = document.getElementById("admin-section-body");
   body.innerHTML = skeleton(4);
   try {
-    const [referral, wheel, renewal, volumeRem, discounts] = await Promise.all([
+    const [referral, wheel, renewal, volumeRem, crypto, discounts] = await Promise.all([
       api("/api/admin/settings/referral"),
       api("/api/admin/settings/wheel"),
       api("/api/admin/settings/renewal"),
       api("/api/admin/settings/volume-reminder"),
+      api("/api/admin/settings/crypto"),
       api("/api/admin/discounts"),
     ]);
 
@@ -2538,6 +2581,20 @@ async function renderAdminSalesSection() {
         <input class="input" id="vol-discount-expiry" type="number" placeholder="مثال: 24" value="${volumeRem.discount_expiry_hours}" style="margin-bottom:4px" />
         <div class="field-error" id="vol-error"></div>
         <button class="btn" id="vol-save" style="margin-top:8px">💾 ذخیره</button>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🪙 پرداخت کریپتو (Plisio)</div>
+        ${crypto.gateway_configured ? "" : `<p class="hint-text" style="color:var(--danger,#ff5a7a)">⚠️ هنوز API Key درگاه تنظیم نشده. از داخل بات، پنل مدیریت → «تنظیم درگاه کریپتو (Plisio)» رو بزن و کلیدت رو بفرست، بعد اینجا فعالش کن.</p>`}
+        <p class="hint-text">با فعال شدن، کاربر هم موقع خرید مستقیم و هم موقع شارژ کیف پول می‌تونه با ارز دیجیتال (BTC/ETH/USDT/...) پرداخت کنه و بلافاصله بعد از تایید تراکنش، سفارش/کیف‌پول به‌صورت خودکار تسویه می‌شه.</p>
+        <div class="field-switch-row">
+          <span>پرداخت کریپتو فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="crypto-enabled" ${crypto.enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">نرخ تبدیل هر ۱ دلار به تومان (خالی یا ۰ = خودکار از نوبیتکس)</label>
+        <input class="input" id="crypto-rate" type="number" placeholder="خودکار (نوبیتکس)" value="${crypto.usd_to_toman_rate || ""}" style="margin-bottom:4px" />
+        <div class="field-error" id="crypto-error"></div>
+        <button class="btn" id="crypto-save" style="margin-top:8px">💾 ذخیره</button>
       </div>
 
       <div class="card">
@@ -2672,6 +2729,22 @@ async function renderAdminSalesSection() {
         });
         tg.HapticFeedback.notificationOccurred("success");
         notify("تنظیمات یادآوری اتمام حجم ذخیره شد.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+
+    document.getElementById("crypto-save").onclick = async () => {
+      const errBox = document.getElementById("crypto-error");
+      errBox.textContent = "";
+      const rateRaw = document.getElementById("crypto-rate").value.trim();
+      const rate = rateRaw ? Number(rateRaw) : 0;
+      if (isNaN(rate) || rate < 0) { errBox.textContent = "نرخ تبدیل باید عددی معتبر باشد (یا خالی بذار برای حالت خودکار)."; return; }
+      try {
+        await api("/api/admin/settings/crypto", {
+          method: "POST",
+          body: JSON.stringify({ enabled: document.getElementById("crypto-enabled").checked, usd_to_toman_rate: rate }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("تنظیمات پرداخت کریپتو ذخیره شد.");
       } catch (e) { errBox.textContent = e.message; }
     };
 
