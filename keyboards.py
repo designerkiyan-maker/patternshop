@@ -100,18 +100,10 @@ def main_menu_kb(db, is_admin: bool) -> ReplyKeyboardMarkup:
             _styled_button(settings.get("btn_admin_panel", "⚙️ پنل مدیریت"), settings.get("btn_admin_panel_style", ""))
         ]
 
-    def row_custom_config():
-        if settings.get("custom_config_enabled", "0") != "1":
-            return None
-        return [
-            _styled_button(settings.get("btn_custom_config", "🛠 ساخت کانفیگ شخصی"), settings.get("btn_custom_config_style", "primary"))
-        ]
-
     builders = {
         "miniapp": row_miniapp,
         "btn_buy": row_buy,
         "btn_test": row_test,
-        "btn_custom_config": row_custom_config,
         "btn_my_orders": row_my_orders,
         "btn_wallet": row_wallet,
         "btn_referral": row_referral,
@@ -242,7 +234,6 @@ ADMIN_PANEL_ITEMS = [
     ("adm_renewal_settings", "🔔 یادآوری تمدید سرویس", "adm_renewal_settings"),
     ("adm_volume_reminder_settings", "📉 یادآوری اتمام حجم", "adm_volume_reminder_settings"),
     ("adm_stock_alert_settings", "📦 آستانه‌ی هشدار موجودی", "adm_stock_alert_settings"),
-    ("adm_custom_config_settings", "🛠 ساخت کانفیگ شخصی (پنل‌های VPN)", "adm_custom_config_settings"),
     ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
     ("adm_resellers_menu", "🏪 مدیریت بات‌های نمایندگی", "adm_resellers_menu"),
     ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
@@ -689,64 +680,6 @@ def stock_alert_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✏️ تغییر آستانه", callback_data="adm_stock_alert_edit")],
         [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
     ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-# ---------------------------------------------------------------------------
-# ساخت کانفیگ شخصی (پنل‌های VPN + قیمت‌گذاری)
-# ---------------------------------------------------------------------------
-
-def custom_config_menu_kb(db) -> InlineKeyboardMarkup:
-    settings = db.get_custom_config_settings()
-    status = "🟢 فعال" if settings["enabled"] else "🔴 غیرفعال"
-    rows = [
-        [InlineKeyboardButton(text=f"وضعیت: {status} (برای تغییر بزنید)", callback_data="adm_custom_config_toggle")],
-        [InlineKeyboardButton(
-            text=f"📶 حداقل/حداکثر حجم: {settings['min_gb']} تا {settings['max_gb']} گیگ",
-            callback_data="adm_custom_config_edit_range",
-        )],
-        [InlineKeyboardButton(text="🖥 مدیریت سرورهای پنل", callback_data="adm_panel_servers")],
-        [InlineKeyboardButton(text="💰 مدیریت قیمت‌گذاری پلکانی", callback_data="adm_pricing_tiers")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def panel_servers_list_kb(db) -> InlineKeyboardMarkup:
-    servers = db.get_panel_servers()
-    rows = []
-    for s in servers:
-        icon = "🟢" if s["is_active"] else "🔴"
-        rows.append([InlineKeyboardButton(
-            text=f"{icon} {s['name']} ({s['panel_type']})", callback_data=f"adm_panel_server_view:{s['id']}",
-        )])
-    rows.append([InlineKeyboardButton(text="➕ افزودن سرور جدید", callback_data="adm_panel_server_add")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_custom_config_settings")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def panel_server_view_kb(server) -> InlineKeyboardMarkup:
-    toggle_text = "🔴 غیرفعال‌سازی" if server["is_active"] else "🟢 فعال‌سازی"
-    rows = [
-        [InlineKeyboardButton(text="🔌 تست اتصال", callback_data=f"adm_panel_server_test:{server['id']}")],
-        [InlineKeyboardButton(text=toggle_text, callback_data=f"adm_panel_server_toggle:{server['id']}")],
-        [InlineKeyboardButton(text="🗑 حذف سرور", callback_data=f"adm_panel_server_delete:{server['id']}")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_panel_servers")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def pricing_tiers_kb(db) -> InlineKeyboardMarkup:
-    tiers = db.get_pricing_tiers()
-    rows = []
-    for t in tiers:
-        to_label = f"{t['to_gb']}" if t["to_gb"] is not None else "∞"
-        rows.append([InlineKeyboardButton(
-            text=f"{t['from_gb']} تا {to_label} گیگ ← {t['price_per_gb']:,} تومان/گیگ  🗑",
-            callback_data=f"adm_pricing_tier_delete:{t['id']}",
-        )])
-    rows.append([InlineKeyboardButton(text="➕ افزودن بازه‌ی قیمت", callback_data="adm_pricing_tier_add")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_custom_config_settings")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
