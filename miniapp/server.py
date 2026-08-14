@@ -51,6 +51,7 @@ from sub_info import fetch_sub_info
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
+from panel_providers import get_provider, PanelError, PanelUsernameTakenError
 
 app = FastAPI(title="V2Ray Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -1228,6 +1229,161 @@ def api_admin_delete_category(cat_id: int, auth=Depends(require_senior_admin)):
     if not db.get_category(cat_id):
         raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
     db.delete_category(cat_id)
+    return {"status": "ok"}
+
+
+class PanelServerCreate(BaseModel):
+    name: str
+    panel_type: str = "pasarguard"
+    api_url: str
+    api_username: str
+    api_password: str
+
+
+class PanelServerUpdate(BaseModel):
+    name: Optional[str] = None
+    api_url: Optional[str] = None
+    api_username: Optional[str] = None
+    api_password: Optional[str] = None
+
+
+class PricingTierCreate(BaseModel):
+    from_gb: int
+    to_gb: Optional[int] = None  # None یعنی تا بی‌نهایت
+    price_per_gb: int
+
+
+class CustomConfigSettingsUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    min_gb: Optional[int] = None
+    max_gb: Optional[int] = None
+
+
+def _panel_server_public(s) -> dict:
+    return {
+        "id": s["id"], "name": s["name"], "panel_type": s["panel_type"],
+        "api_url": s["api_url"], "api_username": s["api_username"],
+        "default_group": s["default_group"], "is_active": bool(s["is_active"]),
+    }
+
+
+@app.get("/api/admin/panel-servers")
+def api_admin_list_panel_servers(auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    return [_panel_server_public(s) for s in db.get_panel_servers()]
+
+
+@app.post("/api/admin/panel-servers")
+def api_admin_add_panel_server(body: PanelServerCreate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    admin_id, _, _ = auth
+    if not body.name.strip() or not body.api_url.strip() or not body.api_username.strip() or not body.api_password.strip():
+        raise HTTPException(status_code=400, detail="همه‌ی فیلدها الزامی هستند.")
+    if body.panel_type not in ("pasarguard",):
+        raise HTTPException(status_code=400, detail="نوع پنل پشتیبانی نمی‌شود.")
+    server_id = db.add_panel_server(
+        body.name.strip(), body.panel_type, body.api_url.strip(),
+        body.api_username.strip(), body.api_password,
+    )
+    db.log_admin_action(admin_id, "panel_server_add", f"سرور «{body.name}» (#{server_id}) از مینی‌اپ")
+    return {"id": server_id}
+
+
+@app.patch("/api/admin/panel-servers/{server_id}")
+def api_admin_edit_panel_server(server_id: int, body: PanelServerUpdate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    if not db.get_panel_server(server_id):
+        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
+    db.update_panel_server(
+        server_id, name=body.name, api_url=body.api_url,
+        api_username=body.api_username, api_password=body.api_password,
+    )
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/panel-servers/{server_id}/toggle")
+def api_admin_toggle_panel_server(server_id: int, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    server = db.get_panel_server(server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
+    db.update_panel_server(server_id, is_active=0 if server["is_active"] else 1)
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/panel-servers/{server_id}/test")
+async def api_admin_test_panel_server(server_id: int, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    server = db.get_panel_server(server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
+    try:
+        provider = get_provider(server)
+        ok = await provider.test_connection()
+    except PanelError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": ok}
+
+
+@app.delete("/api/admin/panel-servers/{server_id}")
+def api_admin_delete_panel_server(server_id: int, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    admin_id, _, _ = auth
+    if not db.get_panel_server(server_id):
+        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
+    db.delete_panel_server(server_id)
+    db.log_admin_action(admin_id, "panel_server_delete", f"سرور #{server_id} از مینی‌اپ")
+    return {"status": "ok"}
+
+
+@app.get("/api/admin/custom-config/settings")
+def api_admin_get_custom_config_settings(auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    return db.get_custom_config_settings()
+
+
+@app.post("/api/admin/custom-config/settings")
+def api_admin_update_custom_config_settings(body: CustomConfigSettingsUpdate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    if body.enabled is not None:
+        db.set_setting("custom_config_enabled", "1" if body.enabled else "0")
+    if body.min_gb is not None:
+        if body.min_gb <= 0:
+            raise HTTPException(status_code=400, detail="حداقل حجم باید بزرگ‌تر از صفر باشد.")
+        db.set_setting("custom_config_min_gb", str(body.min_gb))
+    if body.max_gb is not None:
+        min_gb = body.min_gb if body.min_gb is not None else db.get_custom_config_settings()["min_gb"]
+        if body.max_gb <= min_gb:
+            raise HTTPException(status_code=400, detail="حداکثر حجم باید بزرگ‌تر از حداقل باشد.")
+        db.set_setting("custom_config_max_gb", str(body.max_gb))
+    return {"status": "ok"}
+
+
+@app.get("/api/admin/custom-config/pricing-tiers")
+def api_admin_list_pricing_tiers(auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    tiers = db.get_pricing_tiers()
+    return [
+        {"id": t["id"], "from_gb": t["from_gb"], "to_gb": t["to_gb"], "price_per_gb": t["price_per_gb"]}
+        for t in tiers
+    ]
+
+
+@app.post("/api/admin/custom-config/pricing-tiers")
+def api_admin_add_pricing_tier(body: PricingTierCreate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    if body.from_gb <= 0 or body.price_per_gb <= 0:
+        raise HTTPException(status_code=400, detail="مقادیر باید مثبت باشند.")
+    if body.to_gb is not None and body.to_gb <= body.from_gb:
+        raise HTTPException(status_code=400, detail="انتهای بازه باید بزرگ‌تر از ابتدای آن باشد.")
+    tier_id = db.add_pricing_tier(body.from_gb, body.to_gb, body.price_per_gb)
+    return {"id": tier_id}
+
+
+@app.delete("/api/admin/custom-config/pricing-tiers/{tier_id}")
+def api_admin_delete_pricing_tier(tier_id: int, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    db.delete_pricing_tier(tier_id)
     return {"status": "ok"}
 
 
