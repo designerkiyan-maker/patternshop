@@ -23,6 +23,7 @@ from config_delivery import deliver_config_to_user
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
 from backup import create_backup, restore_backup, is_valid_sqlite_db
+import crypto_payment
 from states import (
     AdminAddCategory,
     AdminAddProduct,
@@ -1567,11 +1568,18 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return await deny_support(call)
         current = db.get_setting("plisio_api_key", "")
         masked = f"...{current[-4:]}" if current else "❌ تنظیم نشده"
+        source = crypto_payment.resolve_plisio_key_source(db)
+        source_note = {
+            "db": "✅ از همین پنل بات خوانده می‌شود (بات و مینی‌اپ هر دو همین را می‌بینند، بدون نیاز به ری‌استارت).",
+            "env": "⚠️ فقط از فایل .env این پروسه خوانده می‌شود. اگر بات و مینی‌اپ را جدا ری‌استارت نکرده باشی ممکن است این دو با هم ناهماهنگ باشند. پیشنهاد: همینجا دوباره ثبتش کن تا مطمئن بشی.",
+            "none": "❌ هیچ کلیدی (نه در دیتابیس، نه در .env) تنظیم نشده.",
+        }[source]
         await state.set_state(AdminSetPlisio.waiting_key)
         await safe_edit(
             call,
             f"🪙 API Key حساب Plisio را ارسال کن (از plisio.net → API Settings).\n"
-            f"وضعیت فعلی: {masked}\n\n"
+            f"وضعیت فعلی: {masked}\n"
+            f"منبع کلید: {source_note}\n\n"
             f"برای غیرفعال‌کردن، عبارت «حذف» را بفرست.",
             reply_markup=kb.admin_back_kb(),
         )

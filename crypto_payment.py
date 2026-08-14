@@ -5,11 +5,14 @@
 اعتبارسنجی‌ها بین این دو مسیر یکسان بماند.
 """
 
+import logging
 from datetime import datetime
 
 from config import PLISIO_API_KEY, API_BASE_URL
 import plisio_client
 import exchange_rate
+
+logger = logging.getLogger("crypto_payment")
 
 
 class CryptoPaymentError(Exception):
@@ -21,6 +24,19 @@ def resolve_plisio_key(db) -> str:
     """کلید API Plisio را برمی‌گرداند: اولویت با کلیدی است که ادمین از داخل بات
     برای همین فروشگاه (تننت) تنظیم کرده؛ در غیر این صورت کلید سراسری .env."""
     return db.get_setting("plisio_api_key", "") or PLISIO_API_KEY
+
+
+def resolve_plisio_key_source(db) -> str:
+    """برای دیباگ/نمایش در پنل ادمین: کلید از کجا آمده؟
+    'db' یعنی از داخل پنل بات ثبت شده (پیشنهادی، فوری و بدون نیاز به ری‌استارت).
+    'env' یعنی فقط از .env این پروسه خوانده شده (اگر بات و مینی‌اپ را جدا
+    ری‌استارت نکنی ممکن است این دو با هم ناهماهنگ شوند).
+    'none' یعنی هیچ‌کدام تنظیم نشده."""
+    if db.get_setting("plisio_api_key", ""):
+        return "db"
+    if PLISIO_API_KEY:
+        return "env"
+    return "none"
 
 
 def crypto_payment_available(db) -> bool:
@@ -36,8 +52,13 @@ async def toman_to_usd(db, amount_toman: int) -> float:
     if rate <= 0:
         try:
             rate = await exchange_rate.get_usd_to_toman_rate()
-        except Exception:
-            raise CryptoPaymentError("دریافت نرخ لحظه‌ای دلار ناموفق بود، لحظاتی دیگر دوباره تلاش کن.")
+        except Exception as e:
+            logger.warning("دریافت نرخ خودکار دلار ناموفق بود: %s", e)
+            raise CryptoPaymentError(
+                "دریافت نرخ لحظه‌ای دلار ناموفق بود (احتمالاً سرور به منابع نرخ دسترسی ندارد). "
+                "می‌تونی از مینی‌اپ → مدیریت → تنظیمات کریپتو، یک نرخ دلار به تومان دستی ثبت کنی "
+                "تا دیگر نیازی به دریافت خودکار نباشد."
+            )
     usd = amount_toman / rate
     if usd < 1:
         raise CryptoPaymentError("مبلغ برای پرداخت کریپتو خیلی کم است (حداقل حدود ۱ دلار).")
