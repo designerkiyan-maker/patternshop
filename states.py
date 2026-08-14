@@ -57,6 +57,10 @@ class AdminSetCard(StatesGroup):
     waiting_holder = State()
 
 
+class AdminSetPlisio(StatesGroup):
+    waiting_key = State()
+
+
 class AdminBroadcast(StatesGroup):
     waiting_message = State()
 

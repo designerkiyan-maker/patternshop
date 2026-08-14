@@ -78,6 +78,10 @@ DEFAULT_SETTINGS = {
     "wheel_code_expiry_hours": "24",  # اعتبار کد جایزه پس از برد (ساعت)
     "wheel_cooldown_hours": "24",  # فاصله مجاز بین دو چرخش هر کاربر
     "btn_wheel": "🎡 گردونه شانس",
+    # پرداخت کریپتو (Plisio)
+    "crypto_payment_enabled": "0",
+    "plisio_api_key": "",  # کلید API درگاه Plisio؛ از داخل بات (دکمه‌ی «تنظیم درگاه کریپتو») قابل تنظیم است
+    "usd_to_toman_rate": "0",  # نرخ تبدیل هر ۱ دلار به تومان؛ توسط ادمین دستی تنظیم می‌شود
     "btn_wheel_style": "success",
     # یادآوری اتمام سرویس + کد تخفیف تشویقی تمدید
     "renewal_reminder_enabled": "1",
@@ -284,6 +288,21 @@ class Database:
                     updated_at TEXT
                 );
 
+                CREATE TABLE IF NOT EXISTS crypto_invoices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    txn_id TEXT UNIQUE NOT NULL,
+                    kind TEXT NOT NULL,              -- 'order' یا 'wallet_topup'
+                    ref_id INTEGER NOT NULL,         -- order_id یا topup_id
+                    user_id INTEGER NOT NULL,
+                    amount_toman INTEGER NOT NULL,
+                    source_amount_usd REAL NOT NULL,
+                    currency TEXT,                   -- ارز انتخابی کاربر (مثلاً BTC, USDT_TRX)
+                    invoice_url TEXT,
+                    status TEXT DEFAULT 'new',        -- new/pending/completed/expired/error/cancelled
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT
+                );
+
                 CREATE TABLE IF NOT EXISTS reseller_bots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     bot_token TEXT UNIQUE NOT NULL,
@@ -364,6 +383,8 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
                 CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket_id ON ticket_messages(ticket_id);
                 CREATE INDEX IF NOT EXISTS idx_reseller_bots_active ON reseller_bots(is_active);
+                CREATE INDEX IF NOT EXISTS idx_crypto_invoices_txn ON crypto_invoices(txn_id);
+                CREATE INDEX IF NOT EXISTS idx_crypto_invoices_ref ON crypto_invoices(kind, ref_id);
                 """
             )
 
@@ -1506,6 +1527,51 @@ class Database:
     def delete_reseller_bot(self, bot_id: int):
         with self._get_conn() as conn:
             conn.execute("DELETE FROM reseller_bots WHERE id=?", (bot_id,))
+
+    # -----------------------------------------------------------------------
+    # فاکتورهای پرداخت کریپتو (Plisio)
+    # -----------------------------------------------------------------------
+
+    def create_crypto_invoice(self, txn_id: str, kind: str, ref_id: int, user_id: int,
+                               amount_toman: int, source_amount_usd: float,
+                               invoice_url: str = None, currency: str = None) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO crypto_invoices (txn_id, kind, ref_id, user_id, amount_toman, "
+                "source_amount_usd, invoice_url, currency, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new')",
+                (txn_id, kind, ref_id, user_id, amount_toman, source_amount_usd, invoice_url, currency),
+            )
+            return cur.lastrowid
+
+    def get_crypto_invoice_by_txn(self, txn_id: str):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM crypto_invoices WHERE txn_id=?", (txn_id,)).fetchone()
+
+    def get_crypto_invoice(self, invoice_id: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM crypto_invoices WHERE id=?", (invoice_id,)).fetchone()
+
+    def update_crypto_invoice_status(self, txn_id: str, status: str, currency: str = None):
+        with self._get_conn() as conn:
+            if currency is not None:
+                conn.execute(
+                    "UPDATE crypto_invoices SET status=?, currency=?, updated_at=? WHERE txn_id=?",
+                    (status, currency, datetime.utcnow().isoformat(), txn_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE crypto_invoices SET status=?, updated_at=? WHERE txn_id=?",
+                    (status, datetime.utcnow().isoformat(), txn_id),
+                )
+
+    def get_pending_crypto_invoice_for_ref(self, kind: str, ref_id: int):
+        """آخرین فاکتور فعال (new/pending) ثبت‌شده برای یک سفارش یا شارژ کیف پول خاص را برمی‌گرداند."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM crypto_invoices WHERE kind=? AND ref_id=? AND status IN ('new','pending') "
+                "ORDER BY id DESC LIMIT 1",
+                (kind, ref_id),
+            ).fetchone()
 
     # -----------------------------------------------------------------------
     # گردونه شانس

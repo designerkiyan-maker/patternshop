@@ -10,6 +10,7 @@ Router تازه می‌سازد که به همان یک db گره خورده؛ �
 
 import random
 import asyncio
+import logging
 
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart
@@ -250,7 +251,7 @@ def create_user_router(db) -> Router:
         caption = (
             f"🧾 سفارش #{order_id}\n"
             f"👤 کاربر: {first_name or ''} (@{username or '---'})\n"
-            f"🆔 آیدی عددی: `{order['user_id']}`\n"
+            f"🆔 آیدی عددی: {order['user_id']}\n"
             f"📦 محصول: {product['name']}"
             + (f" × {quantity}\n" if quantity > 1 else "\n")
             + f"💰 قیمت پایه: {order['base_price']:,} تومان\n"
@@ -272,18 +273,20 @@ def create_user_router(db) -> Router:
             try:
                 if receipt_file_id:
                     sent = await bot.send_photo(
-                        admin_id, receipt_file_id, caption=caption, parse_mode="Markdown",
+                        admin_id, receipt_file_id, caption=caption,
                         reply_markup=reply_markup,
                     )
                 else:
                     if not already_approved:
                         caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول/تخفیف پوشش داده شده)"
                     sent = await bot.send_message(
-                        admin_id, caption, parse_mode="Markdown", reply_markup=reply_markup,
+                        admin_id, caption, reply_markup=reply_markup,
                     )
                 db.set_order_admin_message(order_id, admin_id, sent.message_id)
             except Exception:
-                pass
+                logging.getLogger("handlers_user").exception(
+                    "ارسال اعلان سفارش #%s به ادمین %s ناموفق بود.", order_id, admin_id
+                )
 
     @router.callback_query(F.data.startswith("buy_start:"))
     async def cb_buy_start(call: CallbackQuery, state: FSMContext, bot: Bot):
@@ -629,18 +632,20 @@ def create_user_router(db) -> Router:
         caption = (
             f"👛 درخواست شارژ کیف پول #{topup_id}\n"
             f"👤 کاربر: {user_row['first_name'] or ''} (@{user_row['username'] or '---'})\n"
-            f"🆔 آیدی عددی: `{message.from_user.id}`\n"
+            f"🆔 آیدی عددی: {message.from_user.id}\n"
             f"💰 مبلغ: {amount:,} تومان"
         )
         for admin_id in db.list_admins():
             try:
                 sent = await bot.send_photo(
-                    admin_id, file_id, caption=caption, parse_mode="Markdown",
+                    admin_id, file_id, caption=caption,
                     reply_markup=kb.topup_review_kb(topup_id),
                 )
                 db.set_topup_admin_message(topup_id, admin_id, sent.message_id)
             except Exception:
-                pass
+                logging.getLogger("handlers_user").exception(
+                    "ارسال اعلان شارژ کیف پول #%s به ادمین %s ناموفق بود.", topup_id, admin_id
+                )
 
         await message.answer(
             "✅ درخواست شارژ کیف پول شما برای بررسی ارسال شد. پس از تایید ادمین، مبلغ به کیف پول شما اضافه می‌شود.",
@@ -669,7 +674,7 @@ def create_user_router(db) -> Router:
         text = (
             f"📩 پیام جدید از کاربر\n"
             f"👤 {user.first_name or ''} (@{user.username or '---'})\n"
-            f"🆔 `{user.id}`\n\n"
+            f"🆔 {user.id}\n\n"
             f"✉️ {message.text or '(بدون متن / رسانه)'}"
         )
         # فقط به اولین ادمین/مالک آنلاین اطلاع بده تا مکالمه به او اختصاص یابد؛
@@ -678,9 +683,11 @@ def create_user_router(db) -> Router:
         admin_ids = [target_admin] if target_admin else db.list_admins()
         for admin_id in admin_ids:
             try:
-                await bot.send_message(admin_id, text, parse_mode="Markdown", reply_markup=kb.contact_reply_kb(user.id))
+                await bot.send_message(admin_id, text, reply_markup=kb.contact_reply_kb(user.id))
             except Exception:
-                pass
+                logging.getLogger("handlers_user").exception(
+                    "ارسال پیام پشتیبانی کاربر %s به ادمین %s ناموفق بود.", user.id, admin_id
+                )
         await message.answer(
             "پیام شما برای پشتیبانی ارسال شد. به زودی پاسخ داده می‌شود.",
             reply_markup=kb.menu_for_user(db, user.id),

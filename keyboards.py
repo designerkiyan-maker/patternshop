@@ -228,6 +228,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_resellers_menu", "🏪 مدیریت بات‌های نمایندگی", "adm_resellers_menu"),
     ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
     ("adm_set_card", "💳 تنظیم شماره کارت", "adm_set_card"),
+    ("adm_set_plisio", "🪙 تنظیم درگاه کریپتو (Plisio)", "adm_set_plisio"),
     ("adm_edit_welcome", "📝 ویرایش پیام خوش‌آمد", "adm_edit_welcome"),
     ("adm_admins_menu", "👤 مدیریت ادمین‌ها", "adm_admins_menu"),
     ("adm_broadcast", "📢 پیام همگانی", "adm_broadcast"),

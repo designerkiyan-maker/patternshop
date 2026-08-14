@@ -31,6 +31,7 @@ from states import (
     AdminForceJoin,
     AdminEditButton,
     AdminSetCard,
+    AdminSetPlisio,
     AdminBroadcast,
     AdminAddAdmin,
     AdminRemoveAdmin,
@@ -1555,6 +1556,43 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             f"شماره کارت جدید: {data['card_number']} | به نام: {message.text.strip()}",
         )
         await message.answer("✅ اطلاعات کارت به‌روزرسانی شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    # -------------------------------------------------------------------
+    # تنظیم درگاه پرداخت کریپتو (Plisio)
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_set_plisio")
+    async def cb_admin_set_plisio(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = db.get_setting("plisio_api_key", "")
+        masked = f"...{current[-4:]}" if current else "❌ تنظیم نشده"
+        await state.set_state(AdminSetPlisio.waiting_key)
+        await safe_edit(
+            call,
+            f"🪙 API Key حساب Plisio را ارسال کن (از plisio.net → API Settings).\n"
+            f"وضعیت فعلی: {masked}\n\n"
+            f"برای غیرفعال‌کردن، عبارت «حذف» را بفرست.",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminSetPlisio.waiting_key)
+    async def process_set_plisio_key(message: Message, state: FSMContext):
+        text = message.text.strip()
+        await state.clear()
+        if text in ("حذف", "/حذف", "-"):
+            db.set_setting("plisio_api_key", "")
+            db.log_admin_action(message.from_user.id, "plisio_key_change", "API Key کریپتو حذف شد.")
+            await message.answer("✅ API Key کریپتو حذف شد و درگاه غیرفعال شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+            return
+        db.set_setting("plisio_api_key", text)
+        db.log_admin_action(message.from_user.id, "plisio_key_change", "API Key کریپتو تغییر کرد.")
+        await message.answer(
+            "✅ API Key کریپتو ذخیره شد.\n"
+            "الان از مینی‌اپ → مدیریت → فروش → «پرداخت کریپتو» فعالش کن.",
+            reply_markup=kb.admin_panel_kb(db, is_main_bot),
+        )
 
     # -------------------------------------------------------------------
     # ویرایش پیام خوش‌آمد

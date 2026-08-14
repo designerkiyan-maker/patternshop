@@ -53,3 +53,11 @@ MAX_TEST_PER_USER = 1
 
 # آدرس مینی‌اپ (باید HTTPS با گواهی معتبر باشد؛ خالی یعنی دکمه مینی‌اپ نمایش داده نشود)
 MINIAPP_URL = os.getenv("MINIAPP_URL", "")
+
+# آدرس پایه‌ی API مینی‌اپ (همان دامنه‌ای که سرور FastAPI روی آن سرو می‌شود؛
+# برای ساخت callback_url که Plisio بعد از پرداخت به آن درخواست می‌زند لازم است)
+API_BASE_URL = os.getenv("API_BASE_URL", "")
+
+# کلید API درگاه پرداخت کریپتو Plisio (فقط در دیتابیس بات اصلی معنا دارد؛
+# https://plisio.net -> Settings -> API Keys)
+PLISIO_API_KEY = os.getenv("PLISIO_API_KEY", "")
