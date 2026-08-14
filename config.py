@@ -56,8 +56,16 @@ MINIAPP_URL = os.getenv("MINIAPP_URL", "")
 
 # آدرس پایه‌ی API مینی‌اپ (همان دامنه‌ای که سرور FastAPI روی آن سرو می‌شود؛
 # برای ساخت callback_url که Plisio بعد از پرداخت به آن درخواست می‌زند لازم است)
-API_BASE_URL = os.getenv("API_BASE_URL", "")
+# اگر به‌صورت جداگانه در .env تنظیم نشده باشد، به‌صورت خودکار از روی MINIAPP_URL
+# استخراج می‌شود (چون سرور FastAPI معمولاً همان دامنه‌ی مینی‌اپ است)؛
+# بنابراین در حالت عادی نیازی به تنظیم دستی این متغیر نیست.
+API_BASE_URL = os.getenv("API_BASE_URL", "").rstrip("/")
+if not API_BASE_URL and MINIAPP_URL:
+    from urllib.parse import urlparse
+    _parsed = urlparse(MINIAPP_URL)
+    if _parsed.scheme and _parsed.netloc:
+        API_BASE_URL = f"{_parsed.scheme}://{_parsed.netloc}"
 
-# کلید API درگاه پرداخت کریپتو Plisio (فقط در دیتابیس بات اصلی معنا دارد؛
-# https://plisio.net -> Settings -> API Keys)
+# کلید API درگاه پرداخت کریپتو Plisio (فقط به‌عنوان فال‌بک سراسری؛ در عمل هر بات
+# (اصلی یا نمایندگی) کلید خودش را از داخل پنل مدیریت بات تنظیم می‌کند)
 PLISIO_API_KEY = os.getenv("PLISIO_API_KEY", "")
