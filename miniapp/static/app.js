@@ -1779,10 +1779,9 @@ async function renderAdminPanelsSection() {
           </select>
           <label class="field-label">آدرس API (مثلاً https://panel.example.com)</label>
           <input class="input" id="ps-url" type="text" placeholder="https://..." style="direction:ltr;text-align:left;margin-bottom:10px" />
-          <label class="field-label">نام کاربری ادمین پنل</label>
-          <input class="input" id="ps-username" type="text" style="direction:ltr;text-align:left;margin-bottom:10px" />
-          <label class="field-label">رمز عبور ادمین پنل</label>
-          <input class="input" id="ps-password" type="password" style="direction:ltr;text-align:left;margin-bottom:4px" />
+          <label class="field-label">کلید API پنل</label>
+          <p class="hint-text" style="margin-top:0">از منوی «کلیدهای API» داخل پنل PasarGuard یک کلید جدید بساز و اینجا بچسبان.</p>
+          <input class="input" id="ps-apikey" type="text" placeholder="pg_key_..." style="direction:ltr;text-align:left;margin-bottom:4px" />
           <div class="field-error" id="ps-error"></div>
           <div style="display:flex;gap:8px;margin-top:8px">
             <button class="btn" id="ps-save">💾 افزودن سرور</button>
@@ -1798,10 +1797,9 @@ async function renderAdminPanelsSection() {
           name: document.getElementById("ps-name").value.trim(),
           panel_type: document.getElementById("ps-type").value,
           api_url: document.getElementById("ps-url").value.trim(),
-          api_username: document.getElementById("ps-username").value.trim(),
-          api_password: document.getElementById("ps-password").value,
+          api_key: document.getElementById("ps-apikey").value.trim(),
         };
-        if (!payload.name || !payload.api_url || !payload.api_username || !payload.api_password) {
+        if (!payload.name || !payload.api_url || !payload.api_key) {
           errBox.textContent = "همه‌ی فیلدها الزامی هستند."; return;
         }
         try {
