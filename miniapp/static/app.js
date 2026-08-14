@@ -1310,6 +1310,7 @@ const STYLE_OPTIONS = [
 
 let adminSection = "stats"; // stats | menu | branding | catalog | tickets | livechat | sales | users | resellers
 let adminCatalogView = { level: "categories" }; // categories | products | configs
+let adminPanelsView = { level: "servers" }; // servers | pricing
 let adminTicketView = { level: "list" }; // list | thread
 let adminLiveChatView = { level: "list" }; // list | thread
 let adminPresenceTimer = null;
@@ -1320,6 +1321,7 @@ const ADMIN_TABS = [
   { key: "menu", label: "چیدمان منو", fullOnly: true, seniorOnly: true },
   { key: "branding", label: "برندینگ", fullOnly: true, seniorOnly: true },
   { key: "catalog", label: "محصولات", fullOnly: true, seniorOnly: true },
+  { key: "panels", label: "پنل‌های VPN", fullOnly: true, seniorOnly: true },
   { key: "users", label: "مدیریت کاربران", fullOnly: true },
   { key: "sales", label: "فروش", fullOnly: true, seniorOnly: true },
   { key: "livechat", label: "پشتیبانی زنده", fullOnly: false },
@@ -1374,6 +1376,7 @@ async function renderAdmin() {
       if (adminSection !== "livechat") clearInterval(adminLiveChatPollTimer);
       adminSection = b.dataset.section;
       if (adminSection === "catalog") adminCatalogView = { level: "categories" };
+      if (adminSection === "panels") adminPanelsView = { level: "servers" };
       if (adminSection === "tickets") adminTicketView = { level: "list" };
       if (adminSection === "livechat") adminLiveChatView = { level: "list" };
       if (adminSection === "users") adminUserView = { level: "list", filter: "all", query: "" };
@@ -1389,6 +1392,7 @@ async function renderAdmin() {
   else if (adminSection === "menu") await renderAdminMenuSection();
   else if (adminSection === "branding") await renderAdminBrandingSection();
   else if (adminSection === "catalog") await renderAdminCatalogSection();
+  else if (adminSection === "panels") await renderAdminPanelsSection();
   else if (adminSection === "users") await renderAdminUsersSection();
   else if (adminSection === "sales") await renderAdminSalesSection();
   else if (adminSection === "livechat") await renderAdminLiveChatSection();
@@ -1752,6 +1756,231 @@ async function saveAdminMenu() {
   } finally {
     saveBtn.disabled = false;
     saveBtn.textContent = "💾 ذخیره تغییرات";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > پنل‌های VPN (ساخت کانفیگ شخصی)
+// ---------------------------------------------------------------------------
+
+async function renderAdminPanelsSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  try {
+    if (adminPanelsView.level === "add-server") {
+      body.innerHTML = `
+        <div class="card">
+          <div class="eyebrow" style="margin-top:0">➕ افزودن سرور پنل</div>
+          <label class="field-label">نام دلخواه سرور</label>
+          <input class="input" id="ps-name" type="text" placeholder="مثلاً: سرور آلمان" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:10px" />
+          <label class="field-label">نوع پنل</label>
+          <select class="input" id="ps-type" style="margin-bottom:10px">
+            <option value="pasarguard">PasarGuard</option>
+          </select>
+          <label class="field-label">آدرس API (مثلاً https://panel.example.com)</label>
+          <input class="input" id="ps-url" type="text" placeholder="https://..." style="direction:ltr;text-align:left;margin-bottom:10px" />
+          <label class="field-label">نام کاربری ادمین پنل</label>
+          <input class="input" id="ps-username" type="text" style="direction:ltr;text-align:left;margin-bottom:10px" />
+          <label class="field-label">رمز عبور ادمین پنل</label>
+          <input class="input" id="ps-password" type="password" style="direction:ltr;text-align:left;margin-bottom:4px" />
+          <div class="field-error" id="ps-error"></div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn" id="ps-save">💾 افزودن سرور</button>
+            <button class="btn outline" id="ps-cancel">انصراف</button>
+          </div>
+        </div>
+      `;
+      document.getElementById("ps-cancel").onclick = () => { adminPanelsView = { level: "servers" }; renderAdminPanelsSection(); };
+      document.getElementById("ps-save").onclick = async () => {
+        const errBox = document.getElementById("ps-error");
+        errBox.textContent = "";
+        const payload = {
+          name: document.getElementById("ps-name").value.trim(),
+          panel_type: document.getElementById("ps-type").value,
+          api_url: document.getElementById("ps-url").value.trim(),
+          api_username: document.getElementById("ps-username").value.trim(),
+          api_password: document.getElementById("ps-password").value,
+        };
+        if (!payload.name || !payload.api_url || !payload.api_username || !payload.api_password) {
+          errBox.textContent = "همه‌ی فیلدها الزامی هستند."; return;
+        }
+        try {
+          await api("/api/admin/panel-servers", { method: "POST", body: JSON.stringify(payload) });
+          tg.HapticFeedback.notificationOccurred("success");
+          notify("سرور اضافه شد. حالا از «تست اتصال» مطمئن شو.");
+          adminPanelsView = { level: "servers" };
+          renderAdminPanelsSection();
+        } catch (e) { errBox.textContent = e.message; }
+      };
+      return;
+    }
+
+    if (adminPanelsView.level === "pricing") {
+      const tiers = await api("/api/admin/custom-config/pricing-tiers");
+      body.innerHTML = `
+        <div class="card">
+          <div class="eyebrow" style="margin-top:0">💰 قیمت‌گذاری پلکانی (تصاعدی)</div>
+          <p class="hint-text">هر بخش از حجم با نرخ همان بازه حساب و جمع می‌شود (مثل پلکان مالیاتی). اگر حجم کاربر از آخرین بازه هم بیشتر شود، باقیمانده با نرخ آخرین بازه حساب می‌شود.</p>
+          ${tiers.length === 0 ? `<p class="hint-text">هنوز بازه‌ای تعریف نشده.</p>` : ""}
+          <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
+            ${tiers.map((t) => `
+              <div style="display:flex;justify-content:space-between;align-items:center;background:var(--glass-bg);border:1px solid var(--glass-brd);border-radius:10px;padding:8px 12px">
+                <span>${t.from_gb} تا ${t.to_gb ?? "∞"} گیگ ← ${Number(t.price_per_gb).toLocaleString()} تومان/گیگ</span>
+                <button class="btn outline danger" data-tier="${t.id}" style="padding:4px 10px;font-size:12px">🗑</button>
+              </div>
+            `).join("")}
+          </div>
+          <button class="btn outline" id="pt-add-toggle">➕ افزودن بازه‌ی جدید</button>
+          <div id="pt-add-form" style="display:none;margin-top:12px">
+            <label class="field-label">از (گیگ)</label>
+            <input class="input" id="pt-from" type="number" min="1" style="margin-bottom:10px" />
+            <label class="field-label">تا (گیگ) - برای بی‌نهایت خالی بگذار</label>
+            <input class="input" id="pt-to" type="number" min="1" style="margin-bottom:10px" />
+            <label class="field-label">قیمت هر گیگ (تومان)</label>
+            <input class="input" id="pt-price" type="number" min="1" style="margin-bottom:4px" />
+            <div class="field-error" id="pt-error"></div>
+            <button class="btn" id="pt-save" style="margin-top:8px">💾 افزودن</button>
+          </div>
+          <div style="margin-top:14px">
+            <button class="btn outline" id="pt-back">⬅️ بازگشت</button>
+          </div>
+        </div>
+      `;
+      document.getElementById("pt-back").onclick = () => { adminPanelsView = { level: "servers" }; renderAdminPanelsSection(); };
+      document.getElementById("pt-add-toggle").onclick = () => {
+        document.getElementById("pt-add-form").style.display = "block";
+      };
+      document.querySelectorAll("[data-tier]").forEach((btn) => {
+        btn.onclick = async () => {
+          if (!confirm("این بازه حذف شود؟")) return;
+          await api(`/api/admin/custom-config/pricing-tiers/${btn.dataset.tier}`, { method: "DELETE" });
+          renderAdminPanelsSection();
+        };
+      });
+      document.getElementById("pt-save").onclick = async () => {
+        const errBox = document.getElementById("pt-error");
+        errBox.textContent = "";
+        const from_gb = parseInt(document.getElementById("pt-from").value, 10);
+        const toRaw = document.getElementById("pt-to").value.trim();
+        const to_gb = toRaw === "" ? null : parseInt(toRaw, 10);
+        const price_per_gb = parseInt(document.getElementById("pt-price").value, 10);
+        if (!from_gb || !price_per_gb || from_gb <= 0 || price_per_gb <= 0) {
+          errBox.textContent = "مقادیر باید عدد صحیح مثبت باشند."; return;
+        }
+        try {
+          await api("/api/admin/custom-config/pricing-tiers", {
+            method: "POST", body: JSON.stringify({ from_gb, to_gb, price_per_gb }),
+          });
+          tg.HapticFeedback.notificationOccurred("success");
+          renderAdminPanelsSection();
+        } catch (e) { errBox.textContent = e.message; }
+      };
+      return;
+    }
+
+    // level === "servers" (پیش‌فرض)
+    const [servers, settings] = await Promise.all([
+      api("/api/admin/panel-servers"),
+      api("/api/admin/custom-config/settings"),
+    ]);
+
+    body.innerHTML = `
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🛠 ساخت کانفیگ شخصی</div>
+        <p class="hint-text">کاربران می‌توانند با تعیین نام، حجم و پرداخت متناسب، کاربر خودشان را مستقیماً روی یکی از سرورهای زیر بسازند.</p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <span>وضعیت این بخش: <b>${settings.enabled ? "🟢 فعال" : "🔴 غیرفعال"}</b></span>
+          <button class="btn ${settings.enabled ? "outline danger" : ""}" id="cc-toggle" style="padding:6px 14px;font-size:13px">${settings.enabled ? "غیرفعال کن" : "فعال کن"}</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div>
+            <label class="field-label">حداقل حجم (گیگ)</label>
+            <input class="input" id="cc-min" type="number" min="1" value="${settings.min_gb}" style="width:110px" />
+          </div>
+          <div>
+            <label class="field-label">حداکثر حجم (گیگ)</label>
+            <input class="input" id="cc-max" type="number" min="1" value="${settings.max_gb}" style="width:110px" />
+          </div>
+          <button class="btn outline" id="cc-save-range" style="padding:8px 14px">💾 ذخیره بازه</button>
+        </div>
+        <div class="field-error" id="cc-error"></div>
+        <p class="hint-text" style="margin-top:8px">⏳ مدت اعتبار فعلاً ثابت روی ${settings.duration_days} روز است.</p>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🖥 سرورهای پنل متصل</div>
+        ${servers.length === 0 ? `<p class="hint-text">هنوز سروری اضافه نشده.</p>` : ""}
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+          ${servers.map((s) => `
+            <div style="background:var(--glass-bg);border:1px solid var(--glass-brd);border-radius:10px;padding:10px 12px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span>${s.is_active ? "🟢" : "🔴"} <b>${s.name}</b> <span class="hint-text" style="margin:0">(${s.panel_type})</span></span>
+              </div>
+              <div class="hint-text" style="margin:4px 0 8px;direction:ltr;text-align:left">${s.api_url}</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="btn outline" data-test="${s.id}" style="padding:4px 10px;font-size:12px">🔌 تست اتصال</button>
+                <button class="btn outline" data-toggle="${s.id}" style="padding:4px 10px;font-size:12px">${s.is_active ? "غیرفعال کن" : "فعال کن"}</button>
+                <button class="btn outline danger" data-delete="${s.id}" style="padding:4px 10px;font-size:12px">🗑 حذف</button>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn" id="ps-add-btn">➕ افزودن سرور جدید</button>
+          <button class="btn outline" id="pt-goto-btn">💰 قیمت‌گذاری پلکانی</button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById("cc-toggle").onclick = async () => {
+      await api("/api/admin/custom-config/settings", {
+        method: "POST", body: JSON.stringify({ enabled: !settings.enabled }),
+      });
+      renderAdminPanelsSection();
+    };
+    document.getElementById("cc-save-range").onclick = async () => {
+      const errBox = document.getElementById("cc-error");
+      errBox.textContent = "";
+      const min_gb = parseInt(document.getElementById("cc-min").value, 10);
+      const max_gb = parseInt(document.getElementById("cc-max").value, 10);
+      if (!min_gb || !max_gb || min_gb <= 0 || max_gb <= min_gb) {
+        errBox.textContent = "حداکثر باید بزرگ‌تر از حداقل باشد."; return;
+      }
+      try {
+        await api("/api/admin/custom-config/settings", {
+          method: "POST", body: JSON.stringify({ min_gb, max_gb }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("بازه‌ی حجم ذخیره شد.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+    document.getElementById("ps-add-btn").onclick = () => { adminPanelsView = { level: "add-server" }; renderAdminPanelsSection(); };
+    document.getElementById("pt-goto-btn").onclick = () => { adminPanelsView = { level: "pricing" }; renderAdminPanelsSection(); };
+    document.querySelectorAll("[data-test]").forEach((btn) => {
+      btn.onclick = async () => {
+        btn.textContent = "در حال تست...";
+        try {
+          const res = await api(`/api/admin/panel-servers/${btn.dataset.test}/test`, { method: "POST" });
+          notify(res.ok ? "✅ اتصال موفق بود." : `❌ اتصال ناموفق بود.${res.error ? " " + res.error : ""}`);
+        } catch (e) { notify(e.message); }
+        btn.textContent = "🔌 تست اتصال";
+      };
+    });
+    document.querySelectorAll("[data-toggle]").forEach((btn) => {
+      btn.onclick = async () => {
+        await api(`/api/admin/panel-servers/${btn.dataset.toggle}/toggle`, { method: "POST" });
+        renderAdminPanelsSection();
+      };
+    });
+    document.querySelectorAll("[data-delete]").forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm("این سرور حذف شود؟")) return;
+        await api(`/api/admin/panel-servers/${btn.dataset.delete}`, { method: "DELETE" });
+        renderAdminPanelsSection();
+      };
+    });
+  } catch (e) {
+    body.innerHTML = `<div class="card"><p class="hint-text">خطا در بارگذاری: ${e.message}</p></div>`;
   }
 }
 
