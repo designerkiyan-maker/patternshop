@@ -14,7 +14,7 @@ import logging
 
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 
 import keyboards as kb
@@ -24,6 +24,7 @@ from config_delivery import deliver_config_to_user
 from force_join import is_channel_member, CHECK_CALLBACK
 from sub_info import fetch_sub_info, format_sub_info_fa
 from stock_alerts import check_and_notify_low_stock
+import crypto_payment
 
 
 def create_user_router(db) -> Router:
@@ -397,9 +398,12 @@ def create_user_router(db) -> Router:
         if wallet_used:
             text += f"👛 استفاده از کیف پول: {wallet_used:,} تومان\n"
         text += f"💰 مبلغ نهایی قابل پرداخت: {order['final_price']:,} تومان\n\n"
-        text += "لطفاً عکس رسید پرداخت را همینجا ارسال کنید."
+        text += "لطفاً عکس رسید پرداخت را همینجا ارسال کنید، یا از دکمه‌ی زیر با ارز دیجیتال پرداخت کنید."
 
-        await call.message.edit_text(text, parse_mode="Markdown", reply_markup=kb.cancel_kb())
+        await call.message.edit_text(
+            text, parse_mode="Markdown",
+            reply_markup=kb.payment_choice_kb(crypto_payment.crypto_payment_available(db)),
+        )
         await call.answer()
 
     @router.callback_query(F.data == "cancel_flow")
@@ -413,6 +417,33 @@ def create_user_router(db) -> Router:
         await state.clear()
         await call.message.edit_text("عملیات لغو شد.")
         await call.answer()
+
+    @router.callback_query(F.data == "pay_crypto", BuyFlow.waiting_receipt)
+    async def cb_pay_crypto_order(call: CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        order = db.get_order(order_id) if order_id else None
+        if not order or order["status"] != "pending":
+            await call.answer("سفارش معتبر یافت نشد.", show_alert=True)
+            return
+        await call.answer("در حال ساخت فاکتور...")
+        product = db.get_product(order["product_id"])
+        tenant_id = db.get_setting("miniapp_tenant_id", "")
+        try:
+            result = await crypto_payment.create_invoice_for(
+                db, tenant_id, call.from_user.id, "order", order_id, order["final_price"],
+                order_name=f"سفارش #{order_id} - {product['name'] if product else ''}",
+            )
+        except crypto_payment.CryptoPaymentError as e:
+            await call.message.answer(f"⚠️ {e}")
+            return
+        await call.message.answer(
+            "🪙 فاکتور پرداخت ساخته شد. روی دکمه‌ی زیر بزن، ارز و مبلغ رو انتخاب کن و پرداخت رو تکمیل کن.\n"
+            "به‌محض تایید تراکنش روی بلاک‌چین، سفارش شما به‌صورت خودکار تحویل داده می‌شود.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["invoice_url"]),
+            ]]),
+        )
 
     @router.message(BuyFlow.waiting_receipt, F.photo)
     async def receive_receipt(message: Message, state: FSMContext, bot: Bot):
@@ -613,7 +644,36 @@ def create_user_router(db) -> Router:
             f"💳 شماره کارت: `{card_number}`\n"
             f"👤 به نام: {card_holder}\n"
         )
-        await message.answer(text, parse_mode="Markdown", reply_markup=kb.cancel_kb())
+        await message.answer(
+            text, parse_mode="Markdown",
+            reply_markup=kb.payment_choice_kb(crypto_payment.crypto_payment_available(db)),
+        )
+
+    @router.callback_query(F.data == "pay_crypto", WalletTopup.waiting_receipt)
+    async def cb_pay_crypto_topup(call: CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        amount = data.get("topup_amount")
+        if not amount:
+            await call.answer("درخواست معتبر یافت نشد.", show_alert=True)
+            return
+        await call.answer("در حال ساخت فاکتور...")
+        topup_id = db.create_topup(call.from_user.id, amount)
+        tenant_id = db.get_setting("miniapp_tenant_id", "")
+        try:
+            result = await crypto_payment.create_invoice_for(
+                db, tenant_id, call.from_user.id, "wallet_topup", topup_id, amount,
+                order_name=f"شارژ کیف پول #{topup_id}",
+            )
+        except crypto_payment.CryptoPaymentError as e:
+            await call.message.answer(f"⚠️ {e}")
+            return
+        await call.message.answer(
+            "🪙 فاکتور پرداخت ساخته شد. روی دکمه‌ی زیر بزن، ارز و مبلغ رو انتخاب کن و پرداخت رو تکمیل کن.\n"
+            "به‌محض تایید تراکنش روی بلاک‌چین، کیف پول شما به‌صورت خودکار شارژ می‌شود.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["invoice_url"]),
+            ]]),
+        )
 
     @router.message(WalletTopup.waiting_receipt, F.photo)
     async def receive_topup_receipt(message: Message, state: FSMContext, bot: Bot):

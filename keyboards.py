@@ -185,6 +185,15 @@ def cancel_kb() -> InlineKeyboardMarkup:
     )
 
 
+def payment_choice_kb(crypto_enabled: bool) -> InlineKeyboardMarkup:
+    """کیبورد مرحله‌ی پرداخت: اگر درگاه کریپتو فعال باشد، دکمه‌ی پرداخت کریپتو هم نمایش داده می‌شود."""
+    rows = []
+    if crypto_enabled:
+        rows.append([InlineKeyboardButton(text="🪙 پرداخت با ارز دیجیتال (تایید آنی)", callback_data="pay_crypto")])
+    rows.append([InlineKeyboardButton(text="❌ انصراف", callback_data="cancel_flow")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 # ---------------------------------------------------------------------------
 # سفارش برای ادمین (تایید/رد)
 # ---------------------------------------------------------------------------
