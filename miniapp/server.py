@@ -30,7 +30,7 @@ from typing import Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import aiohttp
-from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form, Depends, Query
+from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form, Depends, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, Response, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,7 +41,9 @@ import sqlite3
 
 logging.basicConfig(level=logging.INFO)
 
-from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, resolve_db_path, RESELLER_DBS_DIR, MINIAPP_URL
+from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, resolve_db_path, RESELLER_DBS_DIR, MINIAPP_URL, API_BASE_URL, PLISIO_API_KEY
+import plisio_client
+import exchange_rate
 from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER
 from miniapp.auth import validate_init_data
 from sub_info import fetch_sub_info
@@ -663,6 +665,10 @@ class OrderCreate(BaseModel):
     discount_code: Optional[str] = None
 
 
+class TopupCreate(BaseModel):
+    amount: int
+
+
 @app.post("/api/orders")
 async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
     tg_id, db, tenant = auth
@@ -734,7 +740,203 @@ async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
         "status": "pending_payment", "order_id": order_id, "final_price": order["final_price"],
         "quantity": quantity,
         "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
+        "crypto_enabled": db.get_setting("crypto_payment_enabled", "0") == "1" and bool(_resolve_plisio_key(db)) and bool(API_BASE_URL),
     }
+
+
+# ---------------------------------------------------------------------------
+# پرداخت کریپتو (Plisio)
+# ---------------------------------------------------------------------------
+
+def _resolve_plisio_key(db: Database) -> str:
+    """کلید API Plisio را برمی‌گرداند: اولویت با کلیدی است که ادمین از داخل بات
+    برای همین فروشگاه (تننت) تنظیم کرده؛ در غیر این صورت کلید سراسری .env."""
+    return db.get_setting("plisio_api_key", "") or PLISIO_API_KEY
+
+
+async def _toman_to_usd(db: Database, amount_toman: int) -> float:
+    rate = float(db.get_setting("usd_to_toman_rate", "0") or 0)
+    if rate <= 0:
+        try:
+            rate = await exchange_rate.get_usd_to_toman_rate()
+        except Exception:
+            raise HTTPException(status_code=503, detail="دریافت نرخ لحظه‌ای دلار ناموفق بود، لحظاتی دیگر دوباره تلاش کن.")
+    usd = amount_toman / rate
+    if usd < 1:
+        raise HTTPException(status_code=400, detail="مبلغ برای پرداخت کریپتو خیلی کم است (حداقل حدود ۱ دلار).")
+    return round(usd, 2)
+
+
+def _crypto_callback_url(tenant_id: str) -> str:
+    if not API_BASE_URL:
+        raise HTTPException(status_code=400, detail="آدرس API_BASE_URL روی سرور تنظیم نشده است.")
+    base = API_BASE_URL.rstrip("/")
+    return f"{base}/api/webhooks/plisio?b={tenant_id}&json=true"
+
+
+async def _create_crypto_invoice_for(
+    db: Database, tenant, tg_id: int, kind: str, ref_id: int, amount_toman: int,
+    order_name: str,
+):
+    api_key = _resolve_plisio_key(db)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="درگاه پرداخت کریپتو هنوز تنظیم نشده. از داخل بات، پنل مدیریت → «تنظیم درگاه کریپتو» را بزن.")
+    if not API_BASE_URL:
+        raise HTTPException(status_code=400, detail="آدرس API_BASE_URL روی سرور تنظیم نشده است.")
+    if db.get_setting("crypto_payment_enabled", "0") != "1":
+        raise HTTPException(status_code=400, detail="پرداخت کریپتو برای این فروشگاه فعال نیست.")
+
+    existing = db.get_pending_crypto_invoice_for_ref(kind, ref_id)
+    if existing:
+        return {"invoice_url": existing["invoice_url"], "txn_id": existing["txn_id"]}
+
+    source_amount_usd = await _toman_to_usd(db, amount_toman)
+    order_number = f"{kind}-{tenant.tenant_id or 'main'}-{ref_id}-{int(datetime.utcnow().timestamp())}"
+    callback_url = _crypto_callback_url(tenant.tenant_id)
+    try:
+        data = await plisio_client.create_invoice(
+            api_key=api_key,
+            order_number=order_number,
+            order_name=order_name,
+            source_amount_usd=source_amount_usd,
+            callback_url=callback_url,
+        )
+    except plisio_client.PlisioError as e:
+        raise HTTPException(status_code=502, detail=f"خطا از درگاه پرداخت: {e}")
+
+    db.create_crypto_invoice(
+        txn_id=data["txn_id"], kind=kind, ref_id=ref_id, user_id=tg_id,
+        amount_toman=amount_toman, source_amount_usd=source_amount_usd,
+        invoice_url=data.get("invoice_url"),
+    )
+    return {"invoice_url": data.get("invoice_url"), "txn_id": data["txn_id"]}
+
+
+@app.post("/api/orders/{order_id}/crypto-invoice")
+async def api_order_crypto_invoice(order_id: int, auth=Depends(get_verified_user)):
+    tg_id, db, tenant = auth
+    order = db.get_order(order_id)
+    if not order or order["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
+    if order["status"] != "pending":
+        raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
+    product = db.get_product(order["product_id"])
+    result = await _create_crypto_invoice_for(
+        db, tenant, tg_id, "order", order_id, order["final_price"],
+        order_name=f"سفارش #{order_id} - {product['name'] if product else ''}",
+    )
+    return result
+
+
+class CryptoWalletInvoiceRequest(BaseModel):
+    topup_id: int
+
+
+@app.post("/api/wallet/crypto-invoice")
+async def api_wallet_crypto_invoice(body: CryptoWalletInvoiceRequest, auth=Depends(get_verified_user)):
+    tg_id, db, tenant = auth
+    topup = db.get_topup(body.topup_id)
+    if not topup or topup["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="درخواست شارژ یافت نشد.")
+    if topup["status"] != "pending":
+        raise HTTPException(status_code=400, detail="این درخواست شارژ قبلاً بررسی شده است.")
+    result = await _create_crypto_invoice_for(
+        db, tenant, tg_id, "wallet_topup", body.topup_id, topup["amount"],
+        order_name=f"شارژ کیف پول #{body.topup_id}",
+    )
+    result["topup_id"] = body.topup_id
+    return result
+
+
+@app.post("/api/webhooks/plisio")
+async def api_plisio_webhook(request: Request, tenant: Tenant = Depends(get_tenant)):
+    try:
+        body = await request.json()
+    except Exception:
+        form = await request.form()
+        body = dict(form)
+
+    if not plisio_client.verify_callback(_resolve_plisio_key(tenant.db), body):
+        raise HTTPException(status_code=401, detail="امضای کال‌بک نامعتبر است.")
+
+    txn_id = body.get("txn_id")
+    status = body.get("status")
+    currency = body.get("currency")
+    if not txn_id or not status:
+        raise HTTPException(status_code=400, detail="داده‌ی کال‌بک ناقص است.")
+
+    db = tenant.db
+    invoice = db.get_crypto_invoice_by_txn(txn_id)
+    if not invoice:
+        return {"status": "ignored"}
+
+    if invoice["status"] == "completed":
+        return {"status": "already_completed"}
+
+    if status in ("new", "pending", "pending internal"):
+        db.update_crypto_invoice_status(txn_id, "pending", currency=currency)
+        return {"status": "ok"}
+
+    if status not in ("completed",):
+        db.update_crypto_invoice_status(txn_id, status, currency=currency)
+        return {"status": "ok"}
+
+    # status == completed
+    db.update_crypto_invoice_status(txn_id, "completed", currency=currency)
+
+    if invoice["kind"] == "wallet_topup":
+        db.approve_topup(invoice["ref_id"])
+        try:
+            async with aiohttp.ClientSession() as session:
+                await session.post(
+                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                    json={
+                        "chat_id": invoice["user_id"],
+                        "text": f"✅ پرداخت کریپتو تایید شد و {invoice['amount_toman']:,} تومان به کیف پول شما اضافه شد.",
+                    },
+                )
+        except Exception:
+            pass
+
+    elif invoice["kind"] == "order":
+        order_id = invoice["ref_id"]
+        order = db.get_order(order_id)
+        if order and order["status"] == "pending":
+            product = db.get_product(order["product_id"])
+            quantity = order["quantity"] or 1
+            results = db.take_unused_configs(order["product_id"], order["user_id"], quantity)
+            if results:
+                db.approve_order(order_id, [r["id"] for r in results])
+                db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or (product["price"] if product else 0))
+                links = "\n".join(r["link"] for r in results)
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        await session.post(
+                            f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                            json={
+                                "chat_id": order["user_id"],
+                                "text": f"✅ پرداخت کریپتو تایید شد!\n📦 محصول: {product['name'] if product else ''}\n\n{links}",
+                            },
+                        )
+                except Exception:
+                    pass
+            else:
+                # موجودی هم‌زمان تمام شده - به ادمین اطلاع بده تا دستی رسیدگی کند
+                admin_ids = db.list_admins()
+                async with aiohttp.ClientSession() as session:
+                    for admin_id in admin_ids:
+                        try:
+                            await session.post(
+                                f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                                json={
+                                    "chat_id": admin_id,
+                                    "text": f"⚠️ سفارش #{order_id} با کریپتو پرداخت شد ولی موجودی محصول تمام شده! لطفاً دستی رسیدگی کنید.",
+                                },
+                            )
+                        except Exception:
+                            pass
+
+    return {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------
@@ -776,10 +978,6 @@ def api_wheel_spin(auth=Depends(get_verified_user)):
 # کیف پول
 # ---------------------------------------------------------------------------
 
-class TopupCreate(BaseModel):
-    amount: int
-
-
 @app.post("/api/wallet/topup-request")
 def api_topup_request(body: TopupCreate, auth=Depends(get_verified_user)):
     tg_id, db, _ = auth
@@ -793,6 +991,7 @@ def api_topup_request(body: TopupCreate, auth=Depends(get_verified_user)):
         "topup_id": topup_id, "card_number": db.get_setting("card_number"),
         "card_holder": db.get_setting("card_holder"),
         "note": "مبلغ را واریز کرده و عکس رسید را همینجا ارسال کنید.",
+        "crypto_enabled": db.get_setting("crypto_payment_enabled", "0") == "1" and bool(_resolve_plisio_key(db)) and bool(API_BASE_URL),
     }
 
 
@@ -1390,6 +1589,11 @@ class VolumeReminderSettingsUpdate(BaseModel):
     discount_expiry_hours: int
 
 
+class CryptoSettingsUpdate(BaseModel):
+    enabled: bool
+    usd_to_toman_rate: int
+
+
 @app.get("/api/admin/settings/referral")
 def api_admin_get_referral_settings(auth=Depends(require_senior_admin)):
     _, db, _ = auth
@@ -1429,6 +1633,31 @@ def api_admin_set_wheel_settings(body: WheelSettingsUpdate, auth=Depends(require
     db.set_wheel_prizes(body.prizes)
     db.set_setting("wheel_code_expiry_hours", str(body.expiry_hours))
     db.set_setting("wheel_cooldown_hours", str(body.cooldown_hours))
+    return {"status": "ok"}
+
+
+@app.get("/api/admin/settings/crypto")
+def api_admin_get_crypto_settings(auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    api_key = _resolve_plisio_key(db)
+    return {
+        "enabled": db.get_setting("crypto_payment_enabled", "0") == "1",
+        "usd_to_toman_rate": int(float(db.get_setting("usd_to_toman_rate", "0") or 0)),
+        "has_own_key": bool(db.get_setting("plisio_api_key", "")),
+        "gateway_configured": bool(api_key) and bool(API_BASE_URL),
+    }
+
+
+@app.post("/api/admin/settings/crypto")
+def api_admin_set_crypto_settings(body: CryptoSettingsUpdate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    api_key = _resolve_plisio_key(db)
+    if body.enabled and (not api_key or not API_BASE_URL):
+        raise HTTPException(status_code=400, detail="ابتدا از داخل بات، پنل مدیریت → «تنظیم درگاه کریپتو» را انجام بده.")
+    if body.usd_to_toman_rate < 0:
+        raise HTTPException(status_code=400, detail="نرخ تبدیل نمی‌تواند منفی باشد.")
+    db.set_setting("crypto_payment_enabled", "1" if body.enabled else "0")
+    db.set_setting("usd_to_toman_rate", str(body.usd_to_toman_rate))
     return {"status": "ok"}
 
 
