@@ -2585,14 +2585,18 @@ async function renderAdminSalesSection() {
 
       <div class="card">
         <div class="eyebrow" style="margin-top:0">🪙 پرداخت کریپتو (Plisio)</div>
-        ${crypto.gateway_configured ? "" : `<p class="hint-text" style="color:var(--danger,#ff5a7a)">⚠️ هنوز API Key درگاه تنظیم نشده. از داخل بات، پنل مدیریت → «تنظیم درگاه کریپتو (Plisio)» رو بزن و کلیدت رو بفرست، بعد اینجا فعالش کن. (اگه بازم غیرفعال موند، یعنی MINIAPP_URL روی سرور تنظیم نشده - این رو دولوپر باید تو .env بذاره.)</p>`}
+        ${crypto.gateway_configured ? "" : (
+          !crypto.has_own_key
+            ? `<p class="hint-text" style="color:var(--danger,#ff5a7a)">⚠️ هنوز API Key درگاه تنظیم نشده. از داخل بات، پنل مدیریت → «تنظیم درگاه کریپتو (Plisio)» رو بزن و کلیدت رو بفرست.</p>`
+            : `<p class="hint-text" style="color:var(--danger,#ff5a7a)">⚠️ API Key ثبت شده (منبع: ${crypto.key_source === "db" ? "پنل بات" : crypto.key_source === "env" ? ".env" : "نامشخص"})، ولی آدرس MINIAPP_URL روی سرور تنظیم نشده. این رو دولوپر باید تو .env بذاره و هر دو سرویس (بات و مینی‌اپ) رو ری‌استارت کنه.</p>`
+        )}
         <p class="hint-text">با فعال شدن، کاربر هم موقع خرید مستقیم و هم موقع شارژ کیف پول می‌تونه با ارز دیجیتال (BTC/ETH/USDT/...) پرداخت کنه و بلافاصله بعد از تایید تراکنش، سفارش/کیف‌پول به‌صورت خودکار تسویه می‌شه.</p>
         <div class="field-switch-row">
           <span>پرداخت کریپتو فعال باشد</span>
           <label class="switch"><input type="checkbox" id="crypto-enabled" ${crypto.enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
         </div>
-        <label class="field-label">نرخ تبدیل هر ۱ دلار به تومان (خالی یا ۰ = خودکار از نوبیتکس)</label>
-        <input class="input" id="crypto-rate" type="number" placeholder="خودکار (نوبیتکس)" value="${crypto.usd_to_toman_rate || ""}" style="margin-bottom:4px" />
+        <label class="field-label">نرخ تبدیل هر ۱ دلار به تومان (خالی یا ۰ = خودکار از نوبیتکس/والکس/ارزدیجیتال)</label>
+        <input class="input" id="crypto-rate" type="number" placeholder="خودکار (نوبیتکس/والکس/ارزدیجیتال)" value="${crypto.usd_to_toman_rate || ""}" style="margin-bottom:4px" />
         <div class="field-error" id="crypto-error"></div>
         <button class="btn" id="crypto-save" style="margin-top:8px">💾 ذخیره</button>
       </div>
