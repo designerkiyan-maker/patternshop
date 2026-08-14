@@ -9,12 +9,21 @@
 
 import asyncio
 import logging
+import os
+from logging.handlers import RotatingFileHandler
 
 from config import BOT_TOKEN, OWNER_ID, DB_PATH, resolve_db_path
 from database import Database
 from bot_manager import BotManager
 
-logging.basicConfig(level=logging.INFO)
+os.makedirs("logs", exist_ok=True)
+_file_handler = RotatingFileHandler(
+    "logs/bot.log", maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8"
+)
+_file_handler.setFormatter(
+    logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+)
+logging.basicConfig(level=logging.INFO, handlers=[_file_handler, logging.StreamHandler()])
 logger = logging.getLogger(__name__)
 
 

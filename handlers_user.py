@@ -16,6 +16,7 @@ from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest, TelegramNetworkError
 
 import keyboards as kb
 from states import BuyFlow, ContactFlow, DiscountEntry, WalletTopup
@@ -25,6 +26,53 @@ from force_join import is_channel_member, CHECK_CALLBACK
 from sub_info import fetch_sub_info, format_sub_info_fa
 from stock_alerts import check_and_notify_low_stock
 import crypto_payment
+
+
+async def _send_admin_notification(bot, admin_id, send_coro_factory, context_label: str, ref_id: int):
+    """ارسال اعلان به یک ادمین با تلاش مجدد در برابر flood-limit و خطای شبکه.
+    دلیل عدم دریافت نوتیف توسط ادمین (بلاک بودن ربات، فایل نامعتبر و ...) به‌صورت
+    شفاف در logs/bot.log ثبت می‌شود تا قابل بررسی باشد."""
+    log = logging.getLogger("handlers_user")
+    for attempt in range(2):
+        try:
+            return await send_coro_factory()
+        except TelegramRetryAfter as e:
+            log.warning(
+                "محدودیت ارسال تلگرام (flood) هنگام اطلاع %s #%s به ادمین %s؛ %s ثانیه صبر و تلاش مجدد.",
+                context_label, ref_id, admin_id, e.retry_after,
+            )
+            await asyncio.sleep(e.retry_after + 1)
+            continue
+        except TelegramForbiddenError:
+            log.warning(
+                "ادمین %s ربات را بلاک/استارت نکرده - اطلاع %s #%s ارسال نشد.",
+                admin_id, context_label, ref_id,
+            )
+            return None
+        except TelegramBadRequest:
+            log.exception(
+                "درخواست نامعتبر هنگام ارسال اطلاع %s #%s به ادمین %s (احتمالاً عکس رسید/file_id نامعتبر است).",
+                context_label, ref_id, admin_id,
+            )
+            return None
+        except TelegramNetworkError:
+            log.warning(
+                "خطای شبکه هنگام ارسال اطلاع %s #%s به ادمین %s؛ تلاش مجدد.",
+                context_label, ref_id, admin_id,
+            )
+            await asyncio.sleep(2)
+            continue
+        except Exception:
+            log.exception(
+                "ارسال اطلاع %s #%s به ادمین %s ناموفق بود.",
+                context_label, ref_id, admin_id,
+            )
+            return None
+    log.error(
+        "ارسال اطلاع %s #%s به ادمین %s پس از تلاش مجدد هم ناموفق بود.",
+        context_label, ref_id, admin_id,
+    )
+    return None
 
 
 def create_user_router(db) -> Router:
@@ -270,24 +318,21 @@ def create_user_router(db) -> Router:
         if already_approved:
             caption += "\n\n✅ این سفارش به‌طور خودکار تایید و کانفیگ برای کاربر ارسال شد (پرداخت کامل از کیف پول/کد تخفیف)."
 
+        if not receipt_file_id and not already_approved:
+            caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول/تخفیف پوشش داده شده)"
+
         for admin_id in db.list_admins():
-            try:
-                if receipt_file_id:
-                    sent = await bot.send_photo(
-                        admin_id, receipt_file_id, caption=caption,
-                        reply_markup=reply_markup,
-                    )
-                else:
-                    if not already_approved:
-                        caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول/تخفیف پوشش داده شده)"
-                    sent = await bot.send_message(
-                        admin_id, caption, reply_markup=reply_markup,
-                    )
-                db.set_order_admin_message(order_id, admin_id, sent.message_id)
-            except Exception:
-                logging.getLogger("handlers_user").exception(
-                    "ارسال اعلان سفارش #%s به ادمین %s ناموفق بود.", order_id, admin_id
+            if receipt_file_id:
+                factory = lambda aid=admin_id: bot.send_photo(
+                    aid, receipt_file_id, caption=caption, reply_markup=reply_markup,
                 )
+            else:
+                factory = lambda aid=admin_id: bot.send_message(
+                    aid, caption, reply_markup=reply_markup,
+                )
+            sent = await _send_admin_notification(bot, admin_id, factory, "سفارش", order_id)
+            if sent:
+                db.set_order_admin_message(order_id, admin_id, sent.message_id)
 
     @router.callback_query(F.data.startswith("buy_start:"))
     async def cb_buy_start(call: CallbackQuery, state: FSMContext, bot: Bot):
@@ -698,16 +743,12 @@ def create_user_router(db) -> Router:
             f"💰 مبلغ: {amount:,} تومان"
         )
         for admin_id in db.list_admins():
-            try:
-                sent = await bot.send_photo(
-                    admin_id, file_id, caption=caption,
-                    reply_markup=kb.topup_review_kb(topup_id),
-                )
+            factory = lambda aid=admin_id: bot.send_photo(
+                aid, file_id, caption=caption, reply_markup=kb.topup_review_kb(topup_id),
+            )
+            sent = await _send_admin_notification(bot, admin_id, factory, "شارژ کیف پول", topup_id)
+            if sent:
                 db.set_topup_admin_message(topup_id, admin_id, sent.message_id)
-            except Exception:
-                logging.getLogger("handlers_user").exception(
-                    "ارسال اعلان شارژ کیف پول #%s به ادمین %s ناموفق بود.", topup_id, admin_id
-                )
 
         await message.answer(
             "✅ درخواست شارژ کیف پول شما برای بررسی ارسال شد. پس از تایید ادمین، مبلغ به کیف پول شما اضافه می‌شود.",
