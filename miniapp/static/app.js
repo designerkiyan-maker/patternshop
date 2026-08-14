@@ -2595,8 +2595,8 @@ async function renderAdminSalesSection() {
           <span>پرداخت کریپتو فعال باشد</span>
           <label class="switch"><input type="checkbox" id="crypto-enabled" ${crypto.enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
         </div>
-        <label class="field-label">نرخ تبدیل هر ۱ دلار به تومان (خالی یا ۰ = خودکار از نوبیتکس/والکس/ارزدیجیتال)</label>
-        <input class="input" id="crypto-rate" type="number" placeholder="خودکار (نوبیتکس/والکس/ارزدیجیتال)" value="${crypto.usd_to_toman_rate || ""}" style="margin-bottom:4px" />
+        <label class="field-label">نرخ تبدیل هر ۱ دلار به تومان (خالی یا ۰ = خودکار از tgju/نوبیتکس/والکس/ارزدیجیتال)</label>
+        <input class="input" id="crypto-rate" type="number" placeholder="خودکار (tgju/نوبیتکس/والکس/ارزدیجیتال)" value="${crypto.usd_to_toman_rate || ""}" style="margin-bottom:4px" />
         <div class="field-error" id="crypto-error"></div>
         <button class="btn" id="crypto-save" style="margin-top:8px">💾 ذخیره</button>
       </div>
