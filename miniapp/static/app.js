@@ -2585,7 +2585,7 @@ async function renderAdminSalesSection() {
 
       <div class="card">
         <div class="eyebrow" style="margin-top:0">🪙 پرداخت کریپتو (Plisio)</div>
-        ${crypto.gateway_configured ? "" : `<p class="hint-text" style="color:var(--danger,#ff5a7a)">⚠️ هنوز API Key درگاه تنظیم نشده. از داخل بات، پنل مدیریت → «تنظیم درگاه کریپتو (Plisio)» رو بزن و کلیدت رو بفرست، بعد اینجا فعالش کن.</p>`}
+        ${crypto.gateway_configured ? "" : `<p class="hint-text" style="color:var(--danger,#ff5a7a)">⚠️ هنوز API Key درگاه تنظیم نشده. از داخل بات، پنل مدیریت → «تنظیم درگاه کریپتو (Plisio)» رو بزن و کلیدت رو بفرست، بعد اینجا فعالش کن. (اگه بازم غیرفعال موند، یعنی MINIAPP_URL روی سرور تنظیم نشده - این رو دولوپر باید تو .env بذاره.)</p>`}
         <p class="hint-text">با فعال شدن، کاربر هم موقع خرید مستقیم و هم موقع شارژ کیف پول می‌تونه با ارز دیجیتال (BTC/ETH/USDT/...) پرداخت کنه و بلافاصله بعد از تایید تراکنش، سفارش/کیف‌پول به‌صورت خودکار تسویه می‌شه.</p>
         <div class="field-switch-row">
           <span>پرداخت کریپتو فعال باشد</span>
