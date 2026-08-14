@@ -129,9 +129,7 @@ class AdminRestoreBackup(StatesGroup):
 class AdminAddPanelServer(StatesGroup):
     waiting_name = State()
     waiting_url = State()
-    waiting_username = State()
-    waiting_password = State()
-    waiting_group = State()
+    waiting_api_key = State()
 
 
 class AdminAddPricingTier(StatesGroup):

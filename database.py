@@ -402,8 +402,7 @@ class Database:
                     name TEXT NOT NULL,
                     panel_type TEXT NOT NULL DEFAULT 'pasarguard',
                     api_url TEXT NOT NULL,
-                    api_username TEXT,
-                    api_password TEXT,
+                    api_key TEXT,
                     default_group TEXT,
                     is_active INTEGER DEFAULT 1,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -485,6 +484,7 @@ class Database:
             ("orders", "custom_volume_gb", "INTEGER"),
             ("orders", "custom_username", "TEXT"),
             ("orders", "custom_panel_server_id", "INTEGER"),
+            ("panel_servers", "api_key", "TEXT"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -2078,17 +2078,17 @@ class Database:
     # -----------------------------------------------------------------------
 
     def add_panel_server(self, name: str, panel_type: str, api_url: str,
-                          api_username: str, api_password: str, default_group: str = None) -> int:
+                          api_key: str, default_group: str = None) -> int:
         with self._get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO panel_servers (name, panel_type, api_url, api_username, api_password, default_group) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (name, panel_type, api_url.rstrip("/"), api_username, api_password, default_group),
+                "INSERT INTO panel_servers (name, panel_type, api_url, api_key, default_group) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (name, panel_type, api_url.rstrip("/"), api_key, default_group),
             )
             return cur.lastrowid
 
     def update_panel_server(self, server_id: int, **fields):
-        allowed = {"name", "panel_type", "api_url", "api_username", "api_password", "default_group", "is_active"}
+        allowed = {"name", "panel_type", "api_url", "api_key", "default_group", "is_active"}
         sets, values = [], []
         for k, v in fields.items():
             if k in allowed and v is not None:

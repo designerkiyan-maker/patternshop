@@ -1294,21 +1294,18 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("آدرس باید با http:// یا https:// شروع شود.")
             return
         await state.update_data(url=url)
-        await state.set_state(AdminAddPanelServer.waiting_username)
-        await message.answer("نام کاربری ادمین پنل را بفرست:")
+        await state.set_state(AdminAddPanelServer.waiting_api_key)
+        await message.answer(
+            "کلید API پنل را بفرست.\n"
+            "از منوی «کلیدهای API» داخل پنل PasarGuard، یک کلید جدید بساز و همینجا بفرست."
+        )
 
-    @router.message(AdminAddPanelServer.waiting_username)
-    async def process_panel_server_username(message: Message, state: FSMContext):
-        await state.update_data(username=message.text.strip())
-        await state.set_state(AdminAddPanelServer.waiting_password)
-        await message.answer("رمز عبور ادمین پنل را بفرست:")
-
-    @router.message(AdminAddPanelServer.waiting_password)
-    async def process_panel_server_password(message: Message, state: FSMContext):
+    @router.message(AdminAddPanelServer.waiting_api_key)
+    async def process_panel_server_api_key(message: Message, state: FSMContext):
         data = await state.get_data()
         server_id = db.add_panel_server(
             name=data["name"], panel_type="pasarguard", api_url=data["url"],
-            api_username=data["username"], api_password=message.text.strip(),
+            api_key=message.text.strip(),
         )
         await state.clear()
         try:
