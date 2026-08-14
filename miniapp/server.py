@@ -1612,6 +1612,7 @@ def api_admin_get_crypto_settings(auth=Depends(require_senior_admin)):
         "usd_to_toman_rate": int(float(db.get_setting("usd_to_toman_rate", "0") or 0)),
         "has_own_key": bool(db.get_setting("plisio_api_key", "")),
         "gateway_configured": bool(api_key) and bool(API_BASE_URL),
+        "key_source": crypto_payment.resolve_plisio_key_source(db),
     }
 
 
