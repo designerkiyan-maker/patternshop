@@ -769,8 +769,8 @@ async def _toman_to_usd(db: Database, amount_toman: int) -> float:
 
 def _crypto_callback_url(tenant_id: str) -> str:
     if not API_BASE_URL:
-        raise HTTPException(status_code=400, detail="آدرس API_BASE_URL روی سرور تنظیم نشده است.")
-    base = API_BASE_URL.rstrip("/")
+        raise HTTPException(status_code=400, detail="آدرس مینی‌اپ (MINIAPP_URL) روی سرور تنظیم نشده است؛ بدون آن پرداخت کریپتو ممکن نیست.")
+    base = API_BASE_URL
     return f"{base}/api/webhooks/plisio?b={tenant_id}&json=true"
 
 
@@ -782,7 +782,7 @@ async def _create_crypto_invoice_for(
     if not api_key:
         raise HTTPException(status_code=400, detail="درگاه پرداخت کریپتو هنوز تنظیم نشده. از داخل بات، پنل مدیریت → «تنظیم درگاه کریپتو» را بزن.")
     if not API_BASE_URL:
-        raise HTTPException(status_code=400, detail="آدرس API_BASE_URL روی سرور تنظیم نشده است.")
+        raise HTTPException(status_code=400, detail="آدرس مینی‌اپ (MINIAPP_URL) روی سرور تنظیم نشده است؛ بدون آن پرداخت کریپتو ممکن نیست.")
     if db.get_setting("crypto_payment_enabled", "0") != "1":
         raise HTTPException(status_code=400, detail="پرداخت کریپتو برای این فروشگاه فعال نیست.")
 
@@ -1653,7 +1653,7 @@ def api_admin_set_crypto_settings(body: CryptoSettingsUpdate, auth=Depends(requi
     _, db, _ = auth
     api_key = _resolve_plisio_key(db)
     if body.enabled and (not api_key or not API_BASE_URL):
-        raise HTTPException(status_code=400, detail="ابتدا از داخل بات، پنل مدیریت → «تنظیم درگاه کریپتو» را انجام بده.")
+        raise HTTPException(status_code=400, detail="ابتدا از داخل بات، پنل مدیریت → «تنظیم درگاه کریپتو» را انجام بده. (اگر بازم فعال نمی‌شه، یعنی MINIAPP_URL روی سرور تنظیم نشده.)")
     if body.usd_to_toman_rate < 0:
         raise HTTPException(status_code=400, detail="نرخ تبدیل نمی‌تواند منفی باشد.")
     db.set_setting("crypto_payment_enabled", "1" if body.enabled else "0")
