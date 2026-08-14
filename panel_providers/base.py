@@ -27,7 +27,7 @@ class PanelUsernameTakenError(PanelError):
 
 
 class BasePanelProvider(ABC):
-    """server: ردیف جدول panel_servers (sqlite3.Row) شامل api_url/api_username/api_password/default_group"""
+    """server: ردیف جدول panel_servers (sqlite3.Row) شامل api_url/api_key/default_group"""
 
     def __init__(self, server):
         self.server = server
