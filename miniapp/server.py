@@ -44,6 +44,7 @@ logging.basicConfig(level=logging.INFO)
 from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, resolve_db_path, RESELLER_DBS_DIR, MINIAPP_URL, API_BASE_URL, PLISIO_API_KEY
 import plisio_client
 import exchange_rate
+import crypto_payment
 from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER
 from miniapp.auth import validate_init_data
 from sub_info import fetch_sub_info
@@ -749,67 +750,33 @@ async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
 # ---------------------------------------------------------------------------
 
 def _resolve_plisio_key(db: Database) -> str:
-    """کلید API Plisio را برمی‌گرداند: اولویت با کلیدی است که ادمین از داخل بات
-    برای همین فروشگاه (تننت) تنظیم کرده؛ در غیر این صورت کلید سراسری .env."""
-    return db.get_setting("plisio_api_key", "") or PLISIO_API_KEY
+    return crypto_payment.resolve_plisio_key(db)
 
 
 async def _toman_to_usd(db: Database, amount_toman: int) -> float:
-    rate = float(db.get_setting("usd_to_toman_rate", "0") or 0)
-    if rate <= 0:
-        try:
-            rate = await exchange_rate.get_usd_to_toman_rate()
-        except Exception:
-            raise HTTPException(status_code=503, detail="دریافت نرخ لحظه‌ای دلار ناموفق بود، لحظاتی دیگر دوباره تلاش کن.")
-    usd = amount_toman / rate
-    if usd < 1:
-        raise HTTPException(status_code=400, detail="مبلغ برای پرداخت کریپتو خیلی کم است (حداقل حدود ۱ دلار).")
-    return round(usd, 2)
+    try:
+        return await crypto_payment.toman_to_usd(db, amount_toman)
+    except crypto_payment.CryptoPaymentError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 def _crypto_callback_url(tenant_id: str) -> str:
-    if not API_BASE_URL:
-        raise HTTPException(status_code=400, detail="آدرس مینی‌اپ (MINIAPP_URL) روی سرور تنظیم نشده است؛ بدون آن پرداخت کریپتو ممکن نیست.")
-    base = API_BASE_URL
-    return f"{base}/api/webhooks/plisio?b={tenant_id}&json=true"
+    try:
+        return crypto_payment.callback_url(tenant_id)
+    except crypto_payment.CryptoPaymentError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 async def _create_crypto_invoice_for(
     db: Database, tenant, tg_id: int, kind: str, ref_id: int, amount_toman: int,
     order_name: str,
 ):
-    api_key = _resolve_plisio_key(db)
-    if not api_key:
-        raise HTTPException(status_code=400, detail="درگاه پرداخت کریپتو هنوز تنظیم نشده. از داخل بات، پنل مدیریت → «تنظیم درگاه کریپتو» را بزن.")
-    if not API_BASE_URL:
-        raise HTTPException(status_code=400, detail="آدرس مینی‌اپ (MINIAPP_URL) روی سرور تنظیم نشده است؛ بدون آن پرداخت کریپتو ممکن نیست.")
-    if db.get_setting("crypto_payment_enabled", "0") != "1":
-        raise HTTPException(status_code=400, detail="پرداخت کریپتو برای این فروشگاه فعال نیست.")
-
-    existing = db.get_pending_crypto_invoice_for_ref(kind, ref_id)
-    if existing:
-        return {"invoice_url": existing["invoice_url"], "txn_id": existing["txn_id"]}
-
-    source_amount_usd = await _toman_to_usd(db, amount_toman)
-    order_number = f"{kind}-{tenant.tenant_id or 'main'}-{ref_id}-{int(datetime.utcnow().timestamp())}"
-    callback_url = _crypto_callback_url(tenant.tenant_id)
     try:
-        data = await plisio_client.create_invoice(
-            api_key=api_key,
-            order_number=order_number,
-            order_name=order_name,
-            source_amount_usd=source_amount_usd,
-            callback_url=callback_url,
+        return await crypto_payment.create_invoice_for(
+            db, tenant.tenant_id, tg_id, kind, ref_id, amount_toman, order_name,
         )
-    except plisio_client.PlisioError as e:
-        raise HTTPException(status_code=502, detail=f"خطا از درگاه پرداخت: {e}")
-
-    db.create_crypto_invoice(
-        txn_id=data["txn_id"], kind=kind, ref_id=ref_id, user_id=tg_id,
-        amount_toman=amount_toman, source_amount_usd=source_amount_usd,
-        invoice_url=data.get("invoice_url"),
-    )
-    return {"invoice_url": data.get("invoice_url"), "txn_id": data["txn_id"]}
+    except crypto_payment.CryptoPaymentError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/orders/{order_id}/crypto-invoice")
