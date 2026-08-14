@@ -1236,15 +1236,13 @@ class PanelServerCreate(BaseModel):
     name: str
     panel_type: str = "pasarguard"
     api_url: str
-    api_username: str
-    api_password: str
+    api_key: str
 
 
 class PanelServerUpdate(BaseModel):
     name: Optional[str] = None
     api_url: Optional[str] = None
-    api_username: Optional[str] = None
-    api_password: Optional[str] = None
+    api_key: Optional[str] = None
 
 
 class PricingTierCreate(BaseModel):
@@ -1262,7 +1260,7 @@ class CustomConfigSettingsUpdate(BaseModel):
 def _panel_server_public(s) -> dict:
     return {
         "id": s["id"], "name": s["name"], "panel_type": s["panel_type"],
-        "api_url": s["api_url"], "api_username": s["api_username"],
+        "api_url": s["api_url"],
         "default_group": s["default_group"], "is_active": bool(s["is_active"]),
     }
 
@@ -1277,13 +1275,12 @@ def api_admin_list_panel_servers(auth=Depends(require_senior_admin)):
 def api_admin_add_panel_server(body: PanelServerCreate, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     admin_id, _, _ = auth
-    if not body.name.strip() or not body.api_url.strip() or not body.api_username.strip() or not body.api_password.strip():
+    if not body.name.strip() or not body.api_url.strip() or not body.api_key.strip():
         raise HTTPException(status_code=400, detail="همه‌ی فیلدها الزامی هستند.")
     if body.panel_type not in ("pasarguard",):
         raise HTTPException(status_code=400, detail="نوع پنل پشتیبانی نمی‌شود.")
     server_id = db.add_panel_server(
-        body.name.strip(), body.panel_type, body.api_url.strip(),
-        body.api_username.strip(), body.api_password,
+        body.name.strip(), body.panel_type, body.api_url.strip(), body.api_key.strip(),
     )
     db.log_admin_action(admin_id, "panel_server_add", f"سرور «{body.name}» (#{server_id}) از مینی‌اپ")
     return {"id": server_id}
@@ -1294,10 +1291,7 @@ def api_admin_edit_panel_server(server_id: int, body: PanelServerUpdate, auth=De
     _, db, _ = auth
     if not db.get_panel_server(server_id):
         raise HTTPException(status_code=404, detail="سرور یافت نشد.")
-    db.update_panel_server(
-        server_id, name=body.name, api_url=body.api_url,
-        api_username=body.api_username, api_password=body.api_password,
-    )
+    db.update_panel_server(server_id, name=body.name, api_url=body.api_url, api_key=body.api_key)
     return {"status": "ok"}
 
 
