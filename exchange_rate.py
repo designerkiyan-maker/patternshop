@@ -10,6 +10,7 @@
 
 import time
 import logging
+import re
 
 import aiohttp
 
@@ -18,6 +19,29 @@ logger = logging.getLogger("exchange_rate")
 _cache = {"rate": None, "ts": 0.0, "source": None}
 CACHE_TTL_SECONDS = 300  # ۵ دقیقه
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=8)
+
+# الگوی نوار قیمت لحظه‌ای پایین صفحات tgju.org، مثلا: "دلار</b> 1,878,000 (0%)"
+# عدد بلافاصله با درصد تغییر داخل پرانتز همراه است که این را از اشاره‌های
+# متنی دیگر به «دلار» داخل مقالات سایت متمایز می‌کند.
+_TGJU_PATTERN = re.compile(r"دلار[^0-9]{0,20}([\d,]{4,10})\s*\([-\d.]+%\)")
+
+
+async def _from_tgju(session: aiohttp.ClientSession) -> float:
+    async with session.get(
+        "https://www.tgju.org/currency",
+        timeout=REQUEST_TIMEOUT,
+        headers={"User-Agent": "Mozilla/5.0"},
+    ) as resp:
+        if resp.status != 200:
+            raise ValueError(f"HTTP {resp.status}")
+        html = await resp.text()
+    match = _TGJU_PATTERN.search(html)
+    if not match:
+        raise ValueError("الگوی قیمت دلار در صفحه tgju.org پیدا نشد (شاید ساختار سایت تغییر کرده).")
+    rial = int(match.group(1).replace(",", ""))
+    if rial <= 0:
+        raise ValueError("مقدار نامعتبر.")
+    return round(rial / 10)  # ریال به تومان
 
 
 async def _from_nobitex(session: aiohttp.ClientSession) -> float:
@@ -61,7 +85,9 @@ async def _from_arzdigital(session: aiohttp.ClientSession) -> float:
 
 
 # ترتیب امتحان منابع؛ اولین موردی که جواب معتبر بدهد استفاده می‌شود.
+# tgju.org اول امتحان می‌شود (طبق درخواست)، بعد نوبیتکس/والکس/ارزدیجیتال به‌عنوان پشتیبان.
 _PROVIDERS = [
+    ("tgju", _from_tgju),
     ("nobitex", _from_nobitex),
     ("wallex", _from_wallex),
     ("arzdigital", _from_arzdigital),
@@ -99,7 +125,7 @@ async def get_usd_to_toman_rate() -> float:
         logger.warning("استفاده از آخرین نرخ کش‌شده (منبع: %s) به‌دلیل شکست همه‌ی منابع.", _cache["source"])
         return _cache["rate"]
     raise RuntimeError(
-        "دریافت نرخ خودکار از همه‌ی منابع (نوبیتکس/والکس/ارزدیجیتال) ناموفق بود. "
+        "دریافت نرخ خودکار از همه‌ی منابع (tgju/نوبیتکس/والکس/ارزدیجیتال) ناموفق بود. "
         "احتمالاً IP سرور توسط این سرویس‌ها بلاک/فیلتر شده. جزئیات: " + " | ".join(errors)
     )
 
