@@ -28,6 +28,7 @@ async def create_invoice(
     callback_url: str,
     email: str = None,
     currency: str = None,
+    expire_min: int = None,
 ) -> dict:
     """یک فاکتور پرداخت کریپتو در Plisio می‌سازد.
     اگر currency مشخص نشود، کاربر خودش داخل صفحه‌ی Plisio ارز را انتخاب می‌کند.
@@ -48,6 +49,8 @@ async def create_invoice(
         params["currency"] = currency
     if email:
         params["email"] = email
+    if expire_min is not None:
+        params["expire_min"] = str(int(expire_min))
 
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{PLISIO_BASE_URL}/invoices/new", params=params, timeout=15) as resp:

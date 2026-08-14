@@ -427,6 +427,7 @@ class Database:
             ("orders", "quantity", "INTEGER DEFAULT 1"),
             ("configs", "order_id", "INTEGER"),
             ("reseller_bots", "link_slug", "TEXT"),
+            ("crypto_invoices", "expires_at", "TEXT"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -1096,8 +1097,14 @@ class Database:
                 self.decrement_discount_usage(order["discount_code_id"])
 
     def get_pending_orders(self):
+        """سفارش‌های نیازمند بررسی دستی؛ سفارش‌هایی که برایشان فاکتور کریپتو ساخته شده‌اند اینجا نمی‌آیند."""
         with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM orders WHERE status='pending' ORDER BY id").fetchall()
+            return conn.execute(
+                "SELECT o.* FROM orders o "
+                "WHERE o.status='pending' "
+                "AND NOT EXISTS (SELECT 1 FROM crypto_invoices ci WHERE ci.kind='order' AND ci.ref_id=o.id) "
+                "ORDER BY o.id"
+            ).fetchall()
 
     def get_user_orders(self, user_tg_id: int):
         with self._get_conn() as conn:
@@ -1465,8 +1472,14 @@ class Database:
             )
 
     def get_pending_topups(self):
+        """شارژهای نیازمند بررسی دستی؛ شارژهای دارای فاکتور کریپتو اینجا نمی‌آیند."""
         with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM wallet_topups WHERE status='pending' ORDER BY id").fetchall()
+            return conn.execute(
+                "SELECT t.* FROM wallet_topups t "
+                "WHERE t.status='pending' "
+                "AND NOT EXISTS (SELECT 1 FROM crypto_invoices ci WHERE ci.kind='wallet_topup' AND ci.ref_id=t.id) "
+                "ORDER BY t.id"
+            ).fetchall()
 
     # -----------------------------------------------------------------------
     # ثبت‌نام بات‌های نمایندگی (فقط در دیتابیس بات اصلی معنا دارد)
@@ -1538,8 +1551,9 @@ class Database:
         with self._get_conn() as conn:
             cur = conn.execute(
                 "INSERT INTO crypto_invoices (txn_id, kind, ref_id, user_id, amount_toman, "
-                "source_amount_usd, invoice_url, currency, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new')",
-                (txn_id, kind, ref_id, user_id, amount_toman, source_amount_usd, invoice_url, currency),
+                "source_amount_usd, invoice_url, currency, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)",
+                (txn_id, kind, ref_id, user_id, amount_toman, source_amount_usd, invoice_url, currency,
+                 (datetime.utcnow() + timedelta(minutes=80)).isoformat()),
             )
             return cur.lastrowid
 
@@ -1572,6 +1586,14 @@ class Database:
                 "ORDER BY id DESC LIMIT 1",
                 (kind, ref_id),
             ).fetchone()
+
+    def get_crypto_invoices(self, limit: int = 50):
+        """فهرست پرداخت‌های کریپتو برای پنل مدیریت؛ شامل پرداخت‌های فعال و تاریخچه."""
+        limit = max(1, min(int(limit or 50), 200))
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM crypto_invoices ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
 
     # -----------------------------------------------------------------------
     # گردونه شانس

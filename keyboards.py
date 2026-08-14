@@ -228,6 +228,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_forcejoin_menu", "📢 عضویت اجباری در کانال", "adm_forcejoin_menu"),
     ("adm_pending_orders", "🧾 سفارش‌های در انتظار", "adm_pending_orders"),
     ("adm_pending_topups", "👛 درخواست‌های شارژ کیف پول", "adm_pending_topups"),
+    ("adm_crypto_payments", "🪙 پرداخت‌های کریپتو", "adm_crypto_payments"),
     ("adm_discounts_menu", "🎟 مدیریت کدهای تخفیف", "adm_discounts_menu"),
     ("adm_wheel_settings", "🎡 مدیریت گردونه شانس", "adm_wheel_settings"),
     ("adm_renewal_settings", "🔔 یادآوری تمدید سرویس", "adm_renewal_settings"),
@@ -508,6 +509,34 @@ def pending_orders_kb(orders) -> InlineKeyboardMarkup:
         rows.append(
             [InlineKeyboardButton(text=f"سفارش #{o['id']} - کاربر {o['user_id']}", callback_data=f"view_order:{o['id']}")]
         )
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+
+
+def crypto_invoices_kb(invoices) -> InlineKeyboardMarkup:
+    rows = []
+    status_text = {
+        "new": "🟡 جدید",
+        "pending": "🟠 در انتظار تایید شبکه",
+        "completed": "🟢 تکمیل‌شده",
+        "expired": "🔴 منقضی‌شده",
+        "cancelled": "⚪️ لغوشده",
+        "error": "🔴 خطا",
+        "mismatch": "🟣 مغایرت",
+    }
+    kind_text = {"order": "سفارش", "wallet_topup": "شارژ کیف پول"}
+    for inv in invoices:
+        st = status_text.get(inv["status"], inv["status"] or "---")
+        kind = kind_text.get(inv["kind"], inv["kind"])
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{st} | {kind} #{inv['ref_id']} | {inv['amount_toman']:,} تومان",
+                callback_data=f"view_crypto_invoice:{inv['id']}",
+            )
+        ])
+    rows.append([InlineKeyboardButton(text="🔄 بروزرسانی", callback_data="adm_crypto_payments")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

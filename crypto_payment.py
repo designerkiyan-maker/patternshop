@@ -100,6 +100,7 @@ async def create_invoice_for(db, tenant_id: str, tg_id: int, kind: str, ref_id: 
             order_name=order_name,
             source_amount_usd=source_amount_usd,
             callback_url=cb_url,
+            expire_min=80,
         )
     except plisio_client.PlisioError as e:
         raise CryptoPaymentError(f"خطا از درگاه پرداخت: {e}")

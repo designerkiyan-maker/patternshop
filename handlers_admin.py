@@ -11,7 +11,7 @@ import asyncio
 import tempfile
 
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, FSInputFile
+from aiogram.types import Message, CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
@@ -705,6 +705,68 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer("درخواست شارژ در انتظاری وجود ندارد.", show_alert=True)
             return
         await replace_admin_view(call, "👛 درخواست‌های شارژ کیف پول در انتظار:", reply_markup=kb.pending_topups_kb(topups))
+        await call.answer()
+
+    # -------------------------------------------------------------------
+    # پرداخت‌های کریپتو (تایید خودکار)
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_crypto_payments")
+    async def cb_admin_crypto_payments(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        invoices = db.get_crypto_invoices(50)
+        if not invoices:
+            await call.answer("هیچ پرداخت کریپتویی ثبت نشده است.", show_alert=True)
+            return
+        await replace_admin_view(
+            call,
+            "🪙 پرداخت‌های کریپتو\n\nاین پرداخت‌ها به‌صورت خودکار تایید می‌شوند و در بخش سفارش‌ها/شارژهای دستی نمایش داده نمی‌شوند.",
+            reply_markup=kb.crypto_invoices_kb(invoices),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("view_crypto_invoice:"))
+    async def cb_view_crypto_invoice(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        invoice_id = callback_id(call.data, "view_crypto_invoice")
+        if invoice_id is None:
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
+        invoice = db.get_crypto_invoice(invoice_id)
+        if not invoice:
+            await call.answer("فاکتور یافت نشد.", show_alert=True)
+            return
+
+        status_text = {
+            "new": "🟡 جدید",
+            "pending": "🟠 در انتظار تایید شبکه",
+            "completed": "🟢 تکمیل‌شده",
+            "expired": "🔴 منقضی‌شده",
+            "cancelled": "⚪️ لغوشده",
+            "error": "🔴 خطا",
+            "mismatch": "🟣 مغایرت",
+        }.get(invoice["status"], invoice["status"] or "---")
+        kind_text = {"order": "🧾 سفارش", "wallet_topup": "👛 شارژ کیف پول"}.get(invoice["kind"], invoice["kind"])
+
+        text = (
+            f"🪙 فاکتور کریپتو #{invoice['id']}\n"
+            f"{kind_text}: #{invoice['ref_id']}\n"
+            f"👤 کاربر: {invoice['user_id']}\n"
+            f"💰 مبلغ: {invoice['amount_toman']:,} تومان\n"
+            f"💵 معادل: {invoice['source_amount_usd']:.2f} USD\n"
+            f"🪙 ارز: {invoice['currency'] or 'انتخاب نشده'}\n"
+            f"📌 وضعیت: {status_text}\n"
+            f"⏳ اعتبار فاکتور: ۸۰ دقیقه\n"
+            f"🕐 ایجاد: {invoice['created_at'] or '---'}\n"
+            f"⌛ انقضا: {invoice['expires_at'] or '---'}"
+        )
+        rows = []
+        if invoice["invoice_url"] and invoice["status"] in ("new", "pending"):
+            rows.append([InlineKeyboardButton(text="🔗 باز کردن فاکتور", url=invoice["invoice_url"])])
+        rows.append([InlineKeyboardButton(text="⬅️ بازگشت به پرداخت‌های کریپتو", callback_data="adm_crypto_payments")])
+        await replace_admin_view(call, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
         await call.answer()
 
     @router.callback_query(F.data.startswith("view_topup:"))
