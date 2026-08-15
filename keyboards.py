@@ -260,7 +260,6 @@ ADMIN_PANEL_ITEMS = [
     ("adm_volume_reminder_settings", "📉 یادآوری اتمام حجم", "adm_volume_reminder_settings"),
     ("adm_stock_alert_settings", "📦 آستانه‌ی هشدار موجودی", "adm_stock_alert_settings"),
     ("adm_custom_config_settings", "🛠 ساخت کانفیگ شخصی (پنل‌های VPN)", "adm_custom_config_settings"),
-    ("adm_reset_test_configs", "🔁 بازنشانی کانفیگ تست برای همه", "adm_reset_test_configs"),
     ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
     ("adm_resellers_menu", "🏪 مدیریت بات‌های نمایندگی", "adm_resellers_menu"),
     ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
@@ -448,6 +447,7 @@ def admin_test_menu_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=f"موجودی فعلی: {remaining} عدد", callback_data="noop")],
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_test_toggle")],
         [InlineKeyboardButton(text="➕ افزودن لینک تست", callback_data="adm_test_add")],
+        [InlineKeyboardButton(text="🔁 بازنشانی کانفیگ تست برای همه", callback_data="adm_reset_test_configs")],
         [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)

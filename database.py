@@ -1826,7 +1826,7 @@ class Database:
                 "SELECT id as config_id, subscription_url as link, user_id as assigned_user_id, "
                 "username as product_name "
                 "FROM custom_configs "
-                "WHERE renewal_reminder_sent=0 AND status='active' "
+                "WHERE renewal_reminder_sent=0 AND status='active' AND source != 'test' "
                 "AND subscription_url IS NOT NULL AND TRIM(subscription_url) != ''"
             ).fetchall()
 
@@ -1892,7 +1892,7 @@ class Database:
                 "SELECT id as config_id, subscription_url as link, user_id as assigned_user_id, "
                 "username as product_name "
                 "FROM custom_configs "
-                "WHERE volume_reminder_sent=0 AND status='active' "
+                "WHERE volume_reminder_sent=0 AND status='active' AND source != 'test' "
                 "AND subscription_url IS NOT NULL AND TRIM(subscription_url) != ''"
             ).fetchall()
 
@@ -2138,19 +2138,28 @@ class Database:
             )
 
     def get_expiring_configs_for_user(self, user_tg_id: int, days_before: int = None):
-        """کانفیگ‌های فعال کاربر که تا چند روز آینده منقضی می‌شوند."""
+        """کانفیگ‌های فعال کاربر (خریداری‌شده از انبار + ساخته‌شده مستقیم روی پنل) که تا چند روز آینده منقضی می‌شوند."""
         if days_before is None:
             days_before = int(self.get_setting("renewal_reminder_days_before", "5") or 5)
         with self._get_conn() as conn:
             threshold = (datetime.utcnow() + timedelta(days=days_before)).isoformat()
             now = datetime.utcnow().isoformat()
-            return conn.execute(
+            rows = conn.execute(
                 "SELECT cf.id as config_id, cf.link, cf.expires_at, o.product_id "
                 "FROM configs cf JOIN orders o ON (o.id = cf.order_id OR o.config_id = cf.id) "
                 "WHERE cf.assigned_user_id=? AND cf.is_used=1 AND cf.expires_at IS NOT NULL "
                 "AND cf.expires_at > ? AND cf.expires_at <= ? AND o.user_id=?",
                 (user_tg_id, now, threshold, user_tg_id),
             ).fetchall()
+            custom_rows = conn.execute(
+                "SELECT id as config_id, subscription_url as link, expires_at, NULL as product_id, "
+                "username as custom_username "
+                "FROM custom_configs "
+                "WHERE user_id=? AND status='active' AND source != 'test' AND expires_at IS NOT NULL "
+                "AND expires_at > ? AND expires_at <= ?",
+                (user_tg_id, now, threshold),
+            ).fetchall()
+            return list(rows) + list(custom_rows)
 
     # -----------------------------------------------------------------------
     # عضویت اجباری در کانال
@@ -2287,6 +2296,8 @@ class Database:
                            volume_gb: int, duration_days: int, subscription_url: str,
                            order_id: int = None, expires_at: str = None, source: str = "custom_config") -> int:
         """source: 'custom_config' (خرید شخصی)، 'test' (کانفیگ تست پنلی)، یا 'reseller'."""
+        if expires_at is None:
+            expires_at = (datetime.utcnow() + timedelta(days=duration_days)).isoformat()
         with self._get_conn() as conn:
             cur = conn.execute(
                 "INSERT INTO custom_configs (order_id, user_id, panel_server_id, username, volume_gb, "
