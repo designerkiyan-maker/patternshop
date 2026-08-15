@@ -9,6 +9,7 @@ Router تازه می‌سازد که به همان یک db گره خورده؛ �
 """
 
 import random
+import re
 import asyncio
 import logging
 
@@ -19,13 +20,14 @@ from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest, TelegramNetworkError
 
 import keyboards as kb
-from states import BuyFlow, ContactFlow, DiscountEntry, WalletTopup
+from states import BuyFlow, ContactFlow, DiscountEntry, WalletTopup, CustomConfigFlow, ResellerFlow
 from config import MAX_TEST_PER_USER
 from config_delivery import deliver_config_to_user
 from force_join import is_channel_member, CHECK_CALLBACK
 from sub_info import fetch_sub_info, format_sub_info_fa
 from stock_alerts import check_and_notify_low_stock
 import crypto_payment
+from panel_providers import get_provider, PanelError, PanelUsernameTakenError
 
 
 async def _send_admin_notification(bot, admin_id, send_coro_factory, context_label: str, ref_id: int):
@@ -147,10 +149,20 @@ def create_user_router(db) -> Router:
     async def show_categories(message: Message, state: FSMContext):
         await state.clear()
         categories = db.get_categories(active_only=True)
-        if not categories:
+        custom_enabled = db.get_setting("custom_config_enabled", "0") == "1"
+        if not categories and not custom_enabled:
             await message.answer("در حال حاضر دسته‌بندی فعالی وجود ندارد.")
             return
-        await message.answer("یک دسته‌بندی را انتخاب کنید:", reply_markup=kb.categories_kb(db, categories))
+        await message.answer("یک گزینه را انتخاب کنید:", reply_markup=kb.categories_kb(db, categories))
+
+    @router.callback_query(F.data == "custom_config_start")
+    async def cb_custom_config_start(call: CallbackQuery, state: FSMContext):
+        await call.answer()
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        await custom_config_start(call.message, state)
 
     @router.callback_query(F.data == "back_main")
     async def cb_back_main(call: CallbackQuery, state: FSMContext):
@@ -291,6 +303,42 @@ def create_user_router(db) -> Router:
 
     async def _notify_admins_of_order(bot: Bot, order_id: int, receipt_file_id: str = None):
         order = db.get_order(order_id)
+
+        if order["is_custom_config"]:
+            user_row = db.get_user(order["user_id"])
+            username = user_row["username"] if user_row else ""
+            first_name = user_row["first_name"] if user_row else ""
+            caption = (
+                f"🧾 سفارش کانفیگ شخصی #{order_id}\n"
+                f"👤 کاربر: {first_name or ''} (@{username or '---'})\n"
+                f"🆔 آیدی عددی: {order['user_id']}\n"
+                f"🛠 نام کاربری: {order['custom_username']}\n"
+                f"📶 حجم: {order['custom_volume_gb']} گیگابایت\n"
+                f"💰 قیمت پایه: {order['base_price']:,} تومان\n"
+            )
+            if order["wallet_used"]:
+                caption += f"👛 استفاده از کیف پول: {order['wallet_used']:,} تومان\n"
+            caption += f"💵 مبلغ قابل پرداخت: {order['final_price']:,} تومان"
+            already_approved = order["status"] != "pending"
+            reply_markup = None if already_approved else kb.order_review_kb(order_id)
+            if already_approved:
+                caption += "\n\n✅ این سفارش به‌طور خودکار تایید و کانفیگ ساخته شد (پرداخت کامل از کیف پول)."
+            if not receipt_file_id and not already_approved:
+                caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول پوشش داده شده)"
+            for admin_id in db.list_admins():
+                if receipt_file_id:
+                    factory = lambda aid=admin_id: bot.send_photo(
+                        aid, receipt_file_id, caption=caption, reply_markup=reply_markup,
+                    )
+                else:
+                    factory = lambda aid=admin_id: bot.send_message(
+                        aid, caption, reply_markup=reply_markup,
+                    )
+                sent = await _send_admin_notification(bot, admin_id, factory, "سفارش کانفیگ شخصی", order_id)
+                if sent:
+                    db.set_order_admin_message(order_id, admin_id, sent.message_id)
+            return
+
         product = db.get_product(order["product_id"])
         user_row = db.get_user(order["user_id"])
         username = user_row["username"] if user_row else ""
@@ -517,6 +565,216 @@ def create_user_router(db) -> Router:
         await message.answer("لطفاً فقط عکس رسید پرداخت را ارسال کنید.")
 
     # -----------------------------------------------------------------------
+    # ساخت کانفیگ شخصی (اتصال مستقیم به پنل VPN)
+    # -----------------------------------------------------------------------
+
+    def _format_pricing_table(tiers) -> str:
+        lines = ["💰 جدول قیمت‌گذاری (بر اساس بازه‌ی حجم):", ""]
+        for t in tiers:
+            to_label = f"{t['to_gb']} گیگ" if t["to_gb"] is not None else "به بالا"
+            from_label = f"{t['from_gb']}" if t["to_gb"] is not None else f"{t['from_gb']} گیگ"
+            lines.append(f"▫️ {from_label} تا {to_label} ← {t['price_per_gb']:,} تومان/گیگ")
+        lines.append("")
+        lines.append("قیمت نهایی = کل حجم انتخابی × نرخ همان بازه‌ای که حجم داخلش قرار می‌گیرد.")
+        return "\n".join(lines)
+
+    async def custom_config_start(message: Message, state: FSMContext):
+        settings = db.get_custom_config_settings()
+        if not settings["enabled"]:
+            await message.answer("این بخش در حال حاضر غیرفعال است.")
+            return
+        server = db.get_panel_server_for_usage("custom_config")
+        if not server:
+            await message.answer("در حال حاضر سروری برای ساخت کانفیگ شخصی فعال نیست. لطفاً بعداً تلاش کنید.")
+            return
+        tiers = db.get_pricing_tiers()
+        if not tiers:
+            await message.answer("قیمت‌گذاری این بخش هنوز توسط ادمین تنظیم نشده است.")
+            return
+        await state.set_state(CustomConfigFlow.waiting_username)
+        await state.update_data(panel_server_id=server["id"])
+        await message.answer(
+            "🛠 ساخت کانفیگ شخصی\n\n"
+            "لطفاً یک نام کاربری دلخواه برای کانفیگ خود ارسال کنید، یا از دکمه‌ی زیر یک نام تصادفی بگیر.\n"
+            "فقط حروف انگلیسی، عدد و آندرلاین مجاز است (بین ۳ تا ۲۰ کاراکتر).",
+            reply_markup=kb.custom_config_username_kb(),
+        )
+
+    @router.callback_query(F.data == "custom_config_random_username", CustomConfigFlow.waiting_username)
+    async def cb_custom_config_random_username(call: CallbackQuery, state: FSMContext):
+        for _ in range(10):
+            candidate = "u" + "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=8))
+            if not db.is_custom_username_taken(candidate):
+                break
+        await call.answer()
+        await _custom_config_apply_username(call.message, state, candidate)
+
+    @router.message(CustomConfigFlow.waiting_username)
+    async def custom_config_receive_username(message: Message, state: FSMContext):
+        username = (message.text or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_]{3,20}", username):
+            await message.answer("❌ نام کاربری نامعتبر است. فقط حروف انگلیسی، عدد و آندرلاین، بین ۳ تا ۲۰ کاراکتر.")
+            return
+        if db.is_custom_username_taken(username):
+            await message.answer("❌ این نام کاربری قبلاً استفاده شده. لطفاً نام دیگری انتخاب کنید.")
+            return
+        await _custom_config_apply_username(message, state, username)
+
+    async def _custom_config_apply_username(message: Message, state: FSMContext, username: str):
+        settings = db.get_custom_config_settings()
+        tiers = db.get_pricing_tiers()
+        await state.update_data(custom_username=username)
+        await state.set_state(CustomConfigFlow.waiting_volume)
+        await message.answer(
+            f"✅ نام کاربری: {username}\n\n"
+            f"{_format_pricing_table(tiers)}\n\n"
+            f"📶 حالا حجم مورد نظر خود را به گیگابایت وارد کنید.\n"
+            f"حداقل: {settings['min_gb']} گیگ — حداکثر: {settings['max_gb']} گیگ\n"
+            f"⏳ مدت اعتبار: {settings['duration_days']} روز (ثابت)",
+            reply_markup=kb.cancel_kb(),
+        )
+
+    @router.message(CustomConfigFlow.waiting_volume)
+    async def custom_config_receive_volume(message: Message, state: FSMContext):
+        settings = db.get_custom_config_settings()
+        text = (message.text or "").strip()
+        if not text.isdigit():
+            await message.answer("❌ لطفاً فقط عدد صحیح وارد کنید (به گیگابایت).")
+            return
+        volume_gb = int(text)
+        if volume_gb < settings["min_gb"] or volume_gb > settings["max_gb"]:
+            await message.answer(
+                f"❌ حجم باید بین {settings['min_gb']} تا {settings['max_gb']} گیگابایت باشد."
+            )
+            return
+
+        price = db.calc_custom_config_price(volume_gb)
+        if price <= 0:
+            await message.answer("⚠️ قیمت‌گذاری برای این بخش هنوز تنظیم نشده. لطفاً با پشتیبانی تماس بگیرید.")
+            await state.clear()
+            return
+
+        data = await state.get_data()
+        username = data.get("custom_username")
+        server = db.get_panel_server(data.get("panel_server_id"))
+        if not server or not server["is_active"]:
+            await message.answer("⛔️ سرور این بخش دیگر در دسترس نیست. لطفاً دوباره از منو شروع کنید.")
+            await state.clear()
+            return
+
+        wallet_credit = db.get_wallet_credit(message.from_user.id)
+        wallet_used = min(wallet_credit, price)
+
+        if wallet_used > 0:
+            db.add_wallet_credit(message.from_user.id, -wallet_used)
+
+        order_id = db.create_custom_config_order(
+            message.from_user.id, volume_gb, username, server["id"],
+            base_price=price, wallet_used=wallet_used,
+        )
+        order = db.get_order(order_id)
+        await state.update_data(order_id=order_id, custom_volume_gb=volume_gb)
+
+        if order["final_price"] <= 0:
+            await state.clear()
+            db.approve_custom_config_order(order_id)
+            server_row = db.get_panel_server(server["id"])
+            try:
+                provider = get_provider(server_row)
+                result = await provider.create_user(username, volume_gb, settings["duration_days"])
+            except Exception as e:
+                db.reject_order(order_id)
+                await message.answer(f"⛔️ خطا در ساخت کانفیگ روی پنل: {e}\nمبلغ به کیف پول بازگردانده شد.")
+                return
+            db.add_custom_config(
+                message.from_user.id, server["id"], result.username, volume_gb,
+                settings["duration_days"], result.subscription_url, order_id=order_id,
+            )
+            await message.answer(
+                "✅ مبلغ سفارش شما به‌طور کامل از کیف پول پوشش داده شد.\n"
+                "کانفیگ شما در پیام بعدی ارسال می‌شود 👇",
+                reply_markup=kb.menu_for_user(db, message.from_user.id),
+            )
+            await deliver_config_to_user(
+                message.bot, message.from_user.id, "کانفیگ شخصی",
+                [result.subscription_url], final_price=0, order_id=order_id,
+            )
+            try:
+                await _notify_admins_of_order(message.bot, order_id)
+            except Exception:
+                pass
+            return
+
+        await state.set_state(CustomConfigFlow.waiting_receipt)
+        card_number = db.get_setting("card_number")
+        card_holder = db.get_setting("card_holder")
+        text = (
+            f"🛠 نام کاربری: {username}\n"
+            f"📶 حجم: {volume_gb} گیگابایت\n"
+            f"⏳ مدت: {settings['duration_days']} روز\n\n"
+            f"💳 شماره کارت: `{card_number}`\n"
+            f"👤 به نام: {card_holder}\n"
+        )
+        if wallet_used:
+            text += f"👛 استفاده از کیف پول: {wallet_used:,} تومان\n"
+        text += f"💰 مبلغ نهایی قابل پرداخت: {order['final_price']:,} تومان\n\n"
+        text += "لطفاً عکس رسید پرداخت را همینجا ارسال کنید، یا از دکمه‌ی زیر با ارز دیجیتال پرداخت کنید."
+        await message.answer(
+            text, parse_mode="Markdown",
+            reply_markup=kb.payment_choice_kb(crypto_payment.crypto_payment_available(db)),
+        )
+
+    @router.callback_query(F.data == "pay_crypto", CustomConfigFlow.waiting_receipt)
+    async def cb_pay_crypto_custom_config(call: CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        order = db.get_order(order_id) if order_id else None
+        if not order or order["status"] != "pending":
+            await call.answer("سفارش معتبر یافت نشد.", show_alert=True)
+            return
+        await call.answer("در حال ساخت فاکتور...")
+        tenant_id = db.get_setting("miniapp_tenant_id", "")
+        try:
+            result = await crypto_payment.create_invoice_for(
+                db, tenant_id, call.from_user.id, "order", order_id, order["final_price"],
+                order_name=f"کانفیگ شخصی #{order_id} - {order['custom_username']}",
+            )
+        except crypto_payment.CryptoPaymentError as e:
+            await call.message.answer(f"⚠️ {e}")
+            return
+        await call.message.answer(
+            "🪙 فاکتور پرداخت ساخته شد. روی دکمه‌ی زیر بزن، ارز و مبلغ رو انتخاب کن و پرداخت رو تکمیل کن.\n"
+            "⏳ اعتبار این فاکتور فقط ۸۰ دقیقه است.\n"
+            "به‌محض تایید تراکنش روی بلاک‌چین، کانفیگ شما به‌صورت خودکار ساخته می‌شود.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["invoice_url"]),
+            ]]),
+        )
+
+    @router.message(CustomConfigFlow.waiting_receipt, F.photo)
+    async def receive_custom_config_receipt(message: Message, state: FSMContext, bot: Bot):
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        order = db.get_order(order_id)
+        if not order or order["status"] != "pending":
+            await message.answer("سفارش معتبر یافت نشد. لطفاً دوباره از منو شروع کنید.")
+            await state.clear()
+            return
+
+        file_id = message.photo[-1].file_id
+        db.set_order_receipt(order_id, file_id)
+        await _notify_admins_of_order(bot, order_id, receipt_file_id=file_id)
+        await message.answer(
+            "✅ رسید شما برای بررسی ارسال شد. پس از تایید ادمین، کانفیگ شخصی شما ساخته و ارسال خواهد شد.",
+            reply_markup=kb.menu_for_user(db, message.from_user.id),
+        )
+        await state.clear()
+
+    @router.message(CustomConfigFlow.waiting_receipt)
+    async def custom_config_receipt_wrong_type(message: Message):
+        await message.answer("لطفاً فقط عکس رسید پرداخت را ارسال کنید.")
+
+    # -----------------------------------------------------------------------
     # کانفیگ تست
     # -----------------------------------------------------------------------
 
@@ -531,6 +789,31 @@ def create_user_router(db) -> Router:
             await message.answer("شما قبلاً کانفیگ تست خود را دریافت کرده‌اید. هر کاربر فقط یک بار مجاز به دریافت کانفیگ تست است.")
             return
 
+        panel_server = db.get_panel_server_for_usage("test_config")
+        if panel_server:
+            volume_gb = int(db.get_setting("test_config_panel_volume_gb", "1") or 1)
+            duration_days = int(db.get_setting("test_config_panel_duration_days", "1") or 1)
+            for _ in range(10):
+                username = "test" + "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=8))
+                if not db.is_custom_username_taken(username):
+                    break
+            try:
+                provider = get_provider(panel_server)
+                result = await provider.create_user(username, volume_gb, duration_days)
+            except PanelError as e:
+                await message.answer(f"⛔️ خطا در ساخت کانفیگ تست: {e}\nلطفاً بعداً تلاش کنید.")
+                return
+            db.add_custom_config(
+                message.from_user.id, panel_server["id"], result.username,
+                volume_gb, duration_days, result.subscription_url, source="test",
+            )
+            db.mark_test_used(message.from_user.id)
+            await message.answer(
+                f"🧪 کانفیگ تست شما ({volume_gb} گیگ، {duration_days} روز):\n\n`{result.subscription_url}`",
+                parse_mode="Markdown",
+            )
+            return
+
         result = db.take_unused_test_config(message.from_user.id)
         if not result:
             await message.answer("متاسفانه موجودی کانفیگ تست تمام شده است. لطفاً بعداً مراجعه کنید.")
@@ -540,13 +823,132 @@ def create_user_router(db) -> Router:
         await message.answer(f"🧪 کانفیگ تست شما:\n\n`{result['link']}`", parse_mode="Markdown")
 
     # -----------------------------------------------------------------------
+    # پنل نمایندگی (ساخت کانفیگ از استخر حجم بدون پرداخت جداگانه)
+    # -----------------------------------------------------------------------
+
+    @router.message(F.text == "🧑‍💼 پنل نمایندگی")
+    async def reseller_panel_open(message: Message, state: FSMContext):
+        if not db.is_reseller(message.from_user.id):
+            return
+        await state.clear()
+        credit = db.get_reseller_credit(message.from_user.id)
+        await message.answer(
+            f"🧑‍💼 پنل نمایندگی\n\n"
+            f"📦 اعتبار باقی‌مانده: {credit:,} گیگابایت\n\n"
+            f"می‌تونی از این اعتبار مستقیم کانفیگ بسازی، بدون پرداخت جداگانه. "
+            f"با هر قیمتی که خودت بخوای می‌تونی به مشتری‌هات بفروشیش.",
+            reply_markup=kb.reseller_panel_kb(),
+        )
+
+    @router.callback_query(F.data == "reseller_new_config")
+    async def cb_reseller_new_config(call: CallbackQuery, state: FSMContext):
+        if not db.is_reseller(call.from_user.id):
+            await call.answer("دسترسی نداری.", show_alert=True)
+            return
+        credit = db.get_reseller_credit(call.from_user.id)
+        if credit <= 0:
+            await call.answer("اعتبار شما کافی نیست. با ادمین تماس بگیر.", show_alert=True)
+            return
+        server = db.get_panel_server_for_usage("reseller")
+        if not server:
+            await call.answer("هنوز سروری برای نمایندگی توسط ادمین تنظیم نشده.", show_alert=True)
+            return
+        await state.set_state(ResellerFlow.waiting_username)
+        await state.update_data(panel_server_id=server["id"])
+        await call.answer()
+        await call.message.answer(
+            "یک نام کاربری برای این کانفیگ وارد کن، یا از دکمه‌ی زیر یک نام تصادفی بگیر.\n"
+            "فقط حروف انگلیسی، عدد و آندرلاین (بین ۳ تا ۲۰ کاراکتر).",
+            reply_markup=kb.custom_config_username_kb(),
+        )
+
+    @router.callback_query(F.data == "custom_config_random_username", ResellerFlow.waiting_username)
+    async def cb_reseller_random_username(call: CallbackQuery, state: FSMContext):
+        for _ in range(10):
+            candidate = "r" + "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=8))
+            if not db.is_custom_username_taken(candidate):
+                break
+        await call.answer()
+        await _reseller_apply_username(call.message, state, candidate)
+
+    @router.message(ResellerFlow.waiting_username)
+    async def reseller_receive_username(message: Message, state: FSMContext):
+        username = (message.text or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_]{3,20}", username):
+            await message.answer("❌ نام کاربری نامعتبر است. فقط حروف انگلیسی، عدد و آندرلاین، بین ۳ تا ۲۰ کاراکتر.")
+            return
+        if db.is_custom_username_taken(username):
+            await message.answer("❌ این نام کاربری قبلاً استفاده شده. لطفاً نام دیگری انتخاب کنید.")
+            return
+        await _reseller_apply_username(message, state, username)
+
+    async def _reseller_apply_username(message: Message, state: FSMContext, username: str):
+        credit = db.get_reseller_credit(message.from_user.id)
+        await state.update_data(reseller_username=username)
+        await state.set_state(ResellerFlow.waiting_volume)
+        await message.answer(
+            f"✅ نام کاربری: {username}\n\n"
+            f"📦 اعتبار باقی‌مانده: {credit:,} گیگابایت\n"
+            f"حالا حجم مورد نظر برای این کانفیگ را به گیگابایت وارد کن:",
+            reply_markup=kb.cancel_kb(),
+        )
+
+    @router.message(ResellerFlow.waiting_volume)
+    async def reseller_receive_volume(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("❌ لطفاً فقط عدد صحیح مثبت وارد کنید.")
+            return
+        volume_gb = int(text)
+        credit = db.get_reseller_credit(message.from_user.id)
+        if volume_gb > credit:
+            await message.answer(f"❌ اعتبار شما کافی نیست. اعتبار باقی‌مانده: {credit:,} گیگ.")
+            return
+
+        data = await state.get_data()
+        server = db.get_panel_server(data.get("panel_server_id"))
+        if not server or not server["is_active"]:
+            await message.answer("⛔️ سرور نمایندگی دیگر در دسترس نیست.")
+            await state.clear()
+            return
+
+        duration_days = db.get_custom_config_settings()["duration_days"]
+        try:
+            provider = get_provider(server)
+            result = await provider.create_user(data["reseller_username"], volume_gb, duration_days)
+        except PanelUsernameTakenError:
+            await message.answer("❌ این نام کاربری روی پنل تکراری است. دوباره از ابتدا با نام دیگری امتحان کن.")
+            return
+        except PanelError as e:
+            await message.answer(f"⛔️ خطا در ساخت کانفیگ: {e}")
+            return
+
+        db.adjust_reseller_credit(message.from_user.id, -volume_gb, reason=f"ساخت کانفیگ «{result.username}»")
+        db.add_custom_config(
+            message.from_user.id, server["id"], result.username, volume_gb, duration_days, result.subscription_url,
+            source="reseller",
+        )
+        new_credit = db.get_reseller_credit(message.from_user.id)
+        await state.clear()
+        await message.answer(
+            f"✅ کانفیگ ساخته شد!\n\n"
+            f"🛠 نام کاربری: {result.username}\n"
+            f"📶 حجم: {volume_gb} گیگ | ⏳ مدت: {duration_days} روز\n\n"
+            f"`{result.subscription_url}`\n\n"
+            f"📦 اعتبار باقی‌مانده: {new_credit:,} گیگابایت",
+            parse_mode="Markdown",
+            reply_markup=kb.menu_for_user(db, message.from_user.id),
+        )
+
+    # -----------------------------------------------------------------------
     # سفارش‌های من
     # -----------------------------------------------------------------------
 
     @router.message(F.text.func(lambda t: t == db.get_setting("btn_my_orders")))
     async def my_orders(message: Message):
         orders = db.get_user_orders(message.from_user.id)
-        if not orders:
+        custom_configs = db.get_custom_configs_for_user(message.from_user.id)
+        if not orders and not custom_configs:
             await message.answer("شما تاکنون سفارشی ثبت نکرده‌اید.")
             return
 
@@ -554,11 +956,14 @@ def create_user_router(db) -> Router:
         lines = []
         approved = []  # (product_name, link)
         for o in orders:
-            product = db.get_product(o["product_id"])
-            pname = product["name"] if product else "نامشخص"
+            if o["is_custom_config"]:
+                pname = f"کانفیگ شخصی «{o['custom_username']}» ({o['custom_volume_gb']} گیگ)"
+            else:
+                product = db.get_product(o["product_id"])
+                pname = product["name"] if product else "نامشخص"
             qty = o["quantity"] or 1
             line = f"#{o['id']} | {pname}" + (f" × {qty}" if qty > 1 else "") + f" | {status_map.get(o['status'], o['status'])}"
-            if o["status"] == "approved":
+            if o["status"] == "approved" and not o["is_custom_config"]:
                 configs = db.get_order_configs(o["id"])
                 links = [c["link"] for c in configs] if configs else None
                 if not links and o["config_id"]:
@@ -569,6 +974,15 @@ def create_user_router(db) -> Router:
                     line += f"{prefix}`{link}`"
                     approved.append((pname, link))
             lines.append(line)
+
+        for cc in custom_configs:
+            pname = f"کانفیگ شخصی «{cc['username']}»"
+            line = f"🛠 {pname} | {cc['volume_gb']} گیگ | {cc['duration_days']} روز"
+            if cc["subscription_url"]:
+                line += f"\n🔗 `{cc['subscription_url']}`"
+                approved.append((pname, cc["subscription_url"]))
+            lines.append(line)
+
         await message.answer("\n\n".join(lines), parse_mode="Markdown")
 
         if approved:

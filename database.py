@@ -99,6 +99,17 @@ DEFAULT_SETTINGS = {
     "volume_discount_percent": "20",  # درصد تخفیف کد تشویقی اتمام حجم
     "volume_discount_expiry_hours": "24",  # اعتبار کد تشویقی اتمام حجم (ساعت)
     "adm_volume_reminder_settings_style": "success",
+    # ساخت کانفیگ شخصی (اتصال مستقیم به پنل VPN)
+    "custom_config_enabled": "0",
+    "custom_config_min_gb": "5",       # حداقل حجم مجاز (گیگ)
+    "custom_config_max_gb": "1000",    # حداکثر حجم مجاز (گیگ)
+    "custom_config_duration_days": "30",  # فعلاً ثابت؛ در آینده قابل انتخاب کاربر می‌شود
+    "test_config_panel_volume_gb": "1",     # فقط وقتی یک سرور برای «کانفیگ تست» فعال باشد
+    "test_config_panel_duration_days": "1",
+    "btn_custom_config": "🛠 ساخت کانفیگ شخصی",
+    "btn_custom_config_style": "primary",
+    "adm_panel_servers_style": "",
+    "adm_custom_config_settings_style": "",
     # چیدمان دکمه‌های منوی اصلی (ترتیب و نمایش) - آرایه JSON از کلیدها
     "menu_order": '["miniapp","btn_buy","btn_test","btn_my_orders","btn_wallet","btn_referral","btn_wheel","btn_contact","btn_admin_panel"]',
 }
@@ -122,10 +133,13 @@ DEFAULT_MENU_ORDER = ["miniapp", "btn_buy", "btn_test", "btn_my_orders", "btn_wa
 
 
 class Database:
+    _SETTINGS_CACHE_TTL = 8  # ثانیه؛ برای هماهنگی بین پردازش بات و Mini App
+
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._conn = None
         self._settings_cache = None
+        self._settings_cache_loaded_at = 0.0
         # مینی‌اپ (FastAPI) توابع sync را در threadpool اجرا می‌کند، یعنی
         # ممکن است چند ریکوئست هم‌زمان از تردهای مختلف به همین یک Database
         # (مثلاً main_db) دسترسی داشته باشند. بات‌های aiogram هم در یک
@@ -385,6 +399,61 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_reseller_bots_active ON reseller_bots(is_active);
                 CREATE INDEX IF NOT EXISTS idx_crypto_invoices_txn ON crypto_invoices(txn_id);
                 CREATE INDEX IF NOT EXISTS idx_crypto_invoices_ref ON crypto_invoices(kind, ref_id);
+
+                -- ===================== ساخت کانفیگ شخصی (پنل‌های VPN) =====================
+                CREATE TABLE IF NOT EXISTS panel_servers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    panel_type TEXT NOT NULL DEFAULT 'pasarguard',
+                    api_url TEXT NOT NULL,
+                    api_username TEXT,
+                    api_password TEXT,
+                    template_username TEXT,
+                    group_ids TEXT,
+                    proxy_settings TEXT,
+                    default_group TEXT,
+                    used_for_custom_config INTEGER DEFAULT 1,
+                    used_for_test_config INTEGER DEFAULT 0,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS custom_config_pricing_tiers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    from_gb INTEGER NOT NULL,
+                    to_gb INTEGER,
+                    price_per_gb INTEGER NOT NULL,
+                    sort_order INTEGER DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS custom_configs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    order_id INTEGER,
+                    user_id INTEGER NOT NULL,
+                    panel_server_id INTEGER NOT NULL,
+                    username TEXT NOT NULL,
+                    volume_gb INTEGER NOT NULL,
+                    duration_days INTEGER NOT NULL DEFAULT 30,
+                    subscription_url TEXT,
+                    status TEXT DEFAULT 'active',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TEXT,
+                    FOREIGN KEY(panel_server_id) REFERENCES panel_servers(id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_panel_servers_active ON panel_servers(is_active);
+                CREATE INDEX IF NOT EXISTS idx_custom_configs_user_id ON custom_configs(user_id);
+                CREATE INDEX IF NOT EXISTS idx_custom_configs_order_id ON custom_configs(order_id);
+
+                CREATE TABLE IF NOT EXISTS reseller_credit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    delta_gb INTEGER NOT NULL,
+                    reason TEXT,
+                    admin_id INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_reseller_credit_log_user ON reseller_credit_log(user_id);
                 """
             )
 
@@ -428,6 +497,27 @@ class Database:
             ("configs", "order_id", "INTEGER"),
             ("reseller_bots", "link_slug", "TEXT"),
             ("crypto_invoices", "expires_at", "TEXT"),
+            # ساخت کانفیگ شخصی: سفارش‌های این نوع از همان جدول orders رد می‌شوند
+            # (تا کارت‌به‌کارت/کیف‌پول/کریپتو بدون تغییر کار کنند) و product_id
+            # برایشان 0 (سنتینل، بدون FK) ذخیره می‌شود؛ جزئیات واقعی در ستون‌های زیر است.
+            ("orders", "is_custom_config", "INTEGER DEFAULT 0"),
+            ("orders", "custom_volume_gb", "INTEGER"),
+            ("orders", "custom_username", "TEXT"),
+            ("orders", "custom_panel_server_id", "INTEGER"),
+            ("panel_servers", "api_key", "TEXT"),
+            ("panel_servers", "api_username", "TEXT"),
+            ("panel_servers", "api_password", "TEXT"),
+            ("panel_servers", "template_username", "TEXT"),
+            ("panel_servers", "group_ids", "TEXT"),
+            ("panel_servers", "proxy_settings", "TEXT"),
+            ("panel_servers", "used_for_custom_config", "INTEGER DEFAULT 1"),
+            ("panel_servers", "used_for_test_config", "INTEGER DEFAULT 0"),
+            ("panel_servers", "used_for_reseller", "INTEGER DEFAULT 0"),
+            ("users", "is_reseller", "INTEGER DEFAULT 0"),
+            ("users", "reseller_credit_gb", "INTEGER DEFAULT 0"),
+            ("custom_configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
+            ("custom_configs", "volume_reminder_sent", "INTEGER DEFAULT 0"),
+            ("custom_configs", "source", "TEXT DEFAULT 'custom_config'"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -442,9 +532,17 @@ class Database:
         # تنظیمات در حافظه کش می‌شوند چون به ازای هر پیام ورودی (فیلترهای
         # روتر در handlers_user.py) چندین بار خوانده می‌شوند؛ خواندن از dict
         # به‌جای query جدید sqlite تفاوت محسوسی در سرعت پاسخ‌گویی ایجاد می‌کند.
-        if self._settings_cache is None:
-            self._load_settings_cache()
+        # نکته: بات و Mini App دو پردازش جدا هستند، هرکدام کش خودشان را دارند؛
+        # به همین دلیل این کش یک TTL کوتاه دارد تا تغییراتی که از پردازش دیگر
+        # ذخیره می‌شوند (مثلاً چیدمان منو از Mini App) بعد از چند ثانیه در بات
+        # هم اعمال شوند، بدون این‌که هر پیام مستقیم به sqlite بزند.
+        self._maybe_reload_settings_cache()
         return self._settings_cache.get(key, default)
+
+    def _maybe_reload_settings_cache(self):
+        now = time.monotonic()
+        if self._settings_cache is None or (now - self._settings_cache_loaded_at) > self._SETTINGS_CACHE_TTL:
+            self._load_settings_cache()
 
     def _load_settings_cache(self):
         with self._get_conn() as conn:
@@ -452,6 +550,7 @@ class Database:
             cache = {r["key"]: r["value"] for r in rows}
         with self._lock:
             self._settings_cache = cache
+            self._settings_cache_loaded_at = time.monotonic()
 
     def set_setting(self, key: str, value: str):
         with self._get_conn() as conn:
@@ -464,8 +563,7 @@ class Database:
             self._settings_cache[key] = value
 
     def get_all_settings(self) -> dict:
-        if self._settings_cache is None:
-            self._load_settings_cache()
+        self._maybe_reload_settings_cache()
         return dict(self._settings_cache)
 
     # -----------------------------------------------------------------------
@@ -617,6 +715,16 @@ class Database:
     def mark_test_used(self, tg_id: int):
         with self._get_conn() as conn:
             conn.execute("UPDATE users SET test_used=test_used+1 WHERE telegram_id=?", (tg_id,))
+
+    def reset_all_test_usage(self) -> list:
+        """test_used همه‌ی کاربرانی که قبلاً کانفیگ تست گرفته‌اند را صفر می‌کند تا
+        دوباره بتوانند تست بگیرند. لیست آیدی همان کاربران را برمی‌گرداند تا بشود
+        بهشان پیام اطلاع‌رسانی فرستاد."""
+        with self._get_conn() as conn:
+            rows = conn.execute("SELECT telegram_id FROM users WHERE test_used > 0").fetchall()
+            user_ids = [r["telegram_id"] for r in rows]
+            conn.execute("UPDATE users SET test_used=0 WHERE test_used > 0")
+            return user_ids
 
     def get_all_user_ids(self):
         with self._get_conn() as conn:
@@ -1045,6 +1153,34 @@ class Database:
                 (user_tg_id, product_id, base_price, wallet_used, discount_code_id, discount_amount, final_price, quantity),
             )
             return cur.lastrowid
+
+    def create_custom_config_order(
+        self,
+        user_tg_id: int,
+        volume_gb: int,
+        username: str,
+        panel_server_id: int,
+        base_price: int,
+        wallet_used: int = 0,
+    ) -> int:
+        """سفارش «ساخت کانفیگ شخصی» - از همان جدول orders استفاده می‌کند (product_id=0
+        سنتینل بدون FK) تا مسیر پرداخت کارت/کیف‌پول/کریپتوی فعلی بدون تغییر کار کند."""
+        final_price = max(base_price - wallet_used, 0)
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO orders (user_id, product_id, status, base_price, wallet_used, final_price, "
+                "quantity, is_custom_config, custom_volume_gb, custom_username, custom_panel_server_id) "
+                "VALUES (?, 0, 'pending', ?, ?, ?, 1, 1, ?, ?, ?)",
+                (user_tg_id, base_price, wallet_used, final_price, volume_gb, username, panel_server_id),
+            )
+            return cur.lastrowid
+
+    def approve_custom_config_order(self, order_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE orders SET status='approved', updated_at=? WHERE id=?",
+                (datetime.utcnow().isoformat(), order_id),
+            )
 
     def set_order_receipt(self, order_id: int, file_id: str):
         with self._get_conn() as conn:
@@ -1679,6 +1815,25 @@ class Database:
         with self._get_conn() as conn:
             conn.execute("UPDATE configs SET renewal_reminder_sent=1 WHERE id=?", (config_id,))
 
+    def get_custom_configs_due_for_renewal_reminder(self):
+        """معادل get_configs_due_for_renewal_reminder برای کانفیگ‌هایی که مستقیم
+        از پنل VPN ساخته شده‌اند (خرید شخصی/نمایندگی/کانفیگ تست پنلی)."""
+        settings = self.get_renewal_settings()
+        if not settings["enabled"]:
+            return []
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT id as config_id, subscription_url as link, user_id as assigned_user_id, "
+                "username as product_name "
+                "FROM custom_configs "
+                "WHERE renewal_reminder_sent=0 AND status='active' "
+                "AND subscription_url IS NOT NULL AND TRIM(subscription_url) != ''"
+            ).fetchall()
+
+    def mark_custom_config_renewal_reminder_sent(self, config_id: int):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE custom_configs SET renewal_reminder_sent=1 WHERE id=?", (config_id,))
+
     def generate_renewal_discount_code(self, user_tg_id: int) -> tuple:
         """یک کد تخفیف یکبارمصرف و محدود به زمان برای یادآوری تمدید سرویس کاربر می‌سازد.
         خروجی: (code, expires_at, percent, expiry_hours)"""
@@ -1725,6 +1880,25 @@ class Database:
     def mark_volume_reminder_sent(self, config_id: int):
         with self._get_conn() as conn:
             conn.execute("UPDATE configs SET volume_reminder_sent=1 WHERE id=?", (config_id,))
+
+    def get_custom_configs_due_for_volume_reminder(self):
+        """معادل get_configs_due_for_volume_reminder برای کانفیگ‌های ساخته‌شده
+        مستقیم روی پنل VPN."""
+        settings = self.get_volume_reminder_settings()
+        if not settings["enabled"]:
+            return []
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT id as config_id, subscription_url as link, user_id as assigned_user_id, "
+                "username as product_name "
+                "FROM custom_configs "
+                "WHERE volume_reminder_sent=0 AND status='active' "
+                "AND subscription_url IS NOT NULL AND TRIM(subscription_url) != ''"
+            ).fetchall()
+
+    def mark_custom_config_volume_reminder_sent(self, config_id: int):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE custom_configs SET volume_reminder_sent=1 WHERE id=?", (config_id,))
 
     def generate_volume_discount_code(self, user_tg_id: int) -> tuple:
         """یک کد تخفیف یکبارمصرف و محدود به زمان برای یادآوری اتمام حجم کاربر می‌سازد.
@@ -1987,3 +2161,217 @@ class Database:
             "enabled": self.get_setting("force_join_enabled", "0") == "1",
             "channel": self.get_setting("force_join_channel", "").strip(),
         }
+
+    # -----------------------------------------------------------------------
+    # پنل‌های VPN (panel_servers) - برای ساخت کانفیگ شخصی
+    # -----------------------------------------------------------------------
+
+    def add_panel_server(self, name: str, panel_type: str, api_url: str,
+                          api_username: str, api_password: str, default_group: str = None) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO panel_servers (name, panel_type, api_url, api_username, api_password, default_group) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (name, panel_type, api_url.rstrip("/"), api_username, api_password, default_group),
+            )
+            return cur.lastrowid
+
+    def update_panel_server(self, server_id: int, **fields):
+        allowed = {"name", "panel_type", "api_url", "api_username", "api_password",
+                   "default_group", "is_active", "template_username", "group_ids", "proxy_settings",
+                   "used_for_custom_config", "used_for_test_config"}
+        sets, values = [], []
+        for k, v in fields.items():
+            if k in allowed and v is not None:
+                sets.append(f"{k}=?")
+                values.append(v.rstrip("/") if k == "api_url" else v)
+        if not sets:
+            return
+        values.append(server_id)
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE panel_servers SET {', '.join(sets)} WHERE id=?", values)
+
+    def delete_panel_server(self, server_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM panel_servers WHERE id=?", (server_id,))
+
+    def get_panel_server(self, server_id: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM panel_servers WHERE id=?", (server_id,)).fetchone()
+
+    def get_panel_servers(self, active_only: bool = False):
+        with self._get_conn() as conn:
+            q = "SELECT * FROM panel_servers"
+            if active_only:
+                q += " WHERE is_active=1"
+            q += " ORDER BY id"
+            return conn.execute(q).fetchall()
+
+    def get_panel_server_for_usage(self, usage: str):
+        """usage: 'custom_config' یا 'test_config' یا 'reseller'. اولین سرور فعالی
+        که برای این مصرف علامت خورده را برمی‌گرداند (چند سرور می‌توانند به یک
+        پنل با یوزر/پس متفاوت اشاره کنند، هرکدام برای یک مصرف)."""
+        column = {
+            "custom_config": "used_for_custom_config",
+            "test_config": "used_for_test_config",
+            "reseller": "used_for_reseller",
+        }.get(usage, "used_for_custom_config")
+        with self._get_conn() as conn:
+            return conn.execute(
+                f"SELECT * FROM panel_servers WHERE is_active=1 AND {column}=1 ORDER BY id LIMIT 1"
+            ).fetchone()
+
+    # -----------------------------------------------------------------------
+    # قیمت‌گذاری پلکانی ساخت کانفیگ شخصی
+    # -----------------------------------------------------------------------
+
+    def get_pricing_tiers(self):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM custom_config_pricing_tiers ORDER BY sort_order, from_gb"
+            ).fetchall()
+
+    def add_pricing_tier(self, from_gb: int, to_gb, price_per_gb: int) -> int:
+        with self._get_conn() as conn:
+            max_sort = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), -1) AS m FROM custom_config_pricing_tiers"
+            ).fetchone()["m"]
+            cur = conn.execute(
+                "INSERT INTO custom_config_pricing_tiers (from_gb, to_gb, price_per_gb, sort_order) VALUES (?, ?, ?, ?)",
+                (from_gb, to_gb, price_per_gb, max_sort + 1),
+            )
+            return cur.lastrowid
+
+    def update_pricing_tier(self, tier_id: int, from_gb: int = None, to_gb=None, price_per_gb: int = None):
+        sets, values = [], []
+        if from_gb is not None:
+            sets.append("from_gb=?"); values.append(from_gb)
+        if to_gb is not None or to_gb is None:  # اجازه‌ی ست‌کردن NULL برای «بی‌نهایت» را هم می‌دهیم
+            sets.append("to_gb=?"); values.append(to_gb)
+        if price_per_gb is not None:
+            sets.append("price_per_gb=?"); values.append(price_per_gb)
+        if not sets:
+            return
+        values.append(tier_id)
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE custom_config_pricing_tiers SET {', '.join(sets)} WHERE id=?", values)
+
+    def delete_pricing_tier(self, tier_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM custom_config_pricing_tiers WHERE id=?", (tier_id,))
+
+    def calc_custom_config_price(self, volume_gb: int) -> int:
+        """قیمت بر اساس نرخ همان بازه‌ای که حجم درخواستی داخلش قرار می‌گیرد
+        محاسبه می‌شود (نه تصاعدی-پلکانی)؛ یعنی کل حجم با یک نرخ ثابت (نرخ آن
+        بازه) ضرب می‌شود. اگر حجم از آخرین بازه هم بیشتر باشد، با نرخ آخرین
+        بازه حساب می‌شود؛ اگر کمتر از اولین بازه باشد، با نرخ اولین بازه."""
+        tiers = self.get_pricing_tiers()
+        if not tiers:
+            return 0
+        for tier in tiers:
+            frm, to = tier["from_gb"], tier["to_gb"]
+            if volume_gb < frm:
+                break
+            if to is None or volume_gb <= to:
+                return int(volume_gb * tier["price_per_gb"])
+        # حجم از آخرین بازه هم بیشتر بوده یا کمتر از اولین بازه:
+        if volume_gb < tiers[0]["from_gb"]:
+            return int(volume_gb * tiers[0]["price_per_gb"])
+        return int(volume_gb * tiers[-1]["price_per_gb"])
+
+    # -----------------------------------------------------------------------
+    # کانفیگ‌های شخصی ساخته‌شده توسط کاربر
+    # -----------------------------------------------------------------------
+
+    def add_custom_config(self, user_id: int, panel_server_id: int, username: str,
+                           volume_gb: int, duration_days: int, subscription_url: str,
+                           order_id: int = None, expires_at: str = None, source: str = "custom_config") -> int:
+        """source: 'custom_config' (خرید شخصی)، 'test' (کانفیگ تست پنلی)، یا 'reseller'."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO custom_configs (order_id, user_id, panel_server_id, username, volume_gb, "
+                "duration_days, subscription_url, expires_at, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (order_id, user_id, panel_server_id, username, volume_gb, duration_days, subscription_url, expires_at, source),
+            )
+            return cur.lastrowid
+
+    def get_custom_configs_for_user(self, user_id: int, source: str = None):
+        with self._get_conn() as conn:
+            if source:
+                return conn.execute(
+                    "SELECT * FROM custom_configs WHERE user_id=? AND source=? ORDER BY id DESC", (user_id, source)
+                ).fetchall()
+            return conn.execute(
+                "SELECT * FROM custom_configs WHERE user_id=? ORDER BY id DESC", (user_id,)
+            ).fetchall()
+
+    def get_test_custom_config_for_user(self, user_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM custom_configs WHERE user_id=? AND source='test' ORDER BY id DESC LIMIT 1",
+                (user_id,),
+            ).fetchone()
+
+    def is_custom_username_taken(self, username: str) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM custom_configs WHERE username=? LIMIT 1", (username,)
+            ).fetchone()
+            return row is not None
+
+    def get_custom_config_settings(self) -> dict:
+        return {
+            "enabled": self.get_setting("custom_config_enabled", "0") == "1",
+            "min_gb": int(self.get_setting("custom_config_min_gb", "5") or 5),
+            "max_gb": int(self.get_setting("custom_config_max_gb", "1000") or 1000),
+            "duration_days": int(self.get_setting("custom_config_duration_days", "30") or 30),
+        }
+
+    # -----------------------------------------------------------------------
+    # نمایندگی بر پایه‌ی استخر حجم (reseller credit)
+    # -----------------------------------------------------------------------
+
+    def is_reseller(self, user_tg_id: int) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT is_reseller FROM users WHERE telegram_id=?", (user_tg_id,)
+            ).fetchone()
+            return bool(row and row["is_reseller"])
+
+    def get_reseller_credit(self, user_tg_id: int) -> int:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT reseller_credit_gb FROM users WHERE telegram_id=?", (user_tg_id,)
+            ).fetchone()
+            return row["reseller_credit_gb"] if row else 0
+
+    def set_reseller_status(self, user_tg_id: int, enabled: bool):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET is_reseller=? WHERE telegram_id=?", (1 if enabled else 0, user_tg_id)
+            )
+
+    def adjust_reseller_credit(self, user_tg_id: int, delta_gb: int, admin_id: int = None, reason: str = None):
+        """delta_gb مثبت (شارژ) یا منفی (کسر بابت ساخت کانفیگ) باشد."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET reseller_credit_gb = reseller_credit_gb + ? WHERE telegram_id=?",
+                (delta_gb, user_tg_id),
+            )
+            conn.execute(
+                "INSERT INTO reseller_credit_log (user_id, delta_gb, reason, admin_id) VALUES (?, ?, ?, ?)",
+                (user_tg_id, delta_gb, reason, admin_id),
+            )
+
+    def get_reseller_credit_log(self, user_tg_id: int, limit: int = 20):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM reseller_credit_log WHERE user_id=? ORDER BY id DESC LIMIT ?",
+                (user_tg_id, limit),
+            ).fetchall()
+
+    def get_resellers(self):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM users WHERE is_reseller=1 ORDER BY reseller_credit_gb DESC"
+            ).fetchall()

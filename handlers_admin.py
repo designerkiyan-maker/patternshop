@@ -24,6 +24,7 @@ from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 import crypto_payment
+from panel_providers import get_provider, PanelError, PanelUsernameTakenError
 from states import (
     AdminAddCategory,
     AdminAddProduct,
@@ -47,6 +48,11 @@ from states import (
     AdminVolumeReminderSettings,
     AdminStockAlertSettings,
     AdminRestoreBackup,
+    AdminAddPanelServer,
+    AdminSetPanelTemplate,
+    AdminAddPricingTier,
+    AdminCustomConfigSettings,
+    AdminResetTestConfig,
 )
 
 
@@ -605,6 +611,59 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer("این سفارش قبلاً بررسی شده است.", show_alert=True)
             return
 
+        # ===== سفارش کانفیگ شخصی: به‌جای برداشتن از انبار، کاربر روی پنل ساخته می‌شود =====
+        if order["is_custom_config"]:
+            server = db.get_panel_server(order["custom_panel_server_id"])
+            if not server or not server["is_active"]:
+                await call.answer("⛔️ سرور پنل مربوطه یافت نشد یا غیرفعال است.", show_alert=True)
+                return
+            try:
+                provider = get_provider(server)
+                result = await provider.create_user(
+                    username=order["custom_username"],
+                    volume_gb=order["custom_volume_gb"],
+                    duration_days=db.get_custom_config_settings()["duration_days"],
+                )
+            except PanelUsernameTakenError:
+                await call.answer("⛔️ این نام کاربری روی پنل تکراری است؛ از کاربر بخواه نام دیگری انتخاب کند.", show_alert=True)
+                return
+            except PanelError as e:
+                await call.answer(f"⛔️ خطا در ارتباط با پنل: {e}", show_alert=True)
+                return
+
+            db.approve_custom_config_order(order_id)
+            db.add_custom_config(
+                user_id=order["user_id"],
+                panel_server_id=server["id"],
+                username=result.username,
+                volume_gb=order["custom_volume_gb"],
+                duration_days=db.get_custom_config_settings()["duration_days"],
+                subscription_url=result.subscription_url,
+                order_id=order_id,
+            )
+            db.log_admin_action(
+                call.from_user.id, "custom_config_approve",
+                f"سفارش کانفیگ شخصی #{order_id} | کاربر {order['user_id']} | یوزرنیم «{result.username}» | "
+                f"{order['custom_volume_gb']} گیگ | مبلغ: {order['final_price']:,}",
+            )
+            try:
+                await bot.send_message(order["user_id"], "✅ کانفیگ شخصی شما ساخته شد!")
+                await deliver_config_to_user(
+                    bot, order["user_id"], "کانفیگ شخصی",
+                    [result.subscription_url], final_price=order["final_price"], order_id=order_id,
+                )
+            except Exception:
+                pass
+            try:
+                await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد و کانفیگ ساخته شد.")
+            except Exception:
+                try:
+                    await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید شد و کانفیگ ساخته شد.")
+                except Exception:
+                    pass
+            await call.answer("سفارش تایید و کانفیگ شخصی روی پنل ساخته شد.")
+            return
+
         product = db.get_product(order["product_id"])
         quantity = order["quantity"] or 1
         results = db.take_unused_configs(order["product_id"], order["user_id"], quantity)
@@ -1147,6 +1206,413 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await state.clear()
         await message.answer(
             f"✅ آستانه‌ی هشدار موجودی روی {text} کانفیگ تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot)
+        )
+
+    # -------------------------------------------------------------------
+    # ساخت کانفیگ شخصی: تنظیمات کلی + سرورهای پنل + قیمت‌گذاری بر اساس بازه
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_custom_config_settings")
+    async def cb_admin_custom_config_settings(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await replace_admin_view(call,
+            "🛠 ساخت کانفیگ شخصی\n\n"
+            "کاربران می‌توانند با تعیین نام، حجم و پرداخت متناسب، کاربر خودشان را مستقیماً "
+            "روی یکی از سرورهای پنل زیر بسازند.",
+            reply_markup=kb.custom_config_menu_kb(db),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_custom_config_toggle")
+    async def cb_admin_custom_config_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        current = db.get_setting("custom_config_enabled", "0")
+        db.set_setting("custom_config_enabled", "0" if current == "1" else "1")
+        db.log_admin_action(call.from_user.id, "custom_config_toggle", f"وضعیت جدید: {'0' if current == '1' else '1'}")
+        await safe_edit(call, "🛠 ساخت کانفیگ شخصی:", reply_markup=kb.custom_config_menu_kb(db))
+        await call.answer("وضعیت تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_custom_config_edit_range")
+    async def cb_admin_custom_config_edit_range(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminCustomConfigSettings.waiting_min_gb)
+        await safe_edit(call, "حداقل حجم مجاز چند گیگابایت باشد؟ (فقط عدد):", reply_markup=kb.admin_back_kb())
+        await call.answer()
+
+    @router.message(AdminCustomConfigSettings.waiting_min_gb)
+    async def process_custom_config_min_gb(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
+            return
+        await state.update_data(min_gb=text)
+        await state.set_state(AdminCustomConfigSettings.waiting_max_gb)
+        await message.answer("حداکثر حجم مجاز چند گیگابایت باشد؟ (فقط عدد):")
+
+    @router.message(AdminCustomConfigSettings.waiting_max_gb)
+    async def process_custom_config_max_gb(message: Message, state: FSMContext):
+        text = message.text.strip()
+        data = await state.get_data()
+        min_gb = int(data.get("min_gb", "0"))
+        if not text.isdigit() or int(text) <= min_gb:
+            await message.answer(f"لطفاً عددی بزرگ‌تر از حداقل ({min_gb}) ارسال کنید.")
+            return
+        db.set_setting("custom_config_min_gb", data["min_gb"])
+        db.set_setting("custom_config_max_gb", text)
+        await state.clear()
+        await message.answer(
+            f"✅ بازه‌ی حجم مجاز روی {data['min_gb']} تا {text} گیگابایت تنظیم شد.",
+            reply_markup=kb.admin_panel_kb(db, is_main_bot),
+        )
+
+    @router.callback_query(F.data == "adm_panel_servers")
+    async def cb_admin_panel_servers(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await replace_admin_view(call, "🖥 سرورهای پنل VPN متصل:", reply_markup=kb.panel_servers_list_kb(db))
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_panel_server_add")
+    async def cb_admin_panel_server_add(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminAddPanelServer.waiting_name)
+        await safe_edit(call, "یک نام دلخواه برای این سرور بفرست (مثلاً «سرور آلمان»):", reply_markup=kb.admin_back_kb())
+        await call.answer()
+
+    @router.message(AdminAddPanelServer.waiting_name)
+    async def process_panel_server_name(message: Message, state: FSMContext):
+        await state.update_data(name=message.text.strip())
+        await state.set_state(AdminAddPanelServer.waiting_url)
+        await message.answer("آدرس API پنل PasarGuard را بفرست (مثلاً https://panel.example.com):")
+
+    @router.message(AdminAddPanelServer.waiting_url)
+    async def process_panel_server_url(message: Message, state: FSMContext):
+        url = message.text.strip()
+        if not url.startswith("http://") and not url.startswith("https://"):
+            await message.answer("آدرس باید با http:// یا https:// شروع شود.")
+            return
+        await state.update_data(url=url)
+        await state.set_state(AdminAddPanelServer.waiting_username)
+        await message.answer("نام کاربری ادمین پنل را بفرست:")
+
+    @router.message(AdminAddPanelServer.waiting_username)
+    async def process_panel_server_username(message: Message, state: FSMContext):
+        await state.update_data(username=message.text.strip())
+        await state.set_state(AdminAddPanelServer.waiting_password)
+        await message.answer("رمز عبور ادمین پنل را بفرست:")
+
+    @router.message(AdminAddPanelServer.waiting_password)
+    async def process_panel_server_password(message: Message, state: FSMContext):
+        await state.update_data(password=message.text.strip())
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await state.set_state(AdminAddPanelServer.waiting_template_user)
+        await message.answer(
+            "یک نام کاربری که از قبل روی این پنل وجود دارد بفرست.\n"
+            "تنظیمات پروتکل/گروه همین کاربر به‌عنوان قالب پیش‌فرض برای همه‌ی "
+            "کانفیگ‌های شخصی جدید استفاده می‌شود."
+        )
+
+    @router.message(AdminAddPanelServer.waiting_template_user)
+    async def process_panel_server_template_user(message: Message, state: FSMContext):
+        data = await state.get_data()
+        server_id = db.add_panel_server(
+            name=data["name"], panel_type="pasarguard", api_url=data["url"],
+            api_username=data["username"], api_password=data["password"],
+        )
+        server = db.get_panel_server(server_id)
+        await message.answer("⏳ در حال دریافت قالب از پنل...")
+        try:
+            provider = get_provider(server)
+            template = await provider.fetch_template_from_user(message.text.strip())
+        except PanelError as e:
+            db.delete_panel_server(server_id)
+            await state.clear()
+            await message.answer(f"⛔️ {e}\nسرور ذخیره نشد؛ دوباره از ابتدا تلاش کن.")
+            return
+
+        import json as _json
+        db.update_panel_server(
+            server_id,
+            group_ids=_json.dumps(template["group_ids"]),
+            proxy_settings=_json.dumps(template["proxy_settings"]),
+            template_username=message.text.strip(),
+        )
+        await state.clear()
+        db.log_admin_action(message.from_user.id, "panel_server_add", f"سرور «{data['name']}» (#{server_id})")
+        await message.answer(
+            f"✅ سرور «{data['name']}» با قالب گرفته‌شده از «{message.text.strip()}» اضافه شد.",
+            reply_markup=kb.admin_panel_kb(db, is_main_bot),
+        )
+
+    @router.callback_query(F.data.startswith("adm_panel_server_view:"))
+    async def cb_admin_panel_server_view(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        server_id = callback_id(call.data, "adm_panel_server_view")
+        server = db.get_panel_server(server_id)
+        if not server:
+            await call.answer("سرور یافت نشد.", show_alert=True)
+            return
+        status = "🟢 فعال" if server["is_active"] else "🔴 غیرفعال"
+        template_status = f"قالب از کاربر «{server['template_username']}»" if server["template_username"] else "⚠️ قالب هنوز تنظیم نشده"
+        usage_status = (
+            f"مصرف: {'✅ خرید شخصی' if server['used_for_custom_config'] else '◻️ خرید شخصی'} | "
+            f"{'✅ کانفیگ تست' if server['used_for_test_config'] else '◻️ کانفیگ تست'}"
+        )
+        text = (
+            f"🖥 {server['name']}\n"
+            f"نوع: {server['panel_type']}\n"
+            f"آدرس: {server['api_url']}\n"
+            f"وضعیت: {status}\n"
+            f"{usage_status}\n"
+            f"{template_status}"
+        )
+        await replace_admin_view(call, text, reply_markup=kb.panel_server_view_kb(server))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_panel_server_template:"))
+    async def cb_admin_panel_server_template(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        server_id = callback_id(call.data, "adm_panel_server_template")
+        if not db.get_panel_server(server_id):
+            await call.answer("سرور یافت نشد.", show_alert=True)
+            return
+        await state.update_data(panel_server_id=server_id)
+        await state.set_state(AdminSetPanelTemplate.waiting_username)
+        await safe_edit(call, "نام کاربری نمونه‌ی جدید (که روی پنل موجود است) را بفرست:", reply_markup=kb.admin_back_kb())
+        await call.answer()
+
+    @router.message(AdminSetPanelTemplate.waiting_username)
+    async def process_panel_server_template_update(message: Message, state: FSMContext):
+        data = await state.get_data()
+        server = db.get_panel_server(data["panel_server_id"])
+        if not server:
+            await state.clear()
+            await message.answer("سرور یافت نشد.")
+            return
+        await message.answer("⏳ در حال دریافت قالب از پنل...")
+        try:
+            provider = get_provider(server)
+            template = await provider.fetch_template_from_user(message.text.strip())
+        except PanelError as e:
+            await message.answer(f"⛔️ {e}")
+            return
+        import json as _json
+        db.update_panel_server(
+            server["id"],
+            group_ids=_json.dumps(template["group_ids"]),
+            proxy_settings=_json.dumps(template["proxy_settings"]),
+            template_username=message.text.strip(),
+        )
+        await state.clear()
+        db.log_admin_action(message.from_user.id, "panel_server_template_update", f"سرور #{server['id']} ← «{message.text.strip()}»")
+        await message.answer("✅ قالب جدید ذخیره شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    @router.callback_query(F.data.startswith("adm_panel_server_test:"))
+    async def cb_admin_panel_server_test(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        server_id = callback_id(call.data, "adm_panel_server_test")
+        server = db.get_panel_server(server_id)
+        if not server:
+            await call.answer("سرور یافت نشد.", show_alert=True)
+            return
+        await call.answer("در حال تست اتصال...")
+        try:
+            provider = get_provider(server)
+            ok = await provider.test_connection()
+        except PanelError:
+            ok = False
+        await call.message.answer("✅ اتصال به پنل موفق بود." if ok else "❌ اتصال به پنل ناموفق بود. اطلاعات را بررسی کن.")
+
+    @router.callback_query(F.data.startswith("adm_panel_server_usage:"))
+    async def cb_admin_panel_server_usage_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        _, kind, server_id_str = call.data.split(":")
+        server_id = int(server_id_str)
+        server = db.get_panel_server(server_id)
+        if not server:
+            await call.answer("سرور یافت نشد.", show_alert=True)
+            return
+        field = {"custom": "used_for_custom_config", "test": "used_for_test_config", "reseller": "used_for_reseller"}.get(kind)
+        if not field:
+            await call.answer("نوع نامعتبر.", show_alert=True)
+            return
+        db.update_panel_server(server_id, **{field: 0 if server[field] else 1})
+        server = db.get_panel_server(server_id)
+        db.log_admin_action(
+            call.from_user.id, "panel_server_usage_toggle",
+            f"سرور #{server_id} | {field} ← {server[field]}",
+        )
+        status = "🟢 فعال" if server["is_active"] else "🔴 غیرفعال"
+        template_status = f"قالب از کاربر «{server['template_username']}»" if server["template_username"] else "⚠️ قالب هنوز تنظیم نشده"
+        usage_status = (
+            f"مصرف: {'✅ خرید شخصی' if server['used_for_custom_config'] else '◻️ خرید شخصی'} | "
+            f"{'✅ کانفیگ تست' if server['used_for_test_config'] else '◻️ کانفیگ تست'} | "
+            f"{'✅ نمایندگی' if server['used_for_reseller'] else '◻️ نمایندگی'}"
+        )
+        await safe_edit(call,
+            f"🖥 {server['name']}\nنوع: {server['panel_type']}\nآدرس: {server['api_url']}\n"
+            f"وضعیت: {status}\n{usage_status}\n{template_status}",
+            reply_markup=kb.panel_server_view_kb(server),
+        )
+        await call.answer("تغییر کرد.")
+
+    @router.callback_query(F.data.startswith("adm_panel_server_toggle:"))
+    async def cb_admin_panel_server_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        server_id = callback_id(call.data, "adm_panel_server_toggle")
+        server = db.get_panel_server(server_id)
+        if not server:
+            await call.answer("سرور یافت نشد.", show_alert=True)
+            return
+        db.update_panel_server(server_id, is_active=0 if server["is_active"] else 1)
+        server = db.get_panel_server(server_id)
+        await safe_edit(call,
+            f"🖥 {server['name']}\nنوع: {server['panel_type']}\nآدرس: {server['api_url']}\n"
+            f"وضعیت: {'🟢 فعال' if server['is_active'] else '🔴 غیرفعال'}",
+            reply_markup=kb.panel_server_view_kb(server),
+        )
+        await call.answer("وضعیت تغییر کرد.")
+
+    @router.callback_query(F.data.startswith("adm_panel_server_delete:"))
+    async def cb_admin_panel_server_delete(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        server_id = callback_id(call.data, "adm_panel_server_delete")
+        db.delete_panel_server(server_id)
+        db.log_admin_action(call.from_user.id, "panel_server_delete", f"سرور #{server_id}")
+        await replace_admin_view(call, "🖥 سرورهای پنل VPN متصل:", reply_markup=kb.panel_servers_list_kb(db))
+        await call.answer("سرور حذف شد.")
+
+    @router.callback_query(F.data == "adm_pricing_tiers")
+    async def cb_admin_pricing_tiers(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await replace_admin_view(call,
+            "💰 قیمت‌گذاری بر اساس بازه‌ی حجم:\n\n"
+            "قیمت نهایی = کل حجم انتخابی کاربر × نرخ همان بازه‌ای که حجم داخلش قرار می‌گیرد "
+            "(نه پلکانی/تصاعدی؛ یک نرخ ثابت برای کل حجم).",
+            reply_markup=kb.pricing_tiers_kb(db),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_pricing_tier_add")
+    async def cb_admin_pricing_tier_add(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminAddPricingTier.waiting_from_gb)
+        await safe_edit(call, "ابتدای این بازه چند گیگابایت باشد؟ (فقط عدد):", reply_markup=kb.admin_back_kb())
+        await call.answer()
+
+    @router.message(AdminAddPricingTier.waiting_from_gb)
+    async def process_pricing_tier_from(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
+            return
+        await state.update_data(from_gb=int(text))
+        await state.set_state(AdminAddPricingTier.waiting_to_gb)
+        await message.answer(
+            "انتهای این بازه چند گیگابایت باشد؟ (فقط عدد)\n"
+            "اگر می‌خواهی این آخرین بازه باشد (بدون سقف/تا بی‌نهایت)، عدد 0 بفرست."
+        )
+
+    @router.message(AdminAddPricingTier.waiting_to_gb)
+    async def process_pricing_tier_to(message: Message, state: FSMContext):
+        text = message.text.strip()
+        data = await state.get_data()
+        if not text.isdigit():
+            await message.answer("لطفاً فقط عدد صحیح ارسال کن (یا 0 برای بی‌نهایت).")
+            return
+        to_gb = None if int(text) == 0 else int(text)
+        if to_gb is not None and to_gb <= data["from_gb"]:
+            await message.answer(f"انتهای بازه باید بزرگ‌تر از ابتدای آن ({data['from_gb']}) باشد.")
+            return
+        await state.update_data(to_gb=to_gb)
+        await state.set_state(AdminAddPricingTier.waiting_price)
+        await message.answer("قیمت هر گیگابایت در این بازه چند تومان باشد؟ (فقط عدد):")
+
+    @router.message(AdminAddPricingTier.waiting_price)
+    async def process_pricing_tier_price(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
+            return
+        data = await state.get_data()
+        db.add_pricing_tier(data["from_gb"], data.get("to_gb"), int(text))
+        await state.clear()
+        to_label = data.get("to_gb") or "∞"
+        db.log_admin_action(
+            message.from_user.id, "pricing_tier_add",
+            f"بازه {data['from_gb']} تا {to_label} گیگ ← {int(text):,} تومان/گیگ",
+        )
+        await message.answer(
+            f"✅ بازه‌ی قیمت اضافه شد: {data['from_gb']} تا {to_label} گیگ ← {int(text):,} تومان/گیگ",
+            reply_markup=kb.admin_panel_kb(db, is_main_bot),
+        )
+
+    @router.callback_query(F.data.startswith("adm_pricing_tier_delete:"))
+    async def cb_admin_pricing_tier_delete(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        tier_id = callback_id(call.data, "adm_pricing_tier_delete")
+        db.delete_pricing_tier(tier_id)
+        db.log_admin_action(call.from_user.id, "pricing_tier_delete", f"بازه #{tier_id}")
+        await replace_admin_view(call, "💰 قیمت‌گذاری بر اساس بازه‌ی حجم:", reply_markup=kb.pricing_tiers_kb(db))
+        await call.answer("بازه حذف شد.")
+
+    @router.callback_query(F.data == "adm_reset_test_configs")
+    async def cb_admin_reset_test_configs(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminResetTestConfig.waiting_message)
+        await safe_edit(call,
+            "پیامی که می‌خوای به کاربرانی که قبلاً کانفیگ تست گرفته‌اند ارسال بشه رو بفرست.\n"
+            "(مثلاً: «🎉 کانفیگ تست دوباره برای شما فعال شد، از منوی اصلی دریافت کنید.»)\n\n"
+            "بعد از این پیام، بازنشانی و ارسال شروع می‌شود.",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminResetTestConfig.waiting_message)
+    async def process_reset_test_configs_message(message: Message, state: FSMContext, bot: Bot):
+        text = message.text.strip()
+        if not text:
+            await message.answer("لطفاً یک متن معتبر ارسال کنید.")
+            return
+        await state.clear()
+        user_ids = db.reset_all_test_usage()
+        db.log_admin_action(
+            message.from_user.id, "reset_test_configs",
+            f"بازنشانی کانفیگ تست برای {len(user_ids)} کاربر",
+        )
+        status_msg = await message.answer(f"⏳ در حال ارسال پیام به {len(user_ids)} کاربر...")
+        sent = 0
+        for uid in user_ids:
+            try:
+                await bot.send_message(uid, text)
+                sent += 1
+            except Exception:
+                pass
+            await asyncio.sleep(0.05)
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+        await message.answer(
+            f"✅ کانفیگ تست برای {len(user_ids)} کاربر بازنشانی شد و پیام به {sent} نفر ارسال شد.",
+            reply_markup=kb.admin_panel_kb(db, is_main_bot),
         )
 
     @router.callback_query(F.data == "adm_renewal_toggle")
