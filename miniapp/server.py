@@ -332,8 +332,10 @@ def api_custom_configs(auth=Depends(get_verified_user)):
             "duration_days": c["duration_days"],
             "subscription_url": c["subscription_url"],
             "created_at": c["created_at"],
+            "expires_at": c["expires_at"],
         }
         for c in configs
+        if c["source"] != "test"
     ]
 
 
@@ -470,6 +472,9 @@ async def api_sub_info(link: str = Query(...), auth=Depends(get_verified_user)):
                 owns_link = True
                 break
     if not owns_link:
+        custom_configs = db.get_custom_configs_for_user(tg_id)
+        owns_link = any(c["subscription_url"] == link for c in custom_configs)
+    if not owns_link:
         raise HTTPException(status_code=403, detail="forbidden")
 
     info = await fetch_sub_info(link)
@@ -497,9 +502,15 @@ async def api_expiring(auth=Depends(get_verified_user)):
                 continue
             expires_at = exp_dt.isoformat()
 
-        product = db.get_product(r["product_id"])
+        product = db.get_product(r["product_id"]) if r["product_id"] else None
+        if product:
+            product_name = product["name"]
+        elif "custom_username" in r.keys() and r["custom_username"]:
+            product_name = f"🛠 کانفیگ شخصی «{r['custom_username']}»"
+        else:
+            product_name = "نامشخص"
         result.append({
-            "product_name": product["name"] if product else "نامشخص",
+            "product_name": product_name,
             "expires_at": expires_at,
             "link": r["link"],
         })
