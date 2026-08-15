@@ -25,6 +25,7 @@ from config_delivery import deliver_config_to_user
 from force_join import is_channel_member, CHECK_CALLBACK
 from sub_info import fetch_sub_info, format_sub_info_fa
 from stock_alerts import check_and_notify_low_stock
+from panel_client import fulfill_order_configs
 import crypto_payment
 
 
@@ -339,13 +340,13 @@ def create_user_router(db) -> Router:
         _, product_id, quantity = call.data.split(":")
         product_id, quantity = int(product_id), int(quantity)
         product = db.get_product(product_id)
-        stock = db.count_available_configs(product_id)
-        if not product or stock <= 0:
+        stock = db.count_available_configs(product_id) if not (product and product["panel_id"]) else None
+        if not product or (stock is not None and stock <= 0):
             await call.answer("این محصول در حال حاضر موجود نیست.", show_alert=True)
             return
         if quantity < 1:
             quantity = 1
-        if quantity > stock:
+        if stock is not None and quantity > stock:
             await call.answer(f"موجودی کافی نیست. فقط {stock} عدد موجود است.", show_alert=True)
             return
 
@@ -379,13 +380,13 @@ def create_user_router(db) -> Router:
         if order["final_price"] <= 0:
             await state.clear()
 
-            results = db.take_unused_configs(product_id, call.from_user.id, quantity)
+            results, delivery_err = await fulfill_order_configs(db, product, call.from_user.id, quantity)
             if not results:
                 # موجودی تمام شده: مبلغ کسرشده از کیف پول/کد تخفیف را برگردان و به ادمین اطلاع بده
                 db.reject_order(order_id)
                 await _notify_admins_of_order(bot, order_id)
                 await call.message.edit_text(
-                    "⛔️ موجودی این محصول در حال حاضر تمام شده است.\n"
+                    f"⛔️ {delivery_err or 'موجودی این محصول در حال حاضر تمام شده است.'}\n"
                     "مبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد. لطفاً بعداً دوباره تلاش کنید "
                     "یا با پشتیبانی در تماس باشید."
                 )
