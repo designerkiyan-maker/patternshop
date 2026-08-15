@@ -24,7 +24,6 @@ from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 import crypto_payment
-from panel_client import PanelClient, fulfill_order_configs
 from states import (
     AdminAddCategory,
     AdminAddProduct,
@@ -48,7 +47,6 @@ from states import (
     AdminVolumeReminderSettings,
     AdminStockAlertSettings,
     AdminRestoreBackup,
-    AdminAddPanel,
 )
 
 
@@ -353,278 +351,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not text.isdigit() or int(text) <= 0:
             await message.answer("لطفاً فقط عدد صحیح و بزرگ‌تر از صفر وارد کنید. مثال: 30")
             return
-        await state.update_data(duration_days=int(text))
-        await state.set_state(AdminAddProduct.waiting_delivery)
-        await message.answer(
-            "این محصول چطور تحویل داده شود؟\n\n"
-            "📦 موجودی دستی: از لینک‌هایی که خودت از قبل اضافه می‌کنی (مثل قبل)\n"
-            "🖥 اتصال به پنل VPN: با هر خرید، یک کاربر واقعی روی پنل انتخابی ساخته می‌شود",
-            reply_markup=kb.admin_product_delivery_kb(),
-        )
-
-    @router.callback_query(AdminAddProduct.waiting_delivery, F.data == "adm_prod_delivery:manual")
-    async def cb_product_delivery_manual(call: CallbackQuery, state: FSMContext):
         data = await state.get_data()
-        db.add_product(data["category_id"], data["name"], data["price"], data["description"], data["duration_days"])
-        db.log_admin_action(call.from_user.id, "product_add", f"محصول «{data['name']}» | قیمت: {data['price']:,} | موجودی دستی")
+        db.add_product(data["category_id"], data["name"], data["price"], data["description"], int(text))
+        db.log_admin_action(message.from_user.id, "product_add", f"محصول «{data['name']}» | قیمت: {data['price']:,}")
         await state.clear()
-        await call.message.answer("✅ محصول با موفقیت اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
-        await call.answer()
-
-    @router.callback_query(AdminAddProduct.waiting_delivery, F.data == "adm_prod_delivery:panel")
-    async def cb_product_delivery_panel(call: CallbackQuery, state: FSMContext):
-        panels = db.list_vpn_panels(active_only=True)
-        if not panels:
-            await call.answer("ابتدا باید حداقل یک پنل VPN فعال اضافه کنی (پنل مدیریت → مدیریت پنل‌های VPN).", show_alert=True)
-            return
-        await state.set_state(AdminAddProduct.waiting_panel)
-        await safe_edit(call, "این محصول به کدام پنل وصل شود؟", reply_markup=kb.admin_pick_panel_for_product_kb(panels))
-        await call.answer()
-
-    @router.callback_query(AdminAddProduct.waiting_panel, F.data.startswith("adm_prod_pickpanel:"))
-    async def cb_product_pick_panel(call: CallbackQuery, state: FSMContext):
-        panel_id = callback_id(call.data, "adm_prod_pickpanel")
-        if panel_id is None:
-            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
-            return
-        await state.update_data(panel_id=panel_id)
-        await state.set_state(AdminAddProduct.waiting_data_limit)
-        await safe_edit(
-            call,
-            "چند گیگابایت حجم برای هر کاربر این محصول اختصاص یابد؟\n"
-            "فقط عدد وارد کن (برای نامحدود بنویس: 0)",
-            reply_markup=kb.admin_back_kb(),
-        )
-        await call.answer()
-
-    @router.message(AdminAddProduct.waiting_data_limit)
-    async def process_product_data_limit(message: Message, state: FSMContext):
-        text = message.text.strip()
-        try:
-            data_limit_gb = float(text)
-            if data_limit_gb < 0:
-                raise ValueError
-        except ValueError:
-            await message.answer("لطفاً فقط عدد وارد کن (برای نامحدود بنویس: 0).")
-            return
-
-        data = await state.get_data()
-        product_id = db.add_product(
-            data["category_id"], data["name"], data["price"], data["description"], data["duration_days"],
-        )
-        db.update_product_panel(product_id, data["panel_id"], data_limit_gb)
-        db.log_admin_action(
-            message.from_user.id, "product_add",
-            f"محصول «{data['name']}» | قیمت: {data['price']:,} | پنل #{data['panel_id']}",
-        )
-        await state.clear()
-        await message.answer("✅ محصول با موفقیت اضافه و به پنل وصل شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
-
-    # -------------------------------------------------------------------
-    # مدیریت پنل‌های VPN (Marzban / PasarGuard)
-    # -------------------------------------------------------------------
-
-    @router.callback_query(F.data == "adm_vpn_panels")
-    async def cb_admin_vpn_panels(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        panels = db.list_vpn_panels()
-        await replace_admin_view(call, "🖥 مدیریت پنل‌های VPN:", reply_markup=kb.admin_vpn_panels_kb(panels))
-        await call.answer()
-
-    @router.callback_query(F.data.startswith("adm_vpnpanel_view:"))
-    async def cb_vpnpanel_view(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        panel_id = callback_id(call.data, "adm_vpnpanel_view")
-        panel = db.get_vpn_panel(panel_id) if panel_id is not None else None
-        if not panel:
-            await call.answer("⚠️ این پنل یافت نشد.", show_alert=True)
-            return
-        kind = "PasarGuard" if panel["is_pasarguard"] else "Marzban"
-        status = "🟢 فعال" if panel["is_active"] else "🔴 غیرفعال"
-        text = (
-            f"🖥 پنل: {panel['name']}\n"
-            f"نوع: {kind}\n"
-            f"آدرس: {panel['url']}\n"
-            f"یوزرنیم ادمین: {panel['username']}\n"
-            f"وضعیت: {status}"
-        )
-        await safe_edit(call, text, reply_markup=kb.admin_vpn_panel_detail_kb(panel))
-        await call.answer()
-
-    @router.callback_query(F.data.startswith("adm_vpnpanel_test:"))
-    async def cb_vpnpanel_test(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        panel_id = callback_id(call.data, "adm_vpnpanel_test")
-        panel = db.get_vpn_panel(panel_id) if panel_id is not None else None
-        if not panel:
-            await call.answer("⚠️ این پنل یافت نشد.", show_alert=True)
-            return
-        await call.answer("در حال تست اتصال...")
-        client = PanelClient(panel, db)
-        stats = await client.get_system_stats()
-        if not stats.get("ok"):
-            await call.message.answer(f"❌ اتصال ناموفق بود:\n{stats.get('error')}")
-            return
-        await call.message.answer(
-            "✅ اتصال موفق بود.\n"
-            f"نسخه پنل: {stats.get('version')}\n"
-            f"کاربران کل: {stats.get('total_user')}\n"
-            f"کاربران آنلاین: {stats.get('active_users')}"
-        )
-
-    @router.callback_query(F.data.startswith("adm_vpnpanel_toggle:"))
-    async def cb_vpnpanel_toggle(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        panel_id = callback_id(call.data, "adm_vpnpanel_toggle")
-        panel = db.get_vpn_panel(panel_id) if panel_id is not None else None
-        if not panel:
-            await call.answer("⚠️ این پنل یافت نشد.", show_alert=True)
-            return
-        db.update_vpn_panel(panel_id, is_active=0 if panel["is_active"] else 1)
-        db.log_admin_action(call.from_user.id, "vpn_panel_toggle", f"پنل «{panel['name']}»")
-        panel = db.get_vpn_panel(panel_id)
-        await safe_edit(call, f"🖥 پنل: {panel['name']}", reply_markup=kb.admin_vpn_panel_detail_kb(panel))
-        await call.answer("وضعیت تغییر کرد.")
-
-    @router.callback_query(F.data.startswith("adm_vpnpanel_del:"))
-    async def cb_vpnpanel_del(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        panel_id = callback_id(call.data, "adm_vpnpanel_del")
-        if panel_id is None:
-            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
-            return
-        await safe_edit(
-            call,
-            "⚠️ با حذف این پنل، محصولات وصل‌شده به آن دیگر نمی‌توانند کاربر جدید بسازند. "
-            "کاربرانی که قبلاً روی خود پنل ساخته شده‌اند دست‌نخورده می‌مانند. مطمئنی؟",
-            reply_markup=kb.admin_vpn_panel_del_confirm_kb(panel_id),
-        )
-        await call.answer()
-
-    @router.callback_query(F.data.startswith("adm_vpnpanel_delconfirm:"))
-    async def cb_vpnpanel_delconfirm(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        panel_id = callback_id(call.data, "adm_vpnpanel_delconfirm")
-        panel = db.get_vpn_panel(panel_id) if panel_id is not None else None
-        if not panel:
-            await call.answer("⚠️ این پنل یافت نشد.", show_alert=True)
-            return
-        db.delete_vpn_panel(panel_id)
-        db.log_admin_action(call.from_user.id, "vpn_panel_delete", f"پنل «{panel['name']}»")
-        panels = db.list_vpn_panels()
-        await safe_edit(call, "🖥 مدیریت پنل‌های VPN:", reply_markup=kb.admin_vpn_panels_kb(panels))
-        await call.answer("پنل حذف شد.")
-
-    @router.callback_query(F.data == "adm_vpnpanel_add")
-    async def cb_vpnpanel_add(call: CallbackQuery, state: FSMContext):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        await state.set_state(AdminAddPanel.waiting_name)
-        await safe_edit(call, "یک نام دلخواه برای این پنل وارد کن (فقط برای شناسایی خودت):", reply_markup=kb.admin_back_kb())
-        await call.answer()
-
-    @router.message(AdminAddPanel.waiting_name)
-    async def process_panel_name(message: Message, state: FSMContext):
-        name = message.text.strip()
-        if not name:
-            await message.answer("لطفاً یک نام معتبر وارد کن.")
-            return
-        if db.get_vpn_panel_by_name(name):
-            await message.answer("پنلی با همین نام قبلاً ثبت شده؛ یک نام دیگر وارد کن.")
-            return
-        await state.update_data(name=name)
-        await state.set_state(AdminAddPanel.waiting_url)
-        await message.answer(
-            "آدرس پنل را وارد کن (با http:// یا https:// و بدون / انتهایی)\n"
-            "مثال: https://panel.example.com:8000"
-        )
-
-    @router.message(AdminAddPanel.waiting_url)
-    async def process_panel_url(message: Message, state: FSMContext):
-        url = message.text.strip()
-        if not (url.startswith("http://") or url.startswith("https://")):
-            await message.answer("آدرس باید با http:// یا https:// شروع شود.")
-            return
-        await state.update_data(url=url.rstrip("/"))
-        await state.set_state(AdminAddPanel.waiting_username)
-        await message.answer("یوزرنیم ادمین پنل را وارد کن:")
-
-    @router.message(AdminAddPanel.waiting_username)
-    async def process_panel_username(message: Message, state: FSMContext):
-        await state.update_data(username=message.text.strip())
-        await state.set_state(AdminAddPanel.waiting_password)
-        await message.answer("پسورد ادمین پنل را وارد کن:")
-
-    @router.message(AdminAddPanel.waiting_password)
-    async def process_panel_password(message: Message, state: FSMContext):
-        await state.update_data(password=message.text.strip())
-        await state.set_state(AdminAddPanel.waiting_type)
-        await message.answer("نوع پنل چیست؟", reply_markup=kb.admin_vpn_panel_type_kb())
-
-    @router.callback_query(AdminAddPanel.waiting_type, F.data.startswith("adm_vpnpanel_type:"))
-    async def process_panel_type(call: CallbackQuery, state: FSMContext):
-        is_pasarguard = call.data.split(":", 1)[1] == "1"
-        await state.update_data(is_pasarguard=is_pasarguard)
-        await state.set_state(AdminAddPanel.waiting_proxies)
-        await call.message.answer(
-            "تنظیمات پیش‌فرض پروکسی (proxies) برای کاربرهایی که ساخته می‌شوند را به فرمت JSON بفرست.\n"
-            "اگر مطمئن نیستی، فقط بنویس: -  (و بعداً از پنل بازش کن)\n\n"
-            'مثال: {"vless": {}}'
-        )
-        await call.answer()
-
-    @router.message(AdminAddPanel.waiting_proxies)
-    async def process_panel_proxies(message: Message, state: FSMContext):
-        import json
-        text = message.text.strip()
-        if text == "-":
-            proxies = "{}"
-        else:
-            try:
-                json.loads(text)
-                proxies = text
-            except ValueError:
-                await message.answer("این متن JSON معتبر نیست. دوباره وارد کن یا بنویس: -")
-                return
-        await state.update_data(proxies=proxies)
-        await state.set_state(AdminAddPanel.waiting_inbounds)
-        await message.answer(
-            "شناسه‌های اینباند/گروه پیش‌فرض را به فرمت JSON (آرایه) بفرست.\n"
-            "اگر مطمئن نیستی، فقط بنویس: -  (و بعداً از پنل بازش کن)\n\n"
-            "مثال: [1, 2]"
-        )
-
-    @router.message(AdminAddPanel.waiting_inbounds)
-    async def process_panel_inbounds(message: Message, state: FSMContext):
-        import json
-        text = message.text.strip()
-        if text == "-":
-            inbounds = "[]"
-        else:
-            try:
-                json.loads(text)
-                inbounds = text
-            except ValueError:
-                await message.answer("این متن JSON معتبر نیست. دوباره وارد کن یا بنویس: -")
-                return
-
-        data = await state.get_data()
-        panel_id = db.add_vpn_panel(
-            data["name"], data["url"], data["username"], data["password"],
-            is_pasarguard=data["is_pasarguard"], default_proxies=data["proxies"], default_inbounds=inbounds,
-        )
-        db.log_admin_action(message.from_user.id, "vpn_panel_add", f"پنل «{data['name']}»")
-        await state.clear()
-        await message.answer(
-            "✅ پنل اضافه شد. پیشنهاد می‌شود الان اتصالش را از داخل «مدیریت پنل‌های VPN → تست اتصال» بررسی کنی.",
-            reply_markup=kb.admin_panel_kb(db, is_main_bot),
-        )
+        await message.answer("✅ محصول با موفقیت اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
     # -------------------------------------------------------------------
     # افزودن کانفیگ (بانک لینک) به محصول
@@ -876,9 +607,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
         product = db.get_product(order["product_id"])
         quantity = order["quantity"] or 1
-        results, err = await fulfill_order_configs(db, product, order["user_id"], quantity)
+        results = db.take_unused_configs(order["product_id"], order["user_id"], quantity)
         if not results:
-            await call.answer(f"⛔️ {err or 'موجودی این محصول تمام شده! ابتدا لینک جدید اضافه کنید.'}", show_alert=True)
+            await call.answer("⛔️ موجودی این محصول تمام شده! ابتدا لینک جدید اضافه کنید.", show_alert=True)
             return
 
         db.approve_order(order_id, [r["id"] for r in results])

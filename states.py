@@ -33,19 +33,6 @@ class AdminAddProduct(StatesGroup):
     waiting_price = State()
     waiting_desc = State()
     waiting_duration = State()
-    waiting_delivery = State()
-    waiting_panel = State()
-    waiting_data_limit = State()
-
-
-class AdminAddPanel(StatesGroup):
-    waiting_name = State()
-    waiting_url = State()
-    waiting_username = State()
-    waiting_password = State()
-    waiting_type = State()
-    waiting_proxies = State()
-    waiting_inbounds = State()
 
 
 class AdminAddConfigs(StatesGroup):

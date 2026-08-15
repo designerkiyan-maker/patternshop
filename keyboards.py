@@ -236,7 +236,6 @@ ADMIN_PANEL_ITEMS = [
     ("adm_stock_alert_settings", "📦 آستانه‌ی هشدار موجودی", "adm_stock_alert_settings"),
     ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
     ("adm_resellers_menu", "🏪 مدیریت بات‌های نمایندگی", "adm_resellers_menu"),
-    ("adm_vpn_panels", "🖥 مدیریت پنل‌های VPN", "adm_vpn_panels"),
     ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
     ("adm_set_card", "💳 تنظیم شماره کارت", "adm_set_card"),
     ("adm_set_plisio", "🪙 تنظیم درگاه کریپتو (Plisio)", "adm_set_plisio"),
@@ -378,18 +377,12 @@ def admin_products_categories_kb(categories, prefix="adm_prod_cat") -> InlineKey
 def admin_products_list_kb(db, products) -> InlineKeyboardMarkup:
     rows = []
     for p in products:
+        stock = db.count_available_configs(p["id"])
         state_icon = "🟢" if p["is_active"] else "🔴"
-        if p["panel_id"]:
-            panel = db.get_vpn_panel(p["panel_id"])
-            panel_name = panel["name"] if panel else "پنل حذف‌شده"
-            stock_text = f"🖥 پنل: {panel_name}"
-        else:
-            stock = db.count_available_configs(p["id"])
-            stock_text = f"موجودی: {stock}"
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"{state_icon} {p['name']} | {p['price']:,}ت | {stock_text} | مدت: {p['duration_days'] or 30} روز",
+                    text=f"{state_icon} {p['name']} | {p['price']:,}ت | موجودی: {stock} | مدت: {p['duration_days'] or 30} روز",
                     callback_data="noop",
                 )
             ]
@@ -416,70 +409,6 @@ def admin_pick_product_kb(products, prefix) -> InlineKeyboardMarkup:
     rows = []
     for p in products:
         rows.append([InlineKeyboardButton(text=f"📦 {p['name']}", callback_data=f"{prefix}:{p['id']}")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-# ---------------------------------------------------------------------------
-# پنل‌های VPN (Marzban / PasarGuard)
-# ---------------------------------------------------------------------------
-
-def admin_vpn_panels_kb(panels) -> InlineKeyboardMarkup:
-    rows = []
-    for p in panels:
-        icon = "🟢" if p["is_active"] else "🔴"
-        kind = "PasarGuard" if p["is_pasarguard"] else "Marzban"
-        rows.append([InlineKeyboardButton(
-            text=f"{icon} {p['name']} ({kind})",
-            callback_data=f"adm_vpnpanel_view:{p['id']}",
-        )])
-    rows.append([InlineKeyboardButton(text="➕ افزودن پنل جدید", callback_data="adm_vpnpanel_add")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def admin_vpn_panel_detail_kb(panel) -> InlineKeyboardMarkup:
-    toggle_text = "🔴 غیرفعال کردن" if panel["is_active"] else "🟢 فعال کردن"
-    rows = [
-        [InlineKeyboardButton(text="🔌 تست اتصال", callback_data=f"adm_vpnpanel_test:{panel['id']}")],
-        [InlineKeyboardButton(text=toggle_text, callback_data=f"adm_vpnpanel_toggle:{panel['id']}")],
-        [InlineKeyboardButton(text="🗑 حذف پنل", callback_data=f"adm_vpnpanel_del:{panel['id']}")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_vpn_panels")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def admin_vpn_panel_type_kb() -> InlineKeyboardMarkup:
-    rows = [
-        [
-            InlineKeyboardButton(text="Marzban (نسخه معمولی)", callback_data="adm_vpnpanel_type:0"),
-            InlineKeyboardButton(text="PasarGuard", callback_data="adm_vpnpanel_type:1"),
-        ],
-        [InlineKeyboardButton(text="❌ انصراف", callback_data="adm_vpn_panels")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def admin_vpn_panel_del_confirm_kb(panel_id) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text="✅ بله، حذف شود", callback_data=f"adm_vpnpanel_delconfirm:{panel_id}")],
-        [InlineKeyboardButton(text="⬅️ انصراف", callback_data=f"adm_vpnpanel_view:{panel_id}")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def admin_product_delivery_kb() -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text="📦 موجودی دستی (لینک‌های از پیش آماده)", callback_data="adm_prod_delivery:manual")],
-        [InlineKeyboardButton(text="🖥 اتصال به پنل VPN (ساخت خودکار کاربر)", callback_data="adm_prod_delivery:panel")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def admin_pick_panel_for_product_kb(panels) -> InlineKeyboardMarkup:
-    rows = []
-    for p in panels:
-        rows.append([InlineKeyboardButton(text=f"🖥 {p['name']}", callback_data=f"adm_prod_pickpanel:{p['id']}")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

@@ -20,11 +20,6 @@ logger = logging.getLogger(__name__)
 
 async def check_and_notify_low_stock(send_fn, db, product_id: int) -> None:
     try:
-        product = db.get_product(product_id)
-        if product and product["panel_id"]:
-            # محصولات وصل به پنل VPN موجودی نامحدود دارند (کاربر لحظه‌ای ساخته
-            # می‌شود)؛ هشدار موجودی برای این‌ها بی‌معنی است.
-            return
         stock = db.count_available_configs(product_id)
         threshold = int(db.get_setting("low_stock_threshold", "3") or 3)
     except Exception:

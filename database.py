@@ -364,21 +364,6 @@ class Database:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
-                CREATE TABLE IF NOT EXISTS vpn_panels (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL UNIQUE,
-                    is_pasarguard INTEGER DEFAULT 0,
-                    url TEXT NOT NULL,
-                    username TEXT NOT NULL,
-                    password TEXT NOT NULL,
-                    default_proxies TEXT DEFAULT '{}',
-                    default_inbounds TEXT DEFAULT '[]',
-                    access_token TEXT,
-                    token_updated_at TEXT,
-                    is_active INTEGER DEFAULT 1,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                );
-
                 CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id);
                 CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by);
                 CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
@@ -443,8 +428,6 @@ class Database:
             ("configs", "order_id", "INTEGER"),
             ("reseller_bots", "link_slug", "TEXT"),
             ("crypto_invoices", "expires_at", "TEXT"),
-            ("products", "panel_id", "INTEGER"),
-            ("products", "panel_data_limit_gb", "INTEGER DEFAULT 0"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -515,68 +498,6 @@ class Database:
             if k not in clean:
                 clean.append(k)
         self.set_setting("menu_order", json.dumps(clean, ensure_ascii=False))
-
-    # -----------------------------------------------------------------------
-    # پنل‌های VPN (Marzban / PasarGuard)
-    # -----------------------------------------------------------------------
-
-    def add_vpn_panel(self, name: str, url: str, username: str, password: str,
-                       is_pasarguard: bool = False, default_proxies: str = "{}",
-                       default_inbounds: str = "[]") -> int:
-        with self._get_conn() as conn:
-            cur = conn.execute(
-                "INSERT INTO vpn_panels (name, url, username, password, is_pasarguard, "
-                "default_proxies, default_inbounds) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (name, url.rstrip("/"), username, password, int(is_pasarguard),
-                 default_proxies, default_inbounds),
-            )
-            return cur.lastrowid
-
-    def get_vpn_panel(self, panel_id: int) -> dict | None:
-        with self._get_conn() as conn:
-            row = conn.execute("SELECT * FROM vpn_panels WHERE id=?", (panel_id,)).fetchone()
-            return dict(row) if row else None
-
-    def get_vpn_panel_by_name(self, name: str) -> dict | None:
-        with self._get_conn() as conn:
-            row = conn.execute("SELECT * FROM vpn_panels WHERE name=?", (name,)).fetchone()
-            return dict(row) if row else None
-
-    def list_vpn_panels(self, active_only: bool = False) -> list:
-        with self._get_conn() as conn:
-            q = "SELECT * FROM vpn_panels"
-            if active_only:
-                q += " WHERE is_active=1"
-            q += " ORDER BY id"
-            rows = conn.execute(q).fetchall()
-            return [dict(r) for r in rows]
-
-    def update_vpn_panel(self, panel_id: int, **fields):
-        if not fields:
-            return
-        allowed = {"name", "url", "username", "password", "is_pasarguard",
-                   "default_proxies", "default_inbounds", "is_active"}
-        sets, values = [], []
-        for k, v in fields.items():
-            if k in allowed:
-                sets.append(f"{k}=?")
-                values.append(v)
-        if not sets:
-            return
-        values.append(panel_id)
-        with self._get_conn() as conn:
-            conn.execute(f"UPDATE vpn_panels SET {', '.join(sets)} WHERE id=?", values)
-
-    def update_vpn_panel_token(self, panel_id: int, access_token: str):
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE vpn_panels SET access_token=?, token_updated_at=? WHERE id=?",
-                (access_token, datetime.utcnow().isoformat(), panel_id),
-            )
-
-    def delete_vpn_panel(self, panel_id: int):
-        with self._get_conn() as conn:
-            conn.execute("DELETE FROM vpn_panels WHERE id=?", (panel_id,))
 
     # -----------------------------------------------------------------------
     # کاربران
@@ -887,13 +808,6 @@ class Database:
             )
             return cur.lastrowid
 
-    def update_product_panel(self, product_id: int, panel_id: int | None, data_limit_gb: float = 0):
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE products SET panel_id=?, panel_data_limit_gb=? WHERE id=?",
-                (panel_id, data_limit_gb, product_id),
-            )
-
     def get_products(self, category_id: int, active_only=True):
         with self._get_conn() as conn:
             if active_only:
@@ -1064,19 +978,6 @@ class Database:
     def get_config_by_id(self, config_id: int):
         with self._get_conn() as conn:
             return conn.execute("SELECT * FROM configs WHERE id=?", (config_id,)).fetchone()
-
-    def create_provisioned_config(self, product_id: int, user_tg_id: int, link: str, expire_ts: int) -> dict:
-        """رکورد configs را مستقیماً در وضعیت «مصرف‌شده» می‌سازد؛ برای کانفیگی که
-        همین الان با فراخوانی زنده‌ی API پنل ساخته شده (نه از انبار دستی)."""
-        with self._get_conn() as conn:
-            now = datetime.utcnow()
-            expires_at = datetime.utcfromtimestamp(expire_ts).isoformat() if expire_ts else None
-            cur = conn.execute(
-                "INSERT INTO configs (product_id, link, is_used, assigned_user_id, assigned_at, expires_at) "
-                "VALUES (?, ?, 1, ?, ?, ?)",
-                (product_id, link, user_tg_id, now.isoformat(), expires_at),
-            )
-            return {"id": cur.lastrowid, "link": link, "expires_at": expires_at}
 
     def release_config(self, config_id: int):
         with self._get_conn() as conn:
