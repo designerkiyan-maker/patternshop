@@ -531,12 +531,12 @@ async function renderHome() {
     const active = orders.filter((o) => o.status === "approved" && !o.is_custom_config);
     const customCards = customConfigs.map((c) => ({
       id: `cc-${c.id}`,
-      product_name: `🛠 کانفیگ شخصی «${c.username}»`,
+      product_name: `🛠 کانفیگ شخصی «${c.username}» (${c.volume_gb} گیگ / ${c.duration_days} روز)`,
       quantity: 1,
       status: "approved",
       link: c.subscription_url,
       links: c.subscription_url ? [c.subscription_url] : [],
-      expires_at: null,
+      expires_at: c.expires_at || null,
     }));
     const allActive = [...active, ...customCards];
 
