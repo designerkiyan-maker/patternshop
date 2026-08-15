@@ -51,6 +51,7 @@ from sub_info import fetch_sub_info
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
+from panel_providers import get_provider, PanelError, PanelUsernameTakenError
 
 app = FastAPI(title="V2Ray Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -287,6 +288,19 @@ def api_orders(auth=Depends(get_verified_user)):
     orders = db.get_user_orders(tg_id)
     result = []
     for o in orders:
+        if o["is_custom_config"]:
+            result.append({
+                "id": o["id"],
+                "product_name": f"کانفیگ شخصی «{o['custom_username']}» ({o['custom_volume_gb']} گیگ)",
+                "quantity": 1,
+                "status": o["status"],
+                "final_price": o["final_price"],
+                "expires_at": None,
+                "link": None,
+                "links": [],
+                "is_custom_config": True,
+            })
+            continue
         product = db.get_product(o["product_id"])
         cfg = db.get_config_by_id(o["config_id"]) if o["config_id"] else None
         configs = db.get_order_configs(o["id"]) if o["status"] == "approved" else []
@@ -300,8 +314,27 @@ def api_orders(auth=Depends(get_verified_user)):
             "expires_at": cfg["expires_at"] if cfg else None,
             "link": cfg["link"] if cfg else None,
             "links": links,
+            "is_custom_config": False,
         })
     return result
+
+
+@app.get("/api/custom-configs")
+def api_custom_configs(auth=Depends(get_verified_user)):
+    """کانفیگ‌های ساخته‌شده مستقیم روی پنل VPN (خرید شخصی/کانفیگ تست پنلی)."""
+    tg_id, db, _ = auth
+    configs = db.get_custom_configs_for_user(tg_id)
+    return [
+        {
+            "id": c["id"],
+            "username": c["username"],
+            "volume_gb": c["volume_gb"],
+            "duration_days": c["duration_days"],
+            "subscription_url": c["subscription_url"],
+            "created_at": c["created_at"],
+        }
+        for c in configs
+    ]
 
 
 @app.get("/api/catalog")
@@ -339,8 +372,13 @@ def api_test_config_status(auth=Depends(get_verified_user)):
     used = bool(user and user["test_used"] >= MAX_TEST_PER_USER)
     link = None
     if used:
-        row = db.get_assigned_test_config(tg_id)
-        link = row["link"] if row else None
+        panel_server = db.get_panel_server_for_usage("test_config")
+        if panel_server:
+            row = db.get_test_custom_config_for_user(tg_id)
+            link = row["subscription_url"] if row else None
+        else:
+            row = db.get_assigned_test_config(tg_id)
+            link = row["link"] if row else None
     return {
         "enabled": db.get_setting("test_enabled", "1") == "1",
         "used": used,
@@ -350,13 +388,38 @@ def api_test_config_status(auth=Depends(get_verified_user)):
 
 
 @app.post("/api/test-config/claim")
-def api_test_config_claim(auth=Depends(get_verified_user)):
+async def api_test_config_claim(auth=Depends(get_verified_user)):
     tg_id, db, _ = auth
     if db.get_setting("test_enabled", "1") != "1":
         raise HTTPException(status_code=400, detail="در حال حاضر امکان دریافت کانفیگ تست غیرفعال است.")
     user = db.get_user(tg_id)
     if user and user["test_used"] >= MAX_TEST_PER_USER:
         raise HTTPException(status_code=400, detail="شما قبلاً کانفیگ تست خود را دریافت کرده‌اید.")
+
+    panel_server = db.get_panel_server_for_usage("test_config")
+    if panel_server:
+        volume_gb = int(db.get_setting("test_config_panel_volume_gb", "1") or 1)
+        duration_days = int(db.get_setting("test_config_panel_duration_days", "1") or 1)
+        username = None
+        for _ in range(10):
+            candidate = "test" + "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(8))
+            if not db.is_custom_username_taken(candidate):
+                username = candidate
+                break
+        if not username:
+            raise HTTPException(status_code=500, detail="خطا در تولید نام کاربری. دوباره تلاش کنید.")
+        try:
+            provider = get_provider(panel_server)
+            result = await provider.create_user(username, volume_gb, duration_days)
+        except PanelError as e:
+            raise HTTPException(status_code=400, detail=f"خطا در ساخت کانفیگ تست: {e}")
+        db.add_custom_config(
+            tg_id, panel_server["id"], result.username, volume_gb, duration_days,
+            result.subscription_url, source="test",
+        )
+        db.mark_test_used(tg_id)
+        return {"link": result.subscription_url}
+
     result = db.take_unused_test_config(tg_id)
     if not result:
         raise HTTPException(status_code=400, detail="متاسفانه موجودی کانفیگ تست تمام شده است.")
@@ -1228,6 +1291,226 @@ def api_admin_delete_category(cat_id: int, auth=Depends(require_senior_admin)):
     if not db.get_category(cat_id):
         raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
     db.delete_category(cat_id)
+    return {"status": "ok"}
+
+
+class PanelServerCreate(BaseModel):
+    name: str
+    panel_type: str = "pasarguard"
+    api_url: str
+    api_username: str
+    api_password: str
+    template_username: str
+
+
+class PanelServerUpdate(BaseModel):
+    name: Optional[str] = None
+    api_url: Optional[str] = None
+    api_username: Optional[str] = None
+    api_password: Optional[str] = None
+
+
+class PanelServerSetTemplate(BaseModel):
+    template_username: str
+
+
+class PricingTierCreate(BaseModel):
+    from_gb: int
+    to_gb: Optional[int] = None  # None یعنی تا بی‌نهایت
+    price_per_gb: int
+
+
+class CustomConfigSettingsUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    min_gb: Optional[int] = None
+    max_gb: Optional[int] = None
+    test_volume_gb: Optional[int] = None
+    test_duration_days: Optional[int] = None
+
+
+def _panel_server_public(s) -> dict:
+    return {
+        "id": s["id"], "name": s["name"], "panel_type": s["panel_type"],
+        "api_url": s["api_url"], "template_username": s["template_username"],
+        "has_template": bool(s["group_ids"] and s["proxy_settings"]),
+        "used_for_custom_config": bool(s["used_for_custom_config"]),
+        "used_for_test_config": bool(s["used_for_test_config"]),
+        "default_group": s["default_group"], "is_active": bool(s["is_active"]),
+    }
+
+
+@app.get("/api/admin/panel-servers")
+def api_admin_list_panel_servers(auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    return [_panel_server_public(s) for s in db.get_panel_servers()]
+
+
+@app.post("/api/admin/panel-servers")
+async def api_admin_add_panel_server(body: PanelServerCreate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    admin_id, _, _ = auth
+    if not body.name.strip() or not body.api_url.strip() or not body.api_username.strip() or not body.api_password.strip() or not body.template_username.strip():
+        raise HTTPException(status_code=400, detail="همه‌ی فیلدها الزامی هستند.")
+    if body.panel_type not in ("pasarguard",):
+        raise HTTPException(status_code=400, detail="نوع پنل پشتیبانی نمی‌شود.")
+    server_id = db.add_panel_server(
+        body.name.strip(), body.panel_type, body.api_url.strip(),
+        body.api_username.strip(), body.api_password,
+    )
+    server = db.get_panel_server(server_id)
+    try:
+        provider = get_provider(server)
+        template = await provider.fetch_template_from_user(body.template_username.strip())
+    except PanelError as e:
+        db.delete_panel_server(server_id)
+        raise HTTPException(status_code=400, detail=str(e))
+    db.update_panel_server(
+        server_id, group_ids=json.dumps(template["group_ids"]),
+        proxy_settings=json.dumps(template["proxy_settings"]),
+        template_username=body.template_username.strip(),
+    )
+    db.log_admin_action(admin_id, "panel_server_add", f"سرور «{body.name}» (#{server_id}) از مینی‌اپ")
+    return {"id": server_id}
+
+
+@app.patch("/api/admin/panel-servers/{server_id}")
+def api_admin_edit_panel_server(server_id: int, body: PanelServerUpdate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    if not db.get_panel_server(server_id):
+        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
+    db.update_panel_server(
+        server_id, name=body.name, api_url=body.api_url,
+        api_username=body.api_username, api_password=body.api_password,
+    )
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/panel-servers/{server_id}/template")
+async def api_admin_set_panel_server_template(server_id: int, body: PanelServerSetTemplate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    server = db.get_panel_server(server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
+    try:
+        provider = get_provider(server)
+        template = await provider.fetch_template_from_user(body.template_username.strip())
+    except PanelError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    db.update_panel_server(
+        server_id, group_ids=json.dumps(template["group_ids"]),
+        proxy_settings=json.dumps(template["proxy_settings"]),
+        template_username=body.template_username.strip(),
+    )
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/panel-servers/{server_id}/toggle")
+def api_admin_toggle_panel_server(server_id: int, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    server = db.get_panel_server(server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
+    db.update_panel_server(server_id, is_active=0 if server["is_active"] else 1)
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/panel-servers/{server_id}/usage/{kind}")
+def api_admin_toggle_panel_server_usage(server_id: int, kind: str, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    if kind not in ("custom", "test"):
+        raise HTTPException(status_code=400, detail="نوع مصرف نامعتبر است.")
+    server = db.get_panel_server(server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
+    field = "used_for_custom_config" if kind == "custom" else "used_for_test_config"
+    db.update_panel_server(server_id, **{field: 0 if server[field] else 1})
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/panel-servers/{server_id}/test")
+async def api_admin_test_panel_server(server_id: int, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    server = db.get_panel_server(server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
+    try:
+        provider = get_provider(server)
+        ok = await provider.test_connection()
+    except PanelError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": ok}
+
+
+@app.delete("/api/admin/panel-servers/{server_id}")
+def api_admin_delete_panel_server(server_id: int, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    admin_id, _, _ = auth
+    if not db.get_panel_server(server_id):
+        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
+    db.delete_panel_server(server_id)
+    db.log_admin_action(admin_id, "panel_server_delete", f"سرور #{server_id} از مینی‌اپ")
+    return {"status": "ok"}
+
+
+@app.get("/api/admin/custom-config/settings")
+def api_admin_get_custom_config_settings(auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    settings = db.get_custom_config_settings()
+    settings["test_volume_gb"] = int(db.get_setting("test_config_panel_volume_gb", "1") or 1)
+    settings["test_duration_days"] = int(db.get_setting("test_config_panel_duration_days", "1") or 1)
+    return settings
+
+
+@app.post("/api/admin/custom-config/settings")
+def api_admin_update_custom_config_settings(body: CustomConfigSettingsUpdate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    if body.enabled is not None:
+        db.set_setting("custom_config_enabled", "1" if body.enabled else "0")
+    if body.min_gb is not None:
+        if body.min_gb <= 0:
+            raise HTTPException(status_code=400, detail="حداقل حجم باید بزرگ‌تر از صفر باشد.")
+        db.set_setting("custom_config_min_gb", str(body.min_gb))
+    if body.max_gb is not None:
+        min_gb = body.min_gb if body.min_gb is not None else db.get_custom_config_settings()["min_gb"]
+        if body.max_gb <= min_gb:
+            raise HTTPException(status_code=400, detail="حداکثر حجم باید بزرگ‌تر از حداقل باشد.")
+        db.set_setting("custom_config_max_gb", str(body.max_gb))
+    if body.test_volume_gb is not None:
+        if body.test_volume_gb <= 0:
+            raise HTTPException(status_code=400, detail="حجم کانفیگ تست باید بزرگ‌تر از صفر باشد.")
+        db.set_setting("test_config_panel_volume_gb", str(body.test_volume_gb))
+    if body.test_duration_days is not None:
+        if body.test_duration_days <= 0:
+            raise HTTPException(status_code=400, detail="مدت کانفیگ تست باید بزرگ‌تر از صفر باشد.")
+        db.set_setting("test_config_panel_duration_days", str(body.test_duration_days))
+    return {"status": "ok"}
+
+
+@app.get("/api/admin/custom-config/pricing-tiers")
+def api_admin_list_pricing_tiers(auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    tiers = db.get_pricing_tiers()
+    return [
+        {"id": t["id"], "from_gb": t["from_gb"], "to_gb": t["to_gb"], "price_per_gb": t["price_per_gb"]}
+        for t in tiers
+    ]
+
+
+@app.post("/api/admin/custom-config/pricing-tiers")
+def api_admin_add_pricing_tier(body: PricingTierCreate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    if body.from_gb <= 0 or body.price_per_gb <= 0:
+        raise HTTPException(status_code=400, detail="مقادیر باید مثبت باشند.")
+    if body.to_gb is not None and body.to_gb <= body.from_gb:
+        raise HTTPException(status_code=400, detail="انتهای بازه باید بزرگ‌تر از ابتدای آن باشد.")
+    tier_id = db.add_pricing_tier(body.from_gb, body.to_gb, body.price_per_gb)
+    return {"id": tier_id}
+
+
+@app.delete("/api/admin/custom-config/pricing-tiers/{tier_id}")
+def api_admin_delete_pricing_tier(tier_id: int, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    db.delete_pricing_tier(tier_id)
     return {"status": "ok"}
 
 
