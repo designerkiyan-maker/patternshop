@@ -51,6 +51,7 @@ from sub_info import fetch_sub_info
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
+from panel_client import fulfill_order_configs
 
 app = FastAPI(title="V2Ray Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -678,10 +679,10 @@ async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
         raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
     quantity = max(1, body.quantity)
     product = db.get_product(body.product_id)
-    stock = db.count_available_configs(body.product_id)
-    if not product or stock <= 0:
+    stock = db.count_available_configs(body.product_id) if not (product and product["panel_id"]) else None
+    if not product or (stock is not None and stock <= 0):
         raise HTTPException(status_code=400, detail="این محصول موجود نیست.")
-    if quantity > stock:
+    if stock is not None and quantity > stock:
         raise HTTPException(status_code=400, detail=f"موجودی کافی نیست. فقط {stock} عدد موجود است.")
 
     total_price = product["price"] * quantity
@@ -711,10 +712,10 @@ async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
     order = db.get_order(order_id)
 
     if order["final_price"] <= 0:
-        results = db.take_unused_configs(body.product_id, tg_id, quantity)
+        results, delivery_err = await fulfill_order_configs(db, product, tg_id, quantity)
         if not results:
             db.reject_order(order_id)
-            raise HTTPException(status_code=409, detail="موجودی هم‌زمان تمام شد؛ مبلغ بازگردانده شد.")
+            raise HTTPException(status_code=409, detail=delivery_err or "موجودی هم‌زمان تمام شد؛ مبلغ بازگردانده شد.")
         db.approve_order(order_id, [r["id"] for r in results])
 
         async def _send_admin_msg(admin_id, text):
@@ -871,7 +872,7 @@ async def api_plisio_webhook(request: Request, tenant: Tenant = Depends(get_tena
         if order and order["status"] == "pending":
             product = db.get_product(order["product_id"])
             quantity = order["quantity"] or 1
-            results = db.take_unused_configs(order["product_id"], order["user_id"], quantity)
+            results, _delivery_err = await fulfill_order_configs(db, product, order["user_id"], quantity)
             if results:
                 db.approve_order(order_id, [r["id"] for r in results])
                 db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or (product["price"] if product else 0))
