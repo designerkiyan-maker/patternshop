@@ -169,3 +169,16 @@ class ResellerFlow(StatesGroup):
 
 class ResellerRequestFlow(StatesGroup):
     waiting_note = State()
+
+
+class AdminAddGbReseller(StatesGroup):
+    waiting_user_id = State()
+
+
+class AdminAdjustResellerCredit(StatesGroup):
+    waiting_amount = State()
+
+
+class AdminSetResellerDuration(StatesGroup):
+    waiting_min = State()
+    waiting_max = State()
