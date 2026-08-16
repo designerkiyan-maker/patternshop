@@ -1311,7 +1311,7 @@ class PanelServerCreate(BaseModel):
     api_url: str
     api_username: str
     api_password: str
-    template_username: str
+    template_username: Optional[str] = None
 
 
 class PanelServerUpdate(BaseModel):
@@ -1323,6 +1323,11 @@ class PanelServerUpdate(BaseModel):
 
 class PanelServerSetTemplate(BaseModel):
     template_username: str
+
+
+class PanelServerXuiConfig(BaseModel):
+    inbound_id: int
+    sub_base_url: str
 
 
 class PricingTierCreate(BaseModel):
@@ -1340,10 +1345,14 @@ class CustomConfigSettingsUpdate(BaseModel):
 
 
 def _panel_server_public(s) -> dict:
+    is_3xui = s["panel_type"] == "3xui"
+    configured = bool(s["xui_inbound_id"] and s["xui_sub_base_url"]) if is_3xui else bool(s["group_ids"] and s["proxy_settings"])
     return {
         "id": s["id"], "name": s["name"], "panel_type": s["panel_type"],
         "api_url": s["api_url"], "template_username": s["template_username"],
         "has_template": bool(s["group_ids"] and s["proxy_settings"]),
+        "xui_inbound_id": s["xui_inbound_id"], "xui_sub_base_url": s["xui_sub_base_url"],
+        "is_configured": configured,
         "used_for_custom_config": bool(s["used_for_custom_config"]),
         "used_for_test_config": bool(s["used_for_test_config"]),
         "default_group": s["default_group"], "is_active": bool(s["is_active"]),
@@ -1360,10 +1369,32 @@ def api_admin_list_panel_servers(auth=Depends(require_senior_admin)):
 async def api_admin_add_panel_server(body: PanelServerCreate, auth=Depends(require_senior_admin)):
     _, db, _ = auth
     admin_id, _, _ = auth
-    if not body.name.strip() or not body.api_url.strip() or not body.api_username.strip() or not body.api_password.strip() or not body.template_username.strip():
-        raise HTTPException(status_code=400, detail="همه‌ی فیلدها الزامی هستند.")
-    if body.panel_type not in ("pasarguard",):
+    if not body.name.strip() or not body.api_url.strip() or not body.api_username.strip() or not body.api_password.strip():
+        raise HTTPException(status_code=400, detail="نام، آدرس، یوزرنیم و پسورد الزامی هستند.")
+    if body.panel_type not in ("pasarguard", "3xui"):
         raise HTTPException(status_code=400, detail="نوع پنل پشتیبانی نمی‌شود.")
+
+    if body.panel_type == "3xui":
+        server_id = db.add_panel_server(
+            body.name.strip(), "3xui", body.api_url.strip(),
+            body.api_username.strip(), body.api_password,
+        )
+        server = db.get_panel_server(server_id)
+        try:
+            provider = get_provider(server)
+            inbounds = await provider.list_inbounds()
+        except PanelError as e:
+            db.delete_panel_server(server_id)
+            raise HTTPException(status_code=400, detail=str(e))
+        if not inbounds:
+            db.delete_panel_server(server_id)
+            raise HTTPException(status_code=400, detail="این پنل هیچ inbound ای ندارد. اول از داخل پنل یک inbound بساز.")
+        db.log_admin_action(admin_id, "panel_server_add", f"سرور «{body.name}» (3X-UI, #{server_id}) از مینی‌اپ")
+        return {"id": server_id, "inbounds": inbounds}
+
+    # پیش‌فرض: PasarGuard
+    if not body.template_username or not body.template_username.strip():
+        raise HTTPException(status_code=400, detail="نام کاربری نمونه الزامی است.")
     server_id = db.add_panel_server(
         body.name.strip(), body.panel_type, body.api_url.strip(),
         body.api_username.strip(), body.api_password,
@@ -1382,6 +1413,37 @@ async def api_admin_add_panel_server(body: PanelServerCreate, auth=Depends(requi
     )
     db.log_admin_action(admin_id, "panel_server_add", f"سرور «{body.name}» (#{server_id}) از مینی‌اپ")
     return {"id": server_id}
+
+
+@app.get("/api/admin/panel-servers/{server_id}/xui-inbounds")
+async def api_admin_list_xui_inbounds(server_id: int, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    server = db.get_panel_server(server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
+    if server["panel_type"] != "3xui":
+        raise HTTPException(status_code=400, detail="این سرور از نوع 3X-UI نیست.")
+    try:
+        provider = get_provider(server)
+        inbounds = await provider.list_inbounds()
+    except PanelError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return inbounds
+
+
+@app.post("/api/admin/panel-servers/{server_id}/xui-config")
+async def api_admin_set_xui_config(server_id: int, body: PanelServerXuiConfig, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    server = db.get_panel_server(server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
+    if server["panel_type"] != "3xui":
+        raise HTTPException(status_code=400, detail="این سرور از نوع 3X-UI نیست.")
+    url = body.sub_base_url.strip()
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="آدرس Subscription باید با http:// یا https:// شروع شود.")
+    db.update_panel_server(server_id, xui_inbound_id=body.inbound_id, xui_sub_base_url=url)
+    return {"status": "ok"}
 
 
 @app.patch("/api/admin/panel-servers/{server_id}")
