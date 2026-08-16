@@ -454,6 +454,18 @@ class Database:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_reseller_credit_log_user ON reseller_credit_log(user_id);
+
+                CREATE TABLE IF NOT EXISTS reseller_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    request_type TEXT NOT NULL,
+                    note TEXT,
+                    status TEXT DEFAULT 'pending',
+                    admin_id INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_reseller_requests_status ON reseller_requests(status);
                 """
             )
 
@@ -517,6 +529,9 @@ class Database:
             ("panel_servers", "xui_sub_base_url", "TEXT"),
             ("users", "is_reseller", "INTEGER DEFAULT 0"),
             ("users", "reseller_credit_gb", "INTEGER DEFAULT 0"),
+            ("users", "reseller_panel_server_id", "INTEGER"),
+            ("users", "reseller_min_duration_days", "INTEGER DEFAULT 1"),
+            ("users", "reseller_max_duration_days", "INTEGER DEFAULT 365"),
             ("custom_configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "volume_reminder_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "source", "TEXT DEFAULT 'custom_config'"),
@@ -2203,9 +2218,18 @@ class Database:
         with self._get_conn() as conn:
             conn.execute(f"UPDATE panel_servers SET {', '.join(sets)} WHERE id=?", values)
 
-    def delete_panel_server(self, server_id: int):
+    def delete_panel_server(self, server_id: int) -> bool:
+        """اگر کانفیگی قبلاً روی این سرور ساخته شده باشد (رکورد در custom_configs
+        دارد)، به‌خاطر FOREIGN KEY حذف واقعی انجام نمی‌شود؛ به‌جایش سرور غیرفعال
+        می‌شود تا از کرش (IntegrityError) جلوگیری شود. خروجی: True اگر واقعاً
+        حذف شد، False اگر فقط غیرفعال شد."""
         with self._get_conn() as conn:
-            conn.execute("DELETE FROM panel_servers WHERE id=?", (server_id,))
+            try:
+                conn.execute("DELETE FROM panel_servers WHERE id=?", (server_id,))
+                return True
+            except sqlite3.IntegrityError:
+                conn.execute("UPDATE panel_servers SET is_active=0 WHERE id=?", (server_id,))
+                return False
 
     def get_panel_server(self, server_id: int):
         with self._get_conn() as conn:
@@ -2388,4 +2412,70 @@ class Database:
         with self._get_conn() as conn:
             return conn.execute(
                 "SELECT * FROM users WHERE is_reseller=1 ORDER BY reseller_credit_gb DESC"
+            ).fetchall()
+
+    def set_reseller_panel_server(self, user_tg_id: int, panel_server_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET reseller_panel_server_id=? WHERE telegram_id=?",
+                (panel_server_id, user_tg_id),
+            )
+
+    def set_reseller_duration_range(self, user_tg_id: int, min_days: int, max_days: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET reseller_min_duration_days=?, reseller_max_duration_days=? WHERE telegram_id=?",
+                (min_days, max_days, user_tg_id),
+            )
+
+    def get_reseller_config(self, user_tg_id: int) -> dict:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT reseller_credit_gb, reseller_panel_server_id, reseller_min_duration_days, "
+                "reseller_max_duration_days FROM users WHERE telegram_id=?", (user_tg_id,)
+            ).fetchone()
+        if not row:
+            return {"credit_gb": 0, "panel_server_id": None, "min_duration_days": 1, "max_duration_days": 365}
+        return {
+            "credit_gb": row["reseller_credit_gb"],
+            "panel_server_id": row["reseller_panel_server_id"],
+            "min_duration_days": row["reseller_min_duration_days"] or 1,
+            "max_duration_days": row["reseller_max_duration_days"] or 365,
+        }
+
+    # -----------------------------------------------------------------------
+    # درخواست نمایندگی (کاربر درخواست می‌دهد؛ ادمین تایید/رد می‌کند)
+    # -----------------------------------------------------------------------
+
+    def create_reseller_request(self, user_tg_id: int, request_type: str, note: str = None) -> int:
+        """request_type: 'bot' (بات خام مستقل) یا 'credit' (اعتبار حجمی از همین بات)"""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO reseller_requests (user_id, request_type, note) VALUES (?, ?, ?)",
+                (user_tg_id, request_type, note),
+            )
+            return cur.lastrowid
+
+    def get_reseller_request(self, request_id: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM reseller_requests WHERE id=?", (request_id,)).fetchone()
+
+    def has_pending_reseller_request(self, user_tg_id: int) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM reseller_requests WHERE user_id=? AND status='pending' LIMIT 1", (user_tg_id,)
+            ).fetchone()
+            return row is not None
+
+    def set_reseller_request_status(self, request_id: int, status: str, admin_id: int = None):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE reseller_requests SET status=?, admin_id=?, updated_at=? WHERE id=?",
+                (status, admin_id, datetime.utcnow().isoformat(), request_id),
+            )
+
+    def get_pending_reseller_requests(self):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM reseller_requests WHERE status='pending' ORDER BY id"
             ).fetchall()
