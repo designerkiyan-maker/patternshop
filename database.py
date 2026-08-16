@@ -513,6 +513,8 @@ class Database:
             ("panel_servers", "used_for_custom_config", "INTEGER DEFAULT 1"),
             ("panel_servers", "used_for_test_config", "INTEGER DEFAULT 0"),
             ("panel_servers", "used_for_reseller", "INTEGER DEFAULT 0"),
+            ("panel_servers", "xui_inbound_id", "INTEGER"),
+            ("panel_servers", "xui_sub_base_url", "TEXT"),
             ("users", "is_reseller", "INTEGER DEFAULT 0"),
             ("users", "reseller_credit_gb", "INTEGER DEFAULT 0"),
             ("custom_configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
