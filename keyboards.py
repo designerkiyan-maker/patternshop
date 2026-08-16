@@ -263,6 +263,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_custom_config_settings", "🛠 ساخت کانفیگ شخصی (پنل‌های VPN)", "adm_custom_config_settings"),
     ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
     ("adm_resellers_menu", "🏪 مدیریت بات‌های نمایندگی", "adm_resellers_menu"),
+    ("adm_gb_resellers_menu", "📦 مدیریت نمایندگان (استخر حجم)", "adm_gb_resellers_menu"),
     ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
     ("adm_set_card", "💳 تنظیم شماره کارت", "adm_set_card"),
     ("adm_set_plisio", "🪙 تنظیم درگاه کریپتو (Plisio)", "adm_set_plisio"),
