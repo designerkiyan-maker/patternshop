@@ -1787,6 +1787,7 @@ async function renderAdminPanelsSection() {
           <label class="field-label">نوع پنل</label>
           <select class="input" id="ps-type" style="margin-bottom:10px">
             <option value="pasarguard">PasarGuard</option>
+            <option value="3xui">3X-UI</option>
           </select>
           <label class="field-label">آدرس API (مثلاً https://panel.example.com)</label>
           <input class="input" id="ps-url" type="text" placeholder="https://..." style="direction:ltr;text-align:left;margin-bottom:10px" />
@@ -1794,9 +1795,12 @@ async function renderAdminPanelsSection() {
           <input class="input" id="ps-username" type="text" style="direction:ltr;text-align:left;margin-bottom:10px" />
           <label class="field-label">رمز عبور ادمین پنل</label>
           <input class="input" id="ps-password" type="password" style="direction:ltr;text-align:left;margin-bottom:10px" />
-          <label class="field-label">نام کاربری نمونه (که از قبل روی پنل موجود است)</label>
-          <p class="hint-text" style="margin-top:0">تنظیمات پروتکل/گروه همین کاربر به‌عنوان قالب پیش‌فرض برای همه‌ی کانفیگ‌های جدید استفاده می‌شود.</p>
-          <input class="input" id="ps-template" type="text" style="direction:ltr;text-align:left;margin-bottom:4px" />
+          <div id="ps-template-wrap">
+            <label class="field-label">نام کاربری نمونه (که از قبل روی پنل موجود است)</label>
+            <p class="hint-text" style="margin-top:0">تنظیمات پروتکل/گروه همین کاربر به‌عنوان قالب پیش‌فرض برای همه‌ی کانفیگ‌های جدید استفاده می‌شود.</p>
+            <input class="input" id="ps-template" type="text" style="direction:ltr;text-align:left;margin-bottom:4px" />
+          </div>
+          <p class="hint-text" id="ps-xui-hint" style="display:none;margin-top:0">بعد از اتصال، لیست inbound های پنل خوانده می‌شود و در مرحله‌ی بعد یکی را انتخاب می‌کنی.</p>
           <div class="field-error" id="ps-error"></div>
           <div style="display:flex;gap:8px;margin-top:8px">
             <button class="btn" id="ps-save">💾 افزودن سرور</button>
@@ -1804,33 +1808,97 @@ async function renderAdminPanelsSection() {
           </div>
         </div>
       `;
+      const psType = document.getElementById("ps-type");
+      const syncPsType = () => {
+        const is3xui = psType.value === "3xui";
+        document.getElementById("ps-template-wrap").style.display = is3xui ? "none" : "block";
+        document.getElementById("ps-xui-hint").style.display = is3xui ? "block" : "none";
+      };
+      psType.onchange = syncPsType;
+      syncPsType();
       document.getElementById("ps-cancel").onclick = () => { adminPanelsView = { level: "servers" }; renderAdminPanelsSection(); };
       document.getElementById("ps-save").onclick = async () => {
         const errBox = document.getElementById("ps-error");
         errBox.textContent = "";
+        const panelType = psType.value;
         const payload = {
           name: document.getElementById("ps-name").value.trim(),
-          panel_type: document.getElementById("ps-type").value,
+          panel_type: panelType,
           api_url: document.getElementById("ps-url").value.trim(),
           api_username: document.getElementById("ps-username").value.trim(),
           api_password: document.getElementById("ps-password").value,
           template_username: document.getElementById("ps-template").value.trim(),
         };
-        if (!payload.name || !payload.api_url || !payload.api_username || !payload.api_password || !payload.template_username) {
-          errBox.textContent = "همه‌ی فیلدها الزامی هستند."; return;
+        if (!payload.name || !payload.api_url || !payload.api_username || !payload.api_password) {
+          errBox.textContent = "نام، آدرس، یوزرنیم و پسورد الزامی هستند."; return;
+        }
+        if (panelType !== "3xui" && !payload.template_username) {
+          errBox.textContent = "نام کاربری نمونه الزامی است."; return;
         }
         try {
           document.getElementById("ps-save").textContent = "⏳ در حال اتصال...";
           document.getElementById("ps-save").disabled = true;
-          await api("/api/admin/panel-servers", { method: "POST", body: JSON.stringify(payload) });
+          const res = await api("/api/admin/panel-servers", { method: "POST", body: JSON.stringify(payload) });
           tg.HapticFeedback.notificationOccurred("success");
-          notify("سرور با موفقیت اضافه شد.");
-          adminPanelsView = { level: "servers" };
+          if (panelType === "3xui") {
+            adminPanelsView = { level: "xui-config", serverId: res.id, inbounds: res.inbounds, name: payload.name };
+          } else {
+            notify("سرور با موفقیت اضافه شد.");
+            adminPanelsView = { level: "servers" };
+          }
           renderAdminPanelsSection();
         } catch (e) {
           errBox.textContent = e.message;
           document.getElementById("ps-save").textContent = "💾 افزودن سرور";
           document.getElementById("ps-save").disabled = false;
+        }
+      };
+      return;
+    }
+
+    if (adminPanelsView.level === "xui-config") {
+      const inbounds = adminPanelsView.inbounds || [];
+      body.innerHTML = `
+        <div class="card">
+          <div class="eyebrow" style="margin-top:0">⚙️ تنظیم Inbound برای «${adminPanelsView.name || ""}»</div>
+          <label class="field-label">کدام inbound برای ساخت کاربرهای جدید استفاده شود؟</label>
+          <select class="input" id="ps-xui-inbound" style="margin-bottom:10px">
+            ${inbounds.map((ib) => `<option value="${ib.id}">#${ib.id} - ${ib.remark || "بدون‌نام"} (${ib.protocol}:${ib.port})</option>`).join("")}
+          </select>
+          <label class="field-label">آدرس پایه‌ی Subscription پنل</label>
+          <p class="hint-text" style="margin-top:0">همان چیزی که پنل موقع ساخت کاربر دستی نشانت می‌دهد، مثلاً https://domain:2096/sub یا https://domain/sub - بدون / انتهایی.</p>
+          <input class="input" id="ps-xui-suburl" type="text" placeholder="https://..." style="direction:ltr;text-align:left;margin-bottom:4px" />
+          <div class="field-error" id="ps-xui-error"></div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn" id="ps-xui-save">💾 ذخیره</button>
+            <button class="btn outline" id="ps-xui-cancel">بعداً</button>
+          </div>
+        </div>
+      `;
+      if (inbounds.length === 0) {
+        document.getElementById("ps-xui-error").textContent = "این پنل هیچ inbound ای ندارد.";
+      }
+      document.getElementById("ps-xui-cancel").onclick = () => { adminPanelsView = { level: "servers" }; renderAdminPanelsSection(); };
+      document.getElementById("ps-xui-save").onclick = async () => {
+        const errBox = document.getElementById("ps-xui-error");
+        errBox.textContent = "";
+        const inbound_id = parseInt(document.getElementById("ps-xui-inbound").value, 10);
+        const sub_base_url = document.getElementById("ps-xui-suburl").value.trim();
+        if (!inbound_id || !sub_base_url) {
+          errBox.textContent = "هر دو فیلد الزامی هستند."; return;
+        }
+        try {
+          document.getElementById("ps-xui-save").disabled = true;
+          await api(`/api/admin/panel-servers/${adminPanelsView.serverId}/xui-config`, {
+            method: "POST", body: JSON.stringify({ inbound_id, sub_base_url }),
+          });
+          tg.HapticFeedback.notificationOccurred("success");
+          notify("سرور 3X-UI با موفقیت تنظیم شد.");
+          adminPanelsView = { level: "servers" };
+          renderAdminPanelsSection();
+        } catch (e) {
+          errBox.textContent = e.message;
+          document.getElementById("ps-xui-save").disabled = false;
         }
       };
       return;
@@ -1952,14 +2020,18 @@ async function renderAdminPanelsSection() {
                 <span>${s.is_active ? "🟢" : "🔴"} <b>${s.name}</b> <span class="hint-text" style="margin:0">(${s.panel_type})</span></span>
               </div>
               <div class="hint-text" style="margin:4px 0 4px;direction:ltr;text-align:left">${s.api_url}</div>
-              <div class="hint-text" style="margin:0 0 4px">${s.has_template ? `🧩 قالب از کاربر «${s.template_username}»` : "⚠️ قالب تنظیم نشده"}</div>
+              <div class="hint-text" style="margin:0 0 4px">${s.panel_type === "3xui"
+                ? (s.is_configured ? `⚙️ Inbound #${s.xui_inbound_id} تنظیم شده` : "⚠️ Inbound تنظیم نشده")
+                : (s.has_template ? `🧩 قالب از کاربر «${s.template_username}»` : "⚠️ قالب تنظیم نشده")}</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
                 <span class="tag" style="opacity:${s.used_for_custom_config ? 1 : 0.4}">${s.used_for_custom_config ? "✅" : "◻️"} خرید شخصی</span>
                 <span class="tag" style="opacity:${s.used_for_test_config ? 1 : 0.4}">${s.used_for_test_config ? "✅" : "◻️"} کانفیگ تست</span>
               </div>
               <div style="display:flex;gap:6px;flex-wrap:wrap">
                 <button class="btn outline" data-test="${s.id}" style="padding:4px 10px;font-size:12px">🔌 تست اتصال</button>
-                <button class="btn outline" data-template="${s.id}" style="padding:4px 10px;font-size:12px">🧩 تغییر قالب</button>
+                ${s.panel_type === "3xui"
+                  ? `<button class="btn outline" data-xui-inbound="${s.id}" data-xui-name="${s.name}" style="padding:4px 10px;font-size:12px">⚙️ تنظیم Inbound</button>`
+                  : `<button class="btn outline" data-template="${s.id}" style="padding:4px 10px;font-size:12px">🧩 تغییر قالب</button>`}
                 <button class="btn outline" data-usage-custom="${s.id}" style="padding:4px 10px;font-size:12px">${s.used_for_custom_config ? "غیرفعال (خرید)" : "فعال (خرید)"}</button>
                 <button class="btn outline" data-usage-test="${s.id}" style="padding:4px 10px;font-size:12px">${s.used_for_test_config ? "غیرفعال (تست)" : "فعال (تست)"}</button>
                 <button class="btn outline" data-toggle="${s.id}" style="padding:4px 10px;font-size:12px">${s.is_active ? "غیرفعال کن" : "فعال کن"}</button>
@@ -2037,6 +2109,17 @@ async function renderAdminPanelsSection() {
           tg.HapticFeedback.notificationOccurred("success");
           renderAdminPanelsSection();
         } catch (e) { notify(e.message); btn.textContent = "🧩 تغییر قالب"; }
+      };
+    });
+    document.querySelectorAll("[data-xui-inbound]").forEach((btn) => {
+      btn.onclick = async () => {
+        const serverId = btn.dataset.xuiInbound;
+        btn.textContent = "⏳...";
+        try {
+          const inbounds = await api(`/api/admin/panel-servers/${serverId}/xui-inbounds`);
+          adminPanelsView = { level: "xui-config", serverId, inbounds, name: btn.dataset.xuiName };
+          renderAdminPanelsSection();
+        } catch (e) { notify(e.message); btn.textContent = "⚙️ تنظیم Inbound"; }
       };
     });
     document.querySelectorAll("[data-usage-custom]").forEach((btn) => {
