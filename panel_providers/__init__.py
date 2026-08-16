@@ -8,13 +8,16 @@ X-UI و ...):
 """
 from .base import BasePanelProvider, PanelUserResult, PanelError, PanelUsernameTakenError
 from .pasarguard_provider import PasarguardProvider
+from .threexui_provider import ThreeXUIProvider
 
 PROVIDERS = {
     "pasarguard": PasarguardProvider,
+    "3xui": ThreeXUIProvider,
 }
 
 PANEL_TYPE_LABELS = {
     "pasarguard": "PasarGuard",
+    "3xui": "3X-UI",
 }
 
 
