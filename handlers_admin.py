@@ -24,7 +24,7 @@ from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 import crypto_payment
-from panel_providers import get_provider, PanelError, PanelUsernameTakenError
+from panel_providers import get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS
 from states import (
     AdminAddCategory,
     AdminAddProduct,
@@ -66,6 +66,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         """دسترسی کامل: مالک، مدیر یا ادمین میانی. ادمین با نقش «پشتیبان» اجازه‌ی این اقدامات
         (تنظیمات، مالی، مدیریت محصولات/موجودی) را ندارد."""
         return db.is_full_admin(user_id)
+
+    def panel_server_readiness_text(server) -> str:
+        if server["panel_type"] == "3xui":
+            if server["xui_inbound_id"] and server["xui_sub_base_url"]:
+                return f"inbound #{server['xui_inbound_id']} تنظیم شده"
+            return "⚠️ inbound/آدرس Subscription هنوز تنظیم نشده"
+        return f"قالب از کاربر «{server['template_username']}»" if server["template_username"] else "⚠️ قالب هنوز تنظیم نشده"
 
     def senior_admin_only(user_id: int) -> bool:
         """فقط مالک یا مدیر کامل؛ ادمین میانی و پشتیبان اجازه‌ی این بخش‌های حساس
@@ -1286,8 +1293,16 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     @router.message(AdminAddPanelServer.waiting_name)
     async def process_panel_server_name(message: Message, state: FSMContext):
         await state.update_data(name=message.text.strip())
+        await state.set_state(AdminAddPanelServer.waiting_type)
+        await message.answer("نوع پنل را انتخاب کن:", reply_markup=kb.panel_type_select_kb())
+
+    @router.callback_query(F.data.startswith("adm_panel_type:"), AdminAddPanelServer.waiting_type)
+    async def cb_panel_server_type_selected(call: CallbackQuery, state: FSMContext):
+        panel_type = call.data.split(":")[1]
+        await state.update_data(panel_type=panel_type)
         await state.set_state(AdminAddPanelServer.waiting_url)
-        await message.answer("آدرس API پنل PasarGuard را بفرست (مثلاً https://panel.example.com):")
+        await call.answer()
+        await call.message.answer("آدرس API پنل را بفرست (مثلاً https://panel.example.com یا با پورت/مسیر مخصوص):")
 
     @router.message(AdminAddPanelServer.waiting_url)
     async def process_panel_server_url(message: Message, state: FSMContext):
@@ -1312,11 +1327,65 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.delete()
         except Exception:
             pass
+        data = await state.get_data()
+
+        if data["panel_type"] == "3xui":
+            await message.answer("⏳ در حال دریافت لیست inbound از پنل...")
+            server_id = db.add_panel_server(
+                name=data["name"], panel_type="3xui", api_url=data["url"],
+                api_username=data["username"], api_password=data["password"],
+            )
+            server = db.get_panel_server(server_id)
+            try:
+                provider = get_provider(server)
+                inbounds = await provider.list_inbounds()
+            except PanelError as e:
+                db.delete_panel_server(server_id)
+                await state.clear()
+                await message.answer(f"⛔️ {e}\nسرور ذخیره نشد؛ دوباره از ابتدا تلاش کن.")
+                return
+            if not inbounds:
+                db.delete_panel_server(server_id)
+                await state.clear()
+                await message.answer("⛔️ این پنل هیچ inbound ای ندارد. اول از داخل پنل یک inbound بساز.")
+                return
+            await state.update_data(server_id=server_id)
+            await state.set_state(AdminAddPanelServer.waiting_inbound_select)
+            await message.answer("کدام inbound برای ساخت کاربرهای جدید استفاده شود؟", reply_markup=kb.inbound_select_kb(inbounds))
+            return
+
+        # پیش‌فرض: PasarGuard
         await state.set_state(AdminAddPanelServer.waiting_template_user)
         await message.answer(
             "یک نام کاربری که از قبل روی این پنل وجود دارد بفرست.\n"
             "تنظیمات پروتکل/گروه همین کاربر به‌عنوان قالب پیش‌فرض برای همه‌ی "
             "کانفیگ‌های شخصی جدید استفاده می‌شود."
+        )
+
+    @router.callback_query(F.data.startswith("adm_xui_inbound:"), AdminAddPanelServer.waiting_inbound_select)
+    async def cb_panel_server_inbound_selected(call: CallbackQuery, state: FSMContext):
+        inbound_id = int(call.data.split(":")[1])
+        await state.update_data(inbound_id=inbound_id)
+        await state.set_state(AdminAddPanelServer.waiting_sub_base_url)
+        await call.answer()
+        await call.message.answer(
+            "آدرس پایه‌ی Subscription پنل را بفرست (همان چیزی که پنل موقع ساخت کاربر دستی نشانت می‌دهد، "
+            "مثلاً https://domain:2096/sub یا https://domain/sub - بدون / انتهایی):"
+        )
+
+    @router.message(AdminAddPanelServer.waiting_sub_base_url)
+    async def process_xui_sub_base_url(message: Message, state: FSMContext):
+        url = message.text.strip()
+        if not url.startswith("http://") and not url.startswith("https://"):
+            await message.answer("آدرس باید با http:// یا https:// شروع شود.")
+            return
+        data = await state.get_data()
+        db.update_panel_server(data["server_id"], xui_inbound_id=data["inbound_id"], xui_sub_base_url=url)
+        await state.clear()
+        db.log_admin_action(message.from_user.id, "panel_server_add", f"سرور «{data['name']}» (3X-UI, #{data['server_id']})")
+        await message.answer(
+            f"✅ سرور «{data['name']}» (3X-UI) با موفقیت اضافه شد.",
+            reply_markup=kb.admin_panel_kb(db, is_main_bot),
         )
 
     @router.message(AdminAddPanelServer.waiting_template_user)
@@ -1361,14 +1430,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer("سرور یافت نشد.", show_alert=True)
             return
         status = "🟢 فعال" if server["is_active"] else "🔴 غیرفعال"
-        template_status = f"قالب از کاربر «{server['template_username']}»" if server["template_username"] else "⚠️ قالب هنوز تنظیم نشده"
+        template_status = panel_server_readiness_text(server)
         usage_status = (
             f"مصرف: {'✅ خرید شخصی' if server['used_for_custom_config'] else '◻️ خرید شخصی'} | "
             f"{'✅ کانفیگ تست' if server['used_for_test_config'] else '◻️ کانفیگ تست'}"
         )
         text = (
             f"🖥 {server['name']}\n"
-            f"نوع: {server['panel_type']}\n"
+            f"نوع: {PANEL_TYPE_LABELS.get(server['panel_type'], server['panel_type'])}\n"
             f"آدرس: {server['api_url']}\n"
             f"وضعیت: {status}\n"
             f"{usage_status}\n"
@@ -1454,14 +1523,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             f"سرور #{server_id} | {field} ← {server[field]}",
         )
         status = "🟢 فعال" if server["is_active"] else "🔴 غیرفعال"
-        template_status = f"قالب از کاربر «{server['template_username']}»" if server["template_username"] else "⚠️ قالب هنوز تنظیم نشده"
+        template_status = panel_server_readiness_text(server)
         usage_status = (
             f"مصرف: {'✅ خرید شخصی' if server['used_for_custom_config'] else '◻️ خرید شخصی'} | "
             f"{'✅ کانفیگ تست' if server['used_for_test_config'] else '◻️ کانفیگ تست'} | "
             f"{'✅ نمایندگی' if server['used_for_reseller'] else '◻️ نمایندگی'}"
         )
         await safe_edit(call,
-            f"🖥 {server['name']}\nنوع: {server['panel_type']}\nآدرس: {server['api_url']}\n"
+            f"🖥 {server['name']}\nنوع: {PANEL_TYPE_LABELS.get(server['panel_type'], server['panel_type'])}\nآدرس: {server['api_url']}\n"
             f"وضعیت: {status}\n{usage_status}\n{template_status}",
             reply_markup=kb.panel_server_view_kb(server),
         )
@@ -1479,7 +1548,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         db.update_panel_server(server_id, is_active=0 if server["is_active"] else 1)
         server = db.get_panel_server(server_id)
         await safe_edit(call,
-            f"🖥 {server['name']}\nنوع: {server['panel_type']}\nآدرس: {server['api_url']}\n"
+            f"🖥 {server['name']}\nنوع: {PANEL_TYPE_LABELS.get(server['panel_type'], server['panel_type'])}\nآدرس: {server['api_url']}\n"
             f"وضعیت: {'🟢 فعال' if server['is_active'] else '🔴 غیرفعال'}",
             reply_markup=kb.panel_server_view_kb(server),
         )

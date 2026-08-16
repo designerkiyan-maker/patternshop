@@ -128,10 +128,13 @@ class AdminRestoreBackup(StatesGroup):
 
 class AdminAddPanelServer(StatesGroup):
     waiting_name = State()
+    waiting_type = State()
     waiting_url = State()
     waiting_username = State()
     waiting_password = State()
     waiting_template_user = State()
+    waiting_inbound_select = State()
+    waiting_sub_base_url = State()
 
 
 class AdminSetPanelTemplate(StatesGroup):

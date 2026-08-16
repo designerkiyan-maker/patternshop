@@ -16,6 +16,7 @@ from aiogram.types import (
 )
 
 from config import MINIAPP_URL
+from panel_providers import PANEL_TYPE_LABELS
 
 
 # ---------------------------------------------------------------------------
@@ -730,13 +731,30 @@ def custom_config_menu_kb(db) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def panel_type_select_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="PasarGuard", callback_data="adm_panel_type:pasarguard")],
+        [InlineKeyboardButton(text="3X-UI", callback_data="adm_panel_type:3xui")],
+        [InlineKeyboardButton(text="❌ انصراف", callback_data="cancel_flow")],
+    ])
+
+
+def inbound_select_kb(inbounds) -> InlineKeyboardMarkup:
+    rows = []
+    for ib in inbounds:
+        label = f"#{ib['id']} {ib['remark']} ({ib['protocol']}:{ib['port']})"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"adm_xui_inbound:{ib['id']}")])
+    rows.append([InlineKeyboardButton(text="❌ انصراف", callback_data="cancel_flow")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def panel_servers_list_kb(db) -> InlineKeyboardMarkup:
     servers = db.get_panel_servers()
     rows = []
     for s in servers:
         icon = "🟢" if s["is_active"] else "🔴"
         rows.append([InlineKeyboardButton(
-            text=f"{icon} {s['name']} ({s['panel_type']})", callback_data=f"adm_panel_server_view:{s['id']}",
+            text=f"{icon} {s['name']} ({PANEL_TYPE_LABELS.get(s['panel_type'], s['panel_type'])})", callback_data=f"adm_panel_server_view:{s['id']}",
         )])
     rows.append([InlineKeyboardButton(text="➕ افزودن سرور جدید", callback_data="adm_panel_server_add")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_custom_config_settings")])

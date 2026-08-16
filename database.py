@@ -2188,7 +2188,8 @@ class Database:
     def update_panel_server(self, server_id: int, **fields):
         allowed = {"name", "panel_type", "api_url", "api_username", "api_password",
                    "default_group", "is_active", "template_username", "group_ids", "proxy_settings",
-                   "used_for_custom_config", "used_for_test_config"}
+                   "used_for_custom_config", "used_for_test_config", "used_for_reseller",
+                   "xui_inbound_id", "xui_sub_base_url"}
         sets, values = [], []
         for k, v in fields.items():
             if k in allowed and v is not None:
