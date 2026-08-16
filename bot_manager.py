@@ -112,7 +112,7 @@ class BotManager:
         dp.callback_query.outer_middleware(force_join_mw)
 
         dp.include_router(create_admin_router(db, is_main_bot=is_main_bot, bot_manager=self))
-        dp.include_router(create_user_router(db))
+        dp.include_router(create_user_router(db, bot_manager=self if is_main_bot else None))
 
         await bot.delete_webhook(drop_pending_updates=True)
         await self._sync_menu_button(bot, db)

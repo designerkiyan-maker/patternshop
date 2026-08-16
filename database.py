@@ -466,6 +466,13 @@ class Database:
                     updated_at TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_reseller_requests_status ON reseller_requests(status);
+
+                CREATE TABLE IF NOT EXISTS reseller_bot_setup_state (
+                    user_id INTEGER PRIMARY KEY,
+                    step TEXT NOT NULL,
+                    token TEXT,
+                    bot_username TEXT
+                );
                 """
             )
 
@@ -2479,3 +2486,39 @@ class Database:
             return conn.execute(
                 "SELECT * FROM reseller_requests WHERE status='pending' ORDER BY id"
             ).fetchall()
+
+    # -----------------------------------------------------------------------
+    # فلوی خودکار خودسرویس ساخت بات نمایندگی (بعد از تایید درخواست)
+    # -----------------------------------------------------------------------
+
+    def start_reseller_bot_setup(self, user_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO reseller_bot_setup_state (user_id, step) VALUES (?, 'waiting_token') "
+                "ON CONFLICT(user_id) DO UPDATE SET step='waiting_token', token=NULL, bot_username=NULL",
+                (user_id,),
+            )
+
+    def get_reseller_bot_setup_step(self, user_id: int):
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT step FROM reseller_bot_setup_state WHERE user_id=?", (user_id,)
+            ).fetchone()
+            return row["step"] if row else None
+
+    def set_reseller_bot_setup_token(self, user_id: int, token: str, bot_username: str):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE reseller_bot_setup_state SET step='waiting_owner_id', token=?, bot_username=? WHERE user_id=?",
+                (token, bot_username, user_id),
+            )
+
+    def get_reseller_bot_setup_data(self, user_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM reseller_bot_setup_state WHERE user_id=?", (user_id,)
+            ).fetchone()
+
+    def clear_reseller_bot_setup(self, user_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM reseller_bot_setup_state WHERE user_id=?", (user_id,))

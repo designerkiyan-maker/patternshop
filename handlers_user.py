@@ -12,6 +12,7 @@ import random
 import re
 import asyncio
 import logging
+import os
 
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart
@@ -20,7 +21,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest, TelegramNetworkError
 
 import keyboards as kb
-from states import BuyFlow, ContactFlow, DiscountEntry, WalletTopup, CustomConfigFlow, ResellerFlow
+from states import BuyFlow, ContactFlow, DiscountEntry, WalletTopup, CustomConfigFlow, ResellerFlow, ResellerRequestFlow
 from config import MAX_TEST_PER_USER
 from config_delivery import deliver_config_to_user
 from force_join import is_channel_member, CHECK_CALLBACK
@@ -28,6 +29,8 @@ from sub_info import fetch_sub_info, format_sub_info_fa
 from stock_alerts import check_and_notify_low_stock
 import crypto_payment
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
+from config import RESELLER_DBS_DIR
+from database import Database
 
 
 async def _send_admin_notification(bot, admin_id, send_coro_factory, context_label: str, ref_id: int):
@@ -77,8 +80,94 @@ async def _send_admin_notification(bot, admin_id, send_coro_factory, context_lab
     return None
 
 
-def create_user_router(db) -> Router:
+def create_user_router(db, bot_manager=None) -> Router:
     router = Router()
+
+    # -----------------------------------------------------------------------
+    # فلوی خودکار خودسرویس ساخت بات نمایندگی (بعد از تایید درخواست ادمین)
+    # این دو هندلر عمداً اول از همه ثبت می‌شوند تا اولویت داشته باشند و با
+    # هیچ دکمه‌ی متنی دیگری تداخل نکنند (فقط وقتی فعال می‌شوند که کاربر
+    # واقعاً وسط این مرحله باشد).
+    # -----------------------------------------------------------------------
+
+    @router.message(F.func(lambda m: db.get_reseller_bot_setup_step(m.from_user.id) == "waiting_token"))
+    async def reseller_bot_setup_receive_token(message: Message):
+        if not bot_manager:
+            db.clear_reseller_bot_setup(message.from_user.id)
+            return
+        token = message.text.strip()
+        for b in db.list_reseller_bots():
+            if b["bot_token"] == token:
+                await message.answer("⛔️ این توکن قبلاً برای یک بات دیگر ثبت شده. یک بات دیگر بساز و توکن جدیدش را بفرست.")
+                return
+        await message.answer("⏳ در حال بررسی اعتبار توکن...")
+        temp_bot = Bot(token=token)
+        try:
+            me = await temp_bot.get_me()
+        except Exception:
+            await message.answer("❌ این توکن معتبر نیست. لطفاً دوباره بررسی و ارسال کن:")
+            await temp_bot.session.close()
+            return
+        await temp_bot.session.close()
+
+        db.set_reseller_bot_setup_token(message.from_user.id, token, me.username)
+        await message.answer(
+            f"✅ توکن معتبر است: @{me.username}\n\n"
+            f"حالا آیدی عددی تلگرام خودت را ارسال کن (همانی که مالک این بات خواهد بود):"
+        )
+
+    @router.message(F.func(lambda m: db.get_reseller_bot_setup_step(m.from_user.id) == "waiting_owner_id"))
+    async def reseller_bot_setup_receive_owner_id(message: Message, bot: Bot):
+        if not bot_manager:
+            db.clear_reseller_bot_setup(message.from_user.id)
+            return
+        text = message.text.strip()
+        if not text.isdigit():
+            await message.answer("لطفاً فقط آیدی عددی ارسال کن.")
+            return
+        owner_id = int(text)
+        setup = db.get_reseller_bot_setup_data(message.from_user.id)
+        if not setup:
+            await message.answer("چیزی اشتباه پیش رفت؛ دوباره از اول امتحان کن.")
+            return
+
+        token = setup["token"]
+        bot_username = setup["bot_username"]
+        user = db.get_user(message.from_user.id)
+        owner_name = (user["first_name"] if user else None) or (user["username"] if user else None) or str(owner_id)
+
+        os.makedirs(RESELLER_DBS_DIR, exist_ok=True)
+        db_path = os.path.join(RESELLER_DBS_DIR, f"{bot_username}.db")
+        reseller_id = db.register_reseller_bot(token, bot_username, owner_id, owner_name, db_path)
+
+        started = await bot_manager.start_bot(token, db_path, owner_id, is_main_bot=False)
+
+        reseller_db = Database(db_path)
+        reseller_db.init_db(owner_id=owner_id)
+        reseller_db.set_setting("miniapp_tenant_id", str(reseller_id))
+
+        db.clear_reseller_bot_setup(message.from_user.id)
+        db.log_admin_action(message.from_user.id, "reseller_self_bot_created", f"بات @{bot_username} (#{reseller_id})")
+
+        status_text = "✅ بات نمایندگی شما ساخته و روشن شد!" if started else \
+            "⚠️ بات ثبت شد ولی راه‌اندازی زنده انجام نشد؛ به‌زودی خودکار روشن می‌شود."
+        await message.answer(
+            f"{status_text}\n\n"
+            f"🤖 بات شما: @{bot_username}\n\n"
+            f"این بات کاملاً مستقل است و همه‌ی امکانات (کد تخفیف، زیرمجموعه‌گیری، کیف پول، کانفیگ تست) را "
+            f"از صفر و جدا دارد. برای شروع، با /start وارد @{bot_username} شو.\n\n"
+            f"برای دریافت اعتبار حجمی و اتصال به پنل VPN، به ادمین ما پیام بده.",
+        )
+        try:
+            for admin_id in db.list_admins():
+                await bot.send_message(
+                    admin_id,
+                    f"🤖 نماینده {owner_name} ({owner_id}) بات @{bot_username} را خودکار ساخت.\n"
+                    f"برای دادن اعتبار حجمی، وارد دیتابیس همان بات نماینده شو (فعلاً از طریق «📦 مدیریت نمایندگان» "
+                    f"داخل خودِ بات @{bot_username}، چون هر بات نماینده استخر مستقل خودش را دارد).",
+                )
+        except Exception:
+            pass
 
     # -----------------------------------------------------------------------
     # عضویت اجباری در کانال
@@ -849,7 +938,14 @@ def create_user_router(db) -> Router:
         if credit <= 0:
             await call.answer("اعتبار شما کافی نیست. با ادمین تماس بگیر.", show_alert=True)
             return
-        server = db.get_panel_server_for_usage("reseller")
+        reseller_cfg = db.get_reseller_config(call.from_user.id)
+        server = None
+        if reseller_cfg["panel_server_id"]:
+            s = db.get_panel_server(reseller_cfg["panel_server_id"])
+            if s and s["is_active"]:
+                server = s
+        if not server:
+            server = db.get_panel_server_for_usage("reseller")
         if not server:
             await call.answer("هنوز سروری برای نمایندگی توسط ادمین تنظیم نشده.", show_alert=True)
             return
@@ -905,14 +1001,37 @@ def create_user_router(db) -> Router:
             await message.answer(f"❌ اعتبار شما کافی نیست. اعتبار باقی‌مانده: {credit:,} گیگ.")
             return
 
+        reseller_cfg = db.get_reseller_config(message.from_user.id)
+        await state.update_data(reseller_volume_gb=volume_gb)
+        await state.set_state(ResellerFlow.waiting_duration)
+        await message.answer(
+            f"⏳ حالا مدت اعتبار این کانفیگ را به روز وارد کن.\n"
+            f"حداقل: {reseller_cfg['min_duration_days']} روز — حداکثر: {reseller_cfg['max_duration_days']} روز",
+            reply_markup=kb.cancel_kb(),
+        )
+
+    @router.message(ResellerFlow.waiting_duration)
+    async def reseller_receive_duration(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("❌ لطفاً فقط عدد صحیح مثبت وارد کنید.")
+            return
+        duration_days = int(text)
+        reseller_cfg = db.get_reseller_config(message.from_user.id)
+        if duration_days < reseller_cfg["min_duration_days"] or duration_days > reseller_cfg["max_duration_days"]:
+            await message.answer(
+                f"❌ مدت باید بین {reseller_cfg['min_duration_days']} تا {reseller_cfg['max_duration_days']} روز باشد."
+            )
+            return
+
         data = await state.get_data()
+        volume_gb = data["reseller_volume_gb"]
         server = db.get_panel_server(data.get("panel_server_id"))
         if not server or not server["is_active"]:
             await message.answer("⛔️ سرور نمایندگی دیگر در دسترس نیست.")
             await state.clear()
             return
 
-        duration_days = db.get_custom_config_settings()["duration_days"]
         try:
             provider = get_provider(server)
             result = await provider.create_user(data["reseller_username"], volume_gb, duration_days)
@@ -941,8 +1060,62 @@ def create_user_router(db) -> Router:
         )
 
     # -----------------------------------------------------------------------
-    # سفارش‌های من
+    # درخواست نمایندگی
     # -----------------------------------------------------------------------
+
+    @router.message(F.text == "🤝 درخواست نمایندگی")
+    async def reseller_request_start(message: Message, state: FSMContext):
+        if db.is_reseller(message.from_user.id):
+            await message.answer("شما همین الان هم نماینده هستید.")
+            return
+        if db.has_pending_reseller_request(message.from_user.id):
+            await message.answer("درخواست قبلی شما هنوز در حال بررسی است؛ لطفاً منتظر بمانید.")
+            return
+        await message.answer(
+            "🤝 درخواست نمایندگی\n\n"
+            "کدام حالت را می‌خواهی؟\n\n"
+            "🤖 <b>بات خام مستقل</b>: یک بات جدا با آیدی خودت که کاملاً مستقل مدیریتش می‌کنی.\n"
+            "📦 <b>اعتبار حجمی</b>: از همین بات، با یک استخر گیگابایت که خودت هرجور بخواهی ازش کانفیگ می‌سازی.",
+            parse_mode="HTML",
+            reply_markup=kb.reseller_request_type_kb(),
+        )
+
+    @router.callback_query(F.data.startswith("reseller_req_type:"))
+    async def cb_reseller_request_type(call: CallbackQuery, state: FSMContext):
+        req_type = call.data.split(":")[1]
+        await state.update_data(reseller_request_type=req_type)
+        await state.set_state(ResellerRequestFlow.waiting_note)
+        await call.answer()
+        await call.message.answer(
+            "اگه توضیح یا درخواست خاصی داری بنویس (مثلاً حجم تقریبی مدنظرت)، وگرنه فقط بنویس «ندارم».",
+            reply_markup=kb.cancel_kb(),
+        )
+
+    @router.message(ResellerRequestFlow.waiting_note)
+    async def reseller_request_receive_note(message: Message, state: FSMContext, bot: Bot):
+        data = await state.get_data()
+        note = message.text.strip()
+        request_id = db.create_reseller_request(message.from_user.id, data["reseller_request_type"], note)
+        await state.clear()
+        await message.answer(
+            "✅ درخواست شما ثبت شد و برای ادمین ارسال شد. نتیجه رو بهت اطلاع می‌دیم.",
+            reply_markup=kb.menu_for_user(db, message.from_user.id),
+        )
+
+        user = db.get_user(message.from_user.id)
+        type_label = "🤖 بات خام مستقل" if data["reseller_request_type"] == "bot" else "📦 اعتبار حجمی"
+        text = (
+            f"🤝 درخواست نمایندگی جدید #{request_id}\n"
+            f"👤 {user['first_name'] if user else ''} (@{user['username'] if user and user['username'] else '---'})\n"
+            f"🆔 آیدی: {message.from_user.id}\n"
+            f"نوع: {type_label}\n"
+            f"توضیح: {note}"
+        )
+        for admin_id in db.list_admins():
+            try:
+                await bot.send_message(admin_id, text, reply_markup=kb.reseller_request_admin_kb(request_id))
+            except Exception:
+                pass
 
     @router.message(F.text.func(lambda t: t == db.get_setting("btn_my_orders")))
     async def my_orders(message: Message):

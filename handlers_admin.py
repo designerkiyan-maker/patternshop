@@ -1930,17 +1930,19 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             except Exception:
                 pass
         else:
+            db.start_reseller_bot_setup(req["user_id"])
             try:
                 await bot.send_message(
                     req["user_id"],
-                    "🎉 درخواست نمایندگی (بات مستقل) شما تایید شد!\n"
-                    "به‌زودی ادمین برای هماهنگی ساخت بات باهات در تماس میشه.",
+                    "🎉 درخواست نمایندگی (بات مستقل) شما تایید شد!\n\n"
+                    "برای ساخت خودکار بات، لطفاً همین‌جا توکن بات را ارسال کن "
+                    "(همان چیزی که از @BotFather گرفتی):",
                 )
             except Exception:
                 pass
             try:
                 await call.message.edit_text(
-                    (call.message.text or "") + "\n\n✅ تایید شد (بات مستقل). برای ساختش از «🏪 مدیریت بات‌های نمایندگی» اقدام کن.",
+                    (call.message.text or "") + "\n\n✅ تایید شد (بات مستقل). از کاربر خواستیم توکن بات را بفرستد؛ بعد از تکمیل خودکار ساخته و روشن می‌شود.",
                 )
             except Exception:
                 pass
