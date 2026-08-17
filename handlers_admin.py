@@ -2098,6 +2098,24 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             reply_markup=kb.gb_resellers_list_kb(db),
         )
 
+    @router.callback_query(F.data.startswith("adm_gb_reseller_convert:"))
+    async def cb_admin_gb_reseller_convert(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        user_id = int(call.data.split(":")[1])
+        db.set_reseller_status(user_id, True)
+        db.log_admin_action(call.from_user.id, "reseller_convert_to_credit", f"کاربر {user_id} اعتبار حجمی هم فعال شد")
+        try:
+            await call.bot.send_message(
+                user_id,
+                "📦 علاوه بر بات مستقل خودت، اعتبار حجمی هم برات فعال شد! "
+                "از منوی اصلی همین بات وارد «🧑‍💼 پنل نمایندگی» شو.",
+            )
+        except Exception:
+            pass
+        await call.answer("اعتبار حجمی برای این نماینده فعال شد.")
+        await replace_admin_view(call, "📦 مدیریت نمایندگان (استخر حجم):", reply_markup=kb.gb_resellers_list_kb(db))
+
     @router.callback_query(F.data.startswith("adm_gb_reseller_view:"))
     async def cb_admin_gb_reseller_view(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
@@ -2106,13 +2124,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         cfg = db.get_reseller_config(user_id)
         user = db.get_user(user_id)
         name = (user["first_name"] if user else None) or str(user_id)
+        own_bot = next((rb for rb in db.list_reseller_bots() if rb["owner_telegram_id"] == user_id), None)
         server_name = "پنل عمومی نمایندگی (پیش‌فرض)"
         if cfg["panel_server_id"]:
             s = db.get_panel_server(cfg["panel_server_id"])
             server_name = s["name"] if s else "سرور حذف‌شده!"
         text = (
             f"👤 {name} (`{user_id}`)\n"
-            f"📦 اعتبار: {cfg['credit_gb']:,} گیگابایت\n"
+            + (f"🤖 بات مستقل: @{own_bot['bot_username']}\n" if own_bot else "")
+            + f"📦 اعتبار: {cfg['credit_gb']:,} گیگابایت\n"
             f"🖥 پنل: {server_name}\n"
             f"⏳ بازه‌ی مدت مجاز: {cfg['min_duration_days']} تا {cfg['max_duration_days']} روز"
         )

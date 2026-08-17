@@ -766,14 +766,17 @@ def inbound_select_kb(inbounds) -> InlineKeyboardMarkup:
 # ---------------------------------------------------------------------------
 
 def gb_resellers_list_kb(db) -> InlineKeyboardMarkup:
-    resellers = db.get_resellers()
+    resellers = db.get_all_resellers_combined()
     rows = []
     for r in resellers:
-        name = r["first_name"] or r["username"] or str(r["telegram_id"])
-        rows.append([InlineKeyboardButton(
-            text=f"👤 {name} | {r['reseller_credit_gb']:,} گیگ",
-            callback_data=f"adm_gb_reseller_view:{r['telegram_id']}",
-        )])
+        if r["is_reseller"]:
+            tag = "🤖 " if r["has_own_bot"] else ""
+            text = f"{tag}👤 {r['name']} | {r['credit_gb']:,} گیگ"
+            rows.append([InlineKeyboardButton(text=text, callback_data=f"adm_gb_reseller_view:{r['telegram_id']}")])
+        else:
+            # فقط بات مستقل دارد، هنوز اعتبار حجمی برایش فعال نشده
+            text = f"🤖 👤 {r['name']} (@{r['bot_username']}) — بدون اعتبار حجمی"
+            rows.append([InlineKeyboardButton(text=text, callback_data=f"adm_gb_reseller_convert:{r['telegram_id']}")])
     rows.append([InlineKeyboardButton(text="➕ افزودن نماینده جدید", callback_data="adm_gb_reseller_add")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

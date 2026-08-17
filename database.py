@@ -2446,6 +2446,41 @@ class Database:
                 "SELECT * FROM users WHERE is_reseller=1 ORDER BY reseller_credit_gb DESC"
             ).fetchall()
 
+    def get_all_resellers_combined(self):
+        """همه‌ی نماینده‌ها را یکجا برمی‌گرداند: هم آن‌هایی که اعتبار حجمی
+        دارند (credit) و هم آن‌هایی که فقط بات مستقل گرفته‌اند (bot، هنوز
+        اعتبار حجمی برایشان فعال نشده). هر آیتم: {telegram_id, name, credit_gb,
+        is_reseller, has_own_bot, bot_username}"""
+        credit_resellers = {r["telegram_id"]: r for r in self.get_resellers()}
+        bot_owners = {}
+        for rb in self.list_reseller_bots():
+            bot_owners.setdefault(rb["owner_telegram_id"], rb["bot_username"])
+
+        combined = {}
+        for uid, r in credit_resellers.items():
+            combined[uid] = {
+                "telegram_id": uid,
+                "name": r["first_name"] or r["username"] or str(uid),
+                "credit_gb": r["reseller_credit_gb"],
+                "is_reseller": True,
+                "has_own_bot": uid in bot_owners,
+                "bot_username": bot_owners.get(uid),
+            }
+        for uid, bot_username in bot_owners.items():
+            if uid in combined:
+                continue
+            user = self.get_user(uid)
+            name = (user["first_name"] if user else None) or (user["username"] if user else None) or str(uid)
+            combined[uid] = {
+                "telegram_id": uid,
+                "name": name,
+                "credit_gb": 0,
+                "is_reseller": False,
+                "has_own_bot": True,
+                "bot_username": bot_username,
+            }
+        return sorted(combined.values(), key=lambda x: (-x["credit_gb"], x["name"]))
+
     def set_reseller_panel_server(self, user_tg_id: int, panel_server_id: int):
         with self._get_conn() as conn:
             conn.execute(
