@@ -522,6 +522,8 @@ class Database:
             ("orders", "is_custom_config", "INTEGER DEFAULT 0"),
             ("orders", "custom_volume_gb", "INTEGER"),
             ("orders", "custom_username", "TEXT"),
+            ("orders", "is_reseller_bot_fee", "INTEGER DEFAULT 0"),
+            ("orders", "reseller_request_id", "INTEGER"),
             ("orders", "custom_panel_server_id", "INTEGER"),
             ("panel_servers", "api_key", "TEXT"),
             ("panel_servers", "api_username", "TEXT"),
@@ -1205,6 +1207,25 @@ class Database:
                 "UPDATE orders SET status='approved', updated_at=? WHERE id=?",
                 (datetime.utcnow().isoformat(), order_id),
             )
+
+    def create_reseller_bot_fee_order(self, user_tg_id: int, price: int, request_id: int) -> int:
+        """سفارش هزینه‌ی ساخت بات نمایندگی - از همان جدول orders استفاده می‌کند
+        (product_id=0 سنتینل) تا مسیر پرداخت کارت/کریپتوی فعلی بدون تغییر کار کند."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO orders (user_id, product_id, status, base_price, wallet_used, final_price, "
+                "quantity, is_reseller_bot_fee, reseller_request_id) VALUES (?, 0, 'pending', ?, 0, ?, 1, 1, ?)",
+                (user_tg_id, price, price, request_id),
+            )
+            return cur.lastrowid
+
+    def get_pending_reseller_bot_fee_order(self, user_tg_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM orders WHERE user_id=? AND is_reseller_bot_fee=1 AND status='pending' "
+                "ORDER BY id DESC LIMIT 1",
+                (user_tg_id,),
+            ).fetchone()
 
     def set_order_receipt(self, order_id: int, file_id: str):
         with self._get_conn() as conn:

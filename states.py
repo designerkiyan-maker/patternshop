@@ -172,6 +172,10 @@ class ResellerRequestFlow(StatesGroup):
     waiting_note = State()
 
 
+class AdminSetResellerBotFee(StatesGroup):
+    waiting_price = State()
+
+
 class AdminAddGbReseller(StatesGroup):
     waiting_user_id = State()
 

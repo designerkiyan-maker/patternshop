@@ -46,6 +46,7 @@ from states import (
     AdminAddGbReseller,
     AdminAdjustResellerCredit,
     AdminSetResellerDuration,
+    AdminSetResellerBotFee,
     AdminWheelSettings,
     AdminRenewalSettings,
     AdminVolumeReminderSettings,
@@ -619,6 +620,33 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         if order["status"] != "pending":
             await call.answer("این سفارش قبلاً بررسی شده است.", show_alert=True)
+            return
+
+        # ===== سفارش هزینه‌ی ساخت بات نمایندگی: بعد از تایید، خودکار وارد فلوی دریافت توکن می‌شود =====
+        if order["is_reseller_bot_fee"]:
+            db.approve_custom_config_order(order_id)
+            db.start_reseller_bot_setup(order["user_id"])
+            db.log_admin_action(
+                call.from_user.id, "reseller_bot_fee_approve",
+                f"سفارش #{order_id} | کاربر {order['user_id']} | مبلغ: {order['final_price']:,}",
+            )
+            try:
+                await bot.send_message(
+                    order["user_id"],
+                    "✅ پرداخت شما تایید شد!\n\n"
+                    "برای ساخت خودکار بات، لطفاً همین‌جا توکن بات را ارسال کن "
+                    "(همان چیزی که از @BotFather گرفتی):",
+                )
+            except Exception:
+                pass
+            try:
+                await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد؛ از کاربر توکن بات خواسته شد.")
+            except Exception:
+                try:
+                    await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید شد؛ از کاربر توکن بات خواسته شد.")
+                except Exception:
+                    pass
+            await call.answer("سفارش تایید و از کاربر توکن بات خواسته شد.")
             return
 
         # ===== سفارش کانفیگ شخصی: به‌جای برداشتن از انبار، کاربر روی پنل ساخته می‌شود =====
@@ -1899,6 +1927,57 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     # -------------------------------------------------------------------
     # درخواست‌های نمایندگی (تایید/رد توسط ادمین)
     # -------------------------------------------------------------------
+
+    @router.callback_query(F.data.startswith("adm_reseller_req_price:"))
+    async def cb_admin_reseller_req_price(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        request_id = int(call.data.split(":")[1])
+        req = db.get_reseller_request(request_id)
+        if not req or req["status"] != "pending":
+            await call.answer("این درخواست قبلاً بررسی شده.", show_alert=True)
+            return
+        await state.update_data(reseller_request_id=request_id)
+        await state.set_state(AdminSetResellerBotFee.waiting_price)
+        await call.message.answer("هزینه‌ی ساخت این بات نمایندگی چند تومان باشد؟ (فقط عدد):")
+        await call.answer()
+
+    @router.message(AdminSetResellerBotFee.waiting_price)
+    async def process_reseller_bot_fee_price(message: Message, state: FSMContext, bot: Bot):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً یک عدد صحیح مثبت ارسال کن.")
+            return
+        price = int(text)
+        data = await state.get_data()
+        request_id = data["reseller_request_id"]
+        req = db.get_reseller_request(request_id)
+        if not req or req["status"] != "pending":
+            await state.clear()
+            await message.answer("این درخواست دیگر معتبر نیست.")
+            return
+
+        order_id = db.create_reseller_bot_fee_order(req["user_id"], price, request_id)
+        db.set_reseller_request_status(request_id, "awaiting_payment", message.from_user.id)
+        await state.clear()
+        db.log_admin_action(message.from_user.id, "reseller_bot_fee_priced", f"درخواست #{request_id} | {price:,} تومان")
+
+        card_number = db.get_setting("card_number")
+        card_holder = db.get_setting("card_holder")
+        pay_text = (
+            f"💰 هزینه‌ی ساخت بات نمایندگی شما: {price:,} تومان\n\n"
+            f"💳 شماره کارت: `{card_number}`\n"
+            f"👤 به نام: {card_holder}\n\n"
+            f"لطفاً عکس رسید پرداخت را همینجا ارسال کنید، یا از دکمه‌ی زیر با ارز دیجیتال پرداخت کنید."
+        )
+        try:
+            await bot.send_message(
+                req["user_id"], pay_text, parse_mode="Markdown",
+                reply_markup=kb.payment_choice_kb(crypto_payment.crypto_payment_available(db)),
+            )
+        except Exception:
+            pass
+        await message.answer(f"✅ مبلغ برای کاربر ارسال شد. شماره سفارش: #{order_id}", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
     @router.callback_query(F.data.startswith("adm_reseller_req_approve:"))
     async def cb_admin_reseller_req_approve(call: CallbackQuery, bot: Bot):

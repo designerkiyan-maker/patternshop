@@ -169,6 +169,36 @@ def create_user_router(db, bot_manager=None) -> Router:
         except Exception:
             pass
 
+    @router.message(F.func(lambda m: db.get_pending_reseller_bot_fee_order(m.from_user.id) is not None), F.photo)
+    async def reseller_bot_fee_receive_receipt(message: Message, bot: Bot):
+        order = db.get_pending_reseller_bot_fee_order(message.from_user.id)
+        file_id = message.photo[-1].file_id
+        db.set_order_receipt(order["id"], file_id)
+        await _notify_admins_of_order(bot, order["id"], receipt_file_id=file_id)
+        await message.answer("✅ رسید شما برای بررسی ارسال شد. پس از تایید ادمین، مراحل ساخت بات ادامه پیدا می‌کند.")
+
+    @router.callback_query(F.data == "pay_crypto", F.func(lambda c: db.get_pending_reseller_bot_fee_order(c.from_user.id) is not None))
+    async def cb_pay_crypto_reseller_bot_fee(call: CallbackQuery):
+        order = db.get_pending_reseller_bot_fee_order(call.from_user.id)
+        await call.answer("در حال ساخت فاکتور...")
+        tenant_id = db.get_setting("miniapp_tenant_id", "")
+        try:
+            result = await crypto_payment.create_invoice_for(
+                db, tenant_id, call.from_user.id, "order", order["id"], order["final_price"],
+                order_name=f"هزینه‌ی بات نمایندگی #{order['id']}",
+            )
+        except crypto_payment.CryptoPaymentError as e:
+            await call.message.answer(f"⚠️ {e}")
+            return
+        await call.message.answer(
+            "🪙 فاکتور پرداخت ساخته شد. روی دکمه‌ی زیر بزن، ارز و مبلغ رو انتخاب کن و پرداخت رو تکمیل کن.\n"
+            "⏳ اعتبار این فاکتور فقط ۸۰ دقیقه است.\n"
+            "به‌محض تایید تراکنش روی بلاک‌چین، خودکار به مرحله‌ی بعد می‌ری.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["invoice_url"]),
+            ]]),
+        )
+
     # -----------------------------------------------------------------------
     # عضویت اجباری در کانال
     # -----------------------------------------------------------------------
@@ -392,6 +422,31 @@ def create_user_router(db, bot_manager=None) -> Router:
 
     async def _notify_admins_of_order(bot: Bot, order_id: int, receipt_file_id: str = None):
         order = db.get_order(order_id)
+
+        if order["is_reseller_bot_fee"]:
+            user_row = db.get_user(order["user_id"])
+            username = user_row["username"] if user_row else ""
+            first_name = user_row["first_name"] if user_row else ""
+            caption = (
+                f"🧾 پرداخت هزینه‌ی بات نمایندگی #{order_id}\n"
+                f"👤 کاربر: {first_name or ''} (@{username or '---'})\n"
+                f"🆔 آیدی عددی: {order['user_id']}\n"
+                f"💵 مبلغ: {order['final_price']:,} تومان"
+            )
+            reply_markup = kb.order_review_kb(order_id)
+            for admin_id in db.list_admins():
+                if receipt_file_id:
+                    factory = lambda aid=admin_id: bot.send_photo(
+                        aid, receipt_file_id, caption=caption, reply_markup=reply_markup,
+                    )
+                else:
+                    factory = lambda aid=admin_id: bot.send_message(
+                        aid, caption, reply_markup=reply_markup,
+                    )
+                sent = await _send_admin_notification(bot, admin_id, factory, "هزینه‌ی بات نمایندگی", order_id)
+                if sent:
+                    db.set_order_admin_message(order_id, admin_id, sent.message_id)
+            return
 
         if order["is_custom_config"]:
             user_row = db.get_user(order["user_id"])
@@ -1113,7 +1168,7 @@ def create_user_router(db, bot_manager=None) -> Router:
         )
         for admin_id in db.list_admins():
             try:
-                await bot.send_message(admin_id, text, reply_markup=kb.reseller_request_admin_kb(request_id))
+                await bot.send_message(admin_id, text, reply_markup=kb.reseller_request_admin_kb(request_id, data["reseller_request_type"]))
             except Exception:
                 pass
 
