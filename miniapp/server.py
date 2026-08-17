@@ -942,40 +942,113 @@ async def api_plisio_webhook(request: Request, tenant: Tenant = Depends(get_tena
     elif invoice["kind"] == "order":
         order_id = invoice["ref_id"]
         order = db.get_order(order_id)
-        if order and order["status"] == "pending":
-            product = db.get_product(order["product_id"])
-            quantity = order["quantity"] or 1
-            results = db.take_unused_configs(order["product_id"], order["user_id"], quantity)
-            if results:
-                db.approve_order(order_id, [r["id"] for r in results])
-                db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or (product["price"] if product else 0))
-                links = "\n".join(r["link"] for r in results)
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        await session.post(
-                            f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
-                            json={
-                                "chat_id": order["user_id"],
-                                "text": f"✅ پرداخت کریپتو تایید شد!\n📦 محصول: {product['name'] if product else ''}\n\n{links}",
-                            },
-                        )
-                except Exception:
-                    pass
-            else:
-                # موجودی هم‌زمان تمام شده - به ادمین اطلاع بده تا دستی رسیدگی کند
+        if not order or order["status"] != "pending":
+            return {"status": "ok"}
+
+        # ===== هزینه‌ی ساخت بات نمایندگی =====
+        if order["is_reseller_bot_fee"]:
+            db.approve_custom_config_order(order_id)
+            db.start_reseller_bot_setup(order["user_id"])
+            try:
+                async with aiohttp.ClientSession() as session:
+                    await session.post(
+                        f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                        json={
+                            "chat_id": order["user_id"],
+                            "text": "✅ پرداخت کریپتو تایید شد!\n\n"
+                                    "برای ساخت خودکار بات، لطفاً همین‌جا توکن بات را ارسال کن "
+                                    "(همان چیزی که از @BotFather گرفتی):",
+                        },
+                    )
+            except Exception:
+                pass
+            return {"status": "ok"}
+
+        # ===== سفارش کانفیگ شخصی (خرید مستقیم روی پنل) =====
+        if order["is_custom_config"]:
+            server = db.get_panel_server(order["custom_panel_server_id"])
+            if not server or not server["is_active"]:
                 admin_ids = db.list_admins()
                 async with aiohttp.ClientSession() as session:
                     for admin_id in admin_ids:
                         try:
                             await session.post(
                                 f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
-                                json={
-                                    "chat_id": admin_id,
-                                    "text": f"⚠️ سفارش #{order_id} با کریپتو پرداخت شد ولی موجودی محصول تمام شده! لطفاً دستی رسیدگی کنید.",
-                                },
+                                json={"chat_id": admin_id, "text": f"⚠️ سفارش کانفیگ شخصی #{order_id} با کریپتو پرداخت شد ولی سرور پنل در دسترس نیست! لطفاً دستی رسیدگی کنید."},
                             )
                         except Exception:
                             pass
+                return {"status": "ok"}
+            try:
+                provider = get_provider(server)
+                result = await provider.create_user(
+                    order["custom_username"], order["custom_volume_gb"], db.get_custom_config_settings()["duration_days"],
+                )
+            except PanelError:
+                admin_ids = db.list_admins()
+                async with aiohttp.ClientSession() as session:
+                    for admin_id in admin_ids:
+                        try:
+                            await session.post(
+                                f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                                json={"chat_id": admin_id, "text": f"⚠️ سفارش کانفیگ شخصی #{order_id} با کریپتو پرداخت شد ولی ساخت کاربر روی پنل ناموفق بود! لطفاً دستی رسیدگی کنید."},
+                            )
+                        except Exception:
+                            pass
+                return {"status": "ok"}
+
+            db.approve_custom_config_order(order_id)
+            db.add_custom_config(
+                order["user_id"], server["id"], result.username, order["custom_volume_gb"],
+                db.get_custom_config_settings()["duration_days"], result.subscription_url, order_id=order_id,
+            )
+            try:
+                async with aiohttp.ClientSession() as session:
+                    await session.post(
+                        f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                        json={
+                            "chat_id": order["user_id"],
+                            "text": f"✅ پرداخت کریپتو تایید شد و کانفیگ شخصی شما ساخته شد!\n\n{result.subscription_url}",
+                        },
+                    )
+            except Exception:
+                pass
+            return {"status": "ok"}
+
+        # ===== سفارش عادی از انبار کانفیگ =====
+        product = db.get_product(order["product_id"])
+        quantity = order["quantity"] or 1
+        results = db.take_unused_configs(order["product_id"], order["user_id"], quantity)
+        if results:
+            db.approve_order(order_id, [r["id"] for r in results])
+            db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or (product["price"] if product else 0))
+            links = "\n".join(r["link"] for r in results)
+            try:
+                async with aiohttp.ClientSession() as session:
+                    await session.post(
+                        f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                        json={
+                            "chat_id": order["user_id"],
+                            "text": f"✅ پرداخت کریپتو تایید شد!\n📦 محصول: {product['name'] if product else ''}\n\n{links}",
+                        },
+                    )
+            except Exception:
+                pass
+        else:
+            # موجودی هم‌زمان تمام شده - به ادمین اطلاع بده تا دستی رسیدگی کند
+            admin_ids = db.list_admins()
+            async with aiohttp.ClientSession() as session:
+                for admin_id in admin_ids:
+                    try:
+                        await session.post(
+                            f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                            json={
+                                "chat_id": admin_id,
+                                "text": f"⚠️ سفارش #{order_id} با کریپتو پرداخت شد ولی موجودی محصول تمام شده! لطفاً دستی رسیدگی کنید.",
+                            },
+                        )
+                    except Exception:
+                        pass
 
     return {"status": "ok"}
 
