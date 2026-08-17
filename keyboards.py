@@ -106,6 +106,11 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False) -> ReplyKeyboard
             return None
         return [_styled_button("🧑‍💼 پنل نمایندگی", "primary")]
 
+    def row_reseller_request():
+        if is_reseller:
+            return None
+        return [_styled_button("🤝 درخواست نمایندگی", "")]
+
     builders = {
         "miniapp": row_miniapp,
         "btn_buy": row_buy,
@@ -129,6 +134,10 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False) -> ReplyKeyboard
 
     if is_reseller:
         row = row_reseller_panel()
+        if row:
+            rows.insert(1 if rows else 0, row)
+    else:
+        row = row_reseller_request()
         if row:
             rows.insert(1 if rows else 0, row)
 
