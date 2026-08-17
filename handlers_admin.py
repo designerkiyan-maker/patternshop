@@ -2369,6 +2369,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             reseller_db = Database(db_path)
             reseller_db.init_db(owner_id=owner_id)
             reseller_db.set_setting("miniapp_tenant_id", str(reseller_id))
+            for admin_id in db.list_admins():
+                if admin_id != owner_id:
+                    reseller_db.add_admin(admin_id, role="admin")
 
             await state.clear()
             status_text = "✅ بات نمایندگی راه‌اندازی و همین الان روشن شد." if started else \

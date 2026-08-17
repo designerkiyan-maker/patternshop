@@ -145,6 +145,12 @@ def create_user_router(db, bot_manager=None) -> Router:
         reseller_db = Database(db_path)
         reseller_db.init_db(owner_id=owner_id)
         reseller_db.set_setting("miniapp_tenant_id", str(reseller_id))
+        # ادمین‌های اصلی (بات مادر) را هم به‌عنوان ادمین این بات نماینده اضافه می‌کنیم
+        # تا بتوانند مستقیم وارد بات نماینده شوند و اعتبار حجمی/پنل برایش تنظیم کنند
+        # (چون هر بات نماینده دیتابیس و استخر حجم کاملاً مستقل خودش را دارد).
+        for admin_id in db.list_admins():
+            if admin_id != owner_id:
+                reseller_db.add_admin(admin_id, role="admin")
 
         db.clear_reseller_bot_setup(message.from_user.id)
         db.log_admin_action(message.from_user.id, "reseller_self_bot_created", f"بات @{bot_username} (#{reseller_id})")
@@ -1118,7 +1124,7 @@ def create_user_router(db, bot_manager=None) -> Router:
     # درخواست نمایندگی
     # -----------------------------------------------------------------------
 
-    @router.message(F.text == "🤝 درخواست نمایندگی")
+    @router.message(F.text.func(lambda t: t == db.get_setting("btn_reseller_request", "🤝 درخواست نمایندگی")))
     async def reseller_request_start(message: Message, state: FSMContext):
         if db.is_reseller(message.from_user.id):
             await message.answer("شما همین الان هم نماینده هستید.")
@@ -1126,13 +1132,17 @@ def create_user_router(db, bot_manager=None) -> Router:
         if db.has_pending_reseller_request(message.from_user.id):
             await message.answer("درخواست قبلی شما هنوز در حال بررسی است؛ لطفاً منتظر بمانید.")
             return
-        await message.answer(
+        is_main = db.get_setting("is_main_bot", "1") == "1"
+        text = (
             "🤝 درخواست نمایندگی\n\n"
             "کدام حالت را می‌خواهی؟\n\n"
-            "🤖 <b>بات خام مستقل</b>: یک بات جدا با آیدی خودت که کاملاً مستقل مدیریتش می‌کنی.\n"
-            "📦 <b>اعتبار حجمی</b>: از همین بات، با یک استخر گیگابایت که خودت هرجور بخواهی ازش کانفیگ می‌سازی.",
-            parse_mode="HTML",
-            reply_markup=kb.reseller_request_type_kb(),
+        )
+        if is_main:
+            text += "🤖 <b>بات خام مستقل</b>: یک بات جدا با آیدی خودت که کاملاً مستقل مدیریتش می‌کنی.\n"
+        text += "📦 <b>اعتبار حجمی</b>: از همین بات، با یک استخر گیگابایت که خودت هرجور بخواهی ازش کانفیگ می‌سازی."
+        await message.answer(
+            text, parse_mode="HTML",
+            reply_markup=kb.reseller_request_type_kb(show_bot_option=is_main),
         )
 
     @router.callback_query(F.data.startswith("reseller_req_type:"))

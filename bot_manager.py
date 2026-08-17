@@ -94,6 +94,7 @@ class BotManager:
 
         db = Database(db_path)
         db.init_db(owner_id=owner_id)
+        db.set_setting("is_main_bot", "1" if is_main_bot else "0")
 
         bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         dp = Dispatcher(storage=MemoryStorage())

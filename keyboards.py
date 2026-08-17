@@ -107,9 +107,15 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False) -> ReplyKeyboard
         return [_styled_button("🧑‍💼 پنل نمایندگی", "primary")]
 
     def row_reseller_request():
+        # درخواست «اعتبار حجمی» (زیرمجموعه) در هر بات (اصلی یا نماینده) مجاز
+        # است تا نماینده هم بتواند به مشتری‌های خودش زیرمجموعه بدهد. فقط نوع
+        # «بات مستقل» به بات اصلی محدود می‌شود (تا زنجیره‌ی بی‌پایان بات‌توی‌بات
+        # درست نشود) - این محدودیت داخل خودِ فلوی انتخاب نوع اعمال می‌شود.
         if is_reseller:
             return None
-        return [_styled_button("🤝 درخواست نمایندگی", "")]
+        if settings.get("reseller_request_enabled", "1") != "1":
+            return None
+        return [_styled_button(settings.get("btn_reseller_request", "🤝 درخواست نمایندگی"), settings.get("btn_reseller_request_style", ""))]
 
     builders = {
         "miniapp": row_miniapp,
@@ -120,6 +126,7 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False) -> ReplyKeyboard
         "btn_referral": row_referral,
         "btn_wheel": row_wheel,
         "btn_contact": row_contact,
+        "btn_reseller_request": row_reseller_request,
         "btn_admin_panel": row_admin_panel,
     }
 
@@ -134,10 +141,6 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False) -> ReplyKeyboard
 
     if is_reseller:
         row = row_reseller_panel()
-        if row:
-            rows.insert(1 if rows else 0, row)
-    else:
-        row = row_reseller_request()
         if row:
             rows.insert(1 if rows else 0, row)
 
@@ -803,12 +806,13 @@ def gb_reseller_panel_select_kb(servers, user_tg_id: int) -> InlineKeyboardMarku
 # درخواست نمایندگی
 # ---------------------------------------------------------------------------
 
-def reseller_request_type_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🤖 بات خام مستقل با آیدی خودم", callback_data="reseller_req_type:bot")],
-        [InlineKeyboardButton(text="📦 اعتبار حجمی از همین بات", callback_data="reseller_req_type:credit")],
-        [InlineKeyboardButton(text="❌ انصراف", callback_data="cancel_flow")],
-    ])
+def reseller_request_type_kb(show_bot_option: bool = True) -> InlineKeyboardMarkup:
+    rows = []
+    if show_bot_option:
+        rows.append([InlineKeyboardButton(text="🤖 بات خام مستقل با آیدی خودم", callback_data="reseller_req_type:bot")])
+    rows.append([InlineKeyboardButton(text="📦 اعتبار حجمی از همین بات", callback_data="reseller_req_type:credit")])
+    rows.append([InlineKeyboardButton(text="❌ انصراف", callback_data="cancel_flow")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def reseller_request_admin_kb(request_id: int, request_type: str = "credit") -> InlineKeyboardMarkup:

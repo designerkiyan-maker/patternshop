@@ -110,8 +110,11 @@ DEFAULT_SETTINGS = {
     "btn_custom_config_style": "primary",
     "adm_panel_servers_style": "",
     "adm_custom_config_settings_style": "",
+    "reseller_request_enabled": "1",
+    "btn_reseller_request": "🤝 درخواست نمایندگی",
+    "btn_reseller_request_style": "",
     # چیدمان دکمه‌های منوی اصلی (ترتیب و نمایش) - آرایه JSON از کلیدها
-    "menu_order": '["miniapp","btn_buy","btn_test","btn_my_orders","btn_wallet","btn_referral","btn_wheel","btn_contact","btn_admin_panel"]',
+    "menu_order": '["miniapp","btn_buy","btn_test","btn_my_orders","btn_wallet","btn_referral","btn_wheel","btn_contact","btn_reseller_request","btn_admin_panel"]',
 }
 
 
@@ -128,8 +131,9 @@ MENU_BUTTON_META = {
     "btn_wheel": {"label": "دکمه گردونه شانس", "toggle_key": "wheel_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_contact": {"label": "دکمه ارتباط با پشتیبانی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
     "btn_admin_panel": {"label": "دکمه پنل مدیریت", "toggle_key": None, "admin_only": True, "has_text": True, "has_style": True},
+    "btn_reseller_request": {"label": "دکمه درخواست نمایندگی", "toggle_key": "reseller_request_enabled", "admin_only": False, "has_text": True, "has_style": True},
 }
-DEFAULT_MENU_ORDER = ["miniapp", "btn_buy", "btn_test", "btn_my_orders", "btn_wallet", "btn_referral", "btn_wheel", "btn_contact", "btn_admin_panel"]
+DEFAULT_MENU_ORDER = ["miniapp", "btn_buy", "btn_test", "btn_my_orders", "btn_wallet", "btn_referral", "btn_wheel", "btn_contact", "btn_reseller_request", "btn_admin_panel"]
 
 
 class Database:
