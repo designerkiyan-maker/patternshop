@@ -187,3 +187,28 @@ class AdminAdjustResellerCredit(StatesGroup):
 class AdminSetResellerDuration(StatesGroup):
     waiting_min = State()
     waiting_max = State()
+
+
+class ResellerProductFlow(StatesGroup):
+    waiting_title = State()
+    waiting_volume = State()
+    waiting_duration = State()
+    waiting_price = State()
+
+
+class SubResellerAddFlow(StatesGroup):
+    waiting_display_name = State()
+
+
+class SubResellerCreditFlow(StatesGroup):
+    waiting_amount = State()
+
+
+class SubResellerCardFlow(StatesGroup):
+    waiting_number = State()
+    waiting_holder = State()
+
+
+class ResellerStoreFlow(StatesGroup):
+    waiting_username = State()
+    waiting_receipt = State()

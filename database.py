@@ -333,6 +333,43 @@ class Database:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
+                -- ===================== زیرنمایندگی (سطح ۲، بدون بات/توکن مستقل) =====================
+                CREATE TABLE IF NOT EXISTS sub_resellers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_id INTEGER UNIQUE NOT NULL,
+                    display_name TEXT,
+                    credit_gb INTEGER DEFAULT 0,
+                    panel_server_id INTEGER,
+                    card_number TEXT,
+                    card_holder_name TEXT,
+                    invite_slug TEXT UNIQUE,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS sub_reseller_credit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sub_reseller_id INTEGER NOT NULL,
+                    delta_gb INTEGER NOT NULL,
+                    reason TEXT,
+                    admin_id INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                -- ===================== بانک کانفیگ نمایندگان (محصول ثابت برای فروشگاه) =====================
+                CREATE TABLE IF NOT EXISTS reseller_products (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    seller_type TEXT NOT NULL,        -- 'owner' یا 'sub_reseller'
+                    seller_id INTEGER NOT NULL,        -- telegram_id فروشنده (owner یا sub_reseller)
+                    title TEXT NOT NULL,
+                    volume_gb INTEGER NOT NULL,
+                    duration_days INTEGER NOT NULL,
+                    price INTEGER NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    sort_order INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS support_messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
@@ -403,6 +440,10 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_reseller_bots_active ON reseller_bots(is_active);
                 CREATE INDEX IF NOT EXISTS idx_crypto_invoices_txn ON crypto_invoices(txn_id);
                 CREATE INDEX IF NOT EXISTS idx_crypto_invoices_ref ON crypto_invoices(kind, ref_id);
+                CREATE INDEX IF NOT EXISTS idx_sub_resellers_active ON sub_resellers(is_active);
+                CREATE INDEX IF NOT EXISTS idx_sub_reseller_credit_log_sr ON sub_reseller_credit_log(sub_reseller_id);
+                CREATE INDEX IF NOT EXISTS idx_reseller_products_seller ON reseller_products(seller_type, seller_id);
+                CREATE INDEX IF NOT EXISTS idx_reseller_products_active ON reseller_products(is_active);
 
                 -- ===================== ساخت کانفیگ شخصی (پنل‌های VPN) =====================
                 CREATE TABLE IF NOT EXISTS panel_servers (
@@ -548,6 +589,18 @@ class Database:
             ("custom_configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "volume_reminder_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "source", "TEXT DEFAULT 'custom_config'"),
+            # یکسان‌سازی بات مستقل/حجمی: بات حجمی هم توکن/آیدی واقعی خودش را دارد،
+            # فقط علاوه بر آن یک استخر حجم (credit_gb) و پنل پیش‌فرض خودش را هم دارد.
+            ("reseller_bots", "mode", "TEXT DEFAULT 'independent'"),
+            ("reseller_bots", "credit_gb", "INTEGER DEFAULT 0"),
+            ("reseller_bots", "panel_server_id", "INTEGER"),
+            # پنل خصوصی زیرنماینده (اگر NULL باشد یعنی پنل عمومی/سراسری ادمین است)
+            ("panel_servers", "owner_sub_reseller_id", "INTEGER"),
+            # مسیریابی سفارش‌های خریدشده از بانک کانفیگ نمایندگان
+            ("orders", "reseller_product_id", "INTEGER"),
+            ("orders", "sub_reseller_id", "INTEGER"),
+            ("reseller_bot_setup_state", "mode", "TEXT DEFAULT 'independent'"),
+            ("orders", "is_reseller_product", "INTEGER DEFAULT 0"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -1212,9 +1265,28 @@ class Database:
                 (datetime.utcnow().isoformat(), order_id),
             )
 
+    def create_reseller_product_order(
+        self,
+        user_tg_id: int,
+        reseller_product_id: int,
+        username: str,
+        base_price: int,
+        wallet_used: int = 0,
+        sub_reseller_id: int = None,
+    ) -> int:
+        """سفارش خرید از «بانک کانفیگ نماینده/زیرنماینده» - از همان جدول orders استفاده می‌کند
+        (product_id=0 سنتینل) تا مسیر پرداخت کارت/کیف‌پول فعلی بدون تغییر کار کند."""
+        final_price = max(base_price - wallet_used, 0)
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO orders (user_id, product_id, status, base_price, wallet_used, final_price, "
+                "quantity, is_reseller_product, custom_username, reseller_product_id, sub_reseller_id) "
+                "VALUES (?, 0, 'pending', ?, ?, ?, 1, 1, ?, ?, ?)",
+                (user_tg_id, base_price, wallet_used, final_price, username, reseller_product_id, sub_reseller_id),
+            )
+            return cur.lastrowid
+
     def create_reseller_bot_fee_order(self, user_tg_id: int, price: int, request_id: int) -> int:
-        """سفارش هزینه‌ی ساخت بات نمایندگی - از همان جدول orders استفاده می‌کند
-        (product_id=0 سنتینل) تا مسیر پرداخت کارت/کریپتوی فعلی بدون تغییر کار کند."""
         with self._get_conn() as conn:
             cur = conn.execute(
                 "INSERT INTO orders (user_id, product_id, status, base_price, wallet_used, final_price, "
@@ -1670,12 +1742,14 @@ class Database:
     # ثبت‌نام بات‌های نمایندگی (فقط در دیتابیس بات اصلی معنا دارد)
     # -----------------------------------------------------------------------
 
-    def register_reseller_bot(self, bot_token: str, bot_username: str, owner_telegram_id: int, owner_name: str, db_path: str) -> int:
+    def register_reseller_bot(self, bot_token: str, bot_username: str, owner_telegram_id: int, owner_name: str,
+                               db_path: str, mode: str = "independent") -> int:
+        """mode: 'independent' (بات خام مستقل) یا 'volume' (بات با حجم - همچنان بات/توکن/دیتابیس کاملاً مستقل خودش را دارد)."""
         with self._get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO reseller_bots (bot_token, bot_username, owner_telegram_id, owner_name, db_path) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (bot_token, bot_username, owner_telegram_id, owner_name, db_path),
+                "INSERT INTO reseller_bots (bot_token, bot_username, owner_telegram_id, owner_name, db_path, mode) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (bot_token, bot_username, owner_telegram_id, owner_name, db_path, mode),
             )
             return cur.lastrowid
 
@@ -2551,12 +2625,12 @@ class Database:
     # فلوی خودکار خودسرویس ساخت بات نمایندگی (بعد از تایید درخواست)
     # -----------------------------------------------------------------------
 
-    def start_reseller_bot_setup(self, user_id: int):
+    def start_reseller_bot_setup(self, user_id: int, mode: str = "independent"):
         with self._get_conn() as conn:
             conn.execute(
-                "INSERT INTO reseller_bot_setup_state (user_id, step) VALUES (?, 'waiting_token') "
-                "ON CONFLICT(user_id) DO UPDATE SET step='waiting_token', token=NULL, bot_username=NULL",
-                (user_id,),
+                "INSERT INTO reseller_bot_setup_state (user_id, step, mode) VALUES (?, 'waiting_token', ?) "
+                "ON CONFLICT(user_id) DO UPDATE SET step='waiting_token', token=NULL, bot_username=NULL, mode=excluded.mode",
+                (user_id, mode),
             )
 
     def get_reseller_bot_setup_step(self, user_id: int):
@@ -2582,3 +2656,181 @@ class Database:
     def clear_reseller_bot_setup(self, user_id: int):
         with self._get_conn() as conn:
             conn.execute("DELETE FROM reseller_bot_setup_state WHERE user_id=?", (user_id,))
+
+    # -----------------------------------------------------------------------
+    # زیرنمایندگی (یک سطح، بدون بات/توکن مستقل - داخل همین دیتابیس)
+    # -----------------------------------------------------------------------
+
+    def create_sub_reseller(self, telegram_id: int, display_name: str = None, invite_slug: str = None) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO sub_resellers (telegram_id, display_name, invite_slug) VALUES (?, ?, ?)",
+                (telegram_id, display_name, invite_slug),
+            )
+            return cur.lastrowid
+
+    def get_sub_reseller(self, sub_reseller_id: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM sub_resellers WHERE id=?", (sub_reseller_id,)).fetchone()
+
+    def get_sub_reseller_by_telegram_id(self, telegram_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM sub_resellers WHERE telegram_id=?", (telegram_id,)
+            ).fetchone()
+
+    def get_sub_reseller_by_slug(self, slug: str):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM sub_resellers WHERE invite_slug=?", (slug,)).fetchone()
+
+    def is_sub_reseller(self, telegram_id: int) -> bool:
+        row = self.get_sub_reseller_by_telegram_id(telegram_id)
+        return bool(row and row["is_active"])
+
+    def list_sub_resellers(self, active_only: bool = False):
+        with self._get_conn() as conn:
+            if active_only:
+                return conn.execute(
+                    "SELECT * FROM sub_resellers WHERE is_active=1 ORDER BY id"
+                ).fetchall()
+            return conn.execute("SELECT * FROM sub_resellers ORDER BY id").fetchall()
+
+    def toggle_sub_reseller(self, sub_reseller_id: int):
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT is_active FROM sub_resellers WHERE id=?", (sub_reseller_id,)
+            ).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE sub_resellers SET is_active=? WHERE id=?",
+                    (0 if row["is_active"] else 1, sub_reseller_id),
+                )
+
+    def delete_sub_reseller(self, sub_reseller_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM sub_resellers WHERE id=?", (sub_reseller_id,))
+
+    def set_sub_reseller_card(self, sub_reseller_id: int, card_number: str, card_holder_name: str = None):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE sub_resellers SET card_number=?, card_holder_name=? WHERE id=?",
+                (card_number, card_holder_name, sub_reseller_id),
+            )
+
+    def set_sub_reseller_panel_server(self, sub_reseller_id: int, panel_server_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE sub_resellers SET panel_server_id=? WHERE id=?",
+                (panel_server_id, sub_reseller_id),
+            )
+
+    def adjust_sub_reseller_credit(self, sub_reseller_id: int, delta_gb: int, admin_id: int = None, reason: str = None):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE sub_resellers SET credit_gb = credit_gb + ? WHERE id=?",
+                (delta_gb, sub_reseller_id),
+            )
+            conn.execute(
+                "INSERT INTO sub_reseller_credit_log (sub_reseller_id, delta_gb, reason, admin_id) VALUES (?, ?, ?, ?)",
+                (sub_reseller_id, delta_gb, reason, admin_id),
+            )
+
+    def grant_credit_to_sub_reseller(self, owner_id: int, sub_reseller_id: int, delta_gb: int, admin_id: int = None) -> bool:
+        """بخشی از اعتبار حجمیِ خودِ نماینده (owner) را به زیرنماینده‌اش منتقل می‌کند
+        (یعنی از حجم owner کم و به credit_gb زیرنماینده اضافه می‌شود)."""
+        owner_credit = self.get_reseller_credit(owner_id)
+        if delta_gb <= 0 or owner_credit < delta_gb:
+            return False
+        self.adjust_reseller_credit(owner_id, -delta_gb, reason=f"انتقال به زیرنماینده #{sub_reseller_id}")
+        self.adjust_sub_reseller_credit(sub_reseller_id, delta_gb, admin_id=admin_id, reason="دریافت از نماینده")
+        return True
+
+    def get_sub_reseller_credit_log(self, sub_reseller_id: int, limit: int = 20):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM sub_reseller_credit_log WHERE sub_reseller_id=? ORDER BY id DESC LIMIT ?",
+                (sub_reseller_id, limit),
+            ).fetchall()
+
+    # -----------------------------------------------------------------------
+    # بانک کانفیگ نمایندگان (محصولات ثابت owner یا sub_reseller برای فروشگاه)
+    # -----------------------------------------------------------------------
+
+    def create_reseller_product(self, seller_type: str, seller_id: int, title: str,
+                                 volume_gb: int, duration_days: int, price: int) -> int:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), -1) AS m FROM reseller_products WHERE seller_type=? AND seller_id=?",
+                (seller_type, seller_id),
+            ).fetchone()
+            sort_order = (row["m"] if row else -1) + 1
+            cur = conn.execute(
+                "INSERT INTO reseller_products (seller_type, seller_id, title, volume_gb, duration_days, price, sort_order) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (seller_type, seller_id, title, volume_gb, duration_days, price, sort_order),
+            )
+            return cur.lastrowid
+
+    def get_reseller_product(self, product_id: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM reseller_products WHERE id=?", (product_id,)).fetchone()
+
+    def list_reseller_products(self, seller_type: str = None, seller_id: int = None, active_only: bool = False):
+        query = "SELECT * FROM reseller_products WHERE 1=1"
+        params = []
+        if seller_type is not None:
+            query += " AND seller_type=?"
+            params.append(seller_type)
+        if seller_id is not None:
+            query += " AND seller_id=?"
+            params.append(seller_id)
+        if active_only:
+            query += " AND is_active=1"
+        query += " ORDER BY sort_order, id"
+        with self._get_conn() as conn:
+            return conn.execute(query, params).fetchall()
+
+    def update_reseller_product(self, product_id: int, title: str = None, volume_gb: int = None,
+                                 duration_days: int = None, price: int = None):
+        fields, values = [], []
+        if title is not None:
+            fields.append("title=?"); values.append(title)
+        if volume_gb is not None:
+            fields.append("volume_gb=?"); values.append(volume_gb)
+        if duration_days is not None:
+            fields.append("duration_days=?"); values.append(duration_days)
+        if price is not None:
+            fields.append("price=?"); values.append(price)
+        if not fields:
+            return
+        values.append(product_id)
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE reseller_products SET {', '.join(fields)} WHERE id=?", values)
+
+    def toggle_reseller_product(self, product_id: int):
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT is_active FROM reseller_products WHERE id=?", (product_id,)
+            ).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE reseller_products SET is_active=? WHERE id=?",
+                    (0 if row["is_active"] else 1, product_id),
+                )
+
+    def delete_reseller_product(self, product_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM reseller_products WHERE id=?", (product_id,))
+
+    def get_storefront_reseller_products(self):
+        """همه‌ی محصولات فعالِ بانک کانفیگ (owner + همه‌ی زیرنماینده‌های فعال) برای نمایش در «خرید کانفیگ»."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT rp.* FROM reseller_products rp "
+                "WHERE rp.is_active=1 AND ("
+                "  rp.seller_type='owner' "
+                "  OR (rp.seller_type='sub_reseller' AND EXISTS ("
+                "      SELECT 1 FROM sub_resellers sr WHERE sr.telegram_id=rp.seller_id AND sr.is_active=1"
+                "  ))"
+                ") ORDER BY rp.sort_order, rp.id"
+            ).fetchall()

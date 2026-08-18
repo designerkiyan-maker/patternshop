@@ -21,7 +21,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest, TelegramNetworkError
 
 import keyboards as kb
-from states import BuyFlow, ContactFlow, DiscountEntry, WalletTopup, CustomConfigFlow, ResellerFlow, ResellerRequestFlow
+from states import BuyFlow, ContactFlow, DiscountEntry, WalletTopup, CustomConfigFlow, ResellerFlow, ResellerRequestFlow, ResellerProductFlow, SubResellerCardFlow, ResellerStoreFlow
 from config import MAX_TEST_PER_USER
 from config_delivery import deliver_config_to_user
 from force_join import is_channel_member, CHECK_CALLBACK
@@ -133,12 +133,13 @@ def create_user_router(db, bot_manager=None) -> Router:
 
         token = setup["token"]
         bot_username = setup["bot_username"]
+        mode = setup["mode"] if "mode" in setup.keys() else "independent"
         user = db.get_user(message.from_user.id)
         owner_name = (user["first_name"] if user else None) or (user["username"] if user else None) or str(owner_id)
 
         os.makedirs(RESELLER_DBS_DIR, exist_ok=True)
         db_path = os.path.join(RESELLER_DBS_DIR, f"{bot_username}.db")
-        reseller_id = db.register_reseller_bot(token, bot_username, owner_id, owner_name, db_path)
+        reseller_id = db.register_reseller_bot(token, bot_username, owner_id, owner_name, db_path, mode=mode)
 
         started = await bot_manager.start_bot(token, db_path, owner_id, is_main_bot=False)
 
@@ -152,25 +153,37 @@ def create_user_router(db, bot_manager=None) -> Router:
             if admin_id != owner_id:
                 reseller_db.add_admin(admin_id, role="admin")
 
+        if mode == "volume":
+            # بات با حجم: صاحب بات همان لحظه به‌عنوان نماینده‌ی حجمی (استخر گیگابایت) داخل
+            # دیتابیس مستقل خودش فعال می‌شود؛ ادمین بعداً فقط باید شارژش کند.
+            reseller_db.set_reseller_status(owner_id, True)
+
         db.clear_reseller_bot_setup(message.from_user.id)
-        db.log_admin_action(message.from_user.id, "reseller_self_bot_created", f"بات @{bot_username} (#{reseller_id})")
+        db.log_admin_action(message.from_user.id, "reseller_self_bot_created", f"بات @{bot_username} (#{reseller_id}) | mode={mode}")
 
         status_text = "✅ بات نمایندگی شما ساخته و روشن شد!" if started else \
             "⚠️ بات ثبت شد ولی راه‌اندازی زنده انجام نشد؛ به‌زودی خودکار روشن می‌شود."
+        mode_note = (
+            "این بات از نوع «بات با حجم» است: کاملاً مستقل (توکن/دیتابیس خودش) است و علاوه بر آن "
+            "یک استخر حجم هم دارد که با آن می‌توانی برای مشتری‌هایت کانفیگ بسازی."
+            if mode == "volume" else
+            "این بات کاملاً مستقل است و همه‌ی امکانات (کد تخفیف، زیرمجموعه‌گیری، کیف پول، کانفیگ تست) را "
+            "از صفر و جدا دارد."
+        )
         await message.answer(
             f"{status_text}\n\n"
             f"🤖 بات شما: @{bot_username}\n\n"
-            f"این بات کاملاً مستقل است و همه‌ی امکانات (کد تخفیف، زیرمجموعه‌گیری، کیف پول، کانفیگ تست) را "
-            f"از صفر و جدا دارد. برای شروع، با /start وارد @{bot_username} شو.\n\n"
+            f"{mode_note} برای شروع، با /start وارد @{bot_username} شو.\n\n"
             f"برای دریافت اعتبار حجمی و اتصال به پنل VPN، به ادمین ما پیام بده.",
         )
         try:
             for admin_id in db.list_admins():
                 await bot.send_message(
                     admin_id,
-                    f"🤖 نماینده {owner_name} ({owner_id}) بات @{bot_username} را خودکار ساخت.\n"
-                    f"برای دادن اعتبار حجمی، وارد دیتابیس همان بات نماینده شو (فعلاً از طریق «📦 مدیریت نمایندگان» "
-                    f"داخل خودِ بات @{bot_username}، چون هر بات نماینده استخر مستقل خودش را دارد).",
+                    f"🤖 نماینده {owner_name} ({owner_id}) بات @{bot_username} را خودکار ساخت (نوع: "
+                    f"{'📦 با حجم' if mode == 'volume' else '🤖 مستقل'}).\n"
+                    f"برای دادن اعتبار حجمی، وارد @{bot_username} شو و از «📦 مدیریت نمایندگان» بهش شارژ بده "
+                    f"(چون هر بات نماینده استخر مستقل خودش را دارد).",
                 )
         except Exception:
             pass
@@ -275,7 +288,8 @@ def create_user_router(db, bot_manager=None) -> Router:
         await state.clear()
         categories = db.get_categories(active_only=True)
         custom_enabled = db.get_setting("custom_config_enabled", "0") == "1"
-        if not categories and not custom_enabled:
+        has_storefront = bool(db.get_storefront_reseller_products())
+        if not categories and not custom_enabled and not has_storefront:
             await message.answer("در حال حاضر دسته‌بندی فعالی وجود ندارد.")
             return
         await message.answer("یک گزینه را انتخاب کنید:", reply_markup=kb.categories_kb(db, categories))
@@ -978,35 +992,49 @@ def create_user_router(db, bot_manager=None) -> Router:
 
     @router.message(F.text == "🧑‍💼 پنل نمایندگی")
     async def reseller_panel_open(message: Message, state: FSMContext):
-        if not db.is_reseller(message.from_user.id):
+        seller_type, seller_id = _reseller_seller_type_id(message.from_user.id)
+        if not seller_type:
             return
         await state.clear()
-        credit = db.get_reseller_credit(message.from_user.id)
+        if seller_type == "owner":
+            credit = db.get_reseller_credit(message.from_user.id)
+        else:
+            credit = db.get_sub_reseller_by_telegram_id(message.from_user.id)["credit_gb"]
         await message.answer(
             f"🧑‍💼 پنل نمایندگی\n\n"
             f"📦 اعتبار باقی‌مانده: {credit:,} گیگابایت\n\n"
             f"می‌تونی از این اعتبار مستقیم کانفیگ بسازی، بدون پرداخت جداگانه. "
             f"با هر قیمتی که خودت بخوای می‌تونی به مشتری‌هات بفروشیش.",
-            reply_markup=kb.reseller_panel_kb(),
+            reply_markup=kb.reseller_panel_kb(show_card_button=(seller_type == "sub_reseller")),
         )
+
+    def _reseller_resolve_panel(seller_type: str, seller_id: int):
+        if seller_type == "owner":
+            reseller_cfg = db.get_reseller_config(seller_id)
+            if reseller_cfg["panel_server_id"]:
+                s = db.get_panel_server(reseller_cfg["panel_server_id"])
+                if s and s["is_active"]:
+                    return s
+        else:
+            sub = db.get_sub_reseller_by_telegram_id(seller_id)
+            if sub and sub["panel_server_id"]:
+                s = db.get_panel_server(sub["panel_server_id"])
+                if s and s["is_active"]:
+                    return s
+        return db.get_panel_server_for_usage("reseller")
 
     @router.callback_query(F.data == "reseller_new_config")
     async def cb_reseller_new_config(call: CallbackQuery, state: FSMContext):
-        if not db.is_reseller(call.from_user.id):
+        seller_type, seller_id = _reseller_seller_type_id(call.from_user.id)
+        if not seller_type:
             await call.answer("دسترسی نداری.", show_alert=True)
             return
-        credit = db.get_reseller_credit(call.from_user.id)
+        credit = db.get_reseller_credit(seller_id) if seller_type == "owner" else \
+            db.get_sub_reseller_by_telegram_id(seller_id)["credit_gb"]
         if credit <= 0:
-            await call.answer("اعتبار شما کافی نیست. با ادمین تماس بگیر.", show_alert=True)
+            await call.answer("اعتبار شما کافی نیست. با نماینده/ادمین بالادستی تماس بگیر.", show_alert=True)
             return
-        reseller_cfg = db.get_reseller_config(call.from_user.id)
-        server = None
-        if reseller_cfg["panel_server_id"]:
-            s = db.get_panel_server(reseller_cfg["panel_server_id"])
-            if s and s["is_active"]:
-                server = s
-        if not server:
-            server = db.get_panel_server_for_usage("reseller")
+        server = _reseller_resolve_panel(seller_type, seller_id)
         if not server:
             await call.answer("هنوز سروری برای نمایندگی توسط ادمین تنظیم نشده.", show_alert=True)
             return
@@ -1057,19 +1085,28 @@ def create_user_router(db, bot_manager=None) -> Router:
             await message.answer("❌ لطفاً فقط عدد صحیح مثبت وارد کنید.")
             return
         volume_gb = int(text)
-        credit = db.get_reseller_credit(message.from_user.id)
+        seller_type, seller_id = _reseller_seller_type_id(message.from_user.id)
+        if not seller_type:
+            return
+        credit = db.get_reseller_credit(seller_id) if seller_type == "owner" else \
+            db.get_sub_reseller_by_telegram_id(seller_id)["credit_gb"]
         if volume_gb > credit:
             await message.answer(f"❌ اعتبار شما کافی نیست. اعتبار باقی‌مانده: {credit:,} گیگ.")
             return
 
-        reseller_cfg = db.get_reseller_config(message.from_user.id)
         await state.update_data(reseller_volume_gb=volume_gb)
         await state.set_state(ResellerFlow.waiting_duration)
-        await message.answer(
-            f"⏳ حالا مدت اعتبار این کانفیگ را به روز وارد کن.\n"
-            f"حداقل: {reseller_cfg['min_duration_days']} روز — حداکثر: {reseller_cfg['max_duration_days']} روز",
-            reply_markup=kb.cancel_kb(),
-        )
+        if seller_type == "owner":
+            reseller_cfg = db.get_reseller_config(seller_id)
+            await state.update_data(reseller_min_dur=reseller_cfg["min_duration_days"], reseller_max_dur=reseller_cfg["max_duration_days"])
+            await message.answer(
+                f"⏳ حالا مدت اعتبار این کانفیگ را به روز وارد کن.\n"
+                f"حداقل: {reseller_cfg['min_duration_days']} روز — حداکثر: {reseller_cfg['max_duration_days']} روز",
+                reply_markup=kb.cancel_kb(),
+            )
+        else:
+            await state.update_data(reseller_min_dur=1, reseller_max_dur=3650)
+            await message.answer("⏳ حالا مدت اعتبار این کانفیگ را به روز وارد کن:", reply_markup=kb.cancel_kb())
 
     @router.message(ResellerFlow.waiting_duration)
     async def reseller_receive_duration(message: Message, state: FSMContext):
@@ -1078,18 +1115,21 @@ def create_user_router(db, bot_manager=None) -> Router:
             await message.answer("❌ لطفاً فقط عدد صحیح مثبت وارد کنید.")
             return
         duration_days = int(text)
-        reseller_cfg = db.get_reseller_config(message.from_user.id)
-        if duration_days < reseller_cfg["min_duration_days"] or duration_days > reseller_cfg["max_duration_days"]:
-            await message.answer(
-                f"❌ مدت باید بین {reseller_cfg['min_duration_days']} تا {reseller_cfg['max_duration_days']} روز باشد."
-            )
+        data = await state.get_data()
+        min_dur, max_dur = data.get("reseller_min_dur", 1), data.get("reseller_max_dur", 3650)
+        if duration_days < min_dur or duration_days > max_dur:
+            await message.answer(f"❌ مدت باید بین {min_dur} تا {max_dur} روز باشد.")
             return
 
-        data = await state.get_data()
         volume_gb = data["reseller_volume_gb"]
         server = db.get_panel_server(data.get("panel_server_id"))
         if not server or not server["is_active"]:
             await message.answer("⛔️ سرور نمایندگی دیگر در دسترس نیست.")
+            await state.clear()
+            return
+
+        seller_type, seller_id = _reseller_seller_type_id(message.from_user.id)
+        if not seller_type:
             await state.clear()
             return
 
@@ -1103,12 +1143,17 @@ def create_user_router(db, bot_manager=None) -> Router:
             await message.answer(f"⛔️ خطا در ساخت کانفیگ: {e}")
             return
 
-        db.adjust_reseller_credit(message.from_user.id, -volume_gb, reason=f"ساخت کانفیگ «{result.username}»")
+        if seller_type == "owner":
+            db.adjust_reseller_credit(seller_id, -volume_gb, reason=f"ساخت کانفیگ «{result.username}»")
+            new_credit = db.get_reseller_credit(seller_id)
+        else:
+            sub = db.get_sub_reseller_by_telegram_id(seller_id)
+            db.adjust_sub_reseller_credit(sub["id"], -volume_gb, reason=f"ساخت کانفیگ «{result.username}»")
+            new_credit = db.get_sub_reseller_by_telegram_id(seller_id)["credit_gb"]
         db.add_custom_config(
             message.from_user.id, server["id"], result.username, volume_gb, duration_days, result.subscription_url,
             source="reseller",
         )
-        new_credit = db.get_reseller_credit(message.from_user.id)
         await state.clear()
         await message.answer(
             f"✅ کانفیگ ساخته شد!\n\n"
@@ -1119,6 +1164,471 @@ def create_user_router(db, bot_manager=None) -> Router:
             parse_mode="Markdown",
             reply_markup=kb.menu_for_user(db, message.from_user.id),
         )
+
+
+    # -----------------------------------------------------------------------
+    # بانک کانفیگ نماینده (محصول ثابت که در «خرید کانفیگ» به مشتری دیده می‌شود)
+    # -----------------------------------------------------------------------
+
+    def _reseller_seller_type_id(user_id: int):
+        """اگر یوزر نماینده‌ی حجمی خود این باتِ (owner) باشد seller_type='owner' و seller_id=telegram_id او؛
+        اگر زیرنماینده‌ی فعال باشد seller_type='sub_reseller'. در غیر این صورت None."""
+        if db.is_reseller(user_id):
+            return "owner", user_id
+        if db.is_sub_reseller(user_id):
+            return "sub_reseller", user_id
+        return None, None
+
+    @router.callback_query(F.data == "reseller_panel_back")
+    async def cb_reseller_panel_back(call: CallbackQuery):
+        seller_type, _ = _reseller_seller_type_id(call.from_user.id)
+        if not seller_type:
+            await call.answer("دسترسی نداری.", show_alert=True)
+            return
+        credit = db.get_reseller_credit(call.from_user.id) if seller_type == "owner" else \
+            db.get_sub_reseller_by_telegram_id(call.from_user.id)["credit_gb"]
+        await call.message.edit_text(
+            f"🧑‍💼 پنل نمایندگی\n\n"
+            f"📦 اعتبار باقی‌مانده: {credit:,} گیگابایت",
+            reply_markup=kb.reseller_panel_kb(show_card_button=(seller_type == "sub_reseller")),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "reseller_products_menu")
+    async def cb_reseller_products_menu(call: CallbackQuery):
+        seller_type, seller_id = _reseller_seller_type_id(call.from_user.id)
+        if not seller_type:
+            await call.answer("دسترسی نداری.", show_alert=True)
+            return
+        products = db.list_reseller_products(seller_type=seller_type, seller_id=seller_id)
+        await call.message.edit_text(
+            "🛍 محصولات من\n\n"
+            "این‌ها محصولاتی هستند که مستقیم در «خرید کانفیگ» به مشتری‌هات نمایش داده می‌شوند و از "
+            "اعتبار حجمی خودت ساخته و کسر می‌شوند.",
+            reply_markup=kb.reseller_products_list_kb(products),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "rprod_add")
+    async def cb_rprod_add(call: CallbackQuery, state: FSMContext):
+        seller_type, seller_id = _reseller_seller_type_id(call.from_user.id)
+        if not seller_type:
+            await call.answer("دسترسی نداری.", show_alert=True)
+            return
+        await state.set_state(ResellerProductFlow.waiting_title)
+        await call.answer()
+        await call.message.answer("عنوان محصول را وارد کن (مثلاً «۳۰ گیگ ماهانه»):", reply_markup=kb.cancel_kb())
+
+    @router.message(ResellerProductFlow.waiting_title)
+    async def rprod_receive_title(message: Message, state: FSMContext):
+        title = (message.text or "").strip()
+        if not title:
+            await message.answer("❌ عنوان نامعتبر است.")
+            return
+        await state.update_data(rprod_title=title)
+        await state.set_state(ResellerProductFlow.waiting_volume)
+        await message.answer("حجم این محصول را به گیگابایت وارد کن:", reply_markup=kb.cancel_kb())
+
+    @router.message(ResellerProductFlow.waiting_volume)
+    async def rprod_receive_volume(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("❌ لطفاً فقط عدد صحیح مثبت وارد کنید.")
+            return
+        await state.update_data(rprod_volume=int(text))
+        await state.set_state(ResellerProductFlow.waiting_duration)
+        await message.answer("مدت اعتبار این محصول را به روز وارد کن:", reply_markup=kb.cancel_kb())
+
+    @router.message(ResellerProductFlow.waiting_duration)
+    async def rprod_receive_duration(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("❌ لطفاً فقط عدد صحیح مثبت وارد کنید.")
+            return
+        await state.update_data(rprod_duration=int(text))
+        await state.set_state(ResellerProductFlow.waiting_price)
+        await message.answer("قیمت فروش این محصول را به تومان وارد کن:", reply_markup=kb.cancel_kb())
+
+    @router.message(ResellerProductFlow.waiting_price)
+    async def rprod_receive_price(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("❌ لطفاً فقط عدد صحیح مثبت وارد کنید.")
+            return
+        seller_type, seller_id = _reseller_seller_type_id(message.from_user.id)
+        if not seller_type:
+            await state.clear()
+            return
+        data = await state.get_data()
+        db.create_reseller_product(
+            seller_type, seller_id, data["rprod_title"], data["rprod_volume"], data["rprod_duration"], int(text),
+        )
+        await state.clear()
+        products = db.list_reseller_products(seller_type=seller_type, seller_id=seller_id)
+        await message.answer(
+            "✅ محصول ساخته شد و از همین الان در «خرید کانفیگ» به مشتری‌هات نمایش داده می‌شود.",
+            reply_markup=kb.reseller_products_list_kb(products),
+        )
+
+    @router.callback_query(F.data.startswith("rprod_view:"))
+    async def cb_rprod_view(call: CallbackQuery):
+        product_id = int(call.data.split(":")[1])
+        product = db.get_reseller_product(product_id)
+        seller_type, seller_id = _reseller_seller_type_id(call.from_user.id)
+        if not product or not seller_type or product["seller_type"] != seller_type or product["seller_id"] != seller_id:
+            await call.answer("محصول یافت نشد.", show_alert=True)
+            return
+        await call.message.edit_text(
+            f"🛍 {product['title']}\n\n"
+            f"📶 حجم: {product['volume_gb']} گیگ\n"
+            f"⏳ مدت: {product['duration_days']} روز\n"
+            f"💰 قیمت: {product['price']:,} تومان\n"
+            f"وضعیت: {'🟢 فعال' if product['is_active'] else '🔴 غیرفعال'}",
+            reply_markup=kb.reseller_product_view_kb(product_id),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("rprod_toggle:"))
+    async def cb_rprod_toggle(call: CallbackQuery):
+        product_id = int(call.data.split(":")[1])
+        product = db.get_reseller_product(product_id)
+        seller_type, seller_id = _reseller_seller_type_id(call.from_user.id)
+        if not product or not seller_type or product["seller_type"] != seller_type or product["seller_id"] != seller_id:
+            await call.answer("محصول یافت نشد.", show_alert=True)
+            return
+        db.toggle_reseller_product(product_id)
+        await cb_rprod_view(call)
+
+    @router.callback_query(F.data.startswith("rprod_del:"))
+    async def cb_rprod_del(call: CallbackQuery):
+        product_id = int(call.data.split(":")[1])
+        product = db.get_reseller_product(product_id)
+        seller_type, seller_id = _reseller_seller_type_id(call.from_user.id)
+        if not product or not seller_type or product["seller_type"] != seller_type or product["seller_id"] != seller_id:
+            await call.answer("محصول یافت نشد.", show_alert=True)
+            return
+        db.delete_reseller_product(product_id)
+        await call.answer("حذف شد.")
+        await cb_reseller_products_menu(call)
+
+    # -----------------------------------------------------------------------
+    # شماره کارت اختصاصی زیرنماینده (پرداخت مشتری مستقیم به خودش)
+    # -----------------------------------------------------------------------
+
+    @router.callback_query(F.data == "subres_set_card")
+    async def cb_subres_set_card(call: CallbackQuery, state: FSMContext):
+        if not db.is_sub_reseller(call.from_user.id):
+            await call.answer("دسترسی نداری.", show_alert=True)
+            return
+        await state.set_state(SubResellerCardFlow.waiting_number)
+        await call.answer()
+        await call.message.answer("شماره کارت ۱۶ رقمی خودت رو بفرست:", reply_markup=kb.cancel_kb())
+
+    @router.message(SubResellerCardFlow.waiting_number)
+    async def subres_receive_card_number(message: Message, state: FSMContext):
+        number = re.sub(r"\D", "", message.text or "")
+        if len(number) != 16:
+            await message.answer("❌ شماره کارت باید دقیقاً ۱۶ رقم باشد.")
+            return
+        await state.update_data(card_number=number)
+        await state.set_state(SubResellerCardFlow.waiting_holder)
+        await message.answer("نام و نام‌خانوادگی صاحب کارت را بفرست:", reply_markup=kb.cancel_kb())
+
+    @router.message(SubResellerCardFlow.waiting_holder)
+    async def subres_receive_card_holder(message: Message, state: FSMContext):
+        holder = (message.text or "").strip()
+        if not holder:
+            await message.answer("❌ نام نامعتبر است.")
+            return
+        data = await state.get_data()
+        sub = db.get_sub_reseller_by_telegram_id(message.from_user.id)
+        if not sub:
+            await state.clear()
+            return
+        db.set_sub_reseller_card(sub["id"], data["card_number"], holder)
+        await state.clear()
+        await message.answer(
+            "✅ شماره کارتت ثبت شد. از این به بعد مشتری‌هایی که از محصولات تو خرید می‌کنن، مستقیم به این کارت پرداخت می‌کنن.",
+            reply_markup=kb.menu_for_user(db, message.from_user.id),
+        )
+
+    # -----------------------------------------------------------------------
+    # فروشگاه بانک کانفیگ نمایندگان (نمایش به مشتری + خرید و تحویل خودکار)
+    # -----------------------------------------------------------------------
+
+    async def _notify_seller_of_order(bot: Bot, order_id: int, receipt_file_id: str = None):
+        order = db.get_order(order_id)
+        product = db.get_reseller_product(order["reseller_product_id"])
+        if not product:
+            return
+        buyer = db.get_user(order["user_id"])
+        buyer_label = f"@{buyer['username']}" if buyer and buyer["username"] else str(order["user_id"])
+        caption = (
+            f"🛍 سفارش جدید از بانک کانفیگ\n\n"
+            f"📦 محصول: {product['title']} ({product['volume_gb']} گیگ / {product['duration_days']} روز)\n"
+            f"🧑 مشتری: {buyer_label}\n"
+            f"🛠 یوزرنیم درخواستی: {order['custom_username']}\n"
+            f"💰 مبلغ: {order['final_price']:,} تومان\n"
+        )
+        recipients = db.list_admins() if product["seller_type"] == "owner" else [product["seller_id"]]
+        for chat_id in recipients:
+            try:
+                if receipt_file_id:
+                    msg = await bot.send_photo(chat_id, receipt_file_id, caption=caption, reply_markup=kb.reseller_order_review_kb(order_id))
+                else:
+                    msg = await bot.send_message(chat_id, caption, reply_markup=kb.reseller_order_review_kb(order_id))
+                db.set_order_admin_message(order_id, chat_id, msg.message_id)
+            except Exception:
+                pass
+
+    @router.callback_query(F.data == "rstore_open")
+    async def cb_rstore_open(call: CallbackQuery):
+        products = db.get_storefront_reseller_products()
+        if not products:
+            await call.answer("در حال حاضر محصولی موجود نیست.", show_alert=True)
+            return
+        await call.message.edit_text(
+            "🛍 بانک کانفیگ نمایندگان\n\nیکی از محصولات زیر را انتخاب کن:",
+            reply_markup=kb.reseller_storefront_kb(products),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("rstore_view:"))
+    async def cb_rstore_view(call: CallbackQuery):
+        product_id = int(call.data.split(":")[1])
+        product = db.get_reseller_product(product_id)
+        if not product or not product["is_active"]:
+            await call.answer("این محصول دیگر موجود نیست.", show_alert=True)
+            return
+        await call.message.edit_text(
+            f"🛍 {product['title']}\n\n"
+            f"📶 حجم: {product['volume_gb']} گیگ\n"
+            f"⏳ مدت: {product['duration_days']} روز\n"
+            f"💰 قیمت: {product['price']:,} تومان",
+            reply_markup=kb.reseller_storefront_confirm_kb(product_id),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("rstore_buy:"))
+    async def cb_rstore_buy(call: CallbackQuery, state: FSMContext):
+        product_id = int(call.data.split(":")[1])
+        product = db.get_reseller_product(product_id)
+        if not product or not product["is_active"]:
+            await call.answer("این محصول دیگر موجود نیست.", show_alert=True)
+            return
+        await state.set_state(ResellerStoreFlow.waiting_username)
+        await state.update_data(rstore_product_id=product_id)
+        await call.answer()
+        await call.message.answer(
+            "یک نام کاربری برای این کانفیگ وارد کن، یا از دکمه‌ی زیر یک نام تصادفی بگیر.\n"
+            "فقط حروف انگلیسی، عدد و آندرلاین (بین ۳ تا ۲۰ کاراکتر).",
+            reply_markup=kb.custom_config_username_kb(),
+        )
+
+    @router.callback_query(F.data == "custom_config_random_username", ResellerStoreFlow.waiting_username)
+    async def cb_rstore_random_username(call: CallbackQuery, state: FSMContext):
+        for _ in range(10):
+            candidate = "s" + "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=8))
+            if not db.is_custom_username_taken(candidate):
+                break
+        await call.answer()
+        await _rstore_apply_username(call.message, state, candidate)
+
+    @router.message(ResellerStoreFlow.waiting_username)
+    async def rstore_receive_username(message: Message, state: FSMContext):
+        username = (message.text or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_]{3,20}", username):
+            await message.answer("❌ نام کاربری نامعتبر است. فقط حروف انگلیسی، عدد و آندرلاین، بین ۳ تا ۲۰ کاراکتر.")
+            return
+        if db.is_custom_username_taken(username):
+            await message.answer("❌ این نام کاربری قبلاً استفاده شده. لطفاً نام دیگری انتخاب کنید.")
+            return
+        await _rstore_apply_username(message, state, username)
+
+    async def _rstore_apply_username(message: Message, state: FSMContext, username: str):
+        data = await state.get_data()
+        product = db.get_reseller_product(data["rstore_product_id"])
+        if not product or not product["is_active"]:
+            await state.clear()
+            await message.answer("⛔️ این محصول دیگر موجود نیست.")
+            return
+
+        wallet_credit = db.get_wallet_credit(message.from_user.id)
+        wallet_used = min(wallet_credit, product["price"])
+        if wallet_used > 0:
+            db.add_wallet_credit(message.from_user.id, -wallet_used)
+
+        sub_reseller_id = None
+        if product["seller_type"] == "sub_reseller":
+            sub = db.get_sub_reseller_by_telegram_id(product["seller_id"])
+            sub_reseller_id = sub["id"] if sub else None
+
+        order_id = db.create_reseller_product_order(
+            message.from_user.id, product["id"], username, product["price"],
+            wallet_used=wallet_used, sub_reseller_id=sub_reseller_id,
+        )
+        order = db.get_order(order_id)
+        await state.update_data(order_id=order_id)
+
+        if order["final_price"] <= 0:
+            await state.clear()
+            ok, info = await _rstore_provision(message.bot, order_id)
+            if ok:
+                await message.answer(
+                    "✅ مبلغ سفارش شما به‌طور کامل از کیف پول پوشش داده شد.\n"
+                    "کانفیگ شما در پیام بعدی ارسال می‌شود 👇",
+                    reply_markup=kb.menu_for_user(db, message.from_user.id),
+                )
+            else:
+                await message.answer(f"⛔️ خطا در ساخت کانفیگ: {info}\nمبلغ به کیف پول بازگردانده شد.")
+            return
+
+        await state.set_state(ResellerStoreFlow.waiting_receipt)
+        if product["seller_type"] == "sub_reseller" and sub_reseller_id:
+            sub = db.get_sub_reseller(sub_reseller_id)
+            card_number = sub["card_number"] or db.get_setting("card_number")
+            card_holder = sub["card_holder_name"] or db.get_setting("card_holder")
+        else:
+            card_number = db.get_setting("card_number")
+            card_holder = db.get_setting("card_holder")
+        text = (
+            f"🛍 {product['title']}\n"
+            f"🛠 نام کاربری: {username}\n\n"
+            f"💳 شماره کارت: `{card_number}`\n"
+            f"👤 به نام: {card_holder}\n"
+        )
+        if wallet_used:
+            text += f"👛 استفاده از کیف پول: {wallet_used:,} تومان\n"
+        text += f"💰 مبلغ نهایی قابل پرداخت: {order['final_price']:,} تومان\n\n"
+        text += "لطفاً عکس رسید پرداخت را همینجا ارسال کنید."
+        await message.answer(text, parse_mode="Markdown", reply_markup=kb.cancel_kb())
+
+    @router.message(ResellerStoreFlow.waiting_receipt, F.photo)
+    async def rstore_receive_receipt(message: Message, state: FSMContext, bot: Bot):
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        order = db.get_order(order_id)
+        if not order or order["status"] != "pending":
+            await message.answer("سفارش معتبر یافت نشد. لطفاً دوباره از منو شروع کنید.")
+            await state.clear()
+            return
+        file_id = message.photo[-1].file_id
+        db.set_order_receipt(order_id, file_id)
+        await _notify_seller_of_order(bot, order_id, receipt_file_id=file_id)
+        await message.answer(
+            "✅ رسید شما برای بررسی ارسال شد. پس از تایید، کانفیگ برای شما ساخته و ارسال خواهد شد.",
+            reply_markup=kb.menu_for_user(db, message.from_user.id),
+        )
+        await state.clear()
+
+    @router.message(ResellerStoreFlow.waiting_receipt)
+    async def rstore_receipt_wrong_type(message: Message):
+        await message.answer("لطفاً فقط عکس رسید پرداخت را ارسال کنید.")
+
+    async def _rstore_provision(bot: Bot, order_id: int):
+        """ساخت خودکار کانفیگ روی پنل + کسر اعتبار فروشنده + تحویل به خریدار. خروجی: (ok, error_or_None)"""
+        order = db.get_order(order_id)
+        product = db.get_reseller_product(order["reseller_product_id"])
+        if not product:
+            db.reject_order(order_id)
+            return False, "محصول یافت نشد."
+
+        server = _reseller_resolve_panel(product["seller_type"], product["seller_id"])
+        if not server:
+            return False, "سروری برای این نماینده تنظیم نشده."
+
+        try:
+            provider = get_provider(server)
+            result = await provider.create_user(order["custom_username"], product["volume_gb"], product["duration_days"])
+        except PanelUsernameTakenError:
+            return False, "این نام کاربری روی پنل تکراری است."
+        except PanelError as e:
+            return False, str(e)
+
+        db.approve_custom_config_order(order_id)
+        db.add_custom_config(
+            order["user_id"], server["id"], result.username, product["volume_gb"], product["duration_days"],
+            result.subscription_url, order_id=order_id, source="reseller_product",
+        )
+        if product["seller_type"] == "owner":
+            db.adjust_reseller_credit(product["seller_id"], -product["volume_gb"], reason=f"فروش «{product['title']}» به مشتری")
+        elif order["sub_reseller_id"]:
+            db.adjust_sub_reseller_credit(order["sub_reseller_id"], -product["volume_gb"], reason=f"فروش «{product['title']}» به مشتری")
+
+        try:
+            await deliver_config_to_user(
+                bot, order["user_id"], product["title"], [result.subscription_url],
+                final_price=order["final_price"], order_id=order_id,
+            )
+        except Exception:
+            pass
+        return True, None
+
+    @router.callback_query(F.data.startswith("rporder_approve:"))
+    async def cb_rporder_approve(call: CallbackQuery):
+        order_id = int(call.data.split(":")[1])
+        order = db.get_order(order_id)
+        if not order or not order["is_reseller_product"]:
+            await call.answer("سفارش نامعتبر است.", show_alert=True)
+            return
+        if order["status"] != "pending":
+            await call.answer("این سفارش قبلاً بررسی شده است.", show_alert=True)
+            return
+        product = db.get_reseller_product(order["reseller_product_id"])
+        allowed = product and (
+            (product["seller_type"] == "owner" and db.is_admin(call.from_user.id)) or
+            (product["seller_type"] == "sub_reseller" and call.from_user.id == product["seller_id"])
+        )
+        if not allowed:
+            await call.answer("اجازه‌ی این کار را نداری.", show_alert=True)
+            return
+
+        ok, err = await _rstore_provision(call.bot, order_id)
+        if not ok:
+            await call.answer(f"⛔️ {err}", show_alert=True)
+            return
+        try:
+            if call.message.photo:
+                await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد و کانفیگ ساخته شد.")
+            else:
+                await call.message.edit_text((call.message.text or "") + "\n\n✅ تایید شد و کانفیگ ساخته شد.")
+        except Exception:
+            pass
+        await call.answer("تایید شد.")
+
+    @router.callback_query(F.data.startswith("rporder_reject:"))
+    async def cb_rporder_reject(call: CallbackQuery):
+        order_id = int(call.data.split(":")[1])
+        order = db.get_order(order_id)
+        if not order or not order["is_reseller_product"]:
+            await call.answer("سفارش نامعتبر است.", show_alert=True)
+            return
+        if order["status"] != "pending":
+            await call.answer("این سفارش قبلاً بررسی شده است.", show_alert=True)
+            return
+        product = db.get_reseller_product(order["reseller_product_id"])
+        allowed = product and (
+            (product["seller_type"] == "owner" and db.is_admin(call.from_user.id)) or
+            (product["seller_type"] == "sub_reseller" and call.from_user.id == product["seller_id"])
+        )
+        if not allowed:
+            await call.answer("اجازه‌ی این کار را نداری.", show_alert=True)
+            return
+        if order["wallet_used"]:
+            db.add_wallet_credit(order["user_id"], order["wallet_used"])
+        db.reject_order(order_id)
+        try:
+            await call.bot.send_message(order["user_id"], "❌ متاسفانه سفارش شما رد شد. در صورت کسر از کیف پول، مبلغ بازگردانده شد.")
+        except Exception:
+            pass
+        try:
+            if call.message.photo:
+                await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n❌ رد شد.")
+            else:
+                await call.message.edit_text((call.message.text or "") + "\n\n❌ رد شد.")
+        except Exception:
+            pass
+        await call.answer("رد شد.")
 
     # -----------------------------------------------------------------------
     # درخواست نمایندگی
@@ -1139,7 +1649,9 @@ def create_user_router(db, bot_manager=None) -> Router:
         )
         if is_main:
             text += "🤖 <b>بات خام مستقل</b>: یک بات جدا با آیدی خودت که کاملاً مستقل مدیریتش می‌کنی.\n"
-        text += "📦 <b>اعتبار حجمی</b>: از همین بات، با یک استخر گیگابایت که خودت هرجور بخواهی ازش کانفیگ می‌سازی."
+            text += "📦 <b>بات با حجم</b>: یک بات جدا با آیدی خودت (مثل بات مستقل) به‌علاوه‌ی یک استخر گیگابایت که خودت هرجور بخواهی ازش کانفیگ می‌سازی."
+        else:
+            text += "📦 <b>زیرنمایندگی</b>: داخل همین بات، با یک استخر گیگابایت (از سهم همین نماینده) که خودت هرجور بخواهی ازش کانفیگ می‌سازی و حتی می‌تونی شماره کارت خودت رو هم بذاری."
         await message.answer(
             text, parse_mode="HTML",
             reply_markup=kb.reseller_request_type_kb(show_bot_option=is_main),
@@ -1168,7 +1680,13 @@ def create_user_router(db, bot_manager=None) -> Router:
         )
 
         user = db.get_user(message.from_user.id)
-        type_label = "🤖 بات خام مستقل" if data["reseller_request_type"] == "bot" else "📦 اعتبار حجمی"
+        is_main_req = db.get_setting("is_main_bot", "1") == "1"
+        if data["reseller_request_type"] == "bot":
+            type_label = "🤖 بات خام مستقل"
+        elif is_main_req:
+            type_label = "📦 بات با حجم"
+        else:
+            type_label = "📦 زیرنمایندگی"
         text = (
             f"🤝 درخواست نمایندگی جدید #{request_id}\n"
             f"👤 {user['first_name'] if user else ''} (@{user['username'] if user and user['username'] else '---'})\n"
