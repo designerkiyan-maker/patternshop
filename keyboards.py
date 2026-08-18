@@ -159,8 +159,6 @@ def categories_kb(db, categories) -> InlineKeyboardMarkup:
     rows = []
     if db.get_setting("custom_config_enabled", "0") == "1":
         rows.append([_styled_inline(db, "🛠 ساخت کانفیگ شخصی", "custom_config_start", "btn_custom_config_style")])
-    if db.get_storefront_reseller_products():
-        rows.append([_styled_inline(db, "🛍 بانک کانفیگ نمایندگان", "rstore_open", "btn_cat_select_style")])
     for cat in categories:
         rows.append([_styled_inline(db, f"📁 {cat['name']}", f"cat:{cat['id']}", "btn_cat_select_style")])
     rows.append([_styled_inline(db, "⬅️ بازگشت", "back_main", "btn_buy_back_style")])
@@ -223,6 +221,7 @@ def reseller_panel_kb(show_card_button: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="➕ ساخت کانفیگ جدید (دستی)", callback_data="reseller_new_config")],
         [InlineKeyboardButton(text="🛍 محصولات من (بانک کانفیگ)", callback_data="reseller_products_menu")],
+        [InlineKeyboardButton(text="🔗 لینک فروشگاه من", callback_data="reseller_store_link")],
     ]
     if show_card_button:
         rows.append([InlineKeyboardButton(text="💳 شماره کارت من", callback_data="subres_set_card")])
@@ -264,7 +263,6 @@ def reseller_storefront_kb(products) -> InlineKeyboardMarkup:
 def reseller_storefront_confirm_kb(product_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ خرید این محصول", callback_data=f"rstore_buy:{product_id}")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="rstore_open")],
     ])
 
 

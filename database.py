@@ -601,6 +601,7 @@ class Database:
             ("orders", "sub_reseller_id", "INTEGER"),
             ("reseller_bot_setup_state", "mode", "TEXT DEFAULT 'independent'"),
             ("orders", "is_reseller_product", "INTEGER DEFAULT 0"),
+            ("users", "reseller_store_slug", "TEXT"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -2662,7 +2663,15 @@ class Database:
     # -----------------------------------------------------------------------
 
     def create_sub_reseller(self, telegram_id: int, display_name: str = None, invite_slug: str = None) -> int:
+        import secrets
         with self._get_conn() as conn:
+            if not invite_slug:
+                for _ in range(10):
+                    candidate = secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8]
+                    exists = conn.execute("SELECT 1 FROM sub_resellers WHERE invite_slug=?", (candidate,)).fetchone()
+                    if not exists:
+                        invite_slug = candidate
+                        break
             cur = conn.execute(
                 "INSERT INTO sub_resellers (telegram_id, display_name, invite_slug) VALUES (?, ?, ?)",
                 (telegram_id, display_name, invite_slug),
@@ -2716,6 +2725,10 @@ class Database:
                 "UPDATE sub_resellers SET card_number=?, card_holder_name=? WHERE id=?",
                 (card_number, card_holder_name, sub_reseller_id),
             )
+
+    def set_sub_reseller_invite_slug(self, sub_reseller_id: int, invite_slug: str):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE sub_resellers SET invite_slug=? WHERE id=?", (invite_slug, sub_reseller_id))
 
     def set_sub_reseller_panel_server(self, sub_reseller_id: int, panel_server_id: int):
         with self._get_conn() as conn:
@@ -2823,7 +2836,8 @@ class Database:
             conn.execute("DELETE FROM reseller_products WHERE id=?", (product_id,))
 
     def get_storefront_reseller_products(self):
-        """همه‌ی محصولات فعالِ بانک کانفیگ (owner + همه‌ی زیرنماینده‌های فعال) برای نمایش در «خرید کانفیگ»."""
+        """همه‌ی محصولات فعالِ بانک کانفیگ (owner + همه‌ی زیرنماینده‌های فعال) - فقط برای مصارف داخلی/ادمین.
+        هرگز مستقیم به مشتری عادی نمایش داده نمی‌شود؛ هر نماینده فقط با لینک اختصاصی خودش دیده می‌شود."""
         with self._get_conn() as conn:
             return conn.execute(
                 "SELECT rp.* FROM reseller_products rp "
@@ -2834,3 +2848,24 @@ class Database:
                 "  ))"
                 ") ORDER BY rp.sort_order, rp.id"
             ).fetchall()
+
+    def get_or_create_owner_store_slug(self, user_tg_id: int) -> str:
+        """اسلاگ اختصاصی لینک فروشگاه یک نماینده‌ی owner (نه زیرنماینده) داخل همین دیتابیس."""
+        import secrets
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT reseller_store_slug FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
+            if row and row["reseller_store_slug"]:
+                return row["reseller_store_slug"]
+            for _ in range(10):
+                slug = secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8]
+                exists = conn.execute("SELECT 1 FROM users WHERE reseller_store_slug=?", (slug,)).fetchone()
+                if not exists:
+                    break
+            conn.execute("UPDATE users SET reseller_store_slug=? WHERE telegram_id=?", (slug, user_tg_id))
+            return slug
+
+    def get_owner_by_store_slug(self, slug: str):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM users WHERE reseller_store_slug=? AND is_reseller=1", (slug,)
+            ).fetchone()

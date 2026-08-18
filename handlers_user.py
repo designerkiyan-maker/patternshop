@@ -262,8 +262,43 @@ def create_user_router(db, bot_manager=None) -> Router:
             if ref_part.isdigit():
                 db.set_referred_by(message.from_user.id, int(ref_part))
 
+        # لینک اختصاصی فروشگاه یک نماینده/زیرنماینده: /start rshop_<slug>
+        if len(parts) > 1 and parts[1].startswith("rshop_"):
+            slug = parts[1][len("rshop_"):]
+            await _open_reseller_storefront_by_slug(message, slug)
+            return
+
         welcome = db.get_setting("welcome_text")
         await message.answer(welcome, reply_markup=kb.menu_for_user(db, message.from_user.id))
+
+    async def _open_reseller_storefront_by_slug(message: Message, slug: str):
+        seller_type, seller_id, seller_label = None, None, None
+        sub = db.get_sub_reseller_by_slug(slug)
+        if sub and sub["is_active"]:
+            seller_type, seller_id = "sub_reseller", sub["telegram_id"]
+            seller_label = sub["display_name"] or "نماینده"
+        else:
+            owner_row = db.get_owner_by_store_slug(slug)
+            if owner_row:
+                seller_type, seller_id = "owner", owner_row["telegram_id"]
+                seller_label = owner_row["first_name"] or owner_row["username"] or "نماینده"
+
+        if not seller_type:
+            welcome = db.get_setting("welcome_text")
+            await message.answer(welcome, reply_markup=kb.menu_for_user(db, message.from_user.id))
+            return
+
+        products = db.list_reseller_products(seller_type=seller_type, seller_id=seller_id, active_only=True)
+        if not products:
+            await message.answer(
+                f"🛍 فروشگاه {seller_label} فعلاً محصولی فعال ندارد.",
+                reply_markup=kb.menu_for_user(db, message.from_user.id),
+            )
+            return
+        await message.answer(
+            f"🛍 فروشگاه {seller_label}\n\nیکی از محصولات زیر را انتخاب کن:",
+            reply_markup=kb.reseller_storefront_kb(products),
+        )
 
     # -----------------------------------------------------------------------
     # مینی‌اپ (دکمه‌ی متنی -> پیام با دکمه‌ی inline واقعی وب‌اپ)
@@ -288,8 +323,7 @@ def create_user_router(db, bot_manager=None) -> Router:
         await state.clear()
         categories = db.get_categories(active_only=True)
         custom_enabled = db.get_setting("custom_config_enabled", "0") == "1"
-        has_storefront = bool(db.get_storefront_reseller_products())
-        if not categories and not custom_enabled and not has_storefront:
+        if not categories and not custom_enabled:
             await message.answer("در حال حاضر دسته‌بندی فعالی وجود ندارد.")
             return
         await message.answer("یک گزینه را انتخاب کنید:", reply_markup=kb.categories_kb(db, categories))
@@ -1203,11 +1237,34 @@ def create_user_router(db, bot_manager=None) -> Router:
         products = db.list_reseller_products(seller_type=seller_type, seller_id=seller_id)
         await call.message.edit_text(
             "🛍 محصولات من\n\n"
-            "این‌ها محصولاتی هستند که مستقیم در «خرید کانفیگ» به مشتری‌هات نمایش داده می‌شوند و از "
-            "اعتبار حجمی خودت ساخته و کسر می‌شوند.",
+            "این‌ها محصولاتی هستند که فقط با «لینک فروشگاه من» به مشتری‌های خودت نمایش داده می‌شوند "
+            "(نه تو فروشگاه عمومی بات) و از اعتبار حجمی خودت ساخته و کسر می‌شوند.",
             reply_markup=kb.reseller_products_list_kb(products),
         )
         await call.answer()
+
+    @router.callback_query(F.data == "reseller_store_link")
+    async def cb_reseller_store_link(call: CallbackQuery, bot: Bot):
+        seller_type, seller_id = _reseller_seller_type_id(call.from_user.id)
+        if not seller_type:
+            await call.answer("دسترسی نداری.", show_alert=True)
+            return
+        if seller_type == "sub_reseller":
+            sub = db.get_sub_reseller_by_telegram_id(seller_id)
+            slug = sub["invite_slug"]
+            if not slug:
+                import secrets
+                slug = secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8]
+                db.set_sub_reseller_invite_slug(sub["id"], slug)
+        else:
+            slug = db.get_or_create_owner_store_slug(seller_id)
+        me = await bot.get_me()
+        link = f"https://t.me/{me.username}?start=rshop_{slug}"
+        await call.answer()
+        await call.message.answer(
+            f"🔗 لینک اختصاصی فروشگاه تو:\n\n{link}\n\n"
+            f"هر کسی با این لینک وارد بات بشه، فقط محصولات خودِ تو رو می‌بینه (نه فروشگاه عمومی و نه محصول نماینده‌های دیگه).",
+        )
 
     @router.callback_query(F.data == "rprod_add")
     async def cb_rprod_add(call: CallbackQuery, state: FSMContext):
@@ -1380,18 +1437,6 @@ def create_user_router(db, bot_manager=None) -> Router:
                 db.set_order_admin_message(order_id, chat_id, msg.message_id)
             except Exception:
                 pass
-
-    @router.callback_query(F.data == "rstore_open")
-    async def cb_rstore_open(call: CallbackQuery):
-        products = db.get_storefront_reseller_products()
-        if not products:
-            await call.answer("در حال حاضر محصولی موجود نیست.", show_alert=True)
-            return
-        await call.message.edit_text(
-            "🛍 بانک کانفیگ نمایندگان\n\nیکی از محصولات زیر را انتخاب کن:",
-            reply_markup=kb.reseller_storefront_kb(products),
-        )
-        await call.answer()
 
     @router.callback_query(F.data.startswith("rstore_view:"))
     async def cb_rstore_view(call: CallbackQuery):
