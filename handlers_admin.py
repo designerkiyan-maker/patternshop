@@ -2130,13 +2130,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             s = db.get_panel_server(cfg["panel_server_id"])
             server_name = s["name"] if s else "سرور حذف‌شده!"
         text = (
-            f"👤 {name} (`{user_id}`)\n"
+            f"👤 {name} (آیدی: {user_id})\n"
             + (f"🤖 بات مستقل: @{own_bot['bot_username']}\n" if own_bot else "")
             + f"📦 اعتبار: {cfg['credit_gb']:,} گیگابایت\n"
             f"🖥 پنل: {server_name}\n"
             f"⏳ بازه‌ی مدت مجاز: {cfg['min_duration_days']} تا {cfg['max_duration_days']} روز"
         )
-        await replace_admin_view(call, text, reply_markup=kb.gb_reseller_view_kb(db, user_id), parse_mode="Markdown")
+        await replace_admin_view(call, text, reply_markup=kb.gb_reseller_view_kb(db, user_id))
         await call.answer()
 
     @router.callback_query(F.data.startswith("adm_gb_reseller_credit:"))
