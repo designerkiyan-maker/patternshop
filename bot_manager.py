@@ -9,6 +9,7 @@
 
 import asyncio
 import logging
+import fcntl
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -97,6 +98,18 @@ class BotManager:
         db.set_setting("is_main_bot", "1" if is_main_bot else "0")
 
         bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        # جلوگیری از اجرای هم‌زمان یک توکن در چند پروسه
+        me = await bot.get_me()
+        lock_path = f"/tmp/telegram_bot_{me.id}.lock"
+        lock_file = open(lock_path, "w")
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            logger.error("Bot %s already running in another process.", me.id)
+            await bot.session.close()
+            lock_file.close()
+            return False
+
         dp = Dispatcher(storage=MemoryStorage())
         dp.errors.register(_global_error_handler)
 
@@ -124,6 +137,7 @@ class BotManager:
         self.instances[token] = {
             "bot": bot, "dp": dp, "task": task, "reminder_task": reminder_task,
             "backup_task": backup_task, "db_path": db_path,
+            "lock_file": lock_file,
         }
         logger.info("بات با db_path=%s راه‌اندازی شد.", db_path)
         return True
@@ -155,6 +169,13 @@ class BotManager:
             await inst["bot"].session.close()
         except Exception:
             pass
+        lock_file = inst.get("lock_file")
+        if lock_file:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                lock_file.close()
+            except Exception:
+                pass
         logger.info("بات با db_path=%s متوقف شد.", inst["db_path"])
         return True
 
