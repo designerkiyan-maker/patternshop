@@ -43,6 +43,7 @@ from states import (
     AdminCreateDiscount,
     AdminReferralPercent,
     AdminAddResellerBot,
+    AdminResellerCredit,
     AdminWheelSettings,
     AdminRenewalSettings,
     AdminVolumeReminderSettings,
@@ -1227,7 +1228,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             "🛠 ساخت کانفیگ شخصی\n\n"
             "کاربران می‌توانند با تعیین نام، حجم و پرداخت متناسب، کاربر خودشان را مستقیماً "
             "روی یکی از سرورهای پنل زیر بسازند.",
-            reply_markup=kb.custom_config_menu_kb(db),
+            reply_markup=kb.custom_config_menu_kb(db, is_main_bot),
         )
         await call.answer()
 
@@ -1238,7 +1239,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         current = db.get_setting("custom_config_enabled", "0")
         db.set_setting("custom_config_enabled", "0" if current == "1" else "1")
         db.log_admin_action(call.from_user.id, "custom_config_toggle", f"وضعیت جدید: {'0' if current == '1' else '1'}")
-        await safe_edit(call, "🛠 ساخت کانفیگ شخصی:", reply_markup=kb.custom_config_menu_kb(db))
+        await safe_edit(call, "🛠 ساخت کانفیگ شخصی:", reply_markup=kb.custom_config_menu_kb(db, is_main_bot))
         await call.answer("وضعیت تغییر کرد.")
 
     @router.callback_query(F.data == "adm_custom_config_edit_range")
@@ -1275,8 +1276,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             reply_markup=kb.admin_panel_kb(db, is_main_bot),
         )
 
+    async def deny_reseller_panel_access(call: CallbackQuery):
+        await call.answer("⛔️ اتصال پنل VPN فقط از طریق بات اصلی مدیریت می‌شود.", show_alert=True)
+
     @router.callback_query(F.data == "adm_panel_servers")
     async def cb_admin_panel_servers(call: CallbackQuery):
+        if not is_main_bot:
+            return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         await replace_admin_view(call, "🖥 سرورهای پنل VPN متصل:", reply_markup=kb.panel_servers_list_kb(db))
@@ -1284,6 +1290,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_panel_server_add")
     async def cb_admin_panel_server_add(call: CallbackQuery, state: FSMContext):
+        if not is_main_bot:
+            return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         await state.set_state(AdminAddPanelServer.waiting_name)
@@ -1422,6 +1430,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_view:"))
     async def cb_admin_panel_server_view(call: CallbackQuery):
+        if not is_main_bot:
+            return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_view")
@@ -1448,6 +1458,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_template:"))
     async def cb_admin_panel_server_template(call: CallbackQuery, state: FSMContext):
+        if not is_main_bot:
+            return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_template")
@@ -1487,6 +1499,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_test:"))
     async def cb_admin_panel_server_test(call: CallbackQuery):
+        if not is_main_bot:
+            return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_test")
@@ -1504,6 +1518,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_usage:"))
     async def cb_admin_panel_server_usage_toggle(call: CallbackQuery):
+        if not is_main_bot:
+            return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         _, kind, server_id_str = call.data.split(":")
@@ -1538,6 +1554,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_toggle:"))
     async def cb_admin_panel_server_toggle(call: CallbackQuery):
+        if not is_main_bot:
+            return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_toggle")
@@ -1556,6 +1574,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_delete:"))
     async def cb_admin_panel_server_delete(call: CallbackQuery):
+        if not is_main_bot:
+            return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_delete")
@@ -2032,6 +2052,168 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 f"از صفر و جدا از بات اصلی دارد. نماینده باید با /start به بات خودش (@{username}) وارد شود.",
                 reply_markup=kb.admin_panel_kb(db, is_main_bot),
             )
+
+        # ---------------------------------------------------------------
+        # نمایندگی حجمی (استخر اعتبار داخل همین بات اصلی، بدون نمایش پنل)
+        # ---------------------------------------------------------------
+
+        @router.callback_query(F.data == "adm_credit_resellers_menu")
+        async def cb_admin_credit_resellers_menu(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            resellers = db.get_resellers()
+            await replace_admin_view(
+                call,
+                "💳 نمایندگی حجمی:\n\n"
+                "کاربرانی که اعتبار (گیگ) خریده‌اند و می‌توانند از داخل همین بات، بدون دیدن پنل واقعی، "
+                "برای مشتری‌های خودشان کانفیگ بسازند.",
+                reply_markup=kb.credit_resellers_menu_kb(resellers),
+            )
+            await call.answer()
+
+        @router.callback_query(F.data == "adm_cres_find")
+        async def cb_admin_cres_find(call: CallbackQuery, state: FSMContext):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            await state.set_state(AdminResellerCredit.waiting_user_id)
+            await safe_edit(
+                call,
+                "آیدی عددی کاربری که می‌خواهید نماینده‌اش کنید (یا مدیریت کنید) را ارسال کنید:",
+                reply_markup=kb.admin_back_kb("adm_credit_resellers_menu"),
+            )
+            await call.answer()
+
+        @router.message(AdminResellerCredit.waiting_user_id)
+        async def process_cres_find(message: Message, state: FSMContext):
+            raw = (message.text or "").strip()
+            if not raw.isdigit():
+                await message.answer("لطفاً فقط آیدی عددی ارسال کنید.")
+                return
+            target_id = int(raw)
+            if not db.get_user(target_id):
+                await state.clear()
+                await message.answer(
+                    "این کاربر هنوز با بات /start نزده. اول باید کاربر یک‌بار بات را استارت کند.",
+                    reply_markup=kb.admin_panel_kb(db, is_main_bot),
+                )
+                return
+            await state.clear()
+            credit = db.get_reseller_credit(target_id)
+            is_res = db.is_reseller(target_id)
+            await message.answer(
+                f"👤 کاربر {target_id}\n"
+                f"وضعیت نمایندگی: {'✅ فعال' if is_res else '◻️ غیرفعال'}\n"
+                f"📦 اعتبار فعلی: {credit:,} گیگ",
+                reply_markup=kb.credit_reseller_view_kb(target_id, is_res),
+            )
+
+        @router.callback_query(F.data.startswith("adm_cres_view:"))
+        async def cb_admin_cres_view(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            target_id = int(call.data.split(":")[1])
+            credit = db.get_reseller_credit(target_id)
+            is_res = db.is_reseller(target_id)
+            await replace_admin_view(
+                call,
+                f"👤 کاربر {target_id}\n"
+                f"وضعیت نمایندگی: {'✅ فعال' if is_res else '◻️ غیرفعال'}\n"
+                f"📦 اعتبار فعلی: {credit:,} گیگ",
+                reply_markup=kb.credit_reseller_view_kb(target_id, is_res),
+            )
+            await call.answer()
+
+        @router.callback_query(F.data.startswith("adm_cres_toggle:"))
+        async def cb_admin_cres_toggle(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            target_id = int(call.data.split(":")[1])
+            db.set_reseller_status(target_id, not db.is_reseller(target_id))
+            db.log_admin_action(call.from_user.id, "reseller_credit_toggle", f"کاربر {target_id}")
+            is_res = db.is_reseller(target_id)
+            credit = db.get_reseller_credit(target_id)
+            await safe_edit(
+                call,
+                f"👤 کاربر {target_id}\n"
+                f"وضعیت نمایندگی: {'✅ فعال' if is_res else '◻️ غیرفعال'}\n"
+                f"📦 اعتبار فعلی: {credit:,} گیگ",
+                reply_markup=kb.credit_reseller_view_kb(target_id, is_res),
+            )
+            await call.answer("وضعیت تغییر کرد.")
+
+        @router.callback_query(F.data.startswith("adm_cres_credit:"))
+        async def cb_admin_cres_credit(call: CallbackQuery, state: FSMContext):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            target_id = int(call.data.split(":")[1])
+            await state.update_data(cres_target_id=target_id)
+            await state.set_state(AdminResellerCredit.waiting_delta)
+            await safe_edit(
+                call,
+                "چند گیگ اضافه/کم شود؟ عدد مثبت برای شارژ، عدد منفی برای کسر (مثلاً 1000 یا 1000-):",
+                reply_markup=kb.admin_back_kb(f"adm_cres_view:{target_id}"),
+            )
+            await call.answer()
+
+        @router.message(AdminResellerCredit.waiting_delta)
+        async def process_cres_credit(message: Message, state: FSMContext):
+            raw = (message.text or "").strip().replace(" ", "")
+            data = await state.get_data()
+            target_id = data.get("cres_target_id")
+            sign = -1 if raw.endswith("-") else 1
+            digits = raw.rstrip("-").lstrip("+")
+            if not digits.isdigit() or int(digits) == 0:
+                await message.answer("لطفاً یک عدد صحیح غیرصفر ارسال کنید (مثلاً 1000 یا 1000-).")
+                return
+            delta = sign * int(digits)
+            db.adjust_reseller_credit(target_id, delta, admin_id=message.from_user.id, reason="تنظیم دستی توسط ادمین")
+            db.log_admin_action(message.from_user.id, "reseller_credit_adjust", f"کاربر {target_id} | {delta:+} گیگ")
+            await state.clear()
+            credit = db.get_reseller_credit(target_id)
+            is_res = db.is_reseller(target_id)
+            await message.answer(
+                f"✅ اعتبار به‌روزرسانی شد.\n\n"
+                f"👤 کاربر {target_id}\n"
+                f"📦 اعتبار فعلی: {credit:,} گیگ",
+                reply_markup=kb.credit_reseller_view_kb(target_id, is_res),
+            )
+
+        @router.callback_query(F.data.startswith("adm_cres_panel:"))
+        async def cb_admin_cres_panel(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            target_id = int(call.data.split(":")[1])
+            panels = db.get_panel_servers(active_only=True)
+            await replace_admin_view(
+                call,
+                "🔗 این نماینده روی کدام پنل کانفیگ بسازد؟\n"
+                "(نماینده هیچ‌وقت آدرس/مشخصات این پنل را نمی‌بیند.)",
+                reply_markup=kb.credit_reseller_panel_pick_kb(target_id, panels),
+            )
+            await call.answer()
+
+        @router.callback_query(F.data.startswith("adm_cres_panel_set:"))
+        async def cb_admin_cres_panel_set(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            _, target_id_str, panel_id_str = call.data.split(":")
+            target_id, panel_id = int(target_id_str), int(panel_id_str)
+            db.set_reseller_panel(target_id, panel_id or None)
+            db.log_admin_action(
+                call.from_user.id, "reseller_panel_set",
+                f"کاربر {target_id} ← پنل {panel_id or 'خودکار'}",
+            )
+            is_res = db.is_reseller(target_id)
+            credit = db.get_reseller_credit(target_id)
+            await safe_edit(
+                call,
+                f"✅ پنل این نماینده تنظیم شد.\n\n"
+                f"👤 کاربر {target_id}\n"
+                f"وضعیت نمایندگی: {'✅ فعال' if is_res else '◻️ غیرفعال'}\n"
+                f"📦 اعتبار فعلی: {credit:,} گیگ",
+                reply_markup=kb.credit_reseller_view_kb(target_id, is_res),
+            )
+            await call.answer("تنظیم شد.")
 
     # -------------------------------------------------------------------
     # ویرایش متن دکمه‌ها

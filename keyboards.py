@@ -263,6 +263,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_custom_config_settings", "🛠 ساخت کانفیگ شخصی (پنل‌های VPN)", "adm_custom_config_settings"),
     ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
     ("adm_resellers_menu", "🏪 مدیریت بات‌های نمایندگی", "adm_resellers_menu"),
+    ("adm_credit_resellers_menu", "💳 نمایندگی حجمی (اعتبار)", "adm_credit_resellers_menu"),
     ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
     ("adm_set_card", "💳 تنظیم شماره کارت", "adm_set_card"),
     ("adm_set_plisio", "🪙 تنظیم درگاه کریپتو (Plisio)", "adm_set_plisio"),
@@ -286,8 +287,8 @@ def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
     current_row = []
 
     for key, label, callback_data in ADMIN_PANEL_ITEMS:
-        if key == "adm_resellers_menu" and not is_main_bot:
-            # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده ندارند
+        if key in ("adm_resellers_menu", "adm_credit_resellers_menu") and not is_main_bot:
+            # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده یا فروش اعتبار ندارند
             continue
 
         current_row.append(_styled_inline(db, label, callback_data, f"{key}_style"))
@@ -332,7 +333,7 @@ def admin_restore_waiting_kb() -> InlineKeyboardMarkup:
 def admin_panel_colors_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
     rows = []
     for key, label, _ in ADMIN_PANEL_ITEMS:
-        if key == "adm_resellers_menu" and not is_main_bot:
+        if key in ("adm_resellers_menu", "adm_credit_resellers_menu") and not is_main_bot:
             continue
         current_style = db.get_setting(f"{key}_style", "")
         style_icon = {"primary": "🔵", "success": "🟢", "danger": "🔴", "": "⚪️"}.get(current_style, "⚪️")
@@ -715,7 +716,7 @@ def stock_alert_settings_kb(db) -> InlineKeyboardMarkup:
 # ساخت کانفیگ شخصی (پنل‌های VPN + قیمت‌گذاری)
 # ---------------------------------------------------------------------------
 
-def custom_config_menu_kb(db) -> InlineKeyboardMarkup:
+def custom_config_menu_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
     settings = db.get_custom_config_settings()
     status = "🟢 فعال" if settings["enabled"] else "🔴 غیرفعال"
     rows = [
@@ -724,10 +725,13 @@ def custom_config_menu_kb(db) -> InlineKeyboardMarkup:
             text=f"📶 حداقل/حداکثر حجم: {settings['min_gb']} تا {settings['max_gb']} گیگ",
             callback_data="adm_custom_config_edit_range",
         )],
-        [InlineKeyboardButton(text="🖥 مدیریت سرورهای پنل", callback_data="adm_panel_servers")],
-        [InlineKeyboardButton(text="💰 مدیریت قیمت‌گذاری بر اساس بازه", callback_data="adm_pricing_tiers")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
     ]
+    if is_main_bot:
+        # اتصال پنل VPN فقط توسط بات اصلی مدیریت می‌شود؛ بات‌های نمایندگی
+        # از استخر حجمی که ادمین تعیین می‌کند استفاده می‌کنند، نه پنل خودشان.
+        rows.append([InlineKeyboardButton(text="🖥 مدیریت سرورهای پنل", callback_data="adm_panel_servers")])
+    rows.append([InlineKeyboardButton(text="💰 مدیریت قیمت‌گذاری بر اساس بازه", callback_data="adm_pricing_tiers")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -838,4 +842,34 @@ def resellers_kb(resellers) -> InlineKeyboardMarkup:
         )
     rows.append([InlineKeyboardButton(text="➕ افزودن بات نمایندگی جدید", callback_data="adm_resbot_add")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def credit_resellers_menu_kb(resellers) -> InlineKeyboardMarkup:
+    rows = []
+    for r in resellers:
+        label = f"👤 {r['telegram_id']} - {r['reseller_credit_gb']:,} گیگ"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"adm_cres_view:{r['telegram_id']}")])
+    rows.append([InlineKeyboardButton(text="➕ افزودن/جستجوی نماینده", callback_data="adm_cres_find")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def credit_reseller_view_kb(user_tg_id: int, is_reseller: bool) -> InlineKeyboardMarkup:
+    toggle_text = "⛔️ لغو نمایندگی" if is_reseller else "✅ تبدیل به نماینده"
+    rows = [
+        [InlineKeyboardButton(text=toggle_text, callback_data=f"adm_cres_toggle:{user_tg_id}")],
+        [InlineKeyboardButton(text="➕/➖ تغییر اعتبار (گیگ)", callback_data=f"adm_cres_credit:{user_tg_id}")],
+        [InlineKeyboardButton(text="🔗 تعیین پنل اختصاصی", callback_data=f"adm_cres_panel:{user_tg_id}")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_credit_resellers_menu")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def credit_reseller_panel_pick_kb(user_tg_id: int, panels) -> InlineKeyboardMarkup:
+    rows = []
+    for p in panels:
+        rows.append([InlineKeyboardButton(text=f"🖥 {p['name']}", callback_data=f"adm_cres_panel_set:{user_tg_id}:{p['id']}")])
+    rows.append([InlineKeyboardButton(text="↩️ خودکار (اولین پنل فعالِ نمایندگی)", callback_data=f"adm_cres_panel_set:{user_tg_id}:0")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data=f"adm_cres_view:{user_tg_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

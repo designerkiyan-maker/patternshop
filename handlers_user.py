@@ -849,7 +849,7 @@ def create_user_router(db) -> Router:
         if credit <= 0:
             await call.answer("اعتبار شما کافی نیست. با ادمین تماس بگیر.", show_alert=True)
             return
-        server = db.get_panel_server_for_usage("reseller")
+        server = db.get_reseller_panel(call.from_user.id)
         if not server:
             await call.answer("هنوز سروری برای نمایندگی توسط ادمین تنظیم نشده.", show_alert=True)
             return

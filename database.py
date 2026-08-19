@@ -520,6 +520,7 @@ class Database:
             ("custom_configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "volume_reminder_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "source", "TEXT DEFAULT 'custom_config'"),
+            ("users", "reseller_panel_id", "INTEGER"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -2389,3 +2390,26 @@ class Database:
             return conn.execute(
                 "SELECT * FROM users WHERE is_reseller=1 ORDER BY reseller_credit_gb DESC"
             ).fetchall()
+
+    def set_reseller_panel(self, user_tg_id: int, panel_server_id):
+        """پنل اختصاصی که ادمین برای این نماینده تعیین کرده (None = پیش‌فرض خودکار)."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET reseller_panel_id=? WHERE telegram_id=?", (panel_server_id, user_tg_id)
+            )
+
+    def get_reseller_panel(self, user_tg_id: int):
+        """پنلی که این نماینده باید رویش کانفیگ بسازد: اول پنل اختصاصی‌اش، وگرنه
+        اولین پنل فعالی که برای «نمایندگی» علامت خورده."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT reseller_panel_id FROM users WHERE telegram_id=?", (user_tg_id,)
+            ).fetchone()
+            panel_id = row["reseller_panel_id"] if row else None
+            if panel_id:
+                server = conn.execute(
+                    "SELECT * FROM panel_servers WHERE id=? AND is_active=1", (panel_id,)
+                ).fetchone()
+                if server:
+                    return server
+        return self.get_panel_server_for_usage("reseller")

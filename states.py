@@ -91,6 +91,11 @@ class AdminReferralPercent(StatesGroup):
     waiting_value = State()
 
 
+class AdminResellerCredit(StatesGroup):
+    waiting_user_id = State()
+    waiting_delta = State()
+
+
 class AdminAddResellerBot(StatesGroup):
     waiting_token = State()
     waiting_owner_id = State()
