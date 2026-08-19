@@ -198,6 +198,18 @@ def require_owner(auth=Depends(get_verified_user)):
     return auth
 
 
+def require_panel_admin(auth=Depends(get_verified_user)):
+    """اتصال/ویرایش/حذف سرورهای پنل VPN. در بات اصلی همیشه آزاد است. در بات نمایندگی
+    فقط وقتی محدود می‌شود که آن بات از مسیر «درخواست نمایندگی» توسط خودِ کاربر ساخته
+    شده باشد؛ بات‌هایی که ادمین اصلی شخصاً از پنل مدیریت ساخته کاملاً دست‌باز می‌مانند."""
+    tg_id, db, tenant = auth
+    if not db.is_senior_admin(tg_id):
+        raise HTTPException(status_code=403, detail="این بخش فقط برای مالک و مدیر کامل در دسترس است.")
+    if tenant.tenant_id and db.is_self_requested_reseller():
+        raise HTTPException(status_code=403, detail="اتصال پنل VPN برای این بات نمایندگی محدود شده و فقط توسط ادمین اصلی فروشگاه انجام می‌شود.")
+    return auth
+
+
 async def get_bot_username(tenant: Tenant) -> str:
     """یوزرنیم همان بات (برای ساخت لینک دعوت زیرمجموعه‌گیری) را می‌گیرد و کش می‌کند."""
     cached = _bot_username_cache.get(tenant.bot_token)
@@ -959,6 +971,25 @@ async def api_plisio_webhook(request: Request, tenant: Tenant = Depends(get_tena
         elif order and order["status"] == "pending" and order["is_custom_config"]:
             server = db.get_panel_server(order["custom_panel_server_id"])
             settings = db.get_custom_config_settings()
+            reseller_owner_id = db.get_owner_id() if (tenant.tenant_id and db.is_self_requested_reseller()) else None
+            if reseller_owner_id and not db.try_deduct_reseller_credit(
+                reseller_owner_id, order["custom_volume_gb"],
+                reason=f"فروش کانفیگ شخصی «{order['custom_username']}» به کاربر {order['user_id']} (کریپتو)",
+            ):
+                admin_ids = db.list_admins()
+                async with aiohttp.ClientSession() as session:
+                    for admin_id in admin_ids:
+                        try:
+                            await session.post(
+                                f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                                json={
+                                    "chat_id": admin_id,
+                                    "text": f"⚠️ سفارش کانفیگ شخصی #{order_id} با کریپتو پرداخت شد ولی موجودی نمایندگی کافی نبود! لطفاً دستی رسیدگی کنید.",
+                                },
+                            )
+                        except Exception:
+                            pass
+                return {"status": "ok"}
             try:
                 provider = get_provider(server)
                 result = await provider.create_user(
@@ -981,6 +1012,8 @@ async def api_plisio_webhook(request: Request, tenant: Tenant = Depends(get_tena
                         },
                     )
             except Exception:
+                if reseller_owner_id:
+                    db.adjust_reseller_credit(reseller_owner_id, order["custom_volume_gb"], reason="بازگشت اعتبار - خطای پنل")
                 admin_ids = db.list_admins()
                 async with aiohttp.ClientSession() as session:
                     for admin_id in admin_ids:
@@ -1413,13 +1446,13 @@ def _panel_server_public(s) -> dict:
 
 
 @app.get("/api/admin/panel-servers")
-def api_admin_list_panel_servers(auth=Depends(require_senior_admin)):
+def api_admin_list_panel_servers(auth=Depends(require_panel_admin)):
     _, db, _ = auth
     return [_panel_server_public(s) for s in db.get_panel_servers()]
 
 
 @app.post("/api/admin/panel-servers")
-async def api_admin_add_panel_server(body: PanelServerCreate, auth=Depends(require_senior_admin)):
+async def api_admin_add_panel_server(body: PanelServerCreate, auth=Depends(require_panel_admin)):
     _, db, _ = auth
     admin_id, _, _ = auth
     if not body.name.strip() or not body.api_url.strip() or not body.api_username.strip() or not body.api_password.strip():
@@ -1469,7 +1502,7 @@ async def api_admin_add_panel_server(body: PanelServerCreate, auth=Depends(requi
 
 
 @app.get("/api/admin/panel-servers/{server_id}/xui-inbounds")
-async def api_admin_list_xui_inbounds(server_id: int, auth=Depends(require_senior_admin)):
+async def api_admin_list_xui_inbounds(server_id: int, auth=Depends(require_panel_admin)):
     _, db, _ = auth
     server = db.get_panel_server(server_id)
     if not server:
@@ -1485,7 +1518,7 @@ async def api_admin_list_xui_inbounds(server_id: int, auth=Depends(require_senio
 
 
 @app.post("/api/admin/panel-servers/{server_id}/xui-config")
-async def api_admin_set_xui_config(server_id: int, body: PanelServerXuiConfig, auth=Depends(require_senior_admin)):
+async def api_admin_set_xui_config(server_id: int, body: PanelServerXuiConfig, auth=Depends(require_panel_admin)):
     _, db, _ = auth
     server = db.get_panel_server(server_id)
     if not server:
@@ -1500,7 +1533,7 @@ async def api_admin_set_xui_config(server_id: int, body: PanelServerXuiConfig, a
 
 
 @app.patch("/api/admin/panel-servers/{server_id}")
-def api_admin_edit_panel_server(server_id: int, body: PanelServerUpdate, auth=Depends(require_senior_admin)):
+def api_admin_edit_panel_server(server_id: int, body: PanelServerUpdate, auth=Depends(require_panel_admin)):
     _, db, _ = auth
     if not db.get_panel_server(server_id):
         raise HTTPException(status_code=404, detail="سرور یافت نشد.")
@@ -1512,7 +1545,7 @@ def api_admin_edit_panel_server(server_id: int, body: PanelServerUpdate, auth=De
 
 
 @app.post("/api/admin/panel-servers/{server_id}/template")
-async def api_admin_set_panel_server_template(server_id: int, body: PanelServerSetTemplate, auth=Depends(require_senior_admin)):
+async def api_admin_set_panel_server_template(server_id: int, body: PanelServerSetTemplate, auth=Depends(require_panel_admin)):
     _, db, _ = auth
     server = db.get_panel_server(server_id)
     if not server:
@@ -1531,7 +1564,7 @@ async def api_admin_set_panel_server_template(server_id: int, body: PanelServerS
 
 
 @app.post("/api/admin/panel-servers/{server_id}/toggle")
-def api_admin_toggle_panel_server(server_id: int, auth=Depends(require_senior_admin)):
+def api_admin_toggle_panel_server(server_id: int, auth=Depends(require_panel_admin)):
     _, db, _ = auth
     server = db.get_panel_server(server_id)
     if not server:
@@ -1541,7 +1574,7 @@ def api_admin_toggle_panel_server(server_id: int, auth=Depends(require_senior_ad
 
 
 @app.post("/api/admin/panel-servers/{server_id}/usage/{kind}")
-def api_admin_toggle_panel_server_usage(server_id: int, kind: str, auth=Depends(require_senior_admin)):
+def api_admin_toggle_panel_server_usage(server_id: int, kind: str, auth=Depends(require_panel_admin)):
     _, db, _ = auth
     if kind not in ("custom", "test"):
         raise HTTPException(status_code=400, detail="نوع مصرف نامعتبر است.")
@@ -1554,7 +1587,7 @@ def api_admin_toggle_panel_server_usage(server_id: int, kind: str, auth=Depends(
 
 
 @app.post("/api/admin/panel-servers/{server_id}/test")
-async def api_admin_test_panel_server(server_id: int, auth=Depends(require_senior_admin)):
+async def api_admin_test_panel_server(server_id: int, auth=Depends(require_panel_admin)):
     _, db, _ = auth
     server = db.get_panel_server(server_id)
     if not server:
@@ -1568,7 +1601,7 @@ async def api_admin_test_panel_server(server_id: int, auth=Depends(require_senio
 
 
 @app.delete("/api/admin/panel-servers/{server_id}")
-def api_admin_delete_panel_server(server_id: int, auth=Depends(require_senior_admin)):
+def api_admin_delete_panel_server(server_id: int, auth=Depends(require_panel_admin)):
     _, db, _ = auth
     admin_id, _, _ = auth
     if not db.get_panel_server(server_id):
