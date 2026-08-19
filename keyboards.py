@@ -106,17 +106,6 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False) -> ReplyKeyboard
             return None
         return [_styled_button("🧑‍💼 پنل نمایندگی", "primary")]
 
-    def row_reseller_request():
-        # درخواست نمایندگی («نمایندگی با حجم») فقط داخل بات اصلی مجاز است؛
-        # نماینده‌ها نباید بتوانند داخل بات خودشان به کاربرانشان نمایندگی بدهند.
-        if is_reseller:
-            return None
-        if settings.get("is_main_bot", "1") != "1":
-            return None
-        if settings.get("reseller_request_enabled", "1") != "1":
-            return None
-        return [_styled_button(settings.get("btn_reseller_request", "🤝 درخواست نمایندگی"), settings.get("btn_reseller_request_style", ""))]
-
     builders = {
         "miniapp": row_miniapp,
         "btn_buy": row_buy,
@@ -126,7 +115,6 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False) -> ReplyKeyboard
         "btn_referral": row_referral,
         "btn_wheel": row_wheel,
         "btn_contact": row_contact,
-        "btn_reseller_request": row_reseller_request,
         "btn_admin_panel": row_admin_panel,
     }
 
@@ -159,8 +147,6 @@ def categories_kb(db, categories) -> InlineKeyboardMarkup:
     rows = []
     if db.get_setting("custom_config_enabled", "0") == "1":
         rows.append([_styled_inline(db, "🛠 ساخت کانفیگ شخصی", "custom_config_start", "btn_custom_config_style")])
-    if db.list_reseller_products(seller_type="owner", active_only=True):
-        rows.append([_styled_inline(db, "🛍 بانک کانفیگ", "rstore_open", "btn_cat_select_style")])
     for cat in categories:
         rows.append([_styled_inline(db, f"📁 {cat['name']}", f"cat:{cat['id']}", "btn_cat_select_style")])
     rows.append([_styled_inline(db, "⬅️ بازگشت", "back_main", "btn_buy_back_style")])
@@ -219,81 +205,9 @@ def custom_config_username_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def reseller_panel_kb(show_card_button: bool = False, show_store_link: bool = False) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text="➕ ساخت کانفیگ جدید (دستی)", callback_data="reseller_new_config")],
-        [InlineKeyboardButton(text="🛍 محصولات من (بانک کانفیگ)", callback_data="reseller_products_menu")],
-    ]
-    if show_store_link:
-        rows.append([InlineKeyboardButton(text="🔗 لینک فروشگاه من", callback_data="reseller_store_link")])
-    if show_card_button:
-        rows.append([InlineKeyboardButton(text="💳 شماره کارت من", callback_data="subres_set_card")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def reseller_products_list_kb(products, back_callback: str = "reseller_panel_back") -> InlineKeyboardMarkup:
-    rows = []
-    for p in products:
-        icon = "🟢" if p["is_active"] else "🔴"
-        rows.append([InlineKeyboardButton(
-            text=f"{icon} {p['title']} — {p['volume_gb']}گیگ/{p['duration_days']}روز — {p['price']:,}ت",
-            callback_data=f"rprod_view:{p['id']}",
-        )])
-    rows.append([InlineKeyboardButton(text="➕ افزودن محصول جدید", callback_data="rprod_add")])
-    rows.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data=back_callback)])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def reseller_product_view_kb(product_id: int) -> InlineKeyboardMarkup:
+def reseller_panel_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔁 فعال/غیرفعال", callback_data=f"rprod_toggle:{product_id}")],
-        [InlineKeyboardButton(text="🗑 حذف", callback_data=f"rprod_del:{product_id}")],
-        [InlineKeyboardButton(text="🔙 بازگشت به لیست", callback_data="reseller_products_menu")],
-    ])
-
-
-def reseller_product_source_kb(show_own_panel: bool = True) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text="📦 از استخر گیگابایت من", callback_data="rprod_src:credit_pool")],
-    ]
-    if show_own_panel:
-        rows.append([InlineKeyboardButton(text="🖥 از پنل VPN شخصی من", callback_data="rprod_src:own_panel")])
-    rows.append([InlineKeyboardButton(text="📥 از انبار لینک ساب آماده", callback_data="rprod_src:stock")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def reseller_product_panel_select_kb(servers) -> InlineKeyboardMarkup:
-    rows = []
-    for s in servers:
-        icon = "🟢" if s["is_active"] else "🔴"
-        rows.append([InlineKeyboardButton(text=f"{icon} {s['name']}", callback_data=f"rprod_panel:{s['id']}")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def reseller_storefront_kb(products) -> InlineKeyboardMarkup:
-    rows = []
-    for p in products:
-        rows.append([InlineKeyboardButton(
-            text=f"🛍 {p['title']} — {p['volume_gb']}گیگ/{p['duration_days']}روز — {p['price']:,}ت",
-            callback_data=f"rstore_view:{p['id']}",
-        )])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="back_main")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def reseller_storefront_confirm_kb(product_id: int, back_callback: str = "rstore_open") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ خرید این محصول", callback_data=f"rstore_buy:{product_id}")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data=back_callback)],
-    ])
-
-
-def reseller_order_review_kb(order_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ تایید و ارسال کانفیگ", callback_data=f"rporder_approve:{order_id}"),
-            InlineKeyboardButton(text="❌ رد کردن", callback_data=f"rporder_reject:{order_id}"),
-        ]
+        [InlineKeyboardButton(text="➕ ساخت کانفیگ جدید", callback_data="reseller_new_config")],
     ])
 
 
@@ -349,7 +263,6 @@ ADMIN_PANEL_ITEMS = [
     ("adm_custom_config_settings", "🛠 ساخت کانفیگ شخصی (پنل‌های VPN)", "adm_custom_config_settings"),
     ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
     ("adm_resellers_menu", "🏪 مدیریت بات‌های نمایندگی", "adm_resellers_menu"),
-    ("adm_gb_resellers_menu", "📦 مدیریت نمایندگان (استخر حجم)", "adm_gb_resellers_menu"),
     ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
     ("adm_set_card", "💳 تنظیم شماره کارت", "adm_set_card"),
     ("adm_set_plisio", "🪙 تنظیم درگاه کریپتو (Plisio)", "adm_set_plisio"),
@@ -367,23 +280,14 @@ def _styled_inline(db, text: str, callback_data: str, style_key: str) -> InlineK
     return InlineKeyboardButton(text=text, callback_data=callback_data, style=style)
 
 
-def admin_panel_kb(db, is_main_bot: bool = True, viewer_id: int = None) -> InlineKeyboardMarkup:
+def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
     """کیبورد پنل مدیریت با چیدمان دو ستونه برای کاهش ارتفاع منو."""
     rows = []
     current_row = []
 
-    # صاحب یک بات نماینده (نه ادمین اصلی که وارد بات نماینده شده) نباید بتواند
-    # پنل VPN وصل کند یا برای کاربران دیگرِ بات خودش نمایندگی/اعتبار حجمی بسازد.
-    hide_owner_only_items = (
-        not is_main_bot and viewer_id is not None and db.get_admin_role(viewer_id) == "owner"
-    )
-    owner_restricted_keys = {"adm_custom_config_settings", "adm_gb_resellers_menu"}
-
     for key, label, callback_data in ADMIN_PANEL_ITEMS:
         if key == "adm_resellers_menu" and not is_main_bot:
             # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده ندارند
-            continue
-        if hide_owner_only_items and key in owner_restricted_keys:
             continue
 
         current_row.append(_styled_inline(db, label, callback_data, f"{key}_style"))
@@ -844,98 +748,6 @@ def inbound_select_kb(inbounds) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-# ---------------------------------------------------------------------------
-# مدیریت نمایندگان استخر حجم
-# ---------------------------------------------------------------------------
-
-def gb_resellers_list_kb(db) -> InlineKeyboardMarkup:
-    resellers = db.get_all_resellers_combined()
-    rows = []
-    for r in resellers:
-        if r["is_reseller"]:
-            tag = "🤖 " if r["has_own_bot"] else ""
-            text = f"{tag}👤 {r['name']} | {r['credit_gb']:,} گیگ"
-            rows.append([InlineKeyboardButton(text=text, callback_data=f"adm_gb_reseller_view:{r['telegram_id']}")])
-        else:
-            # فقط بات مستقل دارد، هنوز اعتبار حجمی برایش فعال نشده
-            text = f"🤖 👤 {r['name']} (@{r['bot_username']}) — بدون اعتبار حجمی"
-            rows.append([InlineKeyboardButton(text=text, callback_data=f"adm_gb_reseller_convert:{r['telegram_id']}")])
-    rows.append([InlineKeyboardButton(text="➕ افزودن نماینده جدید", callback_data="adm_gb_reseller_add")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def gb_reseller_view_kb(db, user_tg_id: int) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text="➕ افزودن/کسر اعتبار", callback_data=f"adm_gb_reseller_credit:{user_tg_id}")],
-        [InlineKeyboardButton(text="🖥 تعیین پنل اختصاصی", callback_data=f"adm_gb_reseller_panel:{user_tg_id}")],
-        [InlineKeyboardButton(text="⏳ تعیین بازه‌ی مدت مجاز", callback_data=f"adm_gb_reseller_duration:{user_tg_id}")],
-        [InlineKeyboardButton(text="🔴 لغو نمایندگی", callback_data=f"adm_gb_reseller_revoke:{user_tg_id}")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_gb_resellers_menu")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def gb_reseller_panel_select_kb(servers, user_tg_id: int) -> InlineKeyboardMarkup:
-    rows = []
-    for s in servers:
-        icon = "🟢" if s["is_active"] else "🔴"
-        rows.append([InlineKeyboardButton(
-            text=f"{icon} {s['name']}", callback_data=f"adm_gb_reseller_panel_set:{user_tg_id}:{s['id']}",
-        )])
-    rows.append([InlineKeyboardButton(text="➖ استفاده از پنل عمومی نمایندگی", callback_data=f"adm_gb_reseller_panel_set:{user_tg_id}:0")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data=f"adm_gb_reseller_view:{user_tg_id}")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-# ---------------------------------------------------------------------------
-# زیرنمایندگان (یک سطح، داخل همین بات نماینده - بدون بات/توکن جدید)
-# ---------------------------------------------------------------------------
-
-def sub_resellers_list_kb(sub_resellers) -> InlineKeyboardMarkup:
-    rows = []
-    for sr in sub_resellers:
-        icon = "🟢" if sr["is_active"] else "🔴"
-        text = f"{icon} {sr['display_name'] or sr['telegram_id']} | {sr['credit_gb']:,} گیگ"
-        rows.append([InlineKeyboardButton(text=text, callback_data=f"adm_subres_view:{sr['id']}")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def sub_reseller_view_kb(sub_reseller_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ افزودن/کسر اعتبار", callback_data=f"adm_subres_credit:{sub_reseller_id}")],
-        [InlineKeyboardButton(text="🖥 تعیین پنل اختصاصی", callback_data=f"adm_subres_panel:{sub_reseller_id}")],
-        [InlineKeyboardButton(text="🔁 فعال/غیرفعال", callback_data=f"adm_subres_toggle:{sub_reseller_id}")],
-        [InlineKeyboardButton(text="🗑 حذف زیرنماینده", callback_data=f"adm_subres_delete:{sub_reseller_id}")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_sub_resellers_menu")],
-    ])
-
-
-def sub_reseller_panel_select_kb(servers, sub_reseller_id: int) -> InlineKeyboardMarkup:
-    rows = []
-    for s in servers:
-        icon = "🟢" if s["is_active"] else "🔴"
-        rows.append([InlineKeyboardButton(
-            text=f"{icon} {s['name']}", callback_data=f"adm_subres_panel_set:{sub_reseller_id}:{s['id']}",
-        )])
-    rows.append([InlineKeyboardButton(text="➖ استفاده از پنل عمومی نمایندگی (اشتراکی)", callback_data=f"adm_subres_panel_set:{sub_reseller_id}:0")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data=f"adm_subres_view:{sub_reseller_id}")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-# ---------------------------------------------------------------------------
-# درخواست نمایندگی
-# ---------------------------------------------------------------------------
-
-def reseller_request_admin_kb(request_id: int, request_type: str = "credit", needs_price: bool = None) -> InlineKeyboardMarkup:
-    # نمایندگی فقط از نوع «با حجم» است و همیشه ادمین باید مبلغش را دستی تعیین کند.
-    approve_btn = InlineKeyboardButton(text="💰 تعیین قیمت و ارسال", callback_data=f"adm_reseller_req_price:{request_id}")
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [approve_btn, InlineKeyboardButton(text="❌ رد", callback_data=f"adm_reseller_req_reject:{request_id}")],
-    ])
-
-
 def panel_servers_list_kb(db) -> InlineKeyboardMarkup:
     servers = db.get_panel_servers()
     rows = []
@@ -1009,23 +821,21 @@ def resellers_kb(resellers) -> InlineKeyboardMarkup:
     rows = []
     for r in resellers:
         state_icon = "🟢" if r["is_active"] else "🔴"
-        mode_icon = "📦" if (r.keys() and "mode" in r.keys() and r["mode"] == "volume") else "🤖"
         label = r["bot_username"] or r["bot_token"][:10] + "..."
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"{state_icon} {mode_icon} @{label} - {r['owner_name'] or r['owner_telegram_id']}",
+                    text=f"{state_icon} @{label} - {r['owner_name'] or r['owner_telegram_id']}",
                     callback_data="noop",
                 )
             ]
         )
-        action_row = [
-            InlineKeyboardButton(text="تغییر وضعیت", callback_data=f"adm_resbot_toggle:{r['id']}"),
-            InlineKeyboardButton(text="🗑حذف", callback_data=f"adm_resbot_del:{r['id']}"),
-        ]
-        rows.append(action_row)
-        if not (r.keys() and "mode" in r.keys() and r["mode"] == "volume"):
-            rows.append([InlineKeyboardButton(text="📦 تبدیل به بات با حجم (دادن حجم اولیه)", callback_data=f"adm_resbot_makevol:{r['id']}")])
+        rows.append(
+            [
+                InlineKeyboardButton(text="تغییر وضعیت", callback_data=f"adm_resbot_toggle:{r['id']}"),
+                InlineKeyboardButton(text="🗑حذف", callback_data=f"adm_resbot_del:{r['id']}"),
+            ]
+        )
     rows.append([InlineKeyboardButton(text="➕ افزودن بات نمایندگی جدید", callback_data="adm_resbot_add")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

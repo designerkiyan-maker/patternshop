@@ -94,7 +94,6 @@ class BotManager:
 
         db = Database(db_path)
         db.init_db(owner_id=owner_id)
-        db.set_setting("is_main_bot", "1" if is_main_bot else "0")
 
         bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         dp = Dispatcher(storage=MemoryStorage())
@@ -113,7 +112,7 @@ class BotManager:
         dp.callback_query.outer_middleware(force_join_mw)
 
         dp.include_router(create_admin_router(db, is_main_bot=is_main_bot, bot_manager=self))
-        dp.include_router(create_user_router(db, bot_manager=self if is_main_bot else None))
+        dp.include_router(create_user_router(db))
 
         await bot.delete_webhook(drop_pending_updates=True)
         await self._sync_menu_button(bot, db)

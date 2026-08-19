@@ -43,10 +43,6 @@ from states import (
     AdminCreateDiscount,
     AdminReferralPercent,
     AdminAddResellerBot,
-    AdminAddGbReseller,
-    AdminAdjustResellerCredit,
-    AdminSetResellerDuration,
-    AdminSetResellerBotFee,
     AdminWheelSettings,
     AdminRenewalSettings,
     AdminVolumeReminderSettings,
@@ -57,8 +53,6 @@ from states import (
     AdminAddPricingTier,
     AdminCustomConfigSettings,
     AdminResetTestConfig,
-    SubResellerCreditFlow,
-    AdminMakeResellerVolume,
 )
 
 
@@ -89,14 +83,6 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     def owner_only(user_id: int) -> bool:
         """فقط مالک اصلی بات (تعیین‌شده در env)؛ برای مدیریت خود ادمین‌ها."""
         return db.is_owner(user_id)
-
-    def reseller_bot_owner_restricted(user_id: int) -> bool:
-        """صاحب یک بات نماینده (نه ادمین اصلی که وارد بات نماینده شده) نباید بتواند
-        پنل VPN وصل کند یا برای کاربران دیگرِ بات خودش نمایندگی/اعتبار حجمی بسازد."""
-        return (not is_main_bot) and db.is_owner(user_id)
-
-    async def deny_reseller_owner(call: CallbackQuery):
-        await call.answer("⛔️ این قابلیت برای نمایندگی با حجم در دسترس نیست.", show_alert=True)
 
     async def deny_support(call: CallbackQuery):
         await call.answer("⛔️ این بخش فقط برای مدیران کامل در دسترس است.", show_alert=True)
@@ -166,14 +152,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not admin_only(message.from_user.id):
             return
         await state.clear()
-        await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db, is_main_bot, message.from_user.id))
+        await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
     @router.callback_query(F.data == "adm_back_panel")
     async def cb_back_panel(call: CallbackQuery, state: FSMContext):
         if not admin_only(call.from_user.id):
             return await call.answer()
         await state.clear()
-        await replace_admin_view(call, "🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db, is_main_bot, call.from_user.id))
+        await replace_admin_view(call, "🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db, is_main_bot))
         await call.answer()
 
     @router.callback_query(F.data == "noop")
@@ -630,35 +616,6 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         if order["status"] != "pending":
             await call.answer("این سفارش قبلاً بررسی شده است.", show_alert=True)
-            return
-
-        # ===== سفارش هزینه‌ی ساخت بات نمایندگی: بعد از تایید، خودکار وارد فلوی دریافت توکن می‌شود =====
-        if order["is_reseller_bot_fee"]:
-            req = db.get_reseller_request(order["reseller_request_id"]) if order["reseller_request_id"] else None
-            mode = "volume" if (req and req["request_type"] == "credit") else "independent"
-            db.approve_custom_config_order(order_id)
-            db.start_reseller_bot_setup(order["user_id"], mode=mode)
-            db.log_admin_action(
-                call.from_user.id, "reseller_bot_fee_approve",
-                f"سفارش #{order_id} | کاربر {order['user_id']} | مبلغ: {order['final_price']:,}",
-            )
-            try:
-                await bot.send_message(
-                    order["user_id"],
-                    "✅ پرداخت شما تایید شد!\n\n"
-                    "برای ساخت خودکار بات، لطفاً همین‌جا توکن بات را ارسال کن "
-                    "(همان چیزی که از @BotFather گرفتی):",
-                )
-            except Exception:
-                pass
-            try:
-                await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد؛ از کاربر توکن بات خواسته شد.")
-            except Exception:
-                try:
-                    await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید شد؛ از کاربر توکن بات خواسته شد.")
-                except Exception:
-                    pass
-            await call.answer("سفارش تایید و از کاربر توکن بات خواسته شد.")
             return
 
         # ===== سفارش کانفیگ شخصی: به‌جای برداشتن از انبار، کاربر روی پنل ساخته می‌شود =====
@@ -1266,8 +1223,6 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_custom_config_settings(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        if reseller_bot_owner_restricted(call.from_user.id):
-            return await deny_reseller_owner(call)
         await replace_admin_view(call,
             "🛠 ساخت کانفیگ شخصی\n\n"
             "کاربران می‌توانند با تعیین نام، حجم و پرداخت متناسب، کاربر خودشان را مستقیماً "
@@ -1324,8 +1279,6 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_panel_servers(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        if reseller_bot_owner_restricted(call.from_user.id):
-            return await deny_reseller_owner(call)
         await replace_admin_view(call, "🖥 سرورهای پنل VPN متصل:", reply_markup=kb.panel_servers_list_kb(db))
         await call.answer()
 
@@ -1333,8 +1286,6 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_panel_server_add(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        if reseller_bot_owner_restricted(call.from_user.id):
-            return await deny_reseller_owner(call)
         await state.set_state(AdminAddPanelServer.waiting_name)
         await safe_edit(call, "یک نام دلخواه برای این سرور بفرست (مثلاً «سرور آلمان»):", reply_markup=kb.admin_back_kb())
         await call.answer()
@@ -1608,13 +1559,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_delete")
-        deleted = db.delete_panel_server(server_id)
+        db.delete_panel_server(server_id)
         db.log_admin_action(call.from_user.id, "panel_server_delete", f"سرور #{server_id}")
         await replace_admin_view(call, "🖥 سرورهای پنل VPN متصل:", reply_markup=kb.panel_servers_list_kb(db))
-        if deleted:
-            await call.answer("سرور حذف شد.")
-        else:
-            await call.answer("این سرور قبلاً برای ساخت کانفیگ استفاده شده؛ برای جلوگیری از خرابی داده حذف نشد، فقط غیرفعال شد.", show_alert=True)
+        await call.answer("سرور حذف شد.")
 
     @router.callback_query(F.data == "adm_pricing_tiers")
     async def cb_admin_pricing_tiers(call: CallbackQuery):
@@ -1942,470 +1890,6 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     # برایش راه‌اندازی می‌کند.
     # -------------------------------------------------------------------
 
-    # -------------------------------------------------------------------
-    # درخواست‌های نمایندگی (تایید/رد توسط ادمین)
-    # -------------------------------------------------------------------
-
-    @router.callback_query(F.data.startswith("adm_reseller_req_price:"))
-    async def cb_admin_reseller_req_price(call: CallbackQuery, state: FSMContext):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        request_id = int(call.data.split(":")[1])
-        req = db.get_reseller_request(request_id)
-        if not req or req["status"] != "pending":
-            await call.answer("این درخواست قبلاً بررسی شده.", show_alert=True)
-            return
-        await state.update_data(reseller_request_id=request_id)
-        await state.set_state(AdminSetResellerBotFee.waiting_price)
-        await call.message.answer("هزینه‌ی ساخت این بات نمایندگی چند تومان باشد؟ (فقط عدد):")
-        await call.answer()
-
-    @router.message(AdminSetResellerBotFee.waiting_price)
-    async def process_reseller_bot_fee_price(message: Message, state: FSMContext, bot: Bot):
-        text = message.text.strip()
-        if not text.isdigit() or int(text) <= 0:
-            await message.answer("لطفاً یک عدد صحیح مثبت ارسال کن.")
-            return
-        price = int(text)
-        data = await state.get_data()
-        request_id = data["reseller_request_id"]
-        req = db.get_reseller_request(request_id)
-        if not req or req["status"] != "pending":
-            await state.clear()
-            await message.answer("این درخواست دیگر معتبر نیست.")
-            return
-
-        order_id = db.create_reseller_bot_fee_order(req["user_id"], price, request_id)
-        db.set_reseller_request_status(request_id, "awaiting_payment", message.from_user.id)
-        await state.clear()
-        db.log_admin_action(message.from_user.id, "reseller_bot_fee_priced", f"درخواست #{request_id} | {price:,} تومان")
-
-        card_number = db.get_setting("card_number")
-        card_holder = db.get_setting("card_holder")
-        pay_text = (
-            f"💰 هزینه‌ی ساخت بات نمایندگی شما: {price:,} تومان\n\n"
-            f"💳 شماره کارت: `{card_number}`\n"
-            f"👤 به نام: {card_holder}\n\n"
-            f"لطفاً عکس رسید پرداخت را همینجا ارسال کنید، یا از دکمه‌ی زیر با ارز دیجیتال پرداخت کنید."
-        )
-        try:
-            await bot.send_message(
-                req["user_id"], pay_text, parse_mode="Markdown",
-                reply_markup=kb.payment_choice_kb(crypto_payment.crypto_payment_available(db)),
-            )
-        except Exception:
-            pass
-        await message.answer(f"✅ مبلغ برای کاربر ارسال شد. شماره سفارش: #{order_id}", reply_markup=kb.admin_panel_kb(db, is_main_bot))
-
-    @router.callback_query(F.data.startswith("adm_reseller_req_approve:"))
-    async def cb_admin_reseller_req_approve(call: CallbackQuery, bot: Bot):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        request_id = int(call.data.split(":")[1])
-        req = db.get_reseller_request(request_id)
-        if not req or req["status"] != "pending":
-            await call.answer("این درخواست قبلاً بررسی شده.", show_alert=True)
-            return
-
-        db.set_reseller_request_status(request_id, "approved", call.from_user.id)
-        db.log_admin_action(call.from_user.id, "reseller_request_approve", f"درخواست #{request_id} | کاربر {req['user_id']}")
-
-        # نمایندگی فقط از نوع «با حجم» است: یک بات جداگانه با توکن/آیدی/دیتابیس
-        # کاملاً مستقل ساخته می‌شود و صاحبش خودکار به‌عنوان نماینده‌ی حجمی همان بات فعال می‌شود.
-        db.start_reseller_bot_setup(req["user_id"], mode="volume")
-        try:
-            await bot.send_message(
-                req["user_id"],
-                "🎉 درخواست نمایندگی (نمایندگی با حجم) شما تایید شد!\n\n"
-                "برای ساخت خودکار بات، لطفاً همین‌جا توکن بات را ارسال کن "
-                "(همان چیزی که از @BotFather گرفتی):",
-            )
-        except Exception:
-            pass
-        try:
-            await call.message.edit_text(
-                (call.message.text or "") + "\n\n✅ تایید شد (نمایندگی با حجم). از کاربر خواستیم توکن بات را بفرستد؛ بعد از تکمیل خودکار ساخته، روشن و به‌عنوان نماینده‌ی حجمی همان بات فعال می‌شود.",
-            )
-        except Exception:
-            pass
-        await call.answer("تایید شد.")
-
-    @router.callback_query(F.data.startswith("adm_reseller_req_reject:"))
-    async def cb_admin_reseller_req_reject(call: CallbackQuery, bot: Bot):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        request_id = int(call.data.split(":")[1])
-        req = db.get_reseller_request(request_id)
-        if not req or req["status"] != "pending":
-            await call.answer("این درخواست قبلاً بررسی شده.", show_alert=True)
-            return
-        db.set_reseller_request_status(request_id, "rejected", call.from_user.id)
-        db.log_admin_action(call.from_user.id, "reseller_request_reject", f"درخواست #{request_id} | کاربر {req['user_id']}")
-        try:
-            await bot.send_message(req["user_id"], "❌ متاسفانه درخواست نمایندگی شما تایید نشد.")
-        except Exception:
-            pass
-        try:
-            await call.message.edit_text((call.message.text or "") + "\n\n❌ رد شد.")
-        except Exception:
-            pass
-        await call.answer("رد شد.")
-
-    @router.callback_query(F.data == "adm_gb_resellers_menu")
-    async def cb_admin_gb_resellers_menu(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        if reseller_bot_owner_restricted(call.from_user.id):
-            return await deny_reseller_owner(call)
-        await replace_admin_view(
-            call,
-            "📦 مدیریت نمایندگان (استخر حجم)\n\n"
-            "به هر نماینده مقدار مشخصی گیگابایت می‌دهی؛ خودش با هر نام/حجم/مدتی "
-            "که بخواهد کانفیگ می‌سازد و با هر قیمتی که دوست دارد می‌فروشد.",
-            reply_markup=kb.gb_resellers_list_kb(db),
-        )
-        await call.answer()
-
-    @router.callback_query(F.data == "adm_gb_reseller_add")
-    async def cb_admin_gb_reseller_add(call: CallbackQuery, state: FSMContext):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        await state.set_state(AdminAddGbReseller.waiting_user_id)
-        await safe_edit(call,
-            "آیدی عددی کاربری که می‌خواهی نماینده شود را بفرست.\n"
-            "(کاربر باید حداقل یک‌بار با بات /start زده باشد)",
-            reply_markup=kb.admin_back_kb(),
-        )
-        await call.answer()
-
-    @router.message(AdminAddGbReseller.waiting_user_id)
-    async def process_gb_reseller_add(message: Message, state: FSMContext):
-        text = message.text.strip()
-        if not text.isdigit():
-            await message.answer("لطفاً فقط آیدی عددی ارسال کن.")
-            return
-        user_id = int(text)
-        user = db.get_user(user_id)
-        if not user:
-            await message.answer("❌ این کاربر هنوز با بات /start نزده. اول باید یک‌بار بات را استارت کند.")
-            return
-        db.set_reseller_status(user_id, True)
-        await state.clear()
-        db.log_admin_action(message.from_user.id, "reseller_add", f"کاربر {user_id} به نمایندگی اضافه شد")
-        try:
-            await message.bot.send_message(
-                user_id, "🎉 شما به‌عنوان نماینده تایید شدید! از منوی اصلی وارد «🧑‍💼 پنل نمایندگی» شوید."
-            )
-        except Exception:
-            pass
-        await message.answer(
-            f"✅ کاربر {user_id} به نمایندگی اضافه شد. حالا از «افزودن/کسر اعتبار» بهش شارژ بده.",
-            reply_markup=kb.gb_resellers_list_kb(db),
-        )
-
-    @router.callback_query(F.data.startswith("adm_gb_reseller_convert:"))
-    async def cb_admin_gb_reseller_convert(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        user_id = int(call.data.split(":")[1])
-        db.set_reseller_status(user_id, True)
-        db.log_admin_action(call.from_user.id, "reseller_convert_to_credit", f"کاربر {user_id} اعتبار حجمی هم فعال شد")
-        try:
-            await call.bot.send_message(
-                user_id,
-                "📦 علاوه بر بات مستقل خودت، اعتبار حجمی هم برات فعال شد! "
-                "از منوی اصلی همین بات وارد «🧑‍💼 پنل نمایندگی» شو.",
-            )
-        except Exception:
-            pass
-        await call.answer("اعتبار حجمی برای این نماینده فعال شد.")
-        await replace_admin_view(call, "📦 مدیریت نمایندگان (استخر حجم):", reply_markup=kb.gb_resellers_list_kb(db))
-
-    @router.callback_query(F.data.startswith("adm_gb_reseller_view:"))
-    async def cb_admin_gb_reseller_view(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        user_id = int(call.data.split(":")[1])
-        cfg = db.get_reseller_config(user_id)
-        user = db.get_user(user_id)
-        name = (user["first_name"] if user else None) or str(user_id)
-        own_bot = next((rb for rb in db.list_reseller_bots() if rb["owner_telegram_id"] == user_id), None)
-        server_name = "پنل عمومی نمایندگی (پیش‌فرض)"
-        if cfg["panel_server_id"]:
-            s = db.get_panel_server(cfg["panel_server_id"])
-            server_name = s["name"] if s else "سرور حذف‌شده!"
-        text = (
-            f"👤 {name} (آیدی: {user_id})\n"
-            + (f"🤖 بات مستقل: @{own_bot['bot_username']}\n" if own_bot else "")
-            + f"📦 اعتبار: {cfg['credit_gb']:,} گیگابایت\n"
-            f"🖥 پنل: {server_name}\n"
-            f"⏳ بازه‌ی مدت مجاز: {cfg['min_duration_days']} تا {cfg['max_duration_days']} روز"
-        )
-        await replace_admin_view(call, text, reply_markup=kb.gb_reseller_view_kb(db, user_id))
-        await call.answer()
-
-    @router.callback_query(F.data.startswith("adm_gb_reseller_credit:"))
-    async def cb_admin_gb_reseller_credit(call: CallbackQuery, state: FSMContext):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        user_id = int(call.data.split(":")[1])
-        await state.update_data(reseller_user_id=user_id)
-        await state.set_state(AdminAdjustResellerCredit.waiting_amount)
-        await safe_edit(call,
-            "چند گیگابایت اضافه/کم بشود؟\n"
-            "برای افزودن عدد مثبت بفرست (مثلاً 1000)، برای کسر عدد منفی (مثلاً -50).",
-            reply_markup=kb.admin_back_kb(),
-        )
-        await call.answer()
-
-    @router.message(AdminAdjustResellerCredit.waiting_amount)
-    async def process_gb_reseller_credit(message: Message, state: FSMContext):
-        text = message.text.strip()
-        try:
-            delta = int(text)
-        except ValueError:
-            await message.answer("لطفاً فقط عدد صحیح ارسال کن (مثبت یا منفی).")
-            return
-        if delta == 0:
-            await message.answer("عدد صفر معنی ندارد.")
-            return
-        data = await state.get_data()
-        user_id = data["reseller_user_id"]
-        db.adjust_reseller_credit(user_id, delta, admin_id=message.from_user.id, reason="شارژ دستی توسط ادمین")
-        new_credit = db.get_reseller_credit(user_id)
-        await state.clear()
-        db.log_admin_action(message.from_user.id, "reseller_credit_adjust", f"کاربر {user_id} | {delta:+,} گیگ")
-        try:
-            if delta > 0:
-                await message.bot.send_message(user_id, f"📦 {delta:,} گیگابایت به اعتبار نمایندگی شما اضافه شد.")
-        except Exception:
-            pass
-        await message.answer(
-            f"✅ انجام شد. اعتبار جدید: {new_credit:,} گیگابایت.",
-            reply_markup=kb.gb_resellers_list_kb(db),
-        )
-
-    @router.callback_query(F.data.startswith("adm_gb_reseller_panel:"))
-    async def cb_admin_gb_reseller_panel(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        user_id = int(call.data.split(":")[1])
-        servers = db.get_panel_servers(active_only=True)
-        if not servers:
-            await call.answer("هنوز هیچ سرور پنلی اضافه نشده.", show_alert=True)
-            return
-        await replace_admin_view(
-            call, "کدام پنل برای این نماینده اختصاصی شود؟", reply_markup=kb.gb_reseller_panel_select_kb(servers, user_id),
-        )
-        await call.answer()
-
-    @router.callback_query(F.data.startswith("adm_gb_reseller_panel_set:"))
-    async def cb_admin_gb_reseller_panel_set(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        _, user_id_str, server_id_str = call.data.split(":")
-        user_id, server_id = int(user_id_str), int(server_id_str)
-        db.set_reseller_panel_server(user_id, server_id if server_id else None)
-        db.log_admin_action(call.from_user.id, "reseller_panel_set", f"کاربر {user_id} ← سرور {server_id or 'پیش‌فرض'}")
-        await call.answer("تنظیم شد.")
-        cfg = db.get_reseller_config(user_id)
-        server_name = "پنل عمومی نمایندگی (پیش‌فرض)"
-        if cfg["panel_server_id"]:
-            s = db.get_panel_server(cfg["panel_server_id"])
-            server_name = s["name"] if s else "سرور حذف‌شده!"
-        await safe_edit(call,
-            f"🖥 پنل این نماینده: {server_name}",
-            reply_markup=kb.gb_reseller_view_kb(db, user_id),
-        )
-
-    @router.callback_query(F.data.startswith("adm_gb_reseller_duration:"))
-    async def cb_admin_gb_reseller_duration(call: CallbackQuery, state: FSMContext):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        user_id = int(call.data.split(":")[1])
-        await state.update_data(reseller_user_id=user_id)
-        await state.set_state(AdminSetResellerDuration.waiting_min)
-        await safe_edit(call, "حداقل مدت مجاز (روز) برای کانفیگ‌های این نماینده چند باشد؟", reply_markup=kb.admin_back_kb())
-        await call.answer()
-
-    @router.message(AdminSetResellerDuration.waiting_min)
-    async def process_gb_reseller_duration_min(message: Message, state: FSMContext):
-        text = message.text.strip()
-        if not text.isdigit() or int(text) <= 0:
-            await message.answer("لطفاً یک عدد صحیح مثبت ارسال کن.")
-            return
-        await state.update_data(min_days=int(text))
-        await state.set_state(AdminSetResellerDuration.waiting_max)
-        await message.answer("حداکثر مدت مجاز (روز) چند باشد؟")
-
-    @router.message(AdminSetResellerDuration.waiting_max)
-    async def process_gb_reseller_duration_max(message: Message, state: FSMContext):
-        text = message.text.strip()
-        data = await state.get_data()
-        if not text.isdigit() or int(text) <= data["min_days"]:
-            await message.answer(f"باید عددی بزرگ‌تر از حداقل ({data['min_days']}) باشد.")
-            return
-        user_id = data["reseller_user_id"]
-        db.set_reseller_duration_range(user_id, data["min_days"], int(text))
-        await state.clear()
-        db.log_admin_action(message.from_user.id, "reseller_duration_set", f"کاربر {user_id} | {data['min_days']} تا {text} روز")
-        await message.answer(
-            f"✅ بازه‌ی مدت این نماینده روی {data['min_days']} تا {text} روز تنظیم شد.",
-            reply_markup=kb.gb_resellers_list_kb(db),
-        )
-
-    @router.callback_query(F.data.startswith("adm_gb_reseller_revoke:"))
-    async def cb_admin_gb_reseller_revoke(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        user_id = int(call.data.split(":")[1])
-        db.set_reseller_status(user_id, False)
-        db.log_admin_action(call.from_user.id, "reseller_revoke", f"نمایندگی کاربر {user_id} لغو شد")
-        await call.answer("نمایندگی لغو شد.")
-        await replace_admin_view(call, "📦 مدیریت نمایندگان (استخر حجم):", reply_markup=kb.gb_resellers_list_kb(db))
-
-    # -----------------------------------------------------------------------
-    # مدیریت زیرنمایندگان (یک سطح، بدون بات/توکن جدید - داخل همین دیتابیس)
-    # -----------------------------------------------------------------------
-
-    @router.callback_query(F.data == "adm_sub_resellers_menu")
-    async def cb_admin_sub_resellers_menu(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        sub_resellers = db.list_sub_resellers()
-        text = (
-            "🧩 مدیریت زیرنمایندگان\n\n"
-            "زیرنماینده داخل همین بات فعالیت می‌کند (بدون بات/توکن جدید). می‌تونی بخشی از اعتبار "
-            "خودت رو بهش منتقل کنی؛ خودش هم می‌تونه محصول و شماره کارت مخصوص خودش رو تنظیم کنه.\n\n"
-            "برای ساخت زیرنماینده‌ی جدید، از «🤝 درخواست نمایندگی» → «📦 زیرنمایندگی» استفاده کن "
-            "(کاربر باید خودش درخواست بده، تو فقط تاییدش می‌کنی)."
-            if not sub_resellers else
-            "🧩 مدیریت زیرنمایندگان:"
-        )
-        await replace_admin_view(call, text, reply_markup=kb.sub_resellers_list_kb(sub_resellers))
-        await call.answer()
-
-    @router.callback_query(F.data.startswith("adm_subres_view:"))
-    async def cb_admin_subres_view(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        sub_id = int(call.data.split(":")[1])
-        sr = db.get_sub_reseller(sub_id)
-        if not sr:
-            await call.answer("یافت نشد.", show_alert=True)
-            return
-        server_name = "پنل عمومی نمایندگی (اشتراکی)"
-        if sr["panel_server_id"]:
-            s = db.get_panel_server(sr["panel_server_id"])
-            server_name = s["name"] if s else "سرور حذف‌شده!"
-        text = (
-            f"👤 {sr['display_name'] or sr['telegram_id']} (آیدی: {sr['telegram_id']})\n"
-            f"📦 اعتبار: {sr['credit_gb']:,} گیگابایت\n"
-            f"🖥 پنل: {server_name}\n"
-            f"💳 شماره کارت: {sr['card_number'] or 'هنوز تنظیم نکرده'}\n"
-            f"وضعیت: {'🟢 فعال' if sr['is_active'] else '🔴 غیرفعال'}"
-        )
-        await replace_admin_view(call, text, reply_markup=kb.sub_reseller_view_kb(sub_id))
-        await call.answer()
-
-    @router.callback_query(F.data.startswith("adm_subres_credit:"))
-    async def cb_admin_subres_credit(call: CallbackQuery, state: FSMContext):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        sub_id = int(call.data.split(":")[1])
-        owner_credit = db.get_reseller_credit(call.from_user.id)
-        await state.update_data(sub_reseller_id=sub_id)
-        await state.set_state(SubResellerCreditFlow.waiting_amount)
-        await safe_edit(call,
-            f"چند گیگابایت از اعتبار خودت (فعلاً {owner_credit:,} گیگ داری) به این زیرنماینده منتقل شود؟\n"
-            "فقط عدد مثبت بفرست (برای کسر، از خود زیرنماینده صرف‌نظر کن یا مقدار منفی وارد کن).",
-            reply_markup=kb.admin_back_kb(),
-        )
-        await call.answer()
-
-    @router.message(SubResellerCreditFlow.waiting_amount)
-    async def process_subres_credit(message: Message, state: FSMContext):
-        text = message.text.strip()
-        try:
-            delta = int(text)
-        except ValueError:
-            await message.answer("لطفاً فقط عدد صحیح ارسال کن (مثبت یا منفی).")
-            return
-        if delta == 0:
-            await message.answer("عدد صفر معنی ندارد.")
-            return
-        data = await state.get_data()
-        sub_id = data["sub_reseller_id"]
-        if delta > 0:
-            ok = db.grant_credit_to_sub_reseller(message.from_user.id, sub_id, delta, admin_id=message.from_user.id)
-            if not ok:
-                await message.answer("❌ اعتبار خودت کافی نیست.")
-                return
-        else:
-            db.adjust_sub_reseller_credit(sub_id, delta, admin_id=message.from_user.id, reason="کسر دستی توسط ادمین")
-        sr = db.get_sub_reseller(sub_id)
-        await state.clear()
-        db.log_admin_action(message.from_user.id, "sub_reseller_credit_adjust", f"زیرنماینده {sub_id} | {delta:+,} گیگ")
-        try:
-            if delta > 0:
-                await message.bot.send_message(sr["telegram_id"], f"📦 {delta:,} گیگابایت به اعتبار زیرنمایندگی شما اضافه شد.")
-        except Exception:
-            pass
-        await message.answer(
-            f"✅ انجام شد. اعتبار جدید زیرنماینده: {sr['credit_gb']:,} گیگابایت.",
-            reply_markup=kb.sub_resellers_list_kb(db.list_sub_resellers()),
-        )
-
-    @router.callback_query(F.data.startswith("adm_subres_panel:"))
-    async def cb_admin_subres_panel(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        sub_id = int(call.data.split(":")[1])
-        servers = db.get_panel_servers(active_only=True)
-        if not servers:
-            await call.answer("هنوز هیچ سرور پنلی اضافه نشده.", show_alert=True)
-            return
-        await replace_admin_view(
-            call, "کدام پنل برای این زیرنماینده اختصاصی شود؟", reply_markup=kb.sub_reseller_panel_select_kb(servers, sub_id),
-        )
-        await call.answer()
-
-    @router.callback_query(F.data.startswith("adm_subres_panel_set:"))
-    async def cb_admin_subres_panel_set(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        _, sub_id_str, server_id_str = call.data.split(":")
-        sub_id, server_id = int(sub_id_str), int(server_id_str)
-        db.set_sub_reseller_panel_server(sub_id, server_id if server_id else None)
-        db.log_admin_action(call.from_user.id, "sub_reseller_panel_set", f"زیرنماینده {sub_id} ← سرور {server_id or 'پیش‌فرض'}")
-        await call.answer("تنظیم شد.")
-        sr = db.get_sub_reseller(sub_id)
-        server_name = "پنل عمومی نمایندگی (اشتراکی)"
-        if sr["panel_server_id"]:
-            s = db.get_panel_server(sr["panel_server_id"])
-            server_name = s["name"] if s else "سرور حذف‌شده!"
-        await safe_edit(call, f"🖥 پنل این زیرنماینده: {server_name}", reply_markup=kb.sub_reseller_view_kb(sub_id))
-
-    @router.callback_query(F.data.startswith("adm_subres_toggle:"))
-    async def cb_admin_subres_toggle(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        sub_id = int(call.data.split(":")[1])
-        db.toggle_sub_reseller(sub_id)
-        db.log_admin_action(call.from_user.id, "sub_reseller_toggle", f"زیرنماینده {sub_id}")
-        await call.answer("وضعیت تغییر کرد.")
-        await cb_admin_subres_view(call)
-
-    @router.callback_query(F.data.startswith("adm_subres_delete:"))
-    async def cb_admin_subres_delete(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        sub_id = int(call.data.split(":")[1])
-        db.delete_sub_reseller(sub_id)
-        db.log_admin_action(call.from_user.id, "sub_reseller_delete", f"زیرنماینده {sub_id} حذف شد")
-        await call.answer("حذف شد.")
-        await replace_admin_view(call, "🧩 مدیریت زیرنمایندگان:", reply_markup=kb.sub_resellers_list_kb(db.list_sub_resellers()))
-
     if is_main_bot:
 
         @router.callback_query(F.data == "adm_resellers_menu")
@@ -2415,60 +1899,6 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             bots = db.list_reseller_bots()
             await replace_admin_view(call, "🏪 مدیریت بات‌های نمایندگی:", reply_markup=kb.resellers_kb(bots))
             await call.answer()
-
-        @router.callback_query(F.data.startswith("adm_resbot_makevol:"))
-        async def cb_admin_resbot_makevol(call: CallbackQuery, state: FSMContext):
-            if not senior_admin_only(call.from_user.id):
-                return await deny_mid(call)
-            bot_id = int(call.data.split(":")[1])
-            reseller_bot = db.get_reseller_bot(bot_id)
-            if not reseller_bot:
-                return await call.answer("یافت نشد.", show_alert=True)
-            await state.update_data(resbot_id=bot_id)
-            await state.set_state(AdminMakeResellerVolume.waiting_credit)
-            await call.answer()
-            await call.message.answer(
-                f"چند گیگابایت اعتبار اولیه به @{reseller_bot['bot_username']} داده شود؟ (فقط عدد):",
-                reply_markup=kb.admin_back_kb(),
-            )
-
-        @router.message(AdminMakeResellerVolume.waiting_credit)
-        async def process_resbot_makevol(message: Message, state: FSMContext, bot: Bot):
-            text = message.text.strip()
-            if not text.isdigit() or int(text) <= 0:
-                await message.answer("لطفاً فقط عدد صحیح مثبت ارسال کن.")
-                return
-            credit_gb = int(text)
-            data = await state.get_data()
-            bot_id = data["resbot_id"]
-            reseller_bot = db.get_reseller_bot(bot_id)
-            if not reseller_bot:
-                await state.clear()
-                await message.answer("این بات نمایندگی دیگر وجود ندارد.")
-                return
-
-            reseller_db = Database(resolve_db_path(reseller_bot["db_path"]))
-            reseller_db.set_reseller_status(reseller_bot["owner_telegram_id"], True)
-            reseller_db.adjust_reseller_credit(reseller_bot["owner_telegram_id"], credit_gb, reason="تبدیل به بات با حجم توسط ادمین اصلی")
-            db.set_reseller_bot_mode(bot_id, "volume")
-            db.log_admin_action(message.from_user.id, "reseller_bot_make_volume", f"بات @{reseller_bot['bot_username']} | {credit_gb:,} گیگ")
-            await state.clear()
-
-            try:
-                await bot.send_message(
-                    reseller_bot["owner_telegram_id"],
-                    f"🎉 بات شما (@{reseller_bot['bot_username']}) از این به بعد «بات با حجم» است و "
-                    f"{credit_gb:,} گیگابایت اعتبار اولیه دریافت کرد.\n"
-                    f"از «🧑‍💼 پنل نمایندگی» داخل بات خودت می‌تونی ازش استفاده کنی و محصول بسازی.",
-                )
-            except Exception:
-                pass
-
-            bots = db.list_reseller_bots()
-            await message.answer(
-                f"✅ انجام شد. @{reseller_bot['bot_username']} حالا «بات با حجم» است.",
-                reply_markup=kb.resellers_kb(bots),
-            )
 
         @router.callback_query(F.data.startswith("adm_resbot_toggle:"))
         async def cb_admin_resbot_toggle(call: CallbackQuery):
@@ -2590,9 +2020,6 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             reseller_db = Database(db_path)
             reseller_db.init_db(owner_id=owner_id)
             reseller_db.set_setting("miniapp_tenant_id", str(reseller_id))
-            for admin_id in db.list_admins():
-                if admin_id != owner_id:
-                    reseller_db.add_admin(admin_id, role="admin")
 
             await state.clear()
             status_text = "✅ بات نمایندگی راه‌اندازی و همین الان روشن شد." if started else \
