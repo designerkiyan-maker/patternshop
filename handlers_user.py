@@ -28,6 +28,7 @@ from sub_info import fetch_sub_info, format_sub_info_fa
 from stock_alerts import check_and_notify_low_stock
 import crypto_payment
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
+from reseller_auto_provision import provision_auto_config, ProvisionError
 
 
 async def _send_admin_notification(bot, admin_id, send_coro_factory, context_label: str, ref_id: int):
@@ -429,21 +430,35 @@ def create_user_router(db, is_main_bot: bool = True) -> Router:
         if order["final_price"] <= 0:
             await state.clear()
 
-            results = db.take_unused_configs(product_id, call.from_user.id, quantity)
-            if not results:
-                # موجودی تمام شده: مبلغ کسرشده از کیف پول/کد تخفیف را برگردان و به ادمین اطلاع بده
-                db.reject_order(order_id)
-                await _notify_admins_of_order(bot, order_id)
-                await call.message.edit_text(
-                    "⛔️ موجودی این محصول در حال حاضر تمام شده است.\n"
-                    "مبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد. لطفاً بعداً دوباره تلاش کنید "
-                    "یا با پشتیبانی در تماس باشید."
-                )
-                await call.answer()
-                return
-
-            db.approve_order(order_id, [r["id"] for r in results])
-            await check_and_notify_low_stock(bot.send_message, db, product_id)
+            if product["is_auto_provision"]:
+                try:
+                    result = await provision_auto_config(db, product)
+                except ProvisionError as e:
+                    db.reject_order(order_id)
+                    await _notify_admins_of_order(bot, order_id)
+                    await call.message.edit_text(
+                        f"⛔️ {e}\nمبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد."
+                    )
+                    await call.answer()
+                    return
+                db.approve_order_auto(order_id)
+                links = [result["subscription_url"]]
+            else:
+                results = db.take_unused_configs(product_id, call.from_user.id, quantity)
+                if not results:
+                    # موجودی تمام شده: مبلغ کسرشده از کیف پول/کد تخفیف را برگردان و به ادمین اطلاع بده
+                    db.reject_order(order_id)
+                    await _notify_admins_of_order(bot, order_id)
+                    await call.message.edit_text(
+                        "⛔️ موجودی این محصول در حال حاضر تمام شده است.\n"
+                        "مبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد. لطفاً بعداً دوباره تلاش کنید "
+                        "یا با پشتیبانی در تماس باشید."
+                    )
+                    await call.answer()
+                    return
+                db.approve_order(order_id, [r["id"] for r in results])
+                links = [r["link"] for r in results]
+                await check_and_notify_low_stock(bot.send_message, db, product_id)
             reward_info = db.reward_referrer_if_first_purchase(call.from_user.id, order["base_price"])
             if reward_info:
                 reward_amount, referrer_id = reward_info
@@ -470,7 +485,7 @@ def create_user_router(db, is_main_bot: bool = True) -> Router:
                 bot,
                 call.from_user.id,
                 product["name"],
-                [r["link"] for r in results],
+                links,
                 final_price=0,
                 order_id=order_id,
             )

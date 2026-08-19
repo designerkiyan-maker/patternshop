@@ -515,6 +515,8 @@ class Database:
             ("panel_servers", "used_for_reseller", "INTEGER DEFAULT 0"),
             ("panel_servers", "xui_inbound_id", "INTEGER"),
             ("panel_servers", "xui_sub_base_url", "TEXT"),
+            ("products", "is_auto_provision", "INTEGER DEFAULT 0"),
+            ("products", "auto_provision_volume_gb", "INTEGER"),
             ("users", "is_reseller", "INTEGER DEFAULT 0"),
             ("users", "reseller_credit_gb", "INTEGER DEFAULT 0"),
             ("custom_configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
@@ -762,6 +764,13 @@ class Database:
             row = conn.execute("SELECT 1 FROM admins WHERE telegram_id=?", (tg_id,)).fetchone()
             return row is not None
 
+    def get_owner_telegram_id(self):
+        """آیدی تلگرام مالک این بات (نقش owner در جدول admins). برای بات نمایندگی
+        همان کسی است که این بات را می‌گرداند - جهت اتصال به اعتبار حجمی‌اش در بات اصلی."""
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT telegram_id FROM admins WHERE role='owner' LIMIT 1").fetchone()
+            return row["telegram_id"] if row else None
+
     def get_admin_role(self, tg_id: int):
         """نقش ادمین را برمی‌گرداند: 'owner' | 'admin' | 'mid' | 'support' | None (اگر ادمین نباشد)."""
         with self._get_conn() as conn:
@@ -911,11 +920,14 @@ class Database:
     # محصولات
     # -----------------------------------------------------------------------
 
-    def add_product(self, category_id: int, name: str, price: int, description: str = "", duration_days: int = 30) -> int:
+    def add_product(self, category_id: int, name: str, price: int, description: str = "", duration_days: int = 30,
+                     is_auto_provision: bool = False, auto_provision_volume_gb: int = None) -> int:
         with self._get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO products (category_id, name, price, description, duration_days) VALUES (?, ?, ?, ?, ?)",
-                (category_id, name, price, description, duration_days),
+                "INSERT INTO products (category_id, name, price, description, duration_days, "
+                "is_auto_provision, auto_provision_volume_gb) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (category_id, name, price, description, duration_days,
+                 1 if is_auto_provision else 0, auto_provision_volume_gb),
             )
             return cur.lastrowid
 
@@ -984,6 +996,13 @@ class Database:
 
     def count_available_configs(self, product_id: int) -> int:
         with self._get_conn() as conn:
+            prod = conn.execute(
+                "SELECT is_auto_provision FROM products WHERE id=?", (product_id,)
+            ).fetchone()
+            if prod and prod["is_auto_provision"]:
+                # این محصولات لحظه‌ی خرید و به‌صورت خودکار از اعتبار حجمی نماینده ساخته می‌شوند؛
+                # «موجودی» به معنای بانک لینک برایشان معنا ندارد، همیشه در دسترس نمایش داده می‌شوند.
+                return 1
             row = conn.execute(
                 "SELECT COUNT(*) c FROM configs WHERE product_id=? AND is_used=0", (product_id,)
             ).fetchone()
@@ -1214,6 +1233,15 @@ class Database:
             conn.executemany(
                 "UPDATE configs SET order_id=? WHERE id=?",
                 [(order_id, cid) for cid in config_ids],
+            )
+
+    def approve_order_auto(self, order_id: int):
+        """تایید سفارش محصولات is_auto_provision که کانفیگشان لحظه‌ی خرید و بدون
+        استفاده از بانک کانفیگ ساخته می‌شود (بدون config_id)."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE orders SET status='approved', updated_at=? WHERE id=?",
+                (datetime.utcnow().isoformat(), order_id),
             )
 
     def get_order_configs(self, order_id: int):

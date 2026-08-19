@@ -25,6 +25,7 @@ from stock_alerts import check_and_notify_low_stock
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 import crypto_payment
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS
+from reseller_auto_provision import provision_auto_config, ProvisionError
 from states import (
     AdminAddCategory,
     AdminAddProduct,
@@ -365,11 +366,61 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not text.isdigit() or int(text) <= 0:
             await message.answer("لطفاً فقط عدد صحیح و بزرگ‌تر از صفر وارد کنید. مثال: 30")
             return
+        await state.update_data(duration_days=int(text))
+
+        if is_main_bot:
+            data = await state.get_data()
+            db.add_product(data["category_id"], data["name"], data["price"], data["description"], data["duration_days"])
+            db.log_admin_action(message.from_user.id, "product_add", f"محصول «{data['name']}» | قیمت: {data['price']:,}")
+            await state.clear()
+            await message.answer("✅ محصول با موفقیت اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+            return
+
+        await state.set_state(AdminAddProduct.waiting_auto_provision_choice)
+        await message.answer(
+            "نوع تأمین این محصول چیست؟\n\n"
+            "🔗 بانک لینک: باید خودت از قبل لینک کانفیگ آماده و اضافه کنی.\n"
+            "⚡️ خودکار از اعتبار حجمی: لحظه‌ی خرید مشتری، کانفیگ خودش از اعتبار حجمی‌ات ساخته و تحویل می‌شود.",
+            reply_markup=kb.product_supply_type_kb(),
+        )
+
+    @router.callback_query(F.data == "prod_supply:bank", AdminAddProduct.waiting_auto_provision_choice)
+    async def cb_product_supply_bank(call: CallbackQuery, state: FSMContext):
         data = await state.get_data()
-        db.add_product(data["category_id"], data["name"], data["price"], data["description"], int(text))
-        db.log_admin_action(message.from_user.id, "product_add", f"محصول «{data['name']}» | قیمت: {data['price']:,}")
+        db.add_product(data["category_id"], data["name"], data["price"], data["description"], data["duration_days"])
+        db.log_admin_action(call.from_user.id, "product_add", f"محصول «{data['name']}» | قیمت: {data['price']:,}")
         await state.clear()
-        await message.answer("✅ محصول با موفقیت اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+        await call.answer()
+        await call.message.answer("✅ محصول با موفقیت اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    @router.callback_query(F.data == "prod_supply:auto", AdminAddProduct.waiting_auto_provision_choice)
+    async def cb_product_supply_auto(call: CallbackQuery, state: FSMContext):
+        await state.set_state(AdminAddProduct.waiting_auto_provision_volume)
+        await call.answer()
+        await call.message.answer("این محصول چند گیگابایت باشد؟ فقط عدد وارد کنید (مثال: 30):")
+
+    @router.message(AdminAddProduct.waiting_auto_provision_volume)
+    async def process_product_auto_provision_volume(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً فقط عدد صحیح و بزرگ‌تر از صفر وارد کنید. مثال: 30")
+            return
+        data = await state.get_data()
+        db.add_product(
+            data["category_id"], data["name"], data["price"], data["description"], data["duration_days"],
+            is_auto_provision=True, auto_provision_volume_gb=int(text),
+        )
+        db.log_admin_action(
+            message.from_user.id, "product_add",
+            f"محصول «{data['name']}» (خودکار، {text} گیگ) | قیمت: {data['price']:,}",
+        )
+        await state.clear()
+        await message.answer(
+            "✅ محصول با موفقیت اضافه شد.\n"
+            "⚠️ برای این‌که این محصول واقعاً کار کند، باید توسط ادمین بات اصلی برایت «نماینده» فعال شده و "
+            "اعتبار حجمی و پنل نمایندگی برایت تنظیم شده باشد.",
+            reply_markup=kb.admin_panel_kb(db, is_main_bot),
+        )
 
     # -------------------------------------------------------------------
     # افزودن کانفیگ (بانک لینک) به محصول
@@ -673,6 +724,37 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
 
         product = db.get_product(order["product_id"])
+
+        if product and product["is_auto_provision"]:
+            try:
+                result = await provision_auto_config(db, product)
+            except ProvisionError as e:
+                await call.answer(f"⛔️ {e}", show_alert=True)
+                return
+            db.approve_order_auto(order_id)
+            db.log_admin_action(
+                call.from_user.id, "order_approve",
+                f"سفارش #{order_id} (خودکار) | کاربر {order['user_id']} | محصول «{product['name']}» | "
+                f"مبلغ: {(order['final_price'] or product['price']):,}",
+            )
+            try:
+                await bot.send_message(order["user_id"], f"✅ خرید شما تایید شد!\n📦 محصول: {product['name']}")
+                await deliver_config_to_user(
+                    bot, order["user_id"], product["name"],
+                    [result["subscription_url"]], final_price=order["final_price"], order_id=order_id,
+                )
+            except Exception:
+                pass
+            try:
+                await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد و کانفیگ ساخته شد.")
+            except Exception:
+                try:
+                    await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید شد و کانفیگ ساخته شد.")
+                except Exception:
+                    pass
+            await call.answer("سفارش تایید و کانفیگ به‌صورت خودکار ساخته شد.")
+            return
+
         quantity = order["quantity"] or 1
         results = db.take_unused_configs(order["product_id"], order["user_id"], quantity)
         if not results:

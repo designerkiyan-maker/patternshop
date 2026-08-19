@@ -380,6 +380,13 @@ def admin_back_kb(callback_data="adm_back_panel") -> InlineKeyboardMarkup:
     )
 
 
+def product_supply_type_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔗 بانک لینک (دستی)", callback_data="prod_supply:bank")],
+        [InlineKeyboardButton(text="⚡️ خودکار از اعتبار حجمی", callback_data="prod_supply:auto")],
+    ])
+
+
 def admin_categories_kb(categories) -> InlineKeyboardMarkup:
     rows = []
     for cat in categories:

@@ -1,0 +1,81 @@
+# -*- coding: utf-8 -*-
+"""
+تحویل خودکار محصولات «اعتبار حجمی» در بات‌های نمایندگی.
+
+وقتی مشتریِ یک بات نمایندگی محصولی با is_auto_provision=1 می‌خرد، به‌جای
+برداشتن یک لینک از بانک کانفیگ (که برای این محصولات اصلاً پر نمی‌شود)،
+همین لحظه یک کاربر جدید روی همان پنلی که برای «نمایندگی» صاحب این بات در
+بات اصلی تنظیم شده ساخته می‌شود و از اعتبار حجمی او کم می‌شود.
+
+این ماژول عمداً کاملاً مستقل از هر Database instance خاصی است چون باید هم
+به دیتابیس ایزوله‌ی بات نمایندگی (برای خواندن مالک/محصول) و هم به دیتابیس
+بات اصلی (برای اعتبار و پنل) دسترسی داشته باشد؛ هر دو در همان پروسه اجرا
+می‌شوند پس این کار فقط یک اتصال SQLite دوم است، نه فراخوانی شبکه‌ای.
+"""
+
+import random
+import string
+
+from config import DB_PATH as MAIN_DB_PATH
+from database import Database
+from panel_providers import get_provider, PanelError, PanelUsernameTakenError
+
+
+class ProvisionError(Exception):
+    pass
+
+
+def _random_username() -> str:
+    return "r" + "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+
+
+async def provision_auto_config(local_db: Database, product) -> dict:
+    """محصول باید is_auto_provision=1 داشته باشد. برمی‌گرداند:
+    {"username": ..., "subscription_url": ..., "volume_gb": ..., "duration_days": ...}
+    در صورت خطا ProvisionError پرتاب می‌کند (پیام آن قابل نمایش مستقیم به کاربر/ادمین است)."""
+    owner_id = local_db.get_owner_telegram_id()
+    if not owner_id:
+        raise ProvisionError("مالک این بات مشخص نیست؛ با پشتیبانی تماس بگیرید.")
+
+    volume_gb = product["auto_provision_volume_gb"]
+    if not volume_gb or volume_gb <= 0:
+        raise ProvisionError("حجم این محصول تنظیم نشده است.")
+    duration_days = product["duration_days"] or 30
+
+    main_db = Database(MAIN_DB_PATH)
+
+    if not main_db.is_reseller(owner_id):
+        raise ProvisionError("دسترسی اعتبار حجمی برای مالک این بات فعال نیست؛ با پشتیبانی تماس بگیرید.")
+
+    credit = main_db.get_reseller_credit(owner_id)
+    if credit < volume_gb:
+        raise ProvisionError(f"اعتبار حجمی نماینده کافی نیست (باقیمانده: {credit:,} گیگ).")
+
+    server = main_db.get_reseller_panel(owner_id)
+    if not server or not server["is_active"]:
+        raise ProvisionError("پنل اعتبار حجمی نماینده تنظیم نشده یا غیرفعال است؛ با پشتیبانی تماس بگیرید.")
+
+    username = None
+    provider = get_provider(server)
+    for _ in range(5):
+        candidate = _random_username()
+        try:
+            result = await provider.create_user(candidate, volume_gb, duration_days)
+            username = candidate
+            break
+        except PanelUsernameTakenError:
+            continue
+    if username is None:
+        raise ProvisionError("ساخت نام کاربری یکتا روی پنل ناموفق بود؛ دوباره تلاش کنید.")
+
+    # فقط بعد از موفقیت واقعیِ ساخت روی پنل، از اعتبار کم می‌شود
+    main_db.adjust_reseller_credit(
+        owner_id, -volume_gb, reason=f"خرید خودکار مشتری - محصول «{product['name']}»"
+    )
+
+    return {
+        "username": result.username,
+        "subscription_url": result.subscription_url,
+        "volume_gb": volume_gb,
+        "duration_days": duration_days,
+    }
