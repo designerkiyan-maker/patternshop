@@ -2096,6 +2096,63 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             )
             await call.answer("بات نمایندگی حذف شد.")
 
+        @router.callback_query(F.data.startswith("adm_resbot_panel:"))
+        async def cb_admin_resbot_panel(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            bot_id = callback_id(call.data, "adm_resbot_panel")
+            reseller_bot = db.get_reseller_bot(bot_id) if bot_id is not None else None
+            if not reseller_bot:
+                return await call.answer("یافت نشد.", show_alert=True)
+
+            panels = db.get_panel_servers(active_only=True)
+            if not panels:
+                await call.answer("ابتدا حداقل یک پنل VPN فعال در بات اصلی تعریف کن.", show_alert=True)
+                return
+
+            reseller_db = Database(resolve_db_path(reseller_bot["db_path"]))
+            current = reseller_db.get_panel_server_for_usage("reseller")
+            current_name = current["name"] if current else None
+
+            await safe_edit(
+                call,
+                f"🔌 پنل VPN برای «@{reseller_bot['bot_username']}»\n\n"
+                "کدام پنل به این نماینده متصل شود؟ (فقط همین نماینده، بقیه‌ی نمایندگان تغییری نمی‌کنند)",
+                reply_markup=kb.reseller_bot_panel_pick_kb(bot_id, panels, current_name),
+            )
+            await call.answer()
+
+        @router.callback_query(F.data.startswith("adm_resbot_panel_set:"))
+        async def cb_admin_resbot_panel_set(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            parts = call.data.split(":")
+            if len(parts) != 3 or not parts[1].isdigit() or not parts[2].isdigit():
+                await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+                return
+            bot_id, panel_id = int(parts[1]), int(parts[2])
+
+            reseller_bot = db.get_reseller_bot(bot_id)
+            panel = db.get_panel_server(panel_id)
+            if not reseller_bot or not panel:
+                return await call.answer("یافت نشد.", show_alert=True)
+
+            reseller_db = Database(resolve_db_path(reseller_bot["db_path"]))
+            reseller_db.clone_panel_server_for_reseller(panel)
+            db.log_admin_action(
+                call.from_user.id, "resbot_panel_set",
+                f"نماینده @{reseller_bot['bot_username']} ← پنل «{panel['name']}»",
+            )
+
+            bots = db.list_reseller_bots()
+            await safe_edit(
+                call,
+                f"✅ پنل «{panel['name']}» برای @{reseller_bot['bot_username']} تنظیم شد.\n\n"
+                "🏪 مدیریت بات‌های نمایندگی:",
+                reply_markup=kb.resellers_kb(bots),
+            )
+            await call.answer("پنل نماینده به‌روزرسانی شد.")
+
         @router.callback_query(F.data.startswith("adm_resbot_credit:"))
         async def cb_admin_resbot_credit(call: CallbackQuery, state: FSMContext):
             if not senior_admin_only(call.from_user.id):
