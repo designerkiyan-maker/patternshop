@@ -146,6 +146,7 @@ def create_user_router(db, bot_manager=None) -> Router:
         reseller_db = Database(db_path)
         reseller_db.init_db(owner_id=owner_id)
         reseller_db.set_setting("miniapp_tenant_id", str(reseller_id))
+        reseller_db.set_setting("reseller_bot_mode", mode)
         # ادمین‌های اصلی (بات مادر) را هم به‌عنوان ادمین این بات نماینده اضافه می‌کنیم
         # تا بتوانند مستقیم وارد بات نماینده شوند و اعتبار حجمی/پنل برایش تنظیم کنند
         # (چون هر بات نماینده دیتابیس و استخر حجم کاملاً مستقل خودش را دارد).
@@ -1319,9 +1320,12 @@ def create_user_router(db, bot_manager=None) -> Router:
             return
         await state.update_data(rprod_price=int(text))
         await state.set_state(ResellerProductFlow.waiting_source)
+        # نماینده‌های «با حجم» (ساخته‌شده از فلوی جدید درخواست نمایندگی) اجازه‌ی
+        # اتصال پنل VPN شخصی ندارند؛ فقط از استخر گیگ یا انبار کانفیگ تامین می‌کنند.
+        show_own_panel = db.get_setting("reseller_bot_mode", "") != "volume"
         await message.answer(
             "این محصول رو از کجا تامین می‌کنی؟",
-            reply_markup=kb.reseller_product_source_kb(),
+            reply_markup=kb.reseller_product_source_kb(show_own_panel=show_own_panel),
         )
 
     @router.callback_query(F.data == "rprod_src:credit_pool", ResellerProductFlow.waiting_source)
@@ -1331,6 +1335,9 @@ def create_user_router(db, bot_manager=None) -> Router:
 
     @router.callback_query(F.data == "rprod_src:own_panel", ResellerProductFlow.waiting_source)
     async def cb_rprod_src_panel(call: CallbackQuery, state: FSMContext):
+        if db.get_setting("reseller_bot_mode", "") == "volume":
+            await call.answer("این قابلیت برای نمایندگی با حجم غیرفعال است.", show_alert=True)
+            return
         servers = db.get_panel_servers(active_only=True)
         if not servers:
             await call.answer("هنوز هیچ پنلی وصل نکردی. اول از بخش پنل‌ها یکی اضافه کن.", show_alert=True)
@@ -1778,43 +1785,30 @@ def create_user_router(db, bot_manager=None) -> Router:
 
     @router.message(F.text.func(lambda t: t == db.get_setting("btn_reseller_request", "🤝 درخواست نمایندگی")))
     async def reseller_request_start(message: Message, state: FSMContext):
+        if db.get_setting("is_main_bot", "1") != "1":
+            # نماینده‌ها اجازه ندارند داخل بات خودشان به کاربرانشان نمایندگی بدهند.
+            return
         if db.is_reseller(message.from_user.id):
             await message.answer("شما همین الان هم نماینده هستید.")
             return
         if db.has_pending_reseller_request(message.from_user.id):
             await message.answer("درخواست قبلی شما هنوز در حال بررسی است؛ لطفاً منتظر بمانید.")
             return
-        is_main = db.get_setting("is_main_bot", "1") == "1"
-        text = (
-            "🤝 درخواست نمایندگی\n\n"
-            "کدام حالت را می‌خواهی؟\n\n"
-        )
-        if is_main:
-            text += "🤖 <b>بات خام مستقل</b>: یک بات جدا با آیدی خودت که کاملاً مستقل مدیریتش می‌کنی.\n"
-            text += "📦 <b>بات با حجم</b>: یک بات جدا با آیدی خودت (مثل بات مستقل) به‌علاوه‌ی یک استخر گیگابایت که خودت هرجور بخواهی ازش کانفیگ می‌سازی."
-        else:
-            text += "📦 <b>زیرنمایندگی</b>: داخل همین بات، با یک استخر گیگابایت (از سهم همین نماینده) که خودت هرجور بخواهی ازش کانفیگ می‌سازی و حتی می‌تونی شماره کارت خودت رو هم بذاری."
-        await message.answer(
-            text, parse_mode="HTML",
-            reply_markup=kb.reseller_request_type_kb(show_bot_option=is_main),
-        )
-
-    @router.callback_query(F.data.startswith("reseller_req_type:"))
-    async def cb_reseller_request_type(call: CallbackQuery, state: FSMContext):
-        req_type = call.data.split(":")[1]
-        await state.update_data(reseller_request_type=req_type)
+        await state.update_data(reseller_request_type="credit")
         await state.set_state(ResellerRequestFlow.waiting_note)
-        await call.answer()
-        await call.message.answer(
-            "اگه توضیح یا درخواست خاصی داری بنویس (مثلاً حجم تقریبی مدنظرت)، وگرنه فقط بنویس «ندارم».",
+        await message.answer(
+            "🤝 <b>درخواست نمایندگی (نمایندگی با حجم)</b>\n\n"
+            "یک بات جداگانه با آیدی خودت می‌گیری به‌علاوه‌ی یک استخر گیگابایت که خودت "
+            "هرجور بخواهی ازش محصول/کانفیگ می‌سازی.\n\n"
+            "توضیح یا درخواستت رو بنویس (مثلاً حجم تقریبی مدنظرت)، وگرنه فقط بنویس «ندارم».",
+            parse_mode="HTML",
             reply_markup=kb.cancel_kb(),
         )
 
     @router.message(ResellerRequestFlow.waiting_note)
     async def reseller_request_receive_note(message: Message, state: FSMContext, bot: Bot):
-        data = await state.get_data()
         note = message.text.strip()
-        request_id = db.create_reseller_request(message.from_user.id, data["reseller_request_type"], note)
+        request_id = db.create_reseller_request(message.from_user.id, "credit", note)
         await state.clear()
         await message.answer(
             "✅ درخواست شما ثبت شد و برای ادمین ارسال شد. نتیجه رو بهت اطلاع می‌دیم.",
@@ -1822,26 +1816,18 @@ def create_user_router(db, bot_manager=None) -> Router:
         )
 
         user = db.get_user(message.from_user.id)
-        is_main_req = db.get_setting("is_main_bot", "1") == "1"
-        if data["reseller_request_type"] == "bot":
-            type_label = "🤖 بات خام مستقل"
-        elif is_main_req:
-            type_label = "📦 بات با حجم"
-        else:
-            type_label = "📦 زیرنمایندگی"
         text = (
             f"🤝 درخواست نمایندگی جدید #{request_id}\n"
             f"👤 {user['first_name'] if user else ''} (@{user['username'] if user and user['username'] else '---'})\n"
             f"🆔 آیدی: {message.from_user.id}\n"
-            f"نوع: {type_label}\n"
+            f"نوع: 📦 نمایندگی با حجم\n"
             f"توضیح: {note}"
         )
         for admin_id in db.list_admins():
             try:
-                needs_price = data["reseller_request_type"] == "bot" or (data["reseller_request_type"] == "credit" and is_main_req)
                 await bot.send_message(
                     admin_id, text,
-                    reply_markup=kb.reseller_request_admin_kb(request_id, data["reseller_request_type"], needs_price=needs_price),
+                    reply_markup=kb.reseller_request_admin_kb(request_id, "credit"),
                 )
             except Exception:
                 pass

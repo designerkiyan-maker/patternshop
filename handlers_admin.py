@@ -1996,66 +1996,24 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         db.set_reseller_request_status(request_id, "approved", call.from_user.id)
         db.log_admin_action(call.from_user.id, "reseller_request_approve", f"درخواست #{request_id} | کاربر {req['user_id']}")
 
-        if req["request_type"] == "credit" and is_main_bot:
-            # این درخواست از بات اصلی است: «بات با حجم» - از این به بعد هم مثل بات مستقل،
-            # توکن/آیدی/دیتابیس کاملاً جدا می‌گیرد؛ فرقش این است که صاحبش خودکار به‌عنوان
-            # نماینده‌ی حجمی همان بات فعال می‌شود.
-            db.start_reseller_bot_setup(req["user_id"], mode="volume")
-            try:
-                await bot.send_message(
-                    req["user_id"],
-                    "🎉 درخواست نمایندگی (بات با حجم) شما تایید شد!\n\n"
-                    "برای ساخت خودکار بات، لطفاً همین‌جا توکن بات را ارسال کن "
-                    "(همان چیزی که از @BotFather گرفتی):",
-                )
-            except Exception:
-                pass
-            try:
-                await call.message.edit_text(
-                    (call.message.text or "") + "\n\n✅ تایید شد (بات با حجم). از کاربر خواستیم توکن بات را بفرستد؛ بعد از تکمیل خودکار ساخته، روشن و به‌عنوان نماینده‌ی حجمی همان بات فعال می‌شود.",
-                )
-            except Exception:
-                pass
-        elif req["request_type"] == "credit":
-            # این درخواست از داخل یک بات نماینده است: زیرنماینده‌ی همان بات (بدون بات/توکن جدید).
-            user_row = db.get_user(req["user_id"])
-            display_name = (user_row["first_name"] if user_row else None) or (user_row["username"] if user_row else None) or str(req["user_id"])
-            existing = db.get_sub_reseller_by_telegram_id(req["user_id"])
-            if existing:
-                db.toggle_sub_reseller(existing["id"]) if not existing["is_active"] else None
-            else:
-                db.create_sub_reseller(req["user_id"], display_name=display_name)
-            try:
-                await bot.send_message(
-                    req["user_id"],
-                    "🎉 درخواست زیرنمایندگی شما تایید شد!\n"
-                    "از منوی اصلی وارد «🧑‍💼 پنل نمایندگی» شو. به‌زودی اعتبار حجمی برات اختصاص داده میشه.",
-                )
-            except Exception:
-                pass
-            try:
-                await call.message.edit_text(
-                    (call.message.text or "") + "\n\n✅ تایید شد (زیرنمایندگی). حالا از «🧩 مدیریت زیرنمایندگان» بهش اعتبار بده.",
-                )
-            except Exception:
-                pass
-        else:
-            db.start_reseller_bot_setup(req["user_id"], mode="independent")
-            try:
-                await bot.send_message(
-                    req["user_id"],
-                    "🎉 درخواست نمایندگی (بات مستقل) شما تایید شد!\n\n"
-                    "برای ساخت خودکار بات، لطفاً همین‌جا توکن بات را ارسال کن "
-                    "(همان چیزی که از @BotFather گرفتی):",
-                )
-            except Exception:
-                pass
-            try:
-                await call.message.edit_text(
-                    (call.message.text or "") + "\n\n✅ تایید شد (بات مستقل). از کاربر خواستیم توکن بات را بفرستد؛ بعد از تکمیل خودکار ساخته و روشن می‌شود.",
-                )
-            except Exception:
-                pass
+        # نمایندگی فقط از نوع «با حجم» است: یک بات جداگانه با توکن/آیدی/دیتابیس
+        # کاملاً مستقل ساخته می‌شود و صاحبش خودکار به‌عنوان نماینده‌ی حجمی همان بات فعال می‌شود.
+        db.start_reseller_bot_setup(req["user_id"], mode="volume")
+        try:
+            await bot.send_message(
+                req["user_id"],
+                "🎉 درخواست نمایندگی (نمایندگی با حجم) شما تایید شد!\n\n"
+                "برای ساخت خودکار بات، لطفاً همین‌جا توکن بات را ارسال کن "
+                "(همان چیزی که از @BotFather گرفتی):",
+            )
+        except Exception:
+            pass
+        try:
+            await call.message.edit_text(
+                (call.message.text or "") + "\n\n✅ تایید شد (نمایندگی با حجم). از کاربر خواستیم توکن بات را بفرستد؛ بعد از تکمیل خودکار ساخته، روشن و به‌عنوان نماینده‌ی حجمی همان بات فعال می‌شود.",
+            )
+        except Exception:
+            pass
         await call.answer("تایید شد.")
 
     @router.callback_query(F.data.startswith("adm_reseller_req_reject:"))

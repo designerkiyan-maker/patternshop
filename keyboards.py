@@ -107,11 +107,11 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False) -> ReplyKeyboard
         return [_styled_button("🧑‍💼 پنل نمایندگی", "primary")]
 
     def row_reseller_request():
-        # درخواست «اعتبار حجمی» (زیرمجموعه) در هر بات (اصلی یا نماینده) مجاز
-        # است تا نماینده هم بتواند به مشتری‌های خودش زیرمجموعه بدهد. فقط نوع
-        # «بات مستقل» به بات اصلی محدود می‌شود (تا زنجیره‌ی بی‌پایان بات‌توی‌بات
-        # درست نشود) - این محدودیت داخل خودِ فلوی انتخاب نوع اعمال می‌شود.
+        # درخواست نمایندگی («نمایندگی با حجم») فقط داخل بات اصلی مجاز است؛
+        # نماینده‌ها نباید بتوانند داخل بات خودشان به کاربرانشان نمایندگی بدهند.
         if is_reseller:
+            return None
+        if settings.get("is_main_bot", "1") != "1":
             return None
         if settings.get("reseller_request_enabled", "1") != "1":
             return None
@@ -252,12 +252,14 @@ def reseller_product_view_kb(product_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def reseller_product_source_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def reseller_product_source_kb(show_own_panel: bool = True) -> InlineKeyboardMarkup:
+    rows = [
         [InlineKeyboardButton(text="📦 از استخر گیگابایت من", callback_data="rprod_src:credit_pool")],
-        [InlineKeyboardButton(text="🖥 از پنل VPN شخصی من", callback_data="rprod_src:own_panel")],
-        [InlineKeyboardButton(text="📥 از انبار لینک ساب آماده", callback_data="rprod_src:stock")],
-    ])
+    ]
+    if show_own_panel:
+        rows.append([InlineKeyboardButton(text="🖥 از پنل VPN شخصی من", callback_data="rprod_src:own_panel")])
+    rows.append([InlineKeyboardButton(text="📥 از انبار لینک ساب آماده", callback_data="rprod_src:stock")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def reseller_product_panel_select_kb(servers) -> InlineKeyboardMarkup:
@@ -348,7 +350,6 @@ ADMIN_PANEL_ITEMS = [
     ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
     ("adm_resellers_menu", "🏪 مدیریت بات‌های نمایندگی", "adm_resellers_menu"),
     ("adm_gb_resellers_menu", "📦 مدیریت نمایندگان (استخر حجم)", "adm_gb_resellers_menu"),
-    ("adm_sub_resellers_menu", "🧩 مدیریت زیرنمایندگان", "adm_sub_resellers_menu"),
     ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
     ("adm_set_card", "💳 تنظیم شماره کارت", "adm_set_card"),
     ("adm_set_plisio", "🪙 تنظیم درگاه کریپتو (Plisio)", "adm_set_plisio"),
@@ -918,24 +919,9 @@ def sub_reseller_panel_select_kb(servers, sub_reseller_id: int) -> InlineKeyboar
 # درخواست نمایندگی
 # ---------------------------------------------------------------------------
 
-def reseller_request_type_kb(show_bot_option: bool = True) -> InlineKeyboardMarkup:
-    rows = []
-    if show_bot_option:
-        rows.append([InlineKeyboardButton(text="🤖 بات خام مستقل با آیدی خودم", callback_data="reseller_req_type:bot")])
-        rows.append([InlineKeyboardButton(text="📦 بات با حجم (بات جدا + استخر گیگابایت)", callback_data="reseller_req_type:credit")])
-    else:
-        rows.append([InlineKeyboardButton(text="📦 زیرنمایندگی از همین بات", callback_data="reseller_req_type:credit")])
-    rows.append([InlineKeyboardButton(text="❌ انصراف", callback_data="cancel_flow")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
 def reseller_request_admin_kb(request_id: int, request_type: str = "credit", needs_price: bool = None) -> InlineKeyboardMarkup:
-    if needs_price is None:
-        needs_price = request_type == "bot"
-    if needs_price:
-        approve_btn = InlineKeyboardButton(text="💰 تعیین قیمت و ارسال", callback_data=f"adm_reseller_req_price:{request_id}")
-    else:
-        approve_btn = InlineKeyboardButton(text="✅ تایید", callback_data=f"adm_reseller_req_approve:{request_id}")
+    # نمایندگی فقط از نوع «با حجم» است و همیشه ادمین باید مبلغش را دستی تعیین کند.
+    approve_btn = InlineKeyboardButton(text="💰 تعیین قیمت و ارسال", callback_data=f"adm_reseller_req_price:{request_id}")
     return InlineKeyboardMarkup(inline_keyboard=[
         [approve_btn, InlineKeyboardButton(text="❌ رد", callback_data=f"adm_reseller_req_reject:{request_id}")],
     ])
