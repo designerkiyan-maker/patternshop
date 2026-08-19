@@ -2284,9 +2284,21 @@ async function renderAdminProducts(body) {
     };
   });
   body.querySelectorAll("[data-edit-prod]").forEach((el) => {
-    el.onclick = () => {
+    el.onclick = async () => {
       const p = products.find((x) => x.id === Number(el.dataset.editProd));
-      openEditProductModal(p);
+      const name = prompt("نام محصول:", p.name);
+      if (name === null) return;
+      const price = prompt("قیمت (تومان):", p.price);
+      if (price === null) return;
+      const duration = prompt("مدت اعتبار (روز):", p.duration_days);
+      if (duration === null) return;
+      try {
+        await api(`/api/admin/products/${p.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name: name.trim() || undefined, price: Number(price), duration_days: Number(duration) }),
+        });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
     };
   });
   body.querySelectorAll("[data-toggle-prod]").forEach((el) => {
@@ -2317,42 +2329,6 @@ async function renderAdminProducts(body) {
         method: "POST",
         body: JSON.stringify({ category_id: categoryId, name, price, duration_days: duration, description: desc }),
       });
-      renderAdmin();
-    } catch (e) { notify(e.message); }
-  };
-}
-
-function openEditProductModal(p) {
-  const overlay = document.createElement("div");
-  overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;";
-  overlay.innerHTML = `
-    <div class="card" style="width:100%;max-width:360px;">
-      <div class="eyebrow" style="margin-top:0">✏️ ویرایش محصول</div>
-      <input class="input" id="edit-prod-name" type="text" placeholder="نام محصول" value="${(p.name || "").replace(/"/g, "&quot;")}" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:8px" />
-      <input class="input" id="edit-prod-price" type="number" placeholder="قیمت (تومان)" value="${p.price}" style="margin-bottom:8px" />
-      <input class="input" id="edit-prod-duration" type="number" placeholder="مدت اعتبار (روز)" value="${p.duration_days}" style="margin-bottom:12px" />
-      <div style="display:flex;gap:8px">
-        <button class="btn" id="edit-prod-save" style="flex:1">✅ ذخیره</button>
-        <button class="btn outline" id="edit-prod-cancel" style="flex:1">لغو</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  const close = () => overlay.remove();
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
-  overlay.querySelector("#edit-prod-cancel").onclick = close;
-  overlay.querySelector("#edit-prod-save").onclick = async () => {
-    const name = overlay.querySelector("#edit-prod-name").value.trim();
-    const price = Number(overlay.querySelector("#edit-prod-price").value);
-    const duration = Number(overlay.querySelector("#edit-prod-duration").value);
-    if (!price || price < 0) { notify("قیمت نامعتبر است."); return; }
-    if (!duration || duration <= 0) { notify("مدت اعتبار نامعتبر است."); return; }
-    try {
-      await api(`/api/admin/products/${p.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ name: name || undefined, price, duration_days: duration }),
-      });
-      close();
       renderAdmin();
     } catch (e) { notify(e.message); }
   };
