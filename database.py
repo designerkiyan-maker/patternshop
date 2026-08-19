@@ -517,6 +517,13 @@ class Database:
             ("panel_servers", "xui_sub_base_url", "TEXT"),
             ("users", "is_reseller", "INTEGER DEFAULT 0"),
             ("users", "reseller_credit_gb", "INTEGER DEFAULT 0"),
+            # درخواست نمایندگی: کاربر عادی حجم می‌خواهد، ادمین قیمت می‌دهد، بعد از
+            # پرداخت کاربر توکن/آیدی بات خودش را می‌فرستد و بات نمایندگی خودکار ساخته می‌شود.
+            ("orders", "is_reseller_request", "INTEGER DEFAULT 0"),
+            ("orders", "reseller_request_gb", "INTEGER"),
+            ("orders", "reseller_bot_token", "TEXT"),
+            ("orders", "reseller_bot_username", "TEXT"),
+            ("orders", "reseller_owner_id", "INTEGER"),
             ("custom_configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "volume_reminder_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "source", "TEXT DEFAULT 'custom_config'"),
@@ -2427,3 +2434,74 @@ class Database:
             return conn.execute(
                 "SELECT * FROM users WHERE is_reseller=1 ORDER BY reseller_credit_gb DESC"
             ).fetchall()
+
+    # -----------------------------------------------------------------------
+    # درخواست نمایندگی (کاربر عادی -> بات نمایندگی مستقل خودش)
+    # مثل «سفارش شخصی» از جدول orders رد می‌شود (product_id=0 سنتینل) تا
+    # کارت‌به‌کارت/کیف‌پول/کریپتوی فعلی بدون تغییر کار کند.
+    # وضعیت‌ها: awaiting_price -> pending (منتظر پرداخت) -> awaiting_bot_token ->
+    # awaiting_owner_id -> completed  (یا rejected در هر مرحله قبل از completed)
+    # -----------------------------------------------------------------------
+
+    def get_user_reseller_bot(self, owner_tg_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM reseller_bots WHERE owner_telegram_id=?", (owner_tg_id,)
+            ).fetchone()
+
+    def get_active_reseller_request(self, user_tg_id: int):
+        """آخرین درخواست نمایندگی کاربر که هنوز نهایی/رد نشده."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM orders WHERE user_id=? AND is_reseller_request=1 "
+                "AND status NOT IN ('completed', 'rejected') ORDER BY id DESC LIMIT 1",
+                (user_tg_id,),
+            ).fetchone()
+
+    def create_reseller_request(self, user_tg_id: int, requested_gb: int) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO orders (user_id, product_id, status, is_reseller_request, reseller_request_gb) "
+                "VALUES (?, 0, 'awaiting_price', 1, ?)",
+                (user_tg_id, requested_gb),
+            )
+            return cur.lastrowid
+
+    def set_reseller_request_price(self, order_id: int, price: int):
+        """قیمت را ثبت می‌کند؛ اگر کیف پول کل مبلغ را پوشش دهد وضعیت مستقیم
+        به awaiting_bot_token می‌رود، وگرنه به pending (منتظر پرداخت)."""
+        order = self.get_order(order_id)
+        wallet_credit = self.get_wallet_credit(order["user_id"])
+        wallet_used = min(wallet_credit, price)
+        if wallet_used > 0:
+            self.add_wallet_credit(order["user_id"], -wallet_used)
+        final_price = max(price - wallet_used, 0)
+        new_status = "awaiting_bot_token" if final_price <= 0 else "pending"
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE orders SET base_price=?, wallet_used=?, final_price=?, status=?, updated_at=? WHERE id=?",
+                (price, wallet_used, final_price, new_status, datetime.utcnow().isoformat(), order_id),
+            )
+        return self.get_order(order_id)
+
+    def mark_reseller_request_paid(self, order_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE orders SET status='awaiting_bot_token', updated_at=? WHERE id=?",
+                (datetime.utcnow().isoformat(), order_id),
+            )
+
+    def set_reseller_request_token(self, order_id: int, token: str, username: str):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE orders SET reseller_bot_token=?, reseller_bot_username=?, status='awaiting_owner_id', "
+                "updated_at=? WHERE id=?",
+                (token, username, datetime.utcnow().isoformat(), order_id),
+            )
+
+    def complete_reseller_request(self, order_id: int, owner_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE orders SET reseller_owner_id=?, status='completed', updated_at=? WHERE id=?",
+                (owner_id, datetime.utcnow().isoformat(), order_id),
+            )

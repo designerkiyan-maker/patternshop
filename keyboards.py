@@ -56,7 +56,7 @@ def miniapp_inline_kb(miniapp_url: str) -> InlineKeyboardMarkup:
     ])
 
 
-def main_menu_kb(db, is_admin: bool, is_reseller: bool = False) -> ReplyKeyboardMarkup:
+def main_menu_kb(db, is_admin: bool, is_reseller: bool = False, user_tg_id: int = None) -> ReplyKeyboardMarkup:
     settings = db.get_all_settings()
     order = db.get_menu_order()
     miniapp_url = _miniapp_url(db)
@@ -106,6 +106,16 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False) -> ReplyKeyboard
             return None
         return [_styled_button("🧑‍💼 پنل نمایندگی", "primary")]
 
+    def row_reseller_request():
+        if is_reseller or user_tg_id is None:
+            return None
+        if db.get_user_reseller_bot(user_tg_id):
+            return [_styled_button("🏪 نمایندگی من", "primary")]
+        req = db.get_active_reseller_request(user_tg_id)
+        if req:
+            return [_styled_button("⏳ پیگیری درخواست نمایندگی", "primary")]
+        return [_styled_button("🤝 درخواست نمایندگی", "primary")]
+
     builders = {
         "miniapp": row_miniapp,
         "btn_buy": row_buy,
@@ -131,12 +141,16 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False) -> ReplyKeyboard
         row = row_reseller_panel()
         if row:
             rows.insert(1 if rows else 0, row)
+    else:
+        row = row_reseller_request()
+        if row:
+            rows.insert(1 if rows else 0, row)
 
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
 def menu_for_user(db, user_tg_id: int) -> ReplyKeyboardMarkup:
-    return main_menu_kb(db, db.is_admin(user_tg_id), db.is_reseller(user_tg_id))
+    return main_menu_kb(db, db.is_admin(user_tg_id), db.is_reseller(user_tg_id), user_tg_id=user_tg_id)
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +222,22 @@ def custom_config_username_kb() -> InlineKeyboardMarkup:
 def reseller_panel_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ ساخت کانفیگ جدید", callback_data="reseller_new_config")],
+    ])
+
+
+def reseller_request_payment_kb(order_id, crypto_enabled: bool) -> InlineKeyboardMarkup:
+    rows = []
+    if crypto_enabled:
+        rows.append([InlineKeyboardButton(
+            text="🪙 پرداخت با ارز دیجیتال (تایید آنی)", callback_data=f"pay_crypto_resreq:{order_id}",
+        )])
+    return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+
+
+def reseller_request_set_price_kb(order_id) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 تعیین قیمت", callback_data=f"adm_resreq_price:{order_id}")],
+        [InlineKeyboardButton(text="❌ رد درخواست", callback_data=f"order_reject:{order_id}")],
     ])
 
 
