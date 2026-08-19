@@ -43,6 +43,7 @@ from states import (
     AdminCreateDiscount,
     AdminReferralPercent,
     AdminAddResellerBot,
+    AdminChargeResellerCredit,
     AdminWheelSettings,
     AdminRenewalSettings,
     AdminVolumeReminderSettings,
@@ -1947,6 +1948,59 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             )
             await call.answer("بات نمایندگی حذف شد.")
 
+        @router.callback_query(F.data.startswith("adm_resbot_credit:"))
+        async def cb_admin_resbot_credit(call: CallbackQuery, state: FSMContext):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            bot_id = callback_id(call.data, "adm_resbot_credit")
+            reseller_bot = db.get_reseller_bot(bot_id) if bot_id is not None else None
+            if not reseller_bot:
+                return await call.answer("یافت نشد.", show_alert=True)
+
+            reseller_db = Database(resolve_db_path(reseller_bot["db_path"]))
+            current_credit = reseller_db.get_reseller_credit(reseller_bot["owner_telegram_id"])
+
+            await state.set_state(AdminChargeResellerCredit.waiting_amount)
+            await state.update_data(resbot_id=bot_id)
+            await safe_edit(
+                call,
+                f"🤖 @{reseller_bot['bot_username']}\n📦 اعتبار فعلی: {current_credit:,} گیگ\n\n"
+                f"مقدار شارژ را به گیگابایت وارد کن (برای کسر، عدد منفی مثل -20 بفرست):",
+                reply_markup=kb.admin_back_kb(),
+            )
+            await call.answer()
+
+        @router.message(AdminChargeResellerCredit.waiting_amount)
+        async def process_resbot_credit_amount(message: Message, state: FSMContext):
+            text = message.text.strip()
+            try:
+                delta_gb = int(text)
+            except ValueError:
+                await message.answer("لطفاً فقط عدد صحیح (می‌تواند منفی باشد) ارسال کنید.")
+                return
+
+            data = await state.get_data()
+            reseller_bot = db.get_reseller_bot(data["resbot_id"])
+            if not reseller_bot:
+                await state.clear()
+                await message.answer("این نماینده دیگر وجود ندارد.")
+                return
+
+            reseller_db = Database(resolve_db_path(reseller_bot["db_path"]))
+            owner_id = reseller_bot["owner_telegram_id"]
+            reseller_db.add_or_update_user(owner_id, None, reseller_bot["owner_name"])
+            reseller_db.set_reseller_status(owner_id, True)
+            reseller_db.adjust_reseller_credit(
+                owner_id, delta_gb, admin_id=message.from_user.id, reason="شارژ توسط ادمین اصلی"
+            )
+            new_credit = reseller_db.get_reseller_credit(owner_id)
+
+            await state.clear()
+            await message.answer(
+                f"✅ اعتبار @{reseller_bot['bot_username']} به‌روزرسانی شد.\n📦 اعتبار جدید: {new_credit:,} گیگ",
+                reply_markup=kb.admin_panel_kb(db, is_main_bot),
+            )
+
         @router.callback_query(F.data == "adm_resbot_add")
         async def cb_admin_resbot_add(call: CallbackQuery, state: FSMContext):
             if not senior_admin_only(call.from_user.id):
@@ -2000,11 +2054,26 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
         @router.message(AdminAddResellerBot.waiting_owner_name)
         async def process_resbot_owner_name(message: Message, state: FSMContext):
+            await state.update_data(resbot_owner_name=message.text.strip())
+            await state.set_state(AdminAddResellerBot.waiting_initial_credit)
+            await message.answer(
+                "حجم اولیه (به گیگابایت) که به این نماینده بابت این بات مستقل می‌فروشی را وارد کن.\n"
+                "برای عدم شارژ اولیه، عدد 0 بفرست:"
+            )
+
+        @router.message(AdminAddResellerBot.waiting_initial_credit)
+        async def process_resbot_initial_credit(message: Message, state: FSMContext):
+            text = message.text.strip()
+            if not text.isdigit():
+                await message.answer("لطفاً فقط عدد صحیح (گیگابایت) ارسال کنید.")
+                return
+            initial_credit = int(text)
+
             data = await state.get_data()
             token = data["resbot_token"]
             username = data["resbot_username"]
             owner_id = data["resbot_owner_id"]
-            owner_name = message.text.strip()
+            owner_name = data["resbot_owner_name"]
 
             os.makedirs(RESELLER_DBS_DIR, exist_ok=True)
             db_path = os.path.join(RESELLER_DBS_DIR, f"{username}.db")
@@ -2021,15 +2090,34 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             reseller_db.init_db(owner_id=owner_id)
             reseller_db.set_setting("miniapp_tenant_id", str(reseller_id))
 
+            # مالک نماینده را به‌عنوان کاربر «نماینده‌ی حجمی» روی دیتابیس خودِ بات مستقلش فعال کن
+            reseller_db.add_or_update_user(owner_id, None, owner_name)
+            reseller_db.set_reseller_status(owner_id, True)
+            if initial_credit > 0:
+                reseller_db.adjust_reseller_credit(
+                    owner_id, initial_credit, admin_id=message.from_user.id, reason="شارژ اولیه هنگام ایجاد نمایندگی"
+                )
+
+            # کپی خودکار تنظیمات پنل مرجع (همان که در بات اصلی برای «نمایندگی» علامت خورده)
+            # روی دیتابیس بات جدید، تا پنل نمایندگی بدون تنظیم دستی کار کند.
+            panel_note = "⚠️ هیچ پنل مرجعی با پرچم «نمایندگی» در بات اصلی تنظیم نشده؛ باید دستی اضافه شود."
+            source_panel = db.get_panel_server_for_usage("reseller")
+            if source_panel:
+                reseller_db.clone_panel_server_for_reseller(source_panel)
+                panel_note = "✅ پنل نمایندگی به‌صورت خودکار از پنل مرجع کپی شد."
+
             await state.clear()
             status_text = "✅ بات نمایندگی راه‌اندازی و همین الان روشن شد." if started else \
                 "⚠️ بات ثبت شد ولی راه‌اندازی زنده انجام نشد؛ با ری‌استارت سرویس اصلی خودکار روشن می‌شود."
             await message.answer(
                 f"{status_text}\n\n"
                 f"🤖 بات: @{username}\n"
-                f"👤 نماینده: {owner_name} ({owner_id})\n\n"
-                f"این بات کاملاً مستقل است و تمام امکانات (کد تخفیف، زیرمجموعه‌گیری، کیف پول، کانفیگ تست) را "
-                f"از صفر و جدا از بات اصلی دارد. نماینده باید با /start به بات خودش (@{username}) وارد شود.",
+                f"👤 نماینده: {owner_name} ({owner_id})\n"
+                f"📦 حجم اولیه: {initial_credit:,} گیگ\n"
+                f"🛠 {panel_note}\n\n"
+                f"این بات کاملاً مستقل است و تمام امکانات (کد تخفیف، زیرمجموعه‌گیری، کیف پول، کانفیگ تست، پنل نمایندگی) را "
+                f"از صفر و جدا از بات اصلی دارد. نماینده باید با /start به بات خودش (@{username}) وارد شود و از «🧑‍💼 پنل "
+                f"نمایندگی» با حجمش کانفیگ بسازد.",
                 reply_markup=kb.admin_panel_kb(db, is_main_bot),
             )
 

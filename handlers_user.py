@@ -912,18 +912,23 @@ def create_user_router(db) -> Router:
             await state.clear()
             return
 
+        if not db.try_deduct_reseller_credit(message.from_user.id, volume_gb, reason=f"ساخت کانفیگ «{data['reseller_username']}»"):
+            await message.answer(f"❌ اعتبار شما کافی نیست. اعتبار باقی‌مانده: {db.get_reseller_credit(message.from_user.id):,} گیگ.")
+            return
+
         duration_days = db.get_custom_config_settings()["duration_days"]
         try:
             provider = get_provider(server)
             result = await provider.create_user(data["reseller_username"], volume_gb, duration_days)
         except PanelUsernameTakenError:
+            db.adjust_reseller_credit(message.from_user.id, volume_gb, reason="بازگشت اعتبار - نام کاربری تکراری")
             await message.answer("❌ این نام کاربری روی پنل تکراری است. دوباره از ابتدا با نام دیگری امتحان کن.")
             return
         except PanelError as e:
+            db.adjust_reseller_credit(message.from_user.id, volume_gb, reason="بازگشت اعتبار - خطای پنل")
             await message.answer(f"⛔️ خطا در ساخت کانفیگ: {e}")
             return
 
-        db.adjust_reseller_credit(message.from_user.id, -volume_gb, reason=f"ساخت کانفیگ «{result.username}»")
         db.add_custom_config(
             message.from_user.id, server["id"], result.username, volume_gb, duration_days, result.subscription_url,
             source="reseller",

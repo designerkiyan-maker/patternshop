@@ -2233,6 +2233,25 @@ class Database:
                 f"SELECT * FROM panel_servers WHERE is_active=1 AND {column}=1 ORDER BY id LIMIT 1"
             ).fetchone()
 
+    def clone_panel_server_for_reseller(self, source_row) -> int:
+        """یک کپی از یک سرور پنل (از دیتابیس اصلی) را روی همین دیتابیس (بات نماینده)
+        می‌سازد، فقط با پرچم used_for_reseller=1 (بقیه‌ی مصرف‌ها خاموش)، تا نیاز به
+        تنظیم دستی پنل توسط نماینده یا ادمین اصلی نباشد."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO panel_servers (name, panel_type, api_url, api_username, api_password, api_key, "
+                "template_username, group_ids, proxy_settings, default_group, xui_inbound_id, xui_sub_base_url, "
+                "used_for_custom_config, used_for_test_config, used_for_reseller, is_active) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 1, 1)",
+                (
+                    source_row["name"], source_row["panel_type"], source_row["api_url"],
+                    source_row["api_username"], source_row["api_password"], source_row["api_key"],
+                    source_row["template_username"], source_row["group_ids"], source_row["proxy_settings"],
+                    source_row["default_group"], source_row["xui_inbound_id"], source_row["xui_sub_base_url"],
+                ),
+            )
+            return cur.lastrowid
+
     # -----------------------------------------------------------------------
     # قیمت‌گذاری پلکانی ساخت کانفیگ شخصی
     # -----------------------------------------------------------------------
@@ -2366,7 +2385,9 @@ class Database:
             )
 
     def adjust_reseller_credit(self, user_tg_id: int, delta_gb: int, admin_id: int = None, reason: str = None):
-        """delta_gb مثبت (شارژ) یا منفی (کسر بابت ساخت کانفیگ) باشد."""
+        """شارژ دستی توسط ادمین (یا بازگشت اعتبار بابت خطا). بدون گارد منفی‌نشدن -
+        فقط ادمین/مسیرهای داخلی معتبر این را صدا می‌زنند. برای کسرِ ناشی از
+        خریدِ کاربر از try_deduct_reseller_credit استفاده کن (اتمیک و گاردشده)."""
         with self._get_conn() as conn:
             conn.execute(
                 "UPDATE users SET reseller_credit_gb = reseller_credit_gb + ? WHERE telegram_id=?",
@@ -2376,6 +2397,23 @@ class Database:
                 "INSERT INTO reseller_credit_log (user_id, delta_gb, reason, admin_id) VALUES (?, ?, ?, ?)",
                 (user_tg_id, delta_gb, reason, admin_id),
             )
+
+    def try_deduct_reseller_credit(self, user_tg_id: int, gb_amount: int, reason: str = None) -> bool:
+        """کسر اتمیک اعتبار برای ساخت کانفیگ: فقط اگر موجودی کافی باشد کم می‌کند.
+        در یک UPDATE با شرط >= انجام می‌شود تا race بین چک و کسر (دو تماس جدا) وجود نداشته باشد."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE users SET reseller_credit_gb = reseller_credit_gb - ? "
+                "WHERE telegram_id=? AND reseller_credit_gb >= ?",
+                (gb_amount, user_tg_id, gb_amount),
+            )
+            if cur.rowcount == 0:
+                return False
+            conn.execute(
+                "INSERT INTO reseller_credit_log (user_id, delta_gb, reason) VALUES (?, ?, ?)",
+                (user_tg_id, -gb_amount, reason),
+            )
+            return True
 
     def get_reseller_credit_log(self, user_tg_id: int, limit: int = 20):
         with self._get_conn() as conn:
