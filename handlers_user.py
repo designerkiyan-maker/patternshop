@@ -323,7 +323,8 @@ def create_user_router(db, bot_manager=None) -> Router:
         await state.clear()
         categories = db.get_categories(active_only=True)
         custom_enabled = db.get_setting("custom_config_enabled", "0") == "1"
-        if not categories and not custom_enabled:
+        has_owner_store = bool(db.list_reseller_products(seller_type="owner", active_only=True))
+        if not categories and not custom_enabled and not has_owner_store:
             await message.answer("در حال حاضر دسته‌بندی فعالی وجود ندارد.")
             return
         await message.answer("یک گزینه را انتخاب کنید:", reply_markup=kb.categories_kb(db, categories))
@@ -1039,7 +1040,7 @@ def create_user_router(db, bot_manager=None) -> Router:
             f"📦 اعتبار باقی‌مانده: {credit:,} گیگابایت\n\n"
             f"می‌تونی از این اعتبار مستقیم کانفیگ بسازی، بدون پرداخت جداگانه. "
             f"با هر قیمتی که خودت بخوای می‌تونی به مشتری‌هات بفروشیش.",
-            reply_markup=kb.reseller_panel_kb(show_card_button=(seller_type == "sub_reseller")),
+            reply_markup=kb.reseller_panel_kb(show_card_button=(seller_type == "sub_reseller"), show_store_link=(seller_type == "sub_reseller")),
         )
 
     def _reseller_resolve_panel(seller_type: str, seller_id: int):
@@ -1224,7 +1225,7 @@ def create_user_router(db, bot_manager=None) -> Router:
         await call.message.edit_text(
             f"🧑‍💼 پنل نمایندگی\n\n"
             f"📦 اعتبار باقی‌مانده: {credit:,} گیگابایت",
-            reply_markup=kb.reseller_panel_kb(show_card_button=(seller_type == "sub_reseller")),
+            reply_markup=kb.reseller_panel_kb(show_card_button=(seller_type == "sub_reseller"), show_store_link=(seller_type == "sub_reseller")),
         )
         await call.answer()
 
@@ -1316,14 +1317,71 @@ def create_user_router(db, bot_manager=None) -> Router:
         if not seller_type:
             await state.clear()
             return
-        data = await state.get_data()
-        db.create_reseller_product(
-            seller_type, seller_id, data["rprod_title"], data["rprod_volume"], data["rprod_duration"], int(text),
+        await state.update_data(rprod_price=int(text))
+        await state.set_state(ResellerProductFlow.waiting_source)
+        await message.answer(
+            "این محصول رو از کجا تامین می‌کنی؟",
+            reply_markup=kb.reseller_product_source_kb(),
         )
+
+    @router.callback_query(F.data == "rprod_src:credit_pool", ResellerProductFlow.waiting_source)
+    async def cb_rprod_src_credit(call: CallbackQuery, state: FSMContext):
+        await _rprod_finalize(call.message, state, call.from_user.id, "credit_pool")
+        await call.answer()
+
+    @router.callback_query(F.data == "rprod_src:own_panel", ResellerProductFlow.waiting_source)
+    async def cb_rprod_src_panel(call: CallbackQuery, state: FSMContext):
+        servers = db.get_panel_servers(active_only=True)
+        if not servers:
+            await call.answer("هنوز هیچ پنلی وصل نکردی. اول از بخش پنل‌ها یکی اضافه کن.", show_alert=True)
+            return
+        await state.set_state(ResellerProductFlow.waiting_panel)
+        await call.answer()
+        await call.message.answer("کدام پنل شخصی خودت؟", reply_markup=kb.reseller_product_panel_select_kb(servers))
+
+    @router.callback_query(F.data.startswith("rprod_panel:"), ResellerProductFlow.waiting_panel)
+    async def cb_rprod_pick_panel(call: CallbackQuery, state: FSMContext):
+        server_id = int(call.data.split(":")[1])
+        await call.answer()
+        await _rprod_finalize(call.message, state, call.from_user.id, "own_panel", panel_server_id=server_id)
+
+    @router.callback_query(F.data == "rprod_src:stock", ResellerProductFlow.waiting_source)
+    async def cb_rprod_src_stock(call: CallbackQuery, state: FSMContext):
+        await state.set_state(ResellerProductFlow.waiting_stock)
+        await call.answer()
+        await call.message.answer(
+            "لینک‌های اشتراک آماده رو بفرست، هر کدوم تو یک خط جدا (می‌تونی چندتا با هم بفرستی):",
+            reply_markup=kb.cancel_kb(),
+        )
+
+    @router.message(ResellerProductFlow.waiting_stock)
+    async def rprod_receive_stock(message: Message, state: FSMContext):
+        links = [line.strip() for line in (message.text or "").splitlines() if line.strip()]
+        if not links:
+            await message.answer("❌ حداقل یک لینک بفرست.")
+            return
+        await state.update_data(rprod_stock_links=links)
+        await _rprod_finalize(message, state, message.from_user.id, "stock")
+
+    async def _rprod_finalize(message: Message, state: FSMContext, user_id: int, source_type: str, panel_server_id: int = None):
+        seller_type, seller_id = _reseller_seller_type_id(user_id)
+        if not seller_type:
+            await state.clear()
+            return
+        data = await state.get_data()
+        pid = db.create_reseller_product(
+            seller_type, seller_id, data["rprod_title"], data["rprod_volume"], data["rprod_duration"], data["rprod_price"],
+            source_type=source_type, panel_server_id=panel_server_id,
+        )
+        note = ""
+        if source_type == "stock":
+            links = data.get("rprod_stock_links", [])
+            db.add_reseller_product_stock(pid, links)
+            note = f"\n📥 {len(links)} لینک به انبار این محصول اضافه شد."
         await state.clear()
         products = db.list_reseller_products(seller_type=seller_type, seller_id=seller_id)
         await message.answer(
-            "✅ محصول ساخته شد و از همین الان در «خرید کانفیگ» به مشتری‌هات نمایش داده می‌شود.",
+            f"✅ محصول ساخته شد و از همین الان به مشتری‌هات نمایش داده می‌شود.{note}",
             reply_markup=kb.reseller_products_list_kb(products),
         )
 
@@ -1438,6 +1496,18 @@ def create_user_router(db, bot_manager=None) -> Router:
             except Exception:
                 pass
 
+    @router.callback_query(F.data == "rstore_open")
+    async def cb_rstore_open(call: CallbackQuery):
+        products = db.list_reseller_products(seller_type="owner", active_only=True)
+        if not products:
+            await call.answer("در حال حاضر محصولی موجود نیست.", show_alert=True)
+            return
+        await call.message.edit_text(
+            "🛍 بانک کانفیگ\n\nیکی از محصولات زیر را انتخاب کن:",
+            reply_markup=kb.reseller_storefront_kb(products),
+        )
+        await call.answer()
+
     @router.callback_query(F.data.startswith("rstore_view:"))
     async def cb_rstore_view(call: CallbackQuery):
         product_id = int(call.data.split(":")[1])
@@ -1445,12 +1515,13 @@ def create_user_router(db, bot_manager=None) -> Router:
         if not product or not product["is_active"]:
             await call.answer("این محصول دیگر موجود نیست.", show_alert=True)
             return
+        back_cb = "rstore_open" if product["seller_type"] == "owner" else "back_main"
         await call.message.edit_text(
             f"🛍 {product['title']}\n\n"
             f"📶 حجم: {product['volume_gb']} گیگ\n"
             f"⏳ مدت: {product['duration_days']} روز\n"
             f"💰 قیمت: {product['price']:,} تومان",
-            reply_markup=kb.reseller_storefront_confirm_kb(product_id),
+            reply_markup=kb.reseller_storefront_confirm_kb(product_id, back_callback=back_cb),
         )
         await call.answer()
 
@@ -1571,16 +1642,40 @@ def create_user_router(db, bot_manager=None) -> Router:
         await message.answer("لطفاً فقط عکس رسید پرداخت را ارسال کنید.")
 
     async def _rstore_provision(bot: Bot, order_id: int):
-        """ساخت خودکار کانفیگ روی پنل + کسر اعتبار فروشنده + تحویل به خریدار. خروجی: (ok, error_or_None)"""
+        """ساخت/تحویل خودکار کانفیگ + کسر اعتبار (در صورت نیاز) + تحویل به خریدار. خروجی: (ok, error_or_None)"""
         order = db.get_order(order_id)
         product = db.get_reseller_product(order["reseller_product_id"])
         if not product:
             db.reject_order(order_id)
             return False, "محصول یافت نشد."
 
-        server = _reseller_resolve_panel(product["seller_type"], product["seller_id"])
+        source_type = product["source_type"] if "source_type" in product.keys() else "credit_pool"
+
+        if source_type == "stock":
+            item = db.take_reseller_product_stock(product["id"], order_id=order_id)
+            if not item:
+                return False, "انبار این محصول خالی شده. با فروشنده هماهنگ کن."
+            placeholder_panel_id = db.get_or_create_stock_placeholder_panel()
+            db.approve_custom_config_order(order_id)
+            db.add_custom_config(
+                order["user_id"], placeholder_panel_id, order["custom_username"], product["volume_gb"], product["duration_days"],
+                item["subscription_url"], order_id=order_id, source="reseller_product",
+            )
+            try:
+                await deliver_config_to_user(
+                    bot, order["user_id"], product["title"], [item["subscription_url"]],
+                    final_price=order["final_price"], order_id=order_id,
+                )
+            except Exception:
+                pass
+            return True, None
+
+        if source_type == "own_panel":
+            server = db.get_panel_server(product["panel_server_id"])
+        else:
+            server = _reseller_resolve_panel(product["seller_type"], product["seller_id"])
         if not server:
-            return False, "سروری برای این نماینده تنظیم نشده."
+            return False, "سروری برای این محصول تنظیم نشده."
 
         try:
             provider = get_provider(server)
@@ -1595,10 +1690,12 @@ def create_user_router(db, bot_manager=None) -> Router:
             order["user_id"], server["id"], result.username, product["volume_gb"], product["duration_days"],
             result.subscription_url, order_id=order_id, source="reseller_product",
         )
-        if product["seller_type"] == "owner":
-            db.adjust_reseller_credit(product["seller_id"], -product["volume_gb"], reason=f"فروش «{product['title']}» به مشتری")
-        elif order["sub_reseller_id"]:
-            db.adjust_sub_reseller_credit(order["sub_reseller_id"], -product["volume_gb"], reason=f"فروش «{product['title']}» به مشتری")
+        if source_type == "credit_pool":
+            if product["seller_type"] == "owner":
+                db.adjust_reseller_credit(product["seller_id"], -product["volume_gb"], reason=f"فروش «{product['title']}» به مشتری")
+            elif order["sub_reseller_id"]:
+                db.adjust_sub_reseller_credit(order["sub_reseller_id"], -product["volume_gb"], reason=f"فروش «{product['title']}» به مشتری")
+        # source_type == 'own_panel': پنل شخصی خودشونه، از استخر گیگ چیزی کم نمی‌شود.
 
         try:
             await deliver_config_to_user(
@@ -1741,7 +1838,11 @@ def create_user_router(db, bot_manager=None) -> Router:
         )
         for admin_id in db.list_admins():
             try:
-                await bot.send_message(admin_id, text, reply_markup=kb.reseller_request_admin_kb(request_id, data["reseller_request_type"]))
+                needs_price = data["reseller_request_type"] == "bot" or (data["reseller_request_type"] == "credit" and is_main_req)
+                await bot.send_message(
+                    admin_id, text,
+                    reply_markup=kb.reseller_request_admin_kb(request_id, data["reseller_request_type"], needs_price=needs_price),
+                )
             except Exception:
                 pass
 

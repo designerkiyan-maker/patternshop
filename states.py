@@ -194,6 +194,9 @@ class ResellerProductFlow(StatesGroup):
     waiting_volume = State()
     waiting_duration = State()
     waiting_price = State()
+    waiting_source = State()
+    waiting_panel = State()
+    waiting_stock = State()
 
 
 class SubResellerAddFlow(StatesGroup):
@@ -202,6 +205,10 @@ class SubResellerAddFlow(StatesGroup):
 
 class SubResellerCreditFlow(StatesGroup):
     waiting_amount = State()
+
+
+class AdminMakeResellerVolume(StatesGroup):
+    waiting_credit = State()
 
 
 class SubResellerCardFlow(StatesGroup):

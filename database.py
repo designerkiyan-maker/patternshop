@@ -367,6 +367,17 @@ class Database:
                     price INTEGER NOT NULL,
                     is_active INTEGER DEFAULT 1,
                     sort_order INTEGER DEFAULT 0,
+                    source_type TEXT DEFAULT 'credit_pool',  -- 'credit_pool' (استخر گیگ) | 'own_panel' (پنل شخصی) | 'stock' (انبار لینک ساب آماده)
+                    panel_server_id INTEGER,                  -- فقط برای source_type='own_panel'
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS reseller_product_stock (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    reseller_product_id INTEGER NOT NULL,
+                    subscription_url TEXT NOT NULL,
+                    is_used INTEGER DEFAULT 0,
+                    order_id INTEGER,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -444,6 +455,7 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_sub_reseller_credit_log_sr ON sub_reseller_credit_log(sub_reseller_id);
                 CREATE INDEX IF NOT EXISTS idx_reseller_products_seller ON reseller_products(seller_type, seller_id);
                 CREATE INDEX IF NOT EXISTS idx_reseller_products_active ON reseller_products(is_active);
+                CREATE INDEX IF NOT EXISTS idx_reseller_product_stock_prod ON reseller_product_stock(reseller_product_id, is_used);
 
                 -- ===================== ساخت کانفیگ شخصی (پنل‌های VPN) =====================
                 CREATE TABLE IF NOT EXISTS panel_servers (
@@ -602,6 +614,8 @@ class Database:
             ("reseller_bot_setup_state", "mode", "TEXT DEFAULT 'independent'"),
             ("orders", "is_reseller_product", "INTEGER DEFAULT 0"),
             ("users", "reseller_store_slug", "TEXT"),
+            ("reseller_products", "source_type", "TEXT DEFAULT 'credit_pool'"),
+            ("reseller_products", "panel_server_id", "INTEGER"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -1754,6 +1768,10 @@ class Database:
             )
             return cur.lastrowid
 
+    def set_reseller_bot_mode(self, reseller_bot_id: int, mode: str):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE reseller_bots SET mode=? WHERE id=?", (mode, reseller_bot_id))
+
     def list_reseller_bots(self, active_only: bool = False):
         with self._get_conn() as conn:
             if active_only:
@@ -2770,7 +2788,8 @@ class Database:
     # -----------------------------------------------------------------------
 
     def create_reseller_product(self, seller_type: str, seller_id: int, title: str,
-                                 volume_gb: int, duration_days: int, price: int) -> int:
+                                 volume_gb: int, duration_days: int, price: int,
+                                 source_type: str = "credit_pool", panel_server_id: int = None) -> int:
         with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT COALESCE(MAX(sort_order), -1) AS m FROM reseller_products WHERE seller_type=? AND seller_id=?",
@@ -2778,9 +2797,51 @@ class Database:
             ).fetchone()
             sort_order = (row["m"] if row else -1) + 1
             cur = conn.execute(
-                "INSERT INTO reseller_products (seller_type, seller_id, title, volume_gb, duration_days, price, sort_order) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (seller_type, seller_id, title, volume_gb, duration_days, price, sort_order),
+                "INSERT INTO reseller_products (seller_type, seller_id, title, volume_gb, duration_days, price, "
+                "sort_order, source_type, panel_server_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (seller_type, seller_id, title, volume_gb, duration_days, price, sort_order, source_type, panel_server_id),
+            )
+            return cur.lastrowid
+
+    def add_reseller_product_stock(self, reseller_product_id: int, subscription_urls) -> int:
+        with self._get_conn() as conn:
+            conn.executemany(
+                "INSERT INTO reseller_product_stock (reseller_product_id, subscription_url) VALUES (?, ?)",
+                [(reseller_product_id, u) for u in subscription_urls],
+            )
+            return len(subscription_urls)
+
+    def count_reseller_product_stock(self, reseller_product_id: int, unused_only: bool = True) -> int:
+        with self._get_conn() as conn:
+            q = "SELECT COUNT(*) AS c FROM reseller_product_stock WHERE reseller_product_id=?"
+            if unused_only:
+                q += " AND is_used=0"
+            return conn.execute(q, (reseller_product_id,)).fetchone()["c"]
+
+    def take_reseller_product_stock(self, reseller_product_id: int, order_id: int = None):
+        """یک لینک اشتراک استفاده‌نشده از انبار محصول برمی‌دارد و مصرف‌شده علامت می‌زند. اگر انبار خالی بود None برمی‌گرداند."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM reseller_product_stock WHERE reseller_product_id=? AND is_used=0 ORDER BY id LIMIT 1",
+                (reseller_product_id,),
+            ).fetchone()
+            if not row:
+                return None
+            conn.execute(
+                "UPDATE reseller_product_stock SET is_used=1, order_id=? WHERE id=?", (order_id, row["id"]),
+            )
+            return row
+
+    def get_or_create_stock_placeholder_panel(self) -> int:
+        """یک ردیف ساختگی و غیرفعال در panel_servers برای کانفیگ‌هایی که از «انبار لینک ساب»
+        نمایندگان می‌آیند (بدون تماس واقعی با هیچ پنلی) - فقط برای رعایت محدودیت NOT NULL."""
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT id FROM panel_servers WHERE name='__reseller_stock__'").fetchone()
+            if row:
+                return row["id"]
+            cur = conn.execute(
+                "INSERT INTO panel_servers (name, panel_type, api_url, is_active, used_for_custom_config, used_for_test_config) "
+                "VALUES ('__reseller_stock__', 'placeholder', '', 0, 0, 0)"
             )
             return cur.lastrowid
 

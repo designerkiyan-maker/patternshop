@@ -58,6 +58,7 @@ from states import (
     AdminCustomConfigSettings,
     AdminResetTestConfig,
     SubResellerCreditFlow,
+    AdminMakeResellerVolume,
 )
 
 
@@ -625,8 +626,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
         # ===== سفارش هزینه‌ی ساخت بات نمایندگی: بعد از تایید، خودکار وارد فلوی دریافت توکن می‌شود =====
         if order["is_reseller_bot_fee"]:
+            req = db.get_reseller_request(order["reseller_request_id"]) if order["reseller_request_id"] else None
+            mode = "volume" if (req and req["request_type"] == "credit") else "independent"
             db.approve_custom_config_order(order_id)
-            db.start_reseller_bot_setup(order["user_id"])
+            db.start_reseller_bot_setup(order["user_id"], mode=mode)
             db.log_admin_action(
                 call.from_user.id, "reseller_bot_fee_approve",
                 f"سفارش #{order_id} | کاربر {order['user_id']} | مبلغ: {order['final_price']:,}",
@@ -2438,6 +2441,60 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             bots = db.list_reseller_bots()
             await replace_admin_view(call, "🏪 مدیریت بات‌های نمایندگی:", reply_markup=kb.resellers_kb(bots))
             await call.answer()
+
+        @router.callback_query(F.data.startswith("adm_resbot_makevol:"))
+        async def cb_admin_resbot_makevol(call: CallbackQuery, state: FSMContext):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            bot_id = int(call.data.split(":")[1])
+            reseller_bot = db.get_reseller_bot(bot_id)
+            if not reseller_bot:
+                return await call.answer("یافت نشد.", show_alert=True)
+            await state.update_data(resbot_id=bot_id)
+            await state.set_state(AdminMakeResellerVolume.waiting_credit)
+            await call.answer()
+            await call.message.answer(
+                f"چند گیگابایت اعتبار اولیه به @{reseller_bot['bot_username']} داده شود؟ (فقط عدد):",
+                reply_markup=kb.admin_back_kb(),
+            )
+
+        @router.message(AdminMakeResellerVolume.waiting_credit)
+        async def process_resbot_makevol(message: Message, state: FSMContext, bot: Bot):
+            text = message.text.strip()
+            if not text.isdigit() or int(text) <= 0:
+                await message.answer("لطفاً فقط عدد صحیح مثبت ارسال کن.")
+                return
+            credit_gb = int(text)
+            data = await state.get_data()
+            bot_id = data["resbot_id"]
+            reseller_bot = db.get_reseller_bot(bot_id)
+            if not reseller_bot:
+                await state.clear()
+                await message.answer("این بات نمایندگی دیگر وجود ندارد.")
+                return
+
+            reseller_db = Database(resolve_db_path(reseller_bot["db_path"]))
+            reseller_db.set_reseller_status(reseller_bot["owner_telegram_id"], True)
+            reseller_db.adjust_reseller_credit(reseller_bot["owner_telegram_id"], credit_gb, reason="تبدیل به بات با حجم توسط ادمین اصلی")
+            db.set_reseller_bot_mode(bot_id, "volume")
+            db.log_admin_action(message.from_user.id, "reseller_bot_make_volume", f"بات @{reseller_bot['bot_username']} | {credit_gb:,} گیگ")
+            await state.clear()
+
+            try:
+                await bot.send_message(
+                    reseller_bot["owner_telegram_id"],
+                    f"🎉 بات شما (@{reseller_bot['bot_username']}) از این به بعد «بات با حجم» است و "
+                    f"{credit_gb:,} گیگابایت اعتبار اولیه دریافت کرد.\n"
+                    f"از «🧑‍💼 پنل نمایندگی» داخل بات خودت می‌تونی ازش استفاده کنی و محصول بسازی.",
+                )
+            except Exception:
+                pass
+
+            bots = db.list_reseller_bots()
+            await message.answer(
+                f"✅ انجام شد. @{reseller_bot['bot_username']} حالا «بات با حجم» است.",
+                reply_markup=kb.resellers_kb(bots),
+            )
 
         @router.callback_query(F.data.startswith("adm_resbot_toggle:"))
         async def cb_admin_resbot_toggle(call: CallbackQuery):
