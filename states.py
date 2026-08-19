@@ -95,11 +95,6 @@ class AdminAddResellerBot(StatesGroup):
     waiting_token = State()
     waiting_owner_id = State()
     waiting_owner_name = State()
-    waiting_initial_credit = State()
-
-
-class AdminChargeResellerCredit(StatesGroup):
-    waiting_amount = State()
 
 
 class AdminWheelSettings(StatesGroup):
@@ -170,11 +165,3 @@ class CustomConfigFlow(StatesGroup):
 class ResellerFlow(StatesGroup):
     waiting_username = State()
     waiting_volume = State()
-
-
-class ResellerRequestFlow(StatesGroup):
-    waiting_volume = State()
-
-
-class AdminResellerRequestPrice(StatesGroup):
-    waiting_price = State()

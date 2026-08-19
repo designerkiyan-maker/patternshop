@@ -517,13 +517,6 @@ class Database:
             ("panel_servers", "xui_sub_base_url", "TEXT"),
             ("users", "is_reseller", "INTEGER DEFAULT 0"),
             ("users", "reseller_credit_gb", "INTEGER DEFAULT 0"),
-            # درخواست نمایندگی: کاربر عادی حجم می‌خواهد، ادمین قیمت می‌دهد، بعد از
-            # پرداخت کاربر توکن/آیدی بات خودش را می‌فرستد و بات نمایندگی خودکار ساخته می‌شود.
-            ("orders", "is_reseller_request", "INTEGER DEFAULT 0"),
-            ("orders", "reseller_request_gb", "INTEGER"),
-            ("orders", "reseller_bot_token", "TEXT"),
-            ("orders", "reseller_bot_username", "TEXT"),
-            ("orders", "reseller_owner_id", "INTEGER"),
             ("custom_configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "volume_reminder_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "source", "TEXT DEFAULT 'custom_config'"),
@@ -788,19 +781,6 @@ class Database:
 
     def is_owner(self, tg_id: int) -> bool:
         return self.get_admin_role(tg_id) == "owner"
-
-    def get_owner_id(self):
-        """آیدی مالک همین یک نمونه از بات (برای بات نمایندگی، همان نماینده)."""
-        with self._get_conn() as conn:
-            row = conn.execute("SELECT telegram_id FROM admins WHERE role='owner' LIMIT 1").fetchone()
-            return row["telegram_id"] if row else None
-
-    def is_self_requested_reseller(self) -> bool:
-        """True فقط برای بات‌های نمایندگی‌ای که خودِ کاربر از داخل بات درخواست داده
-        (نه بات‌هایی که ادمین اصلی شخصاً از پنل مدیریت ساخته). محدودیت‌های مربوط به
-        اتصال پنل VPN و اجباری‌بودن استفاده از استخر اعتبار، فقط روی این نوع اعمال
-        می‌شود؛ بات‌هایی که ادمین اصلی شخصاً ساخته کاملاً دست‌باز و مستقل می‌مانند."""
-        return self.get_setting("reseller_self_requested", "0") == "1"
 
     def add_admin(self, tg_id: int, role: str = "admin"):
         if role not in ("admin", "mid", "support"):
@@ -2253,29 +2233,6 @@ class Database:
                 f"SELECT * FROM panel_servers WHERE is_active=1 AND {column}=1 ORDER BY id LIMIT 1"
             ).fetchone()
 
-    def clone_panel_server_for_reseller(self, source_row) -> int:
-        """یک کپی از یک سرور پنل (از دیتابیس اصلی) را روی همین دیتابیس (بات نماینده)
-        می‌سازد، فقط با پرچم used_for_reseller=1 (بقیه‌ی مصرف‌ها خاموش)، تا نیاز به
-        تنظیم دستی پنل توسط نماینده یا ادمین اصلی نباشد.
-        Idempotent: هر سرور قبلی با همین پرچم را حذف می‌کند تا این متد هم موقع
-        ساخت بات نماینده و هم برای همگام‌سازی مجدد (وقتی ادمین اصلی سرور را عوض
-        می‌کند) بدون تکرار قابل فراخوانی باشد."""
-        with self._get_conn() as conn:
-            conn.execute("DELETE FROM panel_servers WHERE used_for_reseller=1")
-            cur = conn.execute(
-                "INSERT INTO panel_servers (name, panel_type, api_url, api_username, api_password, api_key, "
-                "template_username, group_ids, proxy_settings, default_group, xui_inbound_id, xui_sub_base_url, "
-                "used_for_custom_config, used_for_test_config, used_for_reseller, is_active) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 1, 1)",
-                (
-                    source_row["name"], source_row["panel_type"], source_row["api_url"],
-                    source_row["api_username"], source_row["api_password"], source_row["api_key"],
-                    source_row["template_username"], source_row["group_ids"], source_row["proxy_settings"],
-                    source_row["default_group"], source_row["xui_inbound_id"], source_row["xui_sub_base_url"],
-                ),
-            )
-            return cur.lastrowid
-
     # -----------------------------------------------------------------------
     # قیمت‌گذاری پلکانی ساخت کانفیگ شخصی
     # -----------------------------------------------------------------------
@@ -2409,9 +2366,7 @@ class Database:
             )
 
     def adjust_reseller_credit(self, user_tg_id: int, delta_gb: int, admin_id: int = None, reason: str = None):
-        """شارژ دستی توسط ادمین (یا بازگشت اعتبار بابت خطا). بدون گارد منفی‌نشدن -
-        فقط ادمین/مسیرهای داخلی معتبر این را صدا می‌زنند. برای کسرِ ناشی از
-        خریدِ کاربر از try_deduct_reseller_credit استفاده کن (اتمیک و گاردشده)."""
+        """delta_gb مثبت (شارژ) یا منفی (کسر بابت ساخت کانفیگ) باشد."""
         with self._get_conn() as conn:
             conn.execute(
                 "UPDATE users SET reseller_credit_gb = reseller_credit_gb + ? WHERE telegram_id=?",
@@ -2421,23 +2376,6 @@ class Database:
                 "INSERT INTO reseller_credit_log (user_id, delta_gb, reason, admin_id) VALUES (?, ?, ?, ?)",
                 (user_tg_id, delta_gb, reason, admin_id),
             )
-
-    def try_deduct_reseller_credit(self, user_tg_id: int, gb_amount: int, reason: str = None) -> bool:
-        """کسر اتمیک اعتبار برای ساخت کانفیگ: فقط اگر موجودی کافی باشد کم می‌کند.
-        در یک UPDATE با شرط >= انجام می‌شود تا race بین چک و کسر (دو تماس جدا) وجود نداشته باشد."""
-        with self._get_conn() as conn:
-            cur = conn.execute(
-                "UPDATE users SET reseller_credit_gb = reseller_credit_gb - ? "
-                "WHERE telegram_id=? AND reseller_credit_gb >= ?",
-                (gb_amount, user_tg_id, gb_amount),
-            )
-            if cur.rowcount == 0:
-                return False
-            conn.execute(
-                "INSERT INTO reseller_credit_log (user_id, delta_gb, reason) VALUES (?, ?, ?)",
-                (user_tg_id, -gb_amount, reason),
-            )
-            return True
 
     def get_reseller_credit_log(self, user_tg_id: int, limit: int = 20):
         with self._get_conn() as conn:
@@ -2451,74 +2389,3 @@ class Database:
             return conn.execute(
                 "SELECT * FROM users WHERE is_reseller=1 ORDER BY reseller_credit_gb DESC"
             ).fetchall()
-
-    # -----------------------------------------------------------------------
-    # درخواست نمایندگی (کاربر عادی -> بات نمایندگی مستقل خودش)
-    # مثل «سفارش شخصی» از جدول orders رد می‌شود (product_id=0 سنتینل) تا
-    # کارت‌به‌کارت/کیف‌پول/کریپتوی فعلی بدون تغییر کار کند.
-    # وضعیت‌ها: awaiting_price -> pending (منتظر پرداخت) -> awaiting_bot_token ->
-    # awaiting_owner_id -> completed  (یا rejected در هر مرحله قبل از completed)
-    # -----------------------------------------------------------------------
-
-    def get_user_reseller_bot(self, owner_tg_id: int):
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT * FROM reseller_bots WHERE owner_telegram_id=?", (owner_tg_id,)
-            ).fetchone()
-
-    def get_active_reseller_request(self, user_tg_id: int):
-        """آخرین درخواست نمایندگی کاربر که هنوز نهایی/رد نشده."""
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT * FROM orders WHERE user_id=? AND is_reseller_request=1 "
-                "AND status NOT IN ('completed', 'rejected') ORDER BY id DESC LIMIT 1",
-                (user_tg_id,),
-            ).fetchone()
-
-    def create_reseller_request(self, user_tg_id: int, requested_gb: int) -> int:
-        with self._get_conn() as conn:
-            cur = conn.execute(
-                "INSERT INTO orders (user_id, product_id, status, is_reseller_request, reseller_request_gb) "
-                "VALUES (?, 0, 'awaiting_price', 1, ?)",
-                (user_tg_id, requested_gb),
-            )
-            return cur.lastrowid
-
-    def set_reseller_request_price(self, order_id: int, price: int):
-        """قیمت را ثبت می‌کند؛ اگر کیف پول کل مبلغ را پوشش دهد وضعیت مستقیم
-        به awaiting_bot_token می‌رود، وگرنه به pending (منتظر پرداخت)."""
-        order = self.get_order(order_id)
-        wallet_credit = self.get_wallet_credit(order["user_id"])
-        wallet_used = min(wallet_credit, price)
-        if wallet_used > 0:
-            self.add_wallet_credit(order["user_id"], -wallet_used)
-        final_price = max(price - wallet_used, 0)
-        new_status = "awaiting_bot_token" if final_price <= 0 else "pending"
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE orders SET base_price=?, wallet_used=?, final_price=?, status=?, updated_at=? WHERE id=?",
-                (price, wallet_used, final_price, new_status, datetime.utcnow().isoformat(), order_id),
-            )
-        return self.get_order(order_id)
-
-    def mark_reseller_request_paid(self, order_id: int):
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE orders SET status='awaiting_bot_token', updated_at=? WHERE id=?",
-                (datetime.utcnow().isoformat(), order_id),
-            )
-
-    def set_reseller_request_token(self, order_id: int, token: str, username: str):
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE orders SET reseller_bot_token=?, reseller_bot_username=?, status='awaiting_owner_id', "
-                "updated_at=? WHERE id=?",
-                (token, username, datetime.utcnow().isoformat(), order_id),
-            )
-
-    def complete_reseller_request(self, order_id: int, owner_id: int):
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE orders SET reseller_owner_id=?, status='completed', updated_at=? WHERE id=?",
-                (owner_id, datetime.utcnow().isoformat(), order_id),
-            )
