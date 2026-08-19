@@ -77,7 +77,7 @@ async def _send_admin_notification(bot, admin_id, send_coro_factory, context_lab
     return None
 
 
-def create_user_router(db) -> Router:
+def create_user_router(db, is_main_bot: bool = True) -> Router:
     router = Router()
 
     # -----------------------------------------------------------------------
@@ -149,15 +149,17 @@ def create_user_router(db) -> Router:
     async def show_categories(message: Message, state: FSMContext):
         await state.clear()
         categories = db.get_categories(active_only=True)
-        custom_enabled = db.get_setting("custom_config_enabled", "0") == "1"
+        custom_enabled = is_main_bot and db.get_setting("custom_config_enabled", "0") == "1"
         if not categories and not custom_enabled:
             await message.answer("در حال حاضر دسته‌بندی فعالی وجود ندارد.")
             return
-        await message.answer("یک گزینه را انتخاب کنید:", reply_markup=kb.categories_kb(db, categories))
+        await message.answer("یک گزینه را انتخاب کنید:", reply_markup=kb.categories_kb(db, categories, is_main_bot))
 
     @router.callback_query(F.data == "custom_config_start")
     async def cb_custom_config_start(call: CallbackQuery, state: FSMContext):
         await call.answer()
+        if not is_main_bot:
+            return
         try:
             await call.message.delete()
         except Exception:
@@ -173,7 +175,7 @@ def create_user_router(db) -> Router:
     @router.callback_query(F.data == "back_categories")
     async def cb_back_categories(call: CallbackQuery):
         categories = db.get_categories(active_only=True)
-        await call.message.edit_text("یک دسته‌بندی را انتخاب کنید:", reply_markup=kb.categories_kb(db, categories))
+        await call.message.edit_text("یک دسته‌بندی را انتخاب کنید:", reply_markup=kb.categories_kb(db, categories, is_main_bot))
         await call.answer()
 
     @router.callback_query(F.data.startswith("cat:"))
@@ -579,6 +581,9 @@ def create_user_router(db) -> Router:
         return "\n".join(lines)
 
     async def custom_config_start(message: Message, state: FSMContext):
+        if not is_main_bot:
+            await message.answer("این بخش در حال حاضر غیرفعال است.")
+            return
         settings = db.get_custom_config_settings()
         if not settings["enabled"]:
             await message.answer("این بخش در حال حاضر غیرفعال است.")

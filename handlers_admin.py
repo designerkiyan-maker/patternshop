@@ -1222,6 +1222,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_custom_config_settings")
     async def cb_admin_custom_config_settings(call: CallbackQuery):
+        if not is_main_bot:
+            return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         await replace_admin_view(call,
@@ -1234,6 +1236,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_custom_config_toggle")
     async def cb_admin_custom_config_toggle(call: CallbackQuery):
+        if not is_main_bot:
+            return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         current = db.get_setting("custom_config_enabled", "0")

@@ -143,9 +143,9 @@ def menu_for_user(db, user_tg_id: int) -> ReplyKeyboardMarkup:
 # دسته‌بندی‌ها / محصولات (کاربر)
 # ---------------------------------------------------------------------------
 
-def categories_kb(db, categories) -> InlineKeyboardMarkup:
+def categories_kb(db, categories, is_main_bot: bool = True) -> InlineKeyboardMarkup:
     rows = []
-    if db.get_setting("custom_config_enabled", "0") == "1":
+    if is_main_bot and db.get_setting("custom_config_enabled", "0") == "1":
         rows.append([_styled_inline(db, "🛠 ساخت کانفیگ شخصی", "custom_config_start", "btn_custom_config_style")])
     for cat in categories:
         rows.append([_styled_inline(db, f"📁 {cat['name']}", f"cat:{cat['id']}", "btn_cat_select_style")])
@@ -289,6 +289,9 @@ def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
     for key, label, callback_data in ADMIN_PANEL_ITEMS:
         if key in ("adm_resellers_menu", "adm_credit_resellers_menu") and not is_main_bot:
             # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده یا فروش اعتبار ندارند
+            continue
+        if key == "adm_custom_config_settings" and not is_main_bot:
+            # ساخت کانفیگ شخصی به اتصال مستقیم پنل VPN نیاز دارد که فقط از بات اصلی مدیریت می‌شود
             continue
 
         current_row.append(_styled_inline(db, label, callback_data, f"{key}_style"))
