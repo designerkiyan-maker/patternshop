@@ -367,14 +367,23 @@ def _styled_inline(db, text: str, callback_data: str, style_key: str) -> InlineK
     return InlineKeyboardButton(text=text, callback_data=callback_data, style=style)
 
 
-def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
+def admin_panel_kb(db, is_main_bot: bool = True, viewer_id: int = None) -> InlineKeyboardMarkup:
     """کیبورد پنل مدیریت با چیدمان دو ستونه برای کاهش ارتفاع منو."""
     rows = []
     current_row = []
 
+    # صاحب یک بات نماینده (نه ادمین اصلی که وارد بات نماینده شده) نباید بتواند
+    # پنل VPN وصل کند یا برای کاربران دیگرِ بات خودش نمایندگی/اعتبار حجمی بسازد.
+    hide_owner_only_items = (
+        not is_main_bot and viewer_id is not None and db.get_admin_role(viewer_id) == "owner"
+    )
+    owner_restricted_keys = {"adm_custom_config_settings", "adm_gb_resellers_menu"}
+
     for key, label, callback_data in ADMIN_PANEL_ITEMS:
         if key == "adm_resellers_menu" and not is_main_bot:
             # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده ندارند
+            continue
+        if hide_owner_only_items and key in owner_restricted_keys:
             continue
 
         current_row.append(_styled_inline(db, label, callback_data, f"{key}_style"))

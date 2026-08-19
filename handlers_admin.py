@@ -90,6 +90,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         """فقط مالک اصلی بات (تعیین‌شده در env)؛ برای مدیریت خود ادمین‌ها."""
         return db.is_owner(user_id)
 
+    def reseller_bot_owner_restricted(user_id: int) -> bool:
+        """صاحب یک بات نماینده (نه ادمین اصلی که وارد بات نماینده شده) نباید بتواند
+        پنل VPN وصل کند یا برای کاربران دیگرِ بات خودش نمایندگی/اعتبار حجمی بسازد."""
+        return (not is_main_bot) and db.is_owner(user_id)
+
+    async def deny_reseller_owner(call: CallbackQuery):
+        await call.answer("⛔️ این قابلیت برای نمایندگی با حجم در دسترس نیست.", show_alert=True)
+
     async def deny_support(call: CallbackQuery):
         await call.answer("⛔️ این بخش فقط برای مدیران کامل در دسترس است.", show_alert=True)
 
@@ -158,14 +166,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not admin_only(message.from_user.id):
             return
         await state.clear()
-        await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+        await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db, is_main_bot, message.from_user.id))
 
     @router.callback_query(F.data == "adm_back_panel")
     async def cb_back_panel(call: CallbackQuery, state: FSMContext):
         if not admin_only(call.from_user.id):
             return await call.answer()
         await state.clear()
-        await replace_admin_view(call, "🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+        await replace_admin_view(call, "🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db, is_main_bot, call.from_user.id))
         await call.answer()
 
     @router.callback_query(F.data == "noop")
@@ -1258,6 +1266,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_custom_config_settings(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
+        if reseller_bot_owner_restricted(call.from_user.id):
+            return await deny_reseller_owner(call)
         await replace_admin_view(call,
             "🛠 ساخت کانفیگ شخصی\n\n"
             "کاربران می‌توانند با تعیین نام، حجم و پرداخت متناسب، کاربر خودشان را مستقیماً "
@@ -1314,6 +1324,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_panel_servers(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
+        if reseller_bot_owner_restricted(call.from_user.id):
+            return await deny_reseller_owner(call)
         await replace_admin_view(call, "🖥 سرورهای پنل VPN متصل:", reply_markup=kb.panel_servers_list_kb(db))
         await call.answer()
 
@@ -1321,6 +1333,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_panel_server_add(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
+        if reseller_bot_owner_restricted(call.from_user.id):
+            return await deny_reseller_owner(call)
         await state.set_state(AdminAddPanelServer.waiting_name)
         await safe_edit(call, "یک نام دلخواه برای این سرور بفرست (مثلاً «سرور آلمان»):", reply_markup=kb.admin_back_kb())
         await call.answer()
@@ -2041,6 +2055,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_gb_resellers_menu(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
+        if reseller_bot_owner_restricted(call.from_user.id):
+            return await deny_reseller_owner(call)
         await replace_admin_view(
             call,
             "📦 مدیریت نمایندگان (استخر حجم)\n\n"
