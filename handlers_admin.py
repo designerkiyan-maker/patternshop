@@ -76,6 +76,20 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return "⚠️ inbound/آدرس Subscription هنوز تنظیم نشده"
         return f"قالب از کاربر «{server['template_username']}»" if server["template_username"] else "⚠️ قالب هنوز تنظیم نشده"
 
+    def panel_admin_only(user_id: int) -> bool:
+        """اتصال/ویرایش/حذف سرورهای پنل VPN. در بات اصلی همیشه آزاد است. در بات
+        نمایندگی فقط وقتی محدود می‌شود که آن بات از مسیر «درخواست نمایندگی» توسط
+        خودِ کاربر ساخته شده باشد؛ بات‌هایی که ادمین اصلی شخصاً از پنل مدیریت ساخته
+        (adm_resbot_add) کاملاً دست‌باز می‌مانند."""
+        if not db.is_senior_admin(user_id):
+            return False
+        if is_main_bot:
+            return True
+        return not db.is_self_requested_reseller()
+
+    async def deny_panel_admin(call: CallbackQuery):
+        await call.answer("⛔️ اتصال پنل VPN برای این بات نمایندگی محدود شده و فقط توسط ادمین اصلی فروشگاه انجام می‌شود.", show_alert=True)
+
     def senior_admin_only(user_id: int) -> bool:
         """فقط مالک یا مدیر کامل؛ ادمین میانی و پشتیبان اجازه‌ی این بخش‌های حساس
         (آمار فروش، تنظیمات کمپین‌ها/تخفیف، نمایندگی‌ها، برندینگ، مدیریت محصولات/
@@ -85,6 +99,20 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     def owner_only(user_id: int) -> bool:
         """فقط مالک اصلی بات (تعیین‌شده در env)؛ برای مدیریت خود ادمین‌ها."""
         return db.is_owner(user_id)
+
+    async def _push_reseller_panel_to_all_bots(source_server) -> int:
+        """سرور پنل نمایندگی را به دیتابیس همه‌ی بات‌های نمایندگی فعال کپی (یا جایگزین)
+        می‌کند، تا نمایندگانی که قبل از تنظیم این سرور ساخته شده‌اند هم بدون دخالت
+        خودشان صاحب پنل شوند. فقط باید از بات اصلی صدا زده شود."""
+        pushed = 0
+        for rb in db.list_reseller_bots(active_only=True):
+            try:
+                rdb = Database(resolve_db_path(rb["db_path"]))
+                rdb.clone_panel_server_for_reseller(source_server)
+                pushed += 1
+            except Exception:
+                continue
+        return pushed
 
     async def deny_support(call: CallbackQuery):
         await call.answer("⛔️ این بخش فقط برای مدیران کامل در دسترس است.", show_alert=True)
@@ -651,6 +679,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if not server or not server["is_active"]:
                 await call.answer("⛔️ سرور پنل مربوطه یافت نشد یا غیرفعال است.", show_alert=True)
                 return
+
+            reseller_owner_id = db.get_owner_id() if ((not is_main_bot) and db.is_self_requested_reseller()) else None
+            if reseller_owner_id and not db.try_deduct_reseller_credit(
+                reseller_owner_id, order["custom_volume_gb"],
+                reason=f"فروش کانفیگ شخصی «{order['custom_username']}» به کاربر {order['user_id']}",
+            ):
+                await call.answer("⛔️ موجودی این فروشگاه برای این سفارش کافی نیست.", show_alert=True)
+                return
+
             try:
                 provider = get_provider(server)
                 result = await provider.create_user(
@@ -659,9 +696,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                     duration_days=db.get_custom_config_settings()["duration_days"],
                 )
             except PanelUsernameTakenError:
+                if reseller_owner_id:
+                    db.adjust_reseller_credit(reseller_owner_id, order["custom_volume_gb"], reason="بازگشت اعتبار - نام کاربری تکراری")
                 await call.answer("⛔️ این نام کاربری روی پنل تکراری است؛ از کاربر بخواه نام دیگری انتخاب کند.", show_alert=True)
                 return
             except PanelError as e:
+                if reseller_owner_id:
+                    db.adjust_reseller_credit(reseller_owner_id, order["custom_volume_gb"], reason="بازگشت اعتبار - خطای پنل")
                 await call.answer(f"⛔️ خطا در ارتباط با پنل: {e}", show_alert=True)
                 return
 
@@ -1306,15 +1347,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_panel_servers")
     async def cb_admin_panel_servers(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
+        if not panel_admin_only(call.from_user.id):
+            return await deny_panel_admin(call)
         await replace_admin_view(call, "🖥 سرورهای پنل VPN متصل:", reply_markup=kb.panel_servers_list_kb(db))
         await call.answer()
 
     @router.callback_query(F.data == "adm_panel_server_add")
     async def cb_admin_panel_server_add(call: CallbackQuery, state: FSMContext):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
+        if not panel_admin_only(call.from_user.id):
+            return await deny_panel_admin(call)
         await state.set_state(AdminAddPanelServer.waiting_name)
         await safe_edit(call, "یک نام دلخواه برای این سرور بفرست (مثلاً «سرور آلمان»):", reply_markup=kb.admin_back_kb())
         await call.answer()
@@ -1451,8 +1492,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_view:"))
     async def cb_admin_panel_server_view(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
+        if not panel_admin_only(call.from_user.id):
+            return await deny_panel_admin(call)
         server_id = callback_id(call.data, "adm_panel_server_view")
         server = db.get_panel_server(server_id)
         if not server:
@@ -1477,8 +1518,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_template:"))
     async def cb_admin_panel_server_template(call: CallbackQuery, state: FSMContext):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
+        if not panel_admin_only(call.from_user.id):
+            return await deny_panel_admin(call)
         server_id = callback_id(call.data, "adm_panel_server_template")
         if not db.get_panel_server(server_id):
             await call.answer("سرور یافت نشد.", show_alert=True)
@@ -1516,8 +1557,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_test:"))
     async def cb_admin_panel_server_test(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
+        if not panel_admin_only(call.from_user.id):
+            return await deny_panel_admin(call)
         server_id = callback_id(call.data, "adm_panel_server_test")
         server = db.get_panel_server(server_id)
         if not server:
@@ -1533,8 +1574,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_usage:"))
     async def cb_admin_panel_server_usage_toggle(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
+        if not panel_admin_only(call.from_user.id):
+            return await deny_panel_admin(call)
         _, kind, server_id_str = call.data.split(":")
         server_id = int(server_id_str)
         server = db.get_panel_server(server_id)
@@ -1551,6 +1592,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             call.from_user.id, "panel_server_usage_toggle",
             f"سرور #{server_id} | {field} ← {server[field]}",
         )
+        if is_main_bot and field == "used_for_reseller" and server[field]:
+            await _push_reseller_panel_to_all_bots(server)
         status = "🟢 فعال" if server["is_active"] else "🔴 غیرفعال"
         template_status = panel_server_readiness_text(server)
         usage_status = (
@@ -1567,8 +1610,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_toggle:"))
     async def cb_admin_panel_server_toggle(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
+        if not panel_admin_only(call.from_user.id):
+            return await deny_panel_admin(call)
         server_id = callback_id(call.data, "adm_panel_server_toggle")
         server = db.get_panel_server(server_id)
         if not server:
@@ -1585,8 +1628,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_delete:"))
     async def cb_admin_panel_server_delete(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
+        if not panel_admin_only(call.from_user.id):
+            return await deny_panel_admin(call)
         server_id = callback_id(call.data, "adm_panel_server_delete")
         db.delete_panel_server(server_id)
         db.log_admin_action(call.from_user.id, "panel_server_delete", f"سرور #{server_id}")

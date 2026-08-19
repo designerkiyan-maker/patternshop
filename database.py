@@ -789,6 +789,19 @@ class Database:
     def is_owner(self, tg_id: int) -> bool:
         return self.get_admin_role(tg_id) == "owner"
 
+    def get_owner_id(self):
+        """آیدی مالک همین یک نمونه از بات (برای بات نمایندگی، همان نماینده)."""
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT telegram_id FROM admins WHERE role='owner' LIMIT 1").fetchone()
+            return row["telegram_id"] if row else None
+
+    def is_self_requested_reseller(self) -> bool:
+        """True فقط برای بات‌های نمایندگی‌ای که خودِ کاربر از داخل بات درخواست داده
+        (نه بات‌هایی که ادمین اصلی شخصاً از پنل مدیریت ساخته). محدودیت‌های مربوط به
+        اتصال پنل VPN و اجباری‌بودن استفاده از استخر اعتبار، فقط روی این نوع اعمال
+        می‌شود؛ بات‌هایی که ادمین اصلی شخصاً ساخته کاملاً دست‌باز و مستقل می‌مانند."""
+        return self.get_setting("reseller_self_requested", "0") == "1"
+
     def add_admin(self, tg_id: int, role: str = "admin"):
         if role not in ("admin", "mid", "support"):
             role = "admin"
@@ -2243,8 +2256,12 @@ class Database:
     def clone_panel_server_for_reseller(self, source_row) -> int:
         """یک کپی از یک سرور پنل (از دیتابیس اصلی) را روی همین دیتابیس (بات نماینده)
         می‌سازد، فقط با پرچم used_for_reseller=1 (بقیه‌ی مصرف‌ها خاموش)، تا نیاز به
-        تنظیم دستی پنل توسط نماینده یا ادمین اصلی نباشد."""
+        تنظیم دستی پنل توسط نماینده یا ادمین اصلی نباشد.
+        Idempotent: هر سرور قبلی با همین پرچم را حذف می‌کند تا این متد هم موقع
+        ساخت بات نماینده و هم برای همگام‌سازی مجدد (وقتی ادمین اصلی سرور را عوض
+        می‌کند) بدون تکرار قابل فراخوانی باشد."""
         with self._get_conn() as conn:
+            conn.execute("DELETE FROM panel_servers WHERE used_for_reseller=1")
             cur = conn.execute(
                 "INSERT INTO panel_servers (name, panel_type, api_url, api_username, api_password, api_key, "
                 "template_username, group_ids, proxy_settings, default_group, xui_inbound_id, xui_sub_base_url, "

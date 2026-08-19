@@ -614,10 +614,19 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not settings["enabled"]:
             await message.answer("این بخش در حال حاضر غیرفعال است.")
             return
-        server = db.get_panel_server_for_usage("custom_config")
+        # فقط بات‌های نمایندگی‌ای که از مسیر درخواست خودکار ساخته شده‌اند، مقید به
+        # استخر حجم/پنل مرکزی هستند؛ بات‌هایی که ادمین اصلی شخصاً ساخته، مثل بات
+        # اصلی مستقل عمل می‌کنند و از پنل خودشان (custom_config) استفاده می‌کنند.
+        restricted_reseller = (not is_main_bot) and db.is_self_requested_reseller()
+        server = db.get_panel_server_for_usage("reseller" if restricted_reseller else "custom_config")
         if not server:
             await message.answer("در حال حاضر سروری برای ساخت کانفیگ شخصی فعال نیست. لطفاً بعداً تلاش کنید.")
             return
+        if restricted_reseller:
+            owner_id = db.get_owner_id()
+            if not owner_id or db.get_reseller_credit(owner_id) <= 0:
+                await message.answer("در حال حاضر موجودی این فروشگاه کافی نیست. لطفاً بعداً تلاش کنید.")
+                return
         tiers = db.get_pricing_tiers()
         if not tiers:
             await message.answer("قیمت‌گذاری این بخش هنوز توسط ادمین تنظیم نشده است.")
@@ -693,6 +702,14 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await state.clear()
             return
 
+        owner_id = None
+        if (not is_main_bot) and db.is_self_requested_reseller():
+            owner_id = db.get_owner_id()
+            owner_credit = db.get_reseller_credit(owner_id) if owner_id else 0
+            if volume_gb > owner_credit:
+                await message.answer("❌ موجودی این فروشگاه برای این حجم کافی نیست. حجم کمتری انتخاب کنید یا بعداً تلاش کنید.")
+                return
+
         wallet_credit = db.get_wallet_credit(message.from_user.id)
         wallet_used = min(wallet_credit, price)
 
@@ -708,12 +725,20 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         if order["final_price"] <= 0:
             await state.clear()
+            if owner_id and not db.try_deduct_reseller_credit(
+                owner_id, volume_gb, reason=f"فروش کانفیگ شخصی «{username}» به کاربر {message.from_user.id}"
+            ):
+                db.reject_order(order_id)
+                await message.answer("❌ موجودی این فروشگاه کافی نیست. مبلغ به کیف پول بازگردانده شد.")
+                return
             db.approve_custom_config_order(order_id)
             server_row = db.get_panel_server(server["id"])
             try:
                 provider = get_provider(server_row)
                 result = await provider.create_user(username, volume_gb, settings["duration_days"])
             except Exception as e:
+                if owner_id:
+                    db.adjust_reseller_credit(owner_id, volume_gb, reason="بازگشت اعتبار - خطای پنل")
                 db.reject_order(order_id)
                 await message.answer(f"⛔️ خطا در ساخت کانفیگ روی پنل: {e}\nمبلغ به کیف پول بازگردانده شد.")
                 return
@@ -1421,6 +1446,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         reseller_db.set_setting("miniapp_tenant_id", str(reseller_id))
         reseller_db.add_or_update_user(owner_id, message.from_user.username or "", message.from_user.first_name or "")
         reseller_db.set_reseller_status(owner_id, True)
+        reseller_db.set_setting("reseller_self_requested", "1")
         if order["reseller_request_gb"]:
             reseller_db.adjust_reseller_credit(
                 owner_id, order["reseller_request_gb"], reason="شارژ اولیه هنگام تایید درخواست نمایندگی",
