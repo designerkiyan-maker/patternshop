@@ -421,7 +421,7 @@ def admin_backup_menu_kb() -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="📥 دریافت بکاپ فوری", callback_data="adm_backup_now")],
         [InlineKeyboardButton(text="♻️ بازیابی از فایل بکاپ", callback_data="adm_restore_start")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:management")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -508,7 +508,7 @@ def admin_categories_kb(categories) -> InlineKeyboardMarkup:
             ]
         )
     rows.append([InlineKeyboardButton(text="➕ افزودن دسته‌بندی جدید", callback_data="adm_cat_add")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -517,7 +517,7 @@ def admin_products_categories_kb(categories, prefix="adm_prod_cat") -> InlineKey
     for cat in categories:
         rows.append([InlineKeyboardButton(text=f"📁 {cat['name']}", callback_data=f"{prefix}:{cat['id']}")])
     rows.append([InlineKeyboardButton(text="➕ افزودن محصول جدید", callback_data="adm_prod_add")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -548,7 +548,7 @@ def admin_pick_category_kb(categories, prefix) -> InlineKeyboardMarkup:
     rows = []
     for cat in categories:
         rows.append([InlineKeyboardButton(text=f"📁 {cat['name']}", callback_data=f"{prefix}:{cat['id']}")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -556,7 +556,7 @@ def admin_pick_product_kb(products, prefix) -> InlineKeyboardMarkup:
     rows = []
     for p in products:
         rows.append([InlineKeyboardButton(text=f"📦 {p['name']}", callback_data=f"{prefix}:{p['id']}")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -573,7 +573,7 @@ def admin_test_menu_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text=toggle_text, callback_data="adm_test_toggle")],
             [InlineKeyboardButton(text="⚙️ تنظیم حجم و مدت کانفیگ تست", callback_data="adm_test_set_volume")],
             [InlineKeyboardButton(text="🔁 بازنشانی کانفیگ تست برای همه", callback_data="adm_reset_test_configs")],
-            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")],
         ]
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -583,7 +583,7 @@ def admin_test_menu_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_test_toggle")],
         [InlineKeyboardButton(text="➕ افزودن لینک تست", callback_data="adm_test_add")],
         [InlineKeyboardButton(text="🔁 بازنشانی کانفیگ تست برای همه", callback_data="adm_reset_test_configs")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -596,7 +596,7 @@ def admin_forcejoin_menu_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=channel_text, callback_data="noop")],
         [InlineKeyboardButton(text="✏️ تنظیم / تغییر کانال", callback_data="adm_forcejoin_set_channel")],
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_forcejoin_toggle")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:alerts")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -647,7 +647,7 @@ def admin_admins_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="➕ افزودن ادمین", callback_data="adm_admin_add")],
         [InlineKeyboardButton(text="🔄 تغییر نقش ادمین", callback_data="adm_admin_role_change")],
         [InlineKeyboardButton(text="➖ حذف ادمین", callback_data="adm_admin_remove")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:management")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -673,7 +673,7 @@ def pending_orders_kb(orders) -> InlineKeyboardMarkup:
         rows.append(
             [InlineKeyboardButton(text=f"سفارش #{o['id']} - کاربر {o['user_id']}", callback_data=f"view_order:{o['id']}")]
         )
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:daily")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -701,7 +701,7 @@ def crypto_invoices_kb(invoices) -> InlineKeyboardMarkup:
             )
         ])
     rows.append([InlineKeyboardButton(text="🔄 بروزرسانی", callback_data="adm_crypto_payments")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:daily")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -716,7 +716,7 @@ def pending_topups_kb(topups) -> InlineKeyboardMarkup:
                 )
             ]
         )
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:daily")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -747,7 +747,7 @@ def discount_codes_kb(codes) -> InlineKeyboardMarkup:
             ]
         )
     rows.append([InlineKeyboardButton(text="➕ ساخت کد تخفیف جدید", callback_data="adm_disc_add")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:finance")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -763,7 +763,7 @@ def referral_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=f"درصد پورسانت فعلی: {percent}%", callback_data="noop")],
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_referral_toggle")],
         [InlineKeyboardButton(text="✏️ تغییر درصد پورسانت", callback_data="adm_referral_percent_edit")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:resellers")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -786,7 +786,7 @@ def wheel_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✏️ تغییر لیست جوایز", callback_data="adm_wheel_edit_prizes")],
         [InlineKeyboardButton(text="✏️ تغییر اعتبار کد", callback_data="adm_wheel_edit_expiry")],
         [InlineKeyboardButton(text="✏️ تغییر فاصله چرخش", callback_data="adm_wheel_edit_cooldown")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:alerts")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -803,7 +803,7 @@ def renewal_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✏️ تغییر تعداد روز یادآوری", callback_data="adm_renewal_edit_days")],
         [InlineKeyboardButton(text="✏️ تغییر درصد تخفیف", callback_data="adm_renewal_edit_percent")],
         [InlineKeyboardButton(text="✏️ تغییر اعتبار کد (ساعت)", callback_data="adm_renewal_edit_hours")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:alerts")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -832,7 +832,7 @@ def volume_reminder_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_volume_toggle")],
         [InlineKeyboardButton(text="✏️ تغییر درصد تخفیف", callback_data="adm_volume_edit_discount_percent")],
         [InlineKeyboardButton(text="✏️ تغییر اعتبار کد (ساعت)", callback_data="adm_volume_edit_discount_hours")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:alerts")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -842,7 +842,7 @@ def stock_alert_settings_kb(db) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=f"📦 آستانه‌ی فعلی: {threshold} کانفیگ باقی‌مانده", callback_data="noop")],
         [InlineKeyboardButton(text="✏️ تغییر آستانه", callback_data="adm_stock_alert_edit")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:alerts")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -866,7 +866,7 @@ def custom_config_menu_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
         # از استخر حجمی که ادمین بات اصلی تعیین می‌کند استفاده می‌کند، نه پنل خودش.
         rows.append([InlineKeyboardButton(text="🖥 مدیریت سرورهای پنل", callback_data="adm_panel_servers")])
     rows.append([InlineKeyboardButton(text="💰 مدیریت قیمت‌گذاری بر اساس بازه", callback_data="adm_pricing_tiers")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1010,7 +1010,7 @@ def reseller_requests_open_kb(requests) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🛑 کنسل دستی", callback_data=f"resreq_admin_cancel:{r['id']}"),
         ])
     rows.append([InlineKeyboardButton(text="🔄 بروزرسانی", callback_data="adm_reseller_requests_menu")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:daily")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1064,7 +1064,7 @@ def resellers_kb(resellers) -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton(text="➕ افزودن بات نمایندگی جدید", callback_data="adm_resbot_add")])
     rows.append([InlineKeyboardButton(text="🧹 پاکسازی داده‌های باقی‌مانده نمایندگی", callback_data="adm_reseller_orphans")])
     rows.append([InlineKeyboardButton(text="🗃 پاکسازی فایل‌های دیتابیس یتیم", callback_data="adm_orphan_db_files")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:resellers")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1089,7 +1089,7 @@ def credit_resellers_menu_kb(resellers) -> InlineKeyboardMarkup:
         label = f"👤 {r['telegram_id']} - {r['reseller_credit_gb']:,} گیگ"
         rows.append([InlineKeyboardButton(text=label, callback_data=f"adm_cres_view:{r['telegram_id']}")])
     rows.append([InlineKeyboardButton(text="➕ افزودن/جستجوی نماینده", callback_data="adm_cres_find")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:resellers")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

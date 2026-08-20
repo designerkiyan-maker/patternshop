@@ -942,6 +942,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_crypto_payments(call: CallbackQuery):
         if not admin_only(call.from_user.id):
             return await call.answer()
+        db.expire_stale_crypto_invoices()
+        db.purge_old_crypto_invoices(days=7)
         invoices = db.get_crypto_invoices(50)
         if not invoices:
             await call.answer("هیچ پرداخت کریپتویی ثبت نشده است.", show_alert=True)

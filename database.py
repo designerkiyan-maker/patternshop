@@ -1974,6 +1974,30 @@ class Database:
                 "SELECT * FROM crypto_invoices ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
 
+    def expire_stale_crypto_invoices(self):
+        """فاکتورهایی که هنوز 'new'/'pending' مانده‌اند ولی زمان اعتبارشان (expires_at)
+        گذشته را 'expired' علامت می‌زند. این‌ها هیچ‌وقت خودشان به‌روزرسانی نمی‌شدند
+        چون کاربر پرداخت نکرده و وبهوکی برایشان نمی‌آید."""
+        now = datetime.utcnow().isoformat()
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE crypto_invoices SET status='expired', updated_at=? "
+                "WHERE status IN ('new','pending') AND expires_at IS NOT NULL AND expires_at < ?",
+                (now, now),
+            )
+
+    def purge_old_crypto_invoices(self, days: int = 7):
+        """فاکتورهای کریپتوی نهایی‌شده (تکمیل/منقضی/لغو/خطا/مغایرت) که بیش از N روز از
+        آخرین به‌روزرسانی‌شان گذشته را برای همیشه حذف می‌کند، تا لیست پنل مدیریت شلوغ نماند."""
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        with self._get_conn() as conn:
+            conn.execute(
+                "DELETE FROM crypto_invoices WHERE status IN "
+                "('completed','expired','cancelled','error','mismatch') "
+                "AND COALESCE(updated_at, created_at) < ?",
+                (cutoff,),
+            )
+
     # -----------------------------------------------------------------------
     # گردونه شانس
     # -----------------------------------------------------------------------
