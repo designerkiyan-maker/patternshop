@@ -586,6 +586,19 @@ class Database:
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+
+        # مهاجرت وضعیت درخواست‌های نمایندگی از نسخه‌های قدیمی.
+        # در نسخه‌های قدیمی ممکن است درخواست جدید با status='pending' ذخیره شده
+        # باشد، در حالی که منطق فعلی مدیر فقط 'pending_review' را معتبر می‌داند؛
+        # در نتیجه با زدن «تأیید و تعیین هزینه» پیام «این درخواست دیگر معتبر نیست»
+        # نمایش داده می‌شد. این تبدیل فقط روی جدول reseller_requests اعمال می‌شود
+        # و وضعیت‌های معتبر نسخه فعلی را دست‌نخورده باقی می‌گذارد.
+        if self._column_exists(conn, "reseller_requests", "status"):
+            conn.execute(
+                "UPDATE reseller_requests SET status='pending_review' "
+                "WHERE status IN ('pending', '') OR status IS NULL"
+            )
+
         conn.execute("CREATE INDEX IF NOT EXISTS idx_configs_order_id ON configs(order_id)")
 
     # -----------------------------------------------------------------------
