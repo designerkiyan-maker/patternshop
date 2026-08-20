@@ -2121,6 +2121,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if reseller_bot and bot_manager:
                 await bot_manager.stop_bot(reseller_bot["bot_token"])
             db.delete_reseller_bot(bot_id)
+            if reseller_bot:
+                # پرچم نماینده/اعتبار/پنل کاربر مالک در دیتابیس اصلی هم پاک شود؛
+                # وگرنه او همچنان «نماینده» شناخته می‌شود و نمی‌تواند دوباره
+                # درخواست نمایندگی بدهد.
+                db.purge_reseller_leftovers(reseller_bot["owner_telegram_id"])
 
             db_purged = False
             if purge and reseller_bot:
@@ -2133,13 +2138,57 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                     logger.exception("پاک‌کردن فایل دیتابیس نماینده ناموفق بود: %s", resolved_path)
 
             bots = db.list_reseller_bots()
-            note = "⚠️ بات متوقف و حذف شد."
+            note = "⚠️ بات متوقف و حذف شد. وضعیت نمایندگی مالک هم در بات اصلی پاک شد."
             note += " دیتابیسش هم پاک شد." if db_purged else " فایل دیتابیسش برای احتیاط پاک نشد."
             await safe_edit(call,
                 f"🏪 مدیریت بات‌های نمایندگی:\n\n{note}",
                 reply_markup=kb.resellers_kb(bots),
             )
             await call.answer("بات نمایندگی حذف شد.")
+
+        @router.callback_query(F.data == "adm_reseller_orphans")
+        async def cb_admin_reseller_orphans(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            orphans = db.list_orphaned_reseller_users()
+            if not orphans:
+                await call.answer("موردی پیدا نشد؛ هیچ داده‌ی باقی‌مانده‌ای وجود ندارد.", show_alert=True)
+                return
+            text = (
+                "🧹 داده‌های باقی‌مانده‌ی نمایندگی\n\n"
+                "این کاربرها پرچم/اعتبار/پنل نمایندگی روی حسابشان مانده، "
+                "درحالی‌که هیچ بات نمایندگی‌ای (حتی غیرفعال) برایشان ثبت نیست؛ "
+                "معمولاً یعنی قبلاً نماینده بوده‌اند و بات‌شان حذف شده اما رد پایش پاک نشده. "
+                "پاکسازی یعنی پرچم نماینده، اعتبار حجمی و پنل اختصاصی‌شان صفر می‌شود تا بتوانند "
+                "دوباره درخواست نمایندگی بدهند."
+            )
+            await replace_admin_view(call, text, reply_markup=kb.reseller_orphans_kb(orphans))
+            await call.answer()
+
+        @router.callback_query(F.data.startswith("adm_reseller_orphan_purge:"))
+        async def cb_admin_reseller_orphan_purge(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            target_id = callback_id(call.data, "adm_reseller_orphan_purge")
+            if target_id is None:
+                await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+                return
+            db.purge_reseller_leftovers(target_id)
+            db.log_admin_action(call.from_user.id, "reseller_orphan_purge", f"کاربر {target_id}")
+            orphans = db.list_orphaned_reseller_users()
+            if orphans:
+                await safe_edit(
+                    call,
+                    "🧹 داده‌های باقی‌مانده‌ی نمایندگی\n\n✅ کاربر پاکسازی شد.",
+                    reply_markup=kb.reseller_orphans_kb(orphans),
+                )
+            else:
+                await safe_edit(
+                    call,
+                    "🧹 داده‌های باقی‌مانده‌ی نمایندگی\n\n✅ کاربر پاکسازی شد. دیگر موردی باقی نمانده.",
+                    reply_markup=kb.admin_back_kb("adm_resellers_menu"),
+                )
+            await call.answer("پاکسازی شد.")
 
         @router.callback_query(F.data == "adm_resbot_add")
         async def cb_admin_resbot_add(call: CallbackQuery, state: FSMContext):

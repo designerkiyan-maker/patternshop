@@ -916,7 +916,23 @@ def resellers_kb(resellers) -> InlineKeyboardMarkup:
             ]
         )
     rows.append([InlineKeyboardButton(text="➕ افزودن بات نمایندگی جدید", callback_data="adm_resbot_add")])
+    rows.append([InlineKeyboardButton(text="🧹 پاکسازی داده‌های باقی‌مانده نمایندگی", callback_data="adm_reseller_orphans")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def reseller_orphans_kb(rows_data) -> InlineKeyboardMarkup:
+    rows = []
+    for r in rows_data:
+        name = r["first_name"] or r["username"] or str(r["telegram_id"])
+        rows.append([InlineKeyboardButton(text=f"👤 {name} ({r['telegram_id']})", callback_data="noop")])
+        rows.append([
+            InlineKeyboardButton(
+                text="🧹 پاکسازی کامل این کاربر",
+                callback_data=f"adm_reseller_orphan_purge:{r['telegram_id']}",
+            )
+        ])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_resellers_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

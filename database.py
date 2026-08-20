@@ -1779,6 +1779,38 @@ class Database:
         with self._get_conn() as conn:
             conn.execute("DELETE FROM reseller_bots WHERE id=?", (bot_id,))
 
+    # -------------------------------------------------------------------
+    # پاکسازی داده‌های باقی‌مانده از نمایندگی‌های حذف‌شده
+    # وقتی یک بات نمایندگی حذف می‌شود، پرچم/اعتبار/پنل نمایندگی روی رکورد
+    # کاربر در دیتابیس اصلی ممکن است پاک نشده باقی بماند و باعث شود دکمه‌ی
+    # «درخواست نمایندگی» برای او دیگر کار نکند (چون هنوز نماینده تلقی می‌شود).
+    # -------------------------------------------------------------------
+
+    def list_orphaned_reseller_users(self):
+        """کاربرانی که پرچم/اعتبار/پنل نمایندگی روی رکوردشان مانده ولی هیچ
+        بات نمایندگی‌ای (حتی غیرفعال) برایشان در reseller_bots ثبت نیست."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                """
+                SELECT telegram_id, first_name, username, is_reseller,
+                       reseller_credit_gb, reseller_panel_id
+                FROM users
+                WHERE (is_reseller = 1 OR reseller_credit_gb > 0 OR reseller_panel_id IS NOT NULL)
+                  AND telegram_id NOT IN (SELECT owner_telegram_id FROM reseller_bots)
+                ORDER BY telegram_id
+                """
+            ).fetchall()
+
+    def purge_reseller_leftovers(self, user_tg_id: int):
+        """پرچم نماینده‌بودن، اعتبار حجمی و پنل اختصاصی کاربر را در دیتابیس
+        اصلی صفر/خالی می‌کند؛ برای پاکسازی کامل رد پای یک نمایندگی حذف‌شده."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET is_reseller=0, reseller_credit_gb=0, reseller_panel_id=NULL "
+                "WHERE telegram_id=?",
+                (user_tg_id,),
+            )
+
     def queue_db_purge(self, bot_token: str, db_path: str):
         with self._get_conn() as conn:
             conn.execute(
