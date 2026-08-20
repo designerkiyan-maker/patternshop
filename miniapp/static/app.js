@@ -531,17 +531,12 @@ function setHeaderWallet(amount) {
   if (el) el.textContent = `${fmt(amount)} تومان`;
 }
 
-function promoSlides({ me, expiring, referralLink }) {
-  const slides = [
-    {
-      bg: "linear-gradient(120deg, #0d1a12, #123a20 55%, #17532c)",
-      icon: "🛒",
-      title: "خرید سرویس جدید!",
-      sub: "سرویس مورد نظرتو انتخاب کن و در چند ثانیه فعالش کن!",
-      cta: "شروع خرید",
-      nav: "store",
-    },
-  ];
+function promoSlides({ me, expiring, referralLink, customBanners }) {
+  // بنرهای اول کاروسل، از پنل ادمین > ظاهر > بنرها قابل مدیریت هستند (متن،
+  // آیکون، رنگ و مقصد هر بنر). دو بنرِ زیر که به‌صورت خودکار و پویا اضافه
+  // می‌شوند (انقضای سرویس / دعوت دوستان) شخصی‌سازی‌شده‌اند و از تنظیمات
+  // بنرها مستقل‌اند.
+  const slides = [];
   if (expiring && expiring.length > 0) {
     slides.push({
       bg: "linear-gradient(120deg, #2b1608, #4d2510 55%, #7a3a14)",
@@ -552,6 +547,7 @@ function promoSlides({ me, expiring, referralLink }) {
       nav: "services",
     });
   }
+  (customBanners || []).forEach((b) => slides.push(b));
   if (referralLink) {
     slides.push({
       bg: "linear-gradient(120deg, #0d1420, #142845 55%, #1c3f6e)",
@@ -562,14 +558,16 @@ function promoSlides({ me, expiring, referralLink }) {
       nav: "referral",
     });
   }
-  slides.push({
-    bg: "linear-gradient(120deg, #150c22, #2a1440 55%, #431f66)",
-    icon: "💬",
-    title: "پشتیبانی ۲۴ ساعته",
-    sub: "هر سوالی داشتی، همین‌جا از پشتیبانی بپرس.",
-    cta: "گفت‌وگو با پشتیبانی",
-    nav: "support",
-  });
+  if (slides.length === 0) {
+    slides.push({
+      bg: "linear-gradient(120deg, #0d1a12, #123a20 55%, #17532c)",
+      icon: "🛒",
+      title: "خرید سرویس جدید!",
+      sub: "سرویس مورد نظرتو انتخاب کن و در چند ثانیه فعالش کن!",
+      cta: "شروع خرید",
+      nav: "store",
+    });
+  }
   return slides;
 }
 
@@ -610,12 +608,13 @@ function wirePromoCarousel(root) {
 async function renderHome() {
   content.innerHTML = skeleton(3);
   try {
-    const [me, orders, customConfigs, expiring, referral] = await Promise.all([
+    const [me, orders, customConfigs, expiring, referral, customBanners] = await Promise.all([
       api("/api/me"),
       api("/api/orders"),
       api("/api/custom-configs").catch(() => []),
       api("/api/expiring").catch(() => []),
       api("/api/referral").catch(() => null),
+      api("/api/banners").catch(() => []),
     ]);
     setHeaderWallet(me.wallet_credit);
     const active = orders.filter((o) => o.status === "approved" && !o.is_custom_config);
@@ -633,7 +632,7 @@ async function renderHome() {
     const adminTabBtn = document.getElementById("admin-tab-btn");
     if (adminTabBtn) adminTabBtn.style.display = me.is_admin ? "" : "none";
 
-    const slides = promoSlides({ me, expiring, referralLink: referral && referral.link });
+    const slides = promoSlides({ me, expiring, referralLink: referral && referral.link, customBanners });
 
     content.innerHTML = `
       <div class="home-greet">
@@ -1670,6 +1669,7 @@ const ADMIN_TABS = [
   { key: "tickets", label: "🎫 تیکت‌ها", fullOnly: false },
   { key: "menu", label: "🧩 چیدمان منو", fullOnly: true, seniorOnly: true },
   { key: "branding", label: "🎨 برندینگ", fullOnly: true, seniorOnly: true },
+  { key: "banners", label: "🖼 بنرها", fullOnly: true, seniorOnly: true },
   { key: "adminlog", label: "📜 لاگ ادمین", fullOnly: true, seniorOnly: true },
   { key: "backup", label: "🗄 بکاپ", fullOnly: true, ownerOnly: true },
 ];
@@ -1682,7 +1682,7 @@ const ADMIN_TAB_GROUPS = [
   { key: "catalog_panels", label: "📦 محصولات و پنل‌ها", tabs: ["catalog", "panels"] },
   { key: "people", label: "👥 کاربران و نمایندگی", tabs: ["users", "resellers"] },
   { key: "support", label: "💬 پشتیبانی", tabs: ["livechat", "tickets"] },
-  { key: "appearance", label: "🎨 منو و برندینگ", tabs: ["menu", "branding"] },
+  { key: "appearance", label: "🎨 منو و برندینگ", tabs: ["menu", "branding", "banners"] },
   { key: "system", label: "🗂 سیستم", tabs: ["adminlog", "backup"] },
 ];
 
@@ -1782,6 +1782,7 @@ async function renderAdmin() {
   if (adminSection === "stats") await renderAdminStatsSection();
   else if (adminSection === "menu") await renderAdminMenuSection();
   else if (adminSection === "branding") await renderAdminBrandingSection();
+  else if (adminSection === "banners") await renderAdminBannersSection();
   else if (adminSection === "catalog") await renderAdminCatalogSection();
   else if (adminSection === "panels") await renderAdminPanelsSection();
   else if (adminSection === "users") await renderAdminUsersSection();
@@ -2058,6 +2059,205 @@ async function renderAdminBrandingSection() {
     };
   } catch (e) {
     body.innerHTML = errorState(e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > بنرها (کاروسل بالای صفحه‌ی خانه)
+// ---------------------------------------------------------------------------
+
+let adminBannerItems = [];
+
+// مقصدهایی که با ضربه‌زدن روی یک بنر ممکن است باز شوند؛ value باید دقیقاً با
+// کلیدهای شیء `tabs` در پایین همین فایل یکی باشد.
+const BANNER_NAV_OPTIONS = [
+  { value: "store", label: "🛒 فروشگاه (خرید سرویس)" },
+  { value: "services", label: "🛡 سرویس‌های من" },
+  { value: "wallet", label: "💳 کیف پول" },
+  { value: "profile", label: "👤 حساب کاربری" },
+  { value: "support", label: "💬 پشتیبانی" },
+  { value: "referral", label: "🤝 دعوت دوستان" },
+  { value: "test", label: "🧪 کانفیگ تست رایگان" },
+  { value: "wheel", label: "🎡 چرخ شانس" },
+  { value: "home", label: "🏠 صفحه‌ی خانه" },
+];
+
+// چند گرادیانِ آماده برای انتخاب سریعِ رنگ پس‌زمینه‌ی بنر؛ روی هرکدام بزنی
+// در کادر متنی زیرش پر می‌شود و می‌شود آن را هم دستی ویرایش کرد.
+const BANNER_BG_PRESETS = [
+  "linear-gradient(120deg, #0d1a12, #123a20 55%, #17532c)",
+  "linear-gradient(120deg, #2b1608, #4d2510 55%, #7a3a14)",
+  "linear-gradient(120deg, #0d1420, #142845 55%, #1c3f6e)",
+  "linear-gradient(120deg, #150c22, #2a1440 55%, #431f66)",
+  "linear-gradient(120deg, #2a0d16, #4d1027 55%, #7a1b45)",
+  "linear-gradient(120deg, #1a1405, #3d2f0a 55%, #5e480f)",
+];
+
+async function renderAdminBannersSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  try {
+    const banners = await api("/api/admin/banners");
+    adminBannerItems = banners;
+    body.innerHTML = `
+      <p class="hint-text">بنرهای کاروسل بالای صفحه‌ی خانه را همین‌جا اضافه، ویرایش، حذف یا مرتب کن. مشخص کن با ضربه‌زدن روی هر بنر، کاربر به کدام بخش مینی‌اپ منتقل شود.</p>
+      <div class="card" id="admin-banner-list"></div>
+      <button class="btn outline" id="admin-banner-add" style="margin-bottom:10px">➕ افزودن بنر جدید</button>
+      <button class="btn" id="admin-banner-save">💾 ذخیره بنرها</button>
+    `;
+    renderAdminBannerList();
+    document.getElementById("admin-banner-add").onclick = () => {
+      collectBannerEdits();
+      adminBannerItems.push({
+        id: "",
+        icon: "✨",
+        title: "بنر جدید",
+        sub: "",
+        cta: "مشاهده",
+        nav: "store",
+        bg: BANNER_BG_PRESETS[0],
+        enabled: true,
+      });
+      renderAdminBannerList();
+    };
+    document.getElementById("admin-banner-save").onclick = saveAdminBanners;
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+function renderAdminBannerList() {
+  const list = document.getElementById("admin-banner-list");
+  if (adminBannerItems.length === 0) {
+    list.innerHTML = `<div class="state-msg"><span class="ic">🖼</span>هنوز بنری اضافه نشده.</div>`;
+    return;
+  }
+  list.innerHTML = adminBannerItems.map((item, idx) => adminBannerRow(item, idx)).join("");
+  adminBannerItems.forEach((item, idx) => {
+    const upBtn = document.getElementById(`banner-up-${idx}`);
+    const downBtn = document.getElementById(`banner-down-${idx}`);
+    const delBtn = document.getElementById(`banner-del-${idx}`);
+    if (upBtn) upBtn.onclick = () => moveBannerItem(idx, -1);
+    if (downBtn) downBtn.onclick = () => moveBannerItem(idx, 1);
+    if (delBtn) delBtn.onclick = () => removeBannerItem(idx);
+  });
+  list.querySelectorAll(".banner-bg-swatch").forEach((sw) => {
+    sw.onclick = () => {
+      const idx = Number(sw.dataset.idx);
+      const bg = sw.dataset.bg;
+      const input = document.querySelector(`.banner-bg-input[data-idx="${idx}"]`);
+      if (input) input.value = bg;
+      const preview = document.querySelector(`.banner-preview[data-idx="${idx}"]`);
+      if (preview) preview.style.background = bg;
+    };
+  });
+  list.querySelectorAll(".banner-bg-input").forEach((input) => {
+    input.oninput = () => {
+      const preview = document.querySelector(`.banner-preview[data-idx="${input.dataset.idx}"]`);
+      if (preview) preview.style.background = input.value;
+    };
+  });
+}
+
+function adminBannerRow(item, idx) {
+  return `
+    <div class="menu-row" data-idx="${idx}">
+      <div class="menu-row-top">
+        <span class="menu-row-label">بنر ${idx + 1}${item.enabled === false ? " (غیرفعال)" : ""}</span>
+        <div class="menu-row-arrows">
+          <button type="button" class="btn small outline" id="banner-up-${idx}" ${idx === 0 ? "disabled" : ""}>▲</button>
+          <button type="button" class="btn small outline" id="banner-down-${idx}" ${idx === adminBannerItems.length - 1 ? "disabled" : ""}>▼</button>
+          <button type="button" class="btn small outline danger" id="banner-del-${idx}">🗑</button>
+        </div>
+      </div>
+      <div class="menu-row-body">
+        <div class="banner-preview" data-idx="${idx}" style="background:${item.bg || BANNER_BG_PRESETS[0]}">
+          <span class="banner-preview-icon banner-icon-input-wrap"><input class="banner-icon-input" data-idx="${idx}" type="text" value="${escHtml(item.icon || "")}" maxlength="4" /></span>
+          <span class="banner-preview-title">${escHtml(item.title || "بنر جدید")}</span>
+        </div>
+        <label class="field-label">عنوان بنر</label>
+        <input class="input banner-title-input" data-idx="${idx}" type="text" value="${escHtml(item.title || "")}" placeholder="مثال: خرید سرویس جدید!" style="direction:rtl;text-align:right;font-family:var(--font-body)" />
+        <label class="field-label">توضیح کوتاه</label>
+        <input class="input banner-sub-input" data-idx="${idx}" type="text" value="${escHtml(item.sub || "")}" placeholder="یک جمله‌ی کوتاه توضیحی" style="direction:rtl;text-align:right;font-family:var(--font-body)" />
+        <label class="field-label">متن دکمه</label>
+        <input class="input banner-cta-input" data-idx="${idx}" type="text" value="${escHtml(item.cta || "")}" placeholder="مثال: شروع خرید" style="direction:rtl;text-align:right;font-family:var(--font-body)" />
+        <label class="field-label">با ضربه‌زدن، کاربر منتقل شود به:</label>
+        <select class="input banner-nav-input" data-idx="${idx}">
+          ${BANNER_NAV_OPTIONS.map((o) => `<option value="${o.value}" ${o.value === item.nav ? "selected" : ""}>${o.label}</option>`).join("")}
+        </select>
+        <label class="field-label">رنگ پس‌زمینه</label>
+        <div class="banner-bg-swatches">
+          ${BANNER_BG_PRESETS.map((bg) => `<button type="button" class="banner-bg-swatch" data-idx="${idx}" data-bg="${bg}" style="background:${bg}"></button>`).join("")}
+        </div>
+        <input class="input banner-bg-input" data-idx="${idx}" type="text" value="${escHtml(item.bg || "")}" placeholder="کد گرادیان/رنگ CSS دلخواه" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:11px" />
+        <label class="menu-toggle">
+          <input type="checkbox" class="banner-enabled-input" data-idx="${idx}" ${item.enabled !== false ? "checked" : ""} />
+          <span>فعال (در کاروسل خانه نمایش داده شود)</span>
+        </label>
+      </div>
+    </div>
+  `;
+}
+
+function collectBannerEdits() {
+  document.querySelectorAll(".banner-icon-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].icon = el.value;
+  });
+  document.querySelectorAll(".banner-title-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].title = el.value;
+  });
+  document.querySelectorAll(".banner-sub-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].sub = el.value;
+  });
+  document.querySelectorAll(".banner-cta-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].cta = el.value;
+  });
+  document.querySelectorAll(".banner-nav-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].nav = el.value;
+  });
+  document.querySelectorAll(".banner-bg-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].bg = el.value;
+  });
+  document.querySelectorAll(".banner-enabled-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].enabled = el.checked;
+  });
+}
+
+function moveBannerItem(idx, dir) {
+  collectBannerEdits();
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= adminBannerItems.length) return;
+  const tmp = adminBannerItems[idx];
+  adminBannerItems[idx] = adminBannerItems[newIdx];
+  adminBannerItems[newIdx] = tmp;
+  renderAdminBannerList();
+}
+
+function removeBannerItem(idx) {
+  collectBannerEdits();
+  adminBannerItems.splice(idx, 1);
+  renderAdminBannerList();
+}
+
+async function saveAdminBanners() {
+  collectBannerEdits();
+  const saveBtn = document.getElementById("admin-banner-save");
+  saveBtn.disabled = true;
+  saveBtn.textContent = "در حال ذخیره...";
+  try {
+    const res = await api("/api/admin/banners", {
+      method: "POST",
+      body: JSON.stringify({ banners: adminBannerItems }),
+    });
+    adminBannerItems = res.banners;
+    tg.HapticFeedback.notificationOccurred("success");
+    notify("بنرها ذخیره شد. برای دیدن تغییرات، صفحه‌ی خانه را دوباره باز کن.");
+    renderAdminBannerList();
+  } catch (e) {
+    notify(e.message);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = "💾 ذخیره بنرها";
   }
 }
 
