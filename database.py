@@ -564,6 +564,8 @@ class Database:
             # هیچ ستونی اضافه نمی‌کند)؛ برای جلوگیری از خطای «no column named ...»
             # موقع ثبت درخواست نمایندگی، این ستون‌ها را هم مهاجرت می‌کنیم.
             ("reseller_requests", "volume_gb", "INTEGER DEFAULT 0"),
+            ("reseller_requests", "request_text", "TEXT"),
+            ("reseller_requests", "status", "TEXT DEFAULT 'pending_review'"),
             ("reseller_requests", "price_toman", "INTEGER"),
             ("reseller_requests", "panel_server_id", "INTEGER"),
             ("reseller_requests", "receipt_file_id", "TEXT"),
@@ -572,6 +574,7 @@ class Database:
             ("reseller_requests", "owner_telegram_id", "INTEGER"),
             ("reseller_requests", "reject_reason", "TEXT"),
             ("reseller_requests", "reviewed_by", "INTEGER"),
+            ("reseller_requests", "created_at", "TEXT"),
             ("reseller_requests", "updated_at", "TEXT"),
         ]
         for table, col, coltype in migrations:
