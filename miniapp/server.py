@@ -287,6 +287,8 @@ def api_me(auth=Depends(get_verified_user)):
     return {
         "telegram_id": tg_id,
         "first_name": user["first_name"],
+        "username": user["username"] if "username" in user.keys() else None,
+        "joined_at": user["joined_at"] if "joined_at" in user.keys() else None,
         "wallet_credit": wallet,
         "referral_count": referral["count"],
         "orders_count": len(orders),
