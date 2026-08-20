@@ -52,7 +52,7 @@ from backup import create_backup, restore_backup, is_valid_sqlite_db
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
-from reseller_auto_provision import provision_auto_config, ProvisionError
+from reseller_auto_provision import provision_auto_config, provision_test_config, ProvisionError
 
 app = FastAPI(title="V2Ray Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -404,12 +404,20 @@ def api_test_config_status(auth=Depends(get_verified_user)):
 
 @app.post("/api/test-config/claim")
 async def api_test_config_claim(auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
+    tg_id, db, tenant = auth
     if db.get_setting("test_enabled", "1") != "1":
         raise HTTPException(status_code=400, detail="در حال حاضر امکان دریافت کانفیگ تست غیرفعال است.")
     user = db.get_user(tg_id)
     if user and user["test_used"] >= MAX_TEST_PER_USER:
         raise HTTPException(status_code=400, detail="شما قبلاً کانفیگ تست خود را دریافت کرده‌اید.")
+
+    if not db.is_full_access_bot(not tenant.tenant_id):
+        try:
+            result = await provision_test_config(db)
+        except ProvisionError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        db.mark_test_used(tg_id)
+        return {"link": result["subscription_url"]}
 
     panel_server = db.get_panel_server_for_usage("test_config")
     if panel_server:
@@ -1726,7 +1734,7 @@ def api_admin_delete_product(product_id: int, auth=Depends(require_senior_admin)
 
 
 @app.get("/api/admin/products/{product_id}/configs")
-def api_admin_list_configs(product_id: int, auth=Depends(require_senior_admin)):
+def api_admin_list_configs(product_id: int, auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     if not db.get_product(product_id):
         raise HTTPException(status_code=404, detail="محصول یافت نشد.")
@@ -1735,7 +1743,7 @@ def api_admin_list_configs(product_id: int, auth=Depends(require_senior_admin)):
 
 
 @app.post("/api/admin/products/{product_id}/configs")
-def api_admin_add_configs(product_id: int, body: ConfigsAdd, auth=Depends(require_senior_admin)):
+def api_admin_add_configs(product_id: int, body: ConfigsAdd, auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     if not db.get_product(product_id):
         raise HTTPException(status_code=404, detail="محصول یافت نشد.")
@@ -1747,7 +1755,7 @@ def api_admin_add_configs(product_id: int, body: ConfigsAdd, auth=Depends(requir
 
 
 @app.delete("/api/admin/configs/{config_id}")
-def api_admin_delete_config(config_id: int, auth=Depends(require_senior_admin)):
+def api_admin_delete_config(config_id: int, auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     db.delete_config(config_id)
     return {"status": "ok"}
