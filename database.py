@@ -142,12 +142,23 @@ DEFAULT_MENU_ORDER = [
 
 class Database:
     _SETTINGS_CACHE_TTL = 8  # ثانیه؛ برای هماهنگی بین پردازش بات و Mini App
+    _ADMIN_CACHE_TTL = 5  # ثانیه؛ کوتاه‌تر از تنظیمات چون نقش ادمین حساس‌تر است
 
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._conn = None
         self._settings_cache = None
         self._settings_cache_loaded_at = 0.0
+        # is_admin()/get_admin_role() قبلاً به ازای *هر* پیام و *هر* کلیک هر
+        # کاربر (چه ادمین چه غیرادمین) مستقیماً یک SELECT synchronous به
+        # sqlite می‌زدند (در BlockedUserMiddleware، AdminPresenceMiddleware و
+        # داخل خود هندلرها - گاهی چندبار برای یک کلیک). چون این کوئری‌ها روی
+        # همان event loop تک‌رشته‌ای اجرا می‌شوند، هر برخورد با قفل نوشتن
+        # (مثلاً هم‌زمان با Mini App) کل بات را فریز می‌کرد. جدول admins بسیار
+        # کم‌تغییر است، پس مثل تنظیمات کش می‌شود؛ بعد از add/set_role/remove
+        # فوراً invalidate می‌شود تا تغییرات همین پردازش بلافاصله اعمال شوند.
+        self._admin_cache = None
+        self._admin_cache_loaded_at = 0.0
         # مینی‌اپ (FastAPI) توابع sync را در threadpool اجرا می‌کند، یعنی
         # ممکن است چند ریکوئست هم‌زمان از تردهای مختلف به همین یک Database
         # (مثلاً main_db) دسترسی داشته باشند. بات‌های aiogram هم در یک
@@ -173,11 +184,22 @@ class Database:
         conn.execute("PRAGMA synchronous = NORMAL")
         # بدون busy_timeout، وقتی بات و مینی‌اپ (دو پروسه‌ی جدا) هم‌زمان روی همین
         # فایل دیتابیس می‌نویسند، هر کوئری که با یک نوشتن هم‌زمان تداخل کند فوراً
-        # با خطای «database is locked» شکست می‌خورد به‌جای اینکه چند میلی‌ثانیه صبر
-        # کند. چون خطا داخل هندلر کلیدها/کالبک‌ها catch نمی‌شد، دکمه از دید کاربر
-        # بی‌واکنش/فریز به‌نظر می‌رسید. این مقدار به SQLite می‌گوید تا ۵ ثانیه صبر
-        # و دوباره تلاش کند قبل از اینکه خطا بدهد.
-        conn.execute("PRAGMA busy_timeout = 30000")
+        # با خطای «database is locked» شکست می‌خورد.
+        #
+        # نکته‌ی مهم: این PRAGMA باعث نمی‌شود انتظار async/غیربلوکه باشد؛
+        # sqlite3.Connection.execute() یک تابع synchronous است و در طول این
+        # انتظار، کل event loop تک‌رشته‌ای aiogram (که همه‌ی بات‌ها - اصلی و
+        # نمایندگی‌ها - در bot_manager.py روی آن اجرا می‌شوند) بلوکه می‌ماند؛
+        # یعنی هیچ کلیدی برای هیچ کاربری پردازش نمی‌شود تا این انتظار تمام شود.
+        # قبلاً این مقدار ۳۰۰۰۰ (۳۰ ثانیه) بود که باعث می‌شد یک برخورد قفل ساده
+        # (مثلاً هم‌زمانی با یک نوشتن از Mini App) کل بات را تا ۳۰ ثانیه برای
+        # همه فریز کند - دقیقاً همان «همه‌چیز قفل می‌شود» که از دید کاربر شبیه
+        # کرش‌کردن دکمه‌هاست. مقدار پایین‌تر این حداکثر زمان فریز را محدود
+        # می‌کند؛ اگر قفل زودتر باز نشود، به‌جای فریز طولانی یک خطای
+        # «database is locked» می‌دهد که توسط try/except هر هندلر یا هندلر
+        # سراسری خطا (_global_error_handler) گرفته و به کاربر پیام کوتاه نشان
+        # داده می‌شود - جایگزینی بسیار بهتر از فریز چندثانیه‌ای کل بات.
+        conn.execute("PRAGMA busy_timeout = 4000")
         return conn
 
     @contextmanager
@@ -204,6 +226,7 @@ class Database:
                     pass
                 self._conn = None
             self._settings_cache = None
+            self._admin_cache = None
 
     def init_db(self, owner_id: int):
         """owner_id: آیدی عددی کسی که مالک/ادمین اصلی همین یک نمونه از بات است
@@ -831,10 +854,26 @@ class Database:
     # ادمین‌ها
     # -----------------------------------------------------------------------
 
-    def is_admin(self, tg_id: int) -> bool:
+    def _maybe_reload_admin_cache(self):
+        now = time.monotonic()
+        if self._admin_cache is None or (now - self._admin_cache_loaded_at) > self._ADMIN_CACHE_TTL:
+            self._load_admin_cache()
+
+    def _load_admin_cache(self):
         with self._get_conn() as conn:
-            row = conn.execute("SELECT 1 FROM admins WHERE telegram_id=?", (tg_id,)).fetchone()
-            return row is not None
+            rows = conn.execute("SELECT telegram_id, role FROM admins").fetchall()
+            cache = {r["telegram_id"]: (r["role"] or "admin") for r in rows}
+        with self._lock:
+            self._admin_cache = cache
+            self._admin_cache_loaded_at = time.monotonic()
+
+    def _invalidate_admin_cache(self):
+        with self._lock:
+            self._admin_cache = None
+
+    def is_admin(self, tg_id: int) -> bool:
+        self._maybe_reload_admin_cache()
+        return tg_id in self._admin_cache
 
     def get_owner_telegram_id(self):
         """آیدی تلگرام مالک این بات (نقش owner در جدول admins). برای بات نمایندگی
@@ -853,9 +892,8 @@ class Database:
 
     def get_admin_role(self, tg_id: int):
         """نقش ادمین را برمی‌گرداند: 'owner' | 'admin' | 'mid' | 'support' | None (اگر ادمین نباشد)."""
-        with self._get_conn() as conn:
-            row = conn.execute("SELECT role FROM admins WHERE telegram_id=?", (tg_id,)).fetchone()
-            return row["role"] if row else None
+        self._maybe_reload_admin_cache()
+        return self._admin_cache.get(tg_id)
 
     def is_full_admin(self, tg_id: int) -> bool:
         """دسترسی کامل عملیاتی: مالک، مدیر یا ادمین میانی (برخلاف پشتیبان که دسترسی محدود دارد)."""
@@ -882,7 +920,9 @@ class Database:
                     "ON CONFLICT(telegram_id) DO UPDATE SET role=excluded.role",
                     (tg_id, role),
                 )
-        return self._sqlite_retry(op)
+        result = self._sqlite_retry(op)
+        self._invalidate_admin_cache()
+        return result
 
     def set_admin_role(self, tg_id: int, role: str) -> bool:
         """تغییر نقش یک ادمین موجود. نقش «owner» هرگز از این مسیر قابل واگذاری نیست."""
@@ -895,7 +935,9 @@ class Database:
                     return False
                 conn.execute("UPDATE admins SET role=? WHERE telegram_id=?", (role, tg_id))
             return True
-        return self._sqlite_retry(op)
+        result = self._sqlite_retry(op)
+        self._invalidate_admin_cache()
+        return result
 
     def remove_admin(self, tg_id: int, protected_owner_id: int = None) -> bool:
         if protected_owner_id is not None and tg_id == protected_owner_id:
@@ -907,7 +949,9 @@ class Database:
                     return False
                 conn.execute("DELETE FROM admins WHERE telegram_id=?", (tg_id,))
             return True
-        return self._sqlite_retry(op)
+        result = self._sqlite_retry(op)
+        self._invalidate_admin_cache()
+        return result
 
     def list_admins(self):
         with self._get_conn() as conn:

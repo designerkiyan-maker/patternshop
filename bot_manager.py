@@ -10,6 +10,7 @@
 import asyncio
 import logging
 import os
+import time
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -31,18 +32,36 @@ logger = logging.getLogger(__name__)
 
 class AdminPresenceMiddleware:
     """با هر پیام/کلیک یک ادمین در بات، حضور آنلاین او را ثبت می‌کند تا پیام‌های
-    جدید پشتیبانی زنده به اولین ادمین/مالک آنلاین مسیریابی شوند (نه به همه)."""
+    جدید پشتیبانی زنده به اولین ادمین/مالک آنلاین مسیریابی شوند (نه به همه).
+
+    برای این هدف نیازی نیست *هر* کلیک واقعاً روی دیتابیس نوشته شود (آستانه‌ی
+    آنلاین‌بودن ۹۰ ثانیه است - PRESENCE_ONLINE_SECONDS در database.py). قبلاً
+    هر کلیک/پیام ادمین یک نوشتن synchronous جدا به sqlite می‌زد؛ چون این کار
+    روی همان event loop مشترک همه‌ی بات‌ها اجرا می‌شود، با هر برخورد به قفل
+    (مثلاً هم‌زمانی با Mini App) کل بات برای همه فریز می‌شد - و چون ادمین‌ها
+    (برخلاف کاربر عادی) هر کلیک پنل مدیریت هم از همین مسیر رد می‌شوند، این
+    فریز بیشتر روی دکمه‌های پنل مدیریت حس می‌شد. با این throttle، هر ادمین
+    حداکثر هر PRESENCE_WRITE_INTERVAL ثانیه یک‌بار واقعاً روی دیتابیس نوشته
+    می‌شود؛ کلیک‌های بین این فاصله فقط از حافظه چک می‌شوند و اصلاً وارد sqlite
+    نمی‌شوند."""
+
+    PRESENCE_WRITE_INTERVAL = 20  # ثانیه
 
     def __init__(self, db):
         self.db = db
+        self._last_write = {}  # tg_id -> time.monotonic() آخرین نوشتن واقعی
 
     async def __call__(self, handler, event, data: dict):
         user = data.get("event_from_user")
         if user is not None and self.db.is_admin(user.id):
-            try:
-                self.db.touch_admin_presence(user.id)
-            except Exception:
-                pass
+            now = time.monotonic()
+            last = self._last_write.get(user.id, 0.0)
+            if now - last >= self.PRESENCE_WRITE_INTERVAL:
+                self._last_write[user.id] = now
+                try:
+                    self.db.touch_admin_presence(user.id)
+                except Exception:
+                    pass
         return await handler(event, data)
 
 
