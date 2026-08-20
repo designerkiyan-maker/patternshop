@@ -272,6 +272,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
     ("adm_resellers_menu", "🏪 مدیریت بات‌های نمایندگی", "adm_resellers_menu"),
     ("adm_credit_resellers_menu", "💳 نمایندگی حجمی (اعتبار)", "adm_credit_resellers_menu"),
+    ("adm_reseller_requests_menu", "📋 درخواست‌های نمایندگی", "adm_reseller_requests_menu"),
     ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
     ("adm_set_card", "💳 تنظیم شماره کارت", "adm_set_card"),
     ("adm_set_plisio", "🪙 تنظیم درگاه کریپتو (Plisio)", "adm_set_plisio"),
@@ -295,8 +296,9 @@ def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
     current_row = []
 
     for key, label, callback_data in ADMIN_PANEL_ITEMS:
-        if key in ("adm_resellers_menu", "adm_credit_resellers_menu") and not is_main_bot:
-            # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده یا فروش اعتبار ندارند
+        if key in ("adm_resellers_menu", "adm_credit_resellers_menu", "adm_reseller_requests_menu") and not is_main_bot:
+            # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده، فروش اعتبار یا مدیریت
+            # درخواست‌های نمایندگی سطح ۲ (که فقط از بات اصلی قابل درخواست است) را ندارند
             continue
         if key == "adm_custom_config_settings" and not db.is_full_access_bot(is_main_bot):
             # ساخت کانفیگ شخصی به اتصال مستقیم پنل VPN نیاز دارد که فقط از بات اصلی یا نمایندگی کامل قابل مدیریت است
@@ -884,6 +886,47 @@ def reseller_request_payment_review_kb(request_id) -> InlineKeyboardMarkup:
     ])
 
 
+def reseller_requests_open_kb(requests) -> InlineKeyboardMarkup:
+    """لیست همه‌ی درخواست‌های باز نمایندگی با دکمه‌ی کنسل دستی برای هرکدام."""
+    status_label = {
+        "pending_review": "🟡 در انتظار بررسی",
+        "awaiting_payment": "🟠 منتظر پرداخت",
+        "awaiting_payment_review": "🟣 رسید ارسال‌شده",
+        "awaiting_bot_info": "🔵 منتظر اطلاعات بات",
+    }
+    rows = []
+    for r in requests:
+        label = status_label.get(r["status"], r["status"])
+        rows.append([
+            InlineKeyboardButton(
+                text=f"#{r['id']} | {label} | کاربر {r['user_id']} | {r['volume_gb']:,} گیگ",
+                callback_data="noop",
+            )
+        ])
+        rows.append([
+            InlineKeyboardButton(text="🛑 کنسل دستی", callback_data=f"resreq_admin_cancel:{r['id']}"),
+        ])
+    rows.append([InlineKeyboardButton(text="🔄 بروزرسانی", callback_data="adm_reseller_requests_menu")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def orphan_db_files_kb(filenames) -> InlineKeyboardMarkup:
+    """لیست فایل‌های دیتابیس یتیم (بدون رکورد نماینده‌ی مرتبط) با دکمه‌ی حذف."""
+    import urllib.parse
+    rows = []
+    for fname in filenames:
+        rows.append([InlineKeyboardButton(text=f"🗃 {fname}", callback_data="noop")])
+        rows.append([
+            InlineKeyboardButton(
+                text="🗑 حذف این فایل",
+                callback_data=f"adm_orphan_db_del:{urllib.parse.quote(fname, safe='')}",
+            )
+        ])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_resellers_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def resbot_del_confirm_kb(bot_id) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="🗑 فقط حذف (دیتابیس نگه داشته شود)", callback_data=f"adm_resbot_delc:{bot_id}:0")],
@@ -917,6 +960,7 @@ def resellers_kb(resellers) -> InlineKeyboardMarkup:
         )
     rows.append([InlineKeyboardButton(text="➕ افزودن بات نمایندگی جدید", callback_data="adm_resbot_add")])
     rows.append([InlineKeyboardButton(text="🧹 پاکسازی داده‌های باقی‌مانده نمایندگی", callback_data="adm_reseller_orphans")])
+    rows.append([InlineKeyboardButton(text="🗃 پاکسازی فایل‌های دیتابیس یتیم", callback_data="adm_orphan_db_files")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

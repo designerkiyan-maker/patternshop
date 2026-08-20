@@ -152,6 +152,30 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         except (IndexError, AttributeError, ValueError):
             return None
 
+    def _find_orphan_reseller_db_files():
+        """فایل‌های .db داخل پوشه‌ی reseller_dbs که هیچ رکورد نماینده‌ای (حتی حذف‌شده)
+        در جدول reseller_bots به مسیرشان اشاره نمی‌کند؛ باقیمانده‌ی نماینده‌های قدیمی."""
+        if not os.path.isdir(RESELLER_DBS_DIR):
+            return []
+        referenced = set()
+        for r in db.list_reseller_bots():
+            try:
+                referenced.add(os.path.normcase(os.path.abspath(resolve_db_path(r["db_path"]))))
+            except Exception:
+                continue
+        orphans = []
+        try:
+            disk_files = sorted(os.listdir(RESELLER_DBS_DIR))
+        except OSError:
+            return []
+        for fname in disk_files:
+            if not fname.endswith(".db"):
+                continue
+            full_path = os.path.normcase(os.path.abspath(os.path.join(RESELLER_DBS_DIR, fname)))
+            if full_path not in referenced:
+                orphans.append(fname)
+        return orphans
+
     # -------------------------------------------------------------------
     # ورود به پنل
     # -------------------------------------------------------------------
@@ -2190,6 +2214,66 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 )
             await call.answer("پاکسازی شد.")
 
+        @router.callback_query(F.data == "adm_orphan_db_files")
+        async def cb_admin_orphan_db_files(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            orphan_files = _find_orphan_reseller_db_files()
+            if not orphan_files:
+                await call.answer("فایل دیتابیس یتیمی روی دیسک پیدا نشد.", show_alert=True)
+                return
+            text = (
+                "🗃 فایل‌های دیتابیس یتیم\n\n"
+                "این فایل‌های .db داخل پوشه‌ی reseller_dbs روی دیسک هستند ولی هیچ بات "
+                "نمایندگی‌ای (حتی حذف‌شده) در جدول reseller_bots به آن‌ها اشاره نمی‌کند؛ "
+                "معمولاً یعنی وقتی نماینده حذف شده، گزینه‌ی «فقط حذف (دیتابیس نگه داشته شود)» "
+                "زده شده. حذف این فایل‌ها غیرقابل بازگشت است."
+            )
+            await replace_admin_view(call, text, reply_markup=kb.orphan_db_files_kb(orphan_files))
+            await call.answer()
+
+        @router.callback_query(F.data.startswith("adm_orphan_db_del:"))
+        async def cb_admin_orphan_db_del(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            import urllib.parse
+            raw = call.data.split(":", 1)[1] if ":" in call.data else ""
+            fname = urllib.parse.unquote(raw)
+
+            # ضدضربه: فقط اجازه‌ی حذف فایل مستقیماً داخل پوشه‌ی reseller_dbs را بده،
+            # نه هیچ مسیر دیگری (جلوگیری از path traversal روی callback_data دستکاری‌شده)
+            if not fname or os.sep in fname or "/" in fname or ".." in fname or not fname.endswith(".db"):
+                await call.answer("❌ نام فایل نامعتبر است.", show_alert=True)
+                return
+
+            target_path = os.path.join(RESELLER_DBS_DIR, fname)
+            still_orphan = fname in _find_orphan_reseller_db_files()
+            if not still_orphan or not os.path.exists(target_path):
+                await call.answer("این فایل دیگر یتیم نیست یا وجود ندارد.", show_alert=True)
+            else:
+                try:
+                    os.remove(target_path)
+                    db.log_admin_action(call.from_user.id, "orphan_db_file_delete", fname)
+                except OSError:
+                    logger.exception("پاک‌کردن فایل دیتابیس یتیم ناموفق بود: %s", target_path)
+                    await call.answer("❌ حذف فایل با خطا مواجه شد.", show_alert=True)
+                    return
+
+            orphan_files = _find_orphan_reseller_db_files()
+            if orphan_files:
+                await safe_edit(
+                    call,
+                    f"🗃 فایل‌های دیتابیس یتیم\n\n✅ فایل «{fname}» پاک شد.",
+                    reply_markup=kb.orphan_db_files_kb(orphan_files),
+                )
+            else:
+                await safe_edit(
+                    call,
+                    f"🗃 فایل‌های دیتابیس یتیم\n\n✅ فایل «{fname}» پاک شد. دیگر فایل یتیمی باقی نمانده.",
+                    reply_markup=kb.admin_back_kb("adm_resellers_menu"),
+                )
+            await call.answer("فایل حذف شد.")
+
         @router.callback_query(F.data == "adm_resbot_add")
         async def cb_admin_resbot_add(call: CallbackQuery, state: FSMContext):
             if not senior_admin_only(call.from_user.id):
@@ -2461,6 +2545,78 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 except Exception:
                     pass
             await call.answer("پرداخت تایید شد.")
+
+        # ---------------------------------------------------------------
+        # درخواست‌های نمایندگی (لیست کامل درخواست‌های باز + کنسل دستی)
+        # ---------------------------------------------------------------
+
+        @router.callback_query(F.data == "adm_reseller_requests_menu")
+        async def cb_admin_reseller_requests_menu(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            requests = db.list_open_reseller_requests()
+            if not requests:
+                await call.answer("درخواست بازی برای نمایندگی وجود ندارد.", show_alert=True)
+                return
+            await replace_admin_view(
+                call,
+                f"📋 درخواست‌های باز نمایندگی ({len(requests)} مورد):\n\n"
+                "با «کنسل دستی» می‌توانید یک درخواست را در هر مرحله‌ای که هست "
+                "(بدون توضیح یا اطلاع‌رسانی رد رسمی) لغو کنید.",
+                reply_markup=kb.reseller_requests_open_kb(requests),
+            )
+            await call.answer()
+
+        @router.callback_query(F.data.startswith("resreq_admin_cancel:"))
+        async def cb_resreq_admin_cancel(call: CallbackQuery, bot: Bot, dispatcher: Dispatcher):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            request_id = callback_id(call.data, "resreq_admin_cancel")
+            if request_id is None:
+                await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+                return
+            req = db.get_reseller_request(request_id)
+            if not req or not db.is_reseller_request_open(req["status"]):
+                await call.answer("این درخواست دیگر باز نیست.", show_alert=True)
+                return
+
+            db.admin_cancel_reseller_request(request_id, call.from_user.id)
+            if req["status"] == "awaiting_bot_info":
+                # کاربر منتظر ارسال توکن بات بوده؛ چون کنسل شد، نباید در این state گیر بماند
+                try:
+                    user_state = FSMContext(
+                        storage=dispatcher.storage,
+                        key=StorageKey(bot_id=bot.id, chat_id=req["user_id"], user_id=req["user_id"]),
+                    )
+                    await user_state.clear()
+                except Exception:
+                    pass
+            db.log_admin_action(
+                call.from_user.id, "reseller_request_admin_cancel",
+                f"درخواست #{request_id} | کاربر {req['user_id']}",
+            )
+            try:
+                await bot.send_message(
+                    req["user_id"],
+                    f"⚪️ درخواست نمایندگی شما (#{request_id}) توسط مدیریت کنسل شد.",
+                )
+            except Exception:
+                pass
+
+            requests = db.list_open_reseller_requests()
+            if requests:
+                await safe_edit(
+                    call,
+                    f"📋 درخواست‌های باز نمایندگی ({len(requests)} مورد):\n\n✅ درخواست #{request_id} کنسل شد.",
+                    reply_markup=kb.reseller_requests_open_kb(requests),
+                )
+            else:
+                await safe_edit(
+                    call,
+                    f"📋 درخواست‌های باز نمایندگی\n\n✅ درخواست #{request_id} کنسل شد. دیگر درخواست بازی باقی نمانده.",
+                    reply_markup=kb.admin_back_kb(),
+                )
+            await call.answer("درخواست کنسل شد.")
 
         # ---------------------------------------------------------------
         # نمایندگی حجمی (استخر اعتبار داخل همین بات اصلی، بدون نمایش پنل)

@@ -2621,6 +2621,22 @@ class Database:
                 ).fetchall()
             return conn.execute("SELECT * FROM reseller_requests ORDER BY id DESC").fetchall()
 
+    def list_open_reseller_requests(self):
+        """درخواست‌های نمایندگی‌ای که هنوز باز هستند (رد/کنسل/تکمیل نشده‌اند)."""
+        placeholders = ",".join("?" * len(self._RESELLER_REQUEST_OPEN_STATUSES))
+        with self._get_conn() as conn:
+            return conn.execute(
+                f"SELECT * FROM reseller_requests WHERE status IN ({placeholders}) ORDER BY id DESC",
+                self._RESELLER_REQUEST_OPEN_STATUSES,
+            ).fetchall()
+
+    def is_reseller_request_open(self, status: str) -> bool:
+        return status in self._RESELLER_REQUEST_OPEN_STATUSES
+
+    def admin_cancel_reseller_request(self, request_id: int, admin_id: int):
+        """کنسل دستی یک درخواست نمایندگی توسط ادمین، در هر مرحله‌ای که باشد."""
+        self.set_reseller_request_status(request_id, "cancelled", reviewed_by=admin_id)
+
     def set_reseller_request_status(self, request_id: int, status: str, **fields):
         cols, values = ["status=?", "updated_at=CURRENT_TIMESTAMP"], [status]
         for key, value in fields.items():
