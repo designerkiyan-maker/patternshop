@@ -183,7 +183,15 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     @router.callback_query(F.data == "back_main")
     async def cb_back_main(call: CallbackQuery, state: FSMContext):
         await state.clear()
-        await call.message.delete()
+        try:
+            await call.message.delete()
+        except Exception:
+            # پیام قدیمی‌تر از ۴۸ ساعت یا از قبل حذف‌شده باشد، تلگرام حذف را رد
+            # می‌کند؛ در این حالت به‌جای کرش، فقط دکمه‌ها را از زیر پیام برمی‌داریم.
+            try:
+                await call.message.edit_reply_markup(reply_markup=None)
+            except Exception:
+                pass
         await call.answer()
 
     @router.callback_query(F.data == "back_categories")
