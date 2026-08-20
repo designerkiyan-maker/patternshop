@@ -1265,25 +1265,45 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         volume_gb = data.get("resreq_volume")
         await state.clear()
 
-        request_id = db.create_reseller_request(message.from_user.id, volume_gb, request_text)
-        user_row = db.get_user(message.from_user.id)
-        caption = (
-            f"🏪 درخواست نمایندگی سطح ۲ #{request_id}\n"
-            f"👤 کاربر: {user_row['first_name'] or ''} (@{user_row['username'] or '---'})\n"
-            f"🆔 آیدی عددی: {message.from_user.id}\n"
-            f"📦 حجم درخواستی: {volume_gb:,} گیگ\n\n"
-            f"📝 متن درخواست:\n{request_text}"
-        )
-        for admin_id in _senior_admin_ids():
-            try:
-                await bot.send_message(admin_id, caption, reply_markup=kb.reseller_request_review_kb(request_id))
-            except Exception:
-                pass
+        if not volume_gb:
+            # اگر به هر دلیلی (مثلاً ری‌استارت بات بین دو مرحله) داده‌ی حجم گم شده باشد،
+            # به‌جای کرش‌کردن روی فرمت عدد، از کاربر می‌خواهیم دوباره از ابتدا شروع کند
+            # تا هرگز بدون پاسخ نماند.
+            await message.answer(
+                "⚠️ مشکلی در ثبت درخواست پیش آمد (احتمالاً به‌دلیل گذشت زمان زیاد). "
+                "لطفاً دوباره روی «درخواست نمایندگی سطح ۲» بزنید.",
+                reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
+            )
+            return
 
-        await message.answer(
-            "✅ درخواست نمایندگی شما ثبت شد. بعد از بررسی ادمین، هزینه‌ی نمایندگی برایتان اعلام می‌شود.",
-            reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
-        )
+        try:
+            request_id = db.create_reseller_request(message.from_user.id, volume_gb, request_text)
+            user_row = db.get_user(message.from_user.id)
+            first_name = (user_row["first_name"] if user_row else "") or ""
+            username = (user_row["username"] if user_row else "") or "---"
+            caption = (
+                f"🏪 درخواست نمایندگی سطح ۲ #{request_id}\n"
+                f"👤 کاربر: {first_name} (@{username})\n"
+                f"🆔 آیدی عددی: {message.from_user.id}\n"
+                f"📦 حجم درخواستی: {volume_gb:,} گیگ\n\n"
+                f"📝 متن درخواست:\n{request_text}"
+            )
+            for admin_id in _senior_admin_ids():
+                try:
+                    await bot.send_message(admin_id, caption, reply_markup=kb.reseller_request_review_kb(request_id))
+                except Exception:
+                    pass
+
+            await message.answer(
+                "✅ درخواست نمایندگی شما ثبت شد. بعد از بررسی ادمین، هزینه‌ی نمایندگی برایتان اعلام می‌شود.",
+                reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
+            )
+        except Exception:
+            logging.getLogger(__name__).exception("خطا در ثبت درخواست نمایندگی سطح ۲ کاربر %s", message.from_user.id)
+            await message.answer(
+                "⚠️ در ثبت درخواست خطایی رخ داد. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.",
+                reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
+            )
 
     @router.callback_query(F.data.startswith("resreq_pay:"))
     async def reseller_request_pay(call: CallbackQuery):
