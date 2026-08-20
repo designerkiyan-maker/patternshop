@@ -1940,20 +1940,15 @@ def api_admin_delete_reseller(reseller_id: int, purge_db: bool = Query(False), a
         raise HTTPException(status_code=404, detail="نماینده یافت نشد.")
     db.delete_reseller_bot(reseller_id)
 
-    file_removed = False
     if purge_db:
         resolved_path = resolve_db_path(reseller_bot["db_path"])
-        try:
-            if os.path.exists(resolved_path):
-                os.remove(resolved_path)
-                file_removed = True
-        except OSError:
-            logging.getLogger("miniapp.resellers").exception("حذف فایل دیتابیس نماینده ناموفق بود: %s", resolved_path)
+        db.queue_db_purge(reseller_bot["bot_token"], resolved_path)
 
     return {
         "status": "ok",
-        "db_purged": file_removed,
-        "note": "بات نماینده حداکثر تا ۱۰ ثانیه دیگر متوقف می‌شود.",
+        "db_purged": False,
+        "note": "بات نماینده حداکثر تا ۱۰ ثانیه دیگر متوقف می‌شود"
+        + (" و بلافاصله بعد از توقف، فایل دیتابیسش پاک خواهد شد." if purge_db else "."),
     }
 
 
