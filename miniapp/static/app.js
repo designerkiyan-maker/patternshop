@@ -546,10 +546,23 @@ async function renderHome() {
     content.innerHTML = `
       ${expiring.length > 0 ? expiringBanner(expiring) : ""}
 
-      <div class="eyebrow">وضعیت حساب</div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-num">${fmt(allActive.length)}</div><div class="stat-label">سرویس فعال</div></div>
+        <div class="stat-card"><div class="stat-num">${fmt(me.wallet_credit)}</div><div class="stat-label">موجودی کیف پول (تومان)</div></div>
+      </div>
+
+      <div class="eyebrow">دسترسی سریع</div>
+      <div class="quick-grid">
+        <div class="quick-item" data-nav="store"><span class="q-label">خرید سرویس جدید</span><span class="q-ic">🛍</span></div>
+        <div class="quick-item" data-nav="home"><span class="q-label">سرویس‌های من</span><span class="q-ic">🛡</span></div>
+        <div class="quick-item" data-nav="wallet"><span class="q-label">کیف پول</span><span class="q-ic">👛</span></div>
+        <div class="quick-item" data-nav="referral"><span class="q-label">زیرمجموعه‌گیری</span><span class="q-ic">🤝</span></div>
+        <div class="quick-item" data-nav="test"><span class="q-label">کانفیگ تست</span><span class="q-ic">🧪</span></div>
+        <div class="quick-item" data-nav="support"><span class="q-label">پشتیبانی</span><span class="q-ic">💬</span></div>
+      </div>
+
+      <div class="eyebrow">آمار حساب</div>
       <div class="card">
-        <h3><span class="ic">◆</span>خلاصه</h3>
-        <div class="stat-row"><span>👛 موجودی کیف پول</span><b>${fmt(me.wallet_credit)} تومان</b></div>
         <div class="stat-row"><span>👥 زیرمجموعه‌ها</span><b>${fmt(me.referral_count)}</b></div>
         <div class="stat-row"><span>📦 تعداد سفارش</span><b>${fmt(me.orders_count)}</b></div>
       </div>
@@ -561,6 +574,9 @@ async function renderHome() {
           : allActive.map(orderCard).join("")}
       </div>
     `;
+    content.querySelectorAll(".quick-item[data-nav]").forEach((el) => {
+      el.onclick = () => switchTab(el.dataset.nav);
+    });
     allActive.filter((o) => o.link).forEach((o) => {
       const links = (o.links && o.links.length) ? o.links : [o.link];
       links.forEach((link, idx) => loadSubInfo(`${o.id}-${idx}`, link));
