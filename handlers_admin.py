@@ -474,11 +474,29 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         data = await state.get_data()
         product_id = data["product_id"]
         links = [line for line in message.text.splitlines() if line.strip()]
-        db.add_configs(product_id, links)
+        added_count, duplicate_count = db.add_configs(product_id, links)
         await state.clear()
         stock = db.count_available_configs(product_id)
+
+        if duplicate_count and added_count:
+            result_text = (
+                f"✅ {added_count} کانفیگ جدید اضافه شد.\n"
+                f"⚠️ {duplicate_count} کانفیگ تکراری بود و اضافه نشد.\n"
+                f"📊 موجودی فعلی این محصول: {stock} عدد"
+            )
+        elif duplicate_count:
+            result_text = (
+                f"⚠️ تعداد {duplicate_count} کانفیگ تکراری بود و اضافه نشد.\n"
+                f"📊 موجودی فعلی این محصول: {stock} عدد"
+            )
+        else:
+            result_text = (
+                f"✅ {added_count} کانفیگ اضافه شد.\n"
+                f"📊 موجودی فعلی این محصول: {stock} عدد"
+            )
+
         await message.answer(
-            f"✅ {len(links)} لینک اضافه شد.\n📊 موجودی فعلی این محصول: {stock} عدد",
+            result_text,
             reply_markup=kb.admin_panel_kb(db, is_main_bot),
         )
 

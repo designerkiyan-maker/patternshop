@@ -311,7 +311,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         await message.answer(text, reply_markup=kb.product_confirm_kb(db, product_id, quantity, max(stock, quantity)))
 
-    async def _notify_admins_of_order(bot: Bot, order_id: int, receipt_file_id: str = None):
+    async def _notify_admins_of_order(bot: Bot, order_id: int, receipt_file_id: str = None, receipt_type: str = "photo"):
+        if receipt_file_id and receipt_file_id.startswith("document:"):
+            receipt_type = "document"
+            receipt_file_id = receipt_file_id.split(":", 1)[1]
         order = db.get_order(order_id)
 
         if order["is_custom_config"]:
@@ -337,9 +340,14 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول پوشش داده شده)"
             for admin_id in db.list_admins():
                 if receipt_file_id:
-                    factory = lambda aid=admin_id: bot.send_photo(
-                        aid, receipt_file_id, caption=caption, reply_markup=reply_markup,
-                    )
+                    if receipt_type == "document":
+                        factory = lambda aid=admin_id: bot.send_document(
+                            aid, receipt_file_id, caption=caption, reply_markup=reply_markup,
+                        )
+                    else:
+                        factory = lambda aid=admin_id: bot.send_photo(
+                            aid, receipt_file_id, caption=caption, reply_markup=reply_markup,
+                        )
                 else:
                     factory = lambda aid=admin_id: bot.send_message(
                         aid, caption, reply_markup=reply_markup,
@@ -381,9 +389,14 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         for admin_id in db.list_admins():
             if receipt_file_id:
-                factory = lambda aid=admin_id: bot.send_photo(
-                    aid, receipt_file_id, caption=caption, reply_markup=reply_markup,
-                )
+                if receipt_type == "document":
+                    factory = lambda aid=admin_id: bot.send_document(
+                        aid, receipt_file_id, caption=caption, reply_markup=reply_markup,
+                    )
+                else:
+                    factory = lambda aid=admin_id: bot.send_photo(
+                        aid, receipt_file_id, caption=caption, reply_markup=reply_markup,
+                    )
             else:
                 factory = lambda aid=admin_id: bot.send_message(
                     aid, caption, reply_markup=reply_markup,
@@ -563,7 +576,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             ]]),
         )
 
-    @router.message(BuyFlow.waiting_receipt, F.photo)
+    @router.message(BuyFlow.waiting_receipt, F.photo | F.document)
     async def receive_receipt(message: Message, state: FSMContext, bot: Bot):
         data = await state.get_data()
         order_id = data.get("order_id")
@@ -573,10 +586,19 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await state.clear()
             return
 
-        file_id = message.photo[-1].file_id
-        db.set_order_receipt(order_id, file_id)
+        if message.photo:
+            file_id = message.photo[-1].file_id
+            receipt_type = "photo"
+            stored_file_id = file_id
+        else:
+            file_id = message.document.file_id
+            receipt_type = "document"
+            stored_file_id = f"document:{file_id}"
 
-        await _notify_admins_of_order(bot, order_id, receipt_file_id=file_id)
+        db.set_order_receipt(order_id, stored_file_id)
+        await _notify_admins_of_order(
+            bot, order_id, receipt_file_id=file_id, receipt_type=receipt_type
+        )
 
         await message.answer(
             "✅ رسید شما برای بررسی ارسال شد. پس از تایید ادمین، کانفیگ برای شما ارسال خواهد شد.",
@@ -586,7 +608,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
     @router.message(BuyFlow.waiting_receipt)
     async def receipt_wrong_type(message: Message):
-        await message.answer("لطفاً فقط عکس رسید پرداخت را ارسال کنید.")
+        await message.answer("لطفاً عکس رسید پرداخت را ارسال کنید (می‌توانید به‌صورت فایل هم بفرستید).")
 
     # -----------------------------------------------------------------------
     # ساخت کانفیگ شخصی (اتصال مستقیم به پنل VPN)
@@ -778,7 +800,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             ]]),
         )
 
-    @router.message(CustomConfigFlow.waiting_receipt, F.photo)
+    @router.message(CustomConfigFlow.waiting_receipt, F.photo | F.document)
     async def receive_custom_config_receipt(message: Message, state: FSMContext, bot: Bot):
         data = await state.get_data()
         order_id = data.get("order_id")
@@ -788,9 +810,19 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await state.clear()
             return
 
-        file_id = message.photo[-1].file_id
-        db.set_order_receipt(order_id, file_id)
-        await _notify_admins_of_order(bot, order_id, receipt_file_id=file_id)
+        if message.photo:
+            file_id = message.photo[-1].file_id
+            receipt_type = "photo"
+            stored_file_id = file_id
+        else:
+            file_id = message.document.file_id
+            receipt_type = "document"
+            stored_file_id = f"document:{file_id}"
+
+        db.set_order_receipt(order_id, stored_file_id)
+        await _notify_admins_of_order(
+            bot, order_id, receipt_file_id=file_id, receipt_type=receipt_type
+        )
         await message.answer(
             "✅ رسید شما برای بررسی ارسال شد. پس از تایید ادمین، کانفیگ شخصی شما ساخته و ارسال خواهد شد.",
             reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
@@ -799,7 +831,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
     @router.message(CustomConfigFlow.waiting_receipt)
     async def custom_config_receipt_wrong_type(message: Message):
-        await message.answer("لطفاً فقط عکس رسید پرداخت را ارسال کنید.")
+        await message.answer("لطفاً عکس رسید پرداخت را ارسال کنید (می‌توانید به‌صورت فایل هم بفرستید).")
 
     # -----------------------------------------------------------------------
     # کانفیگ تست
@@ -1213,7 +1245,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
     @router.message(WalletTopup.waiting_receipt)
     async def topup_receipt_wrong_type(message: Message):
-        await message.answer("لطفاً فقط عکس رسید پرداخت را ارسال کنید.")
+        await message.answer("لطفاً عکس رسید پرداخت را ارسال کنید (می‌توانید به‌صورت فایل هم بفرستید).")
 
     # -----------------------------------------------------------------------
     # درخواست خودکار نمایندگی سطح ۲
