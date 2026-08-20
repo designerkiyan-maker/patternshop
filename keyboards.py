@@ -293,6 +293,9 @@ def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
         if key == "adm_custom_config_settings" and not db.is_full_access_bot(is_main_bot):
             # ساخت کانفیگ شخصی به اتصال مستقیم پنل VPN نیاز دارد که فقط از بات اصلی یا نمایندگی کامل قابل مدیریت است
             continue
+        if key == "adm_add_configs" and not db.is_full_access_bot(is_main_bot):
+            # نماینده سطح ۲ بانک لینک دستی ندارد؛ محصولاتش همیشه خودکار از اعتبار حجمی تامین می‌شوند
+            continue
 
         current_row.append(_styled_inline(db, label, callback_data, f"{key}_style"))
         if len(current_row) == 2:
@@ -444,9 +447,23 @@ def admin_pick_product_kb(products, prefix) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_test_menu_kb(db) -> InlineKeyboardMarkup:
+def admin_test_menu_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
     enabled = db.get_setting("test_enabled", "1") == "1"
     toggle_text = "🔴 غیرفعال کردن کانفیگ تست" if enabled else "🟢 فعال کردن کانفیگ تست"
+
+    if not db.is_full_access_bot(is_main_bot):
+        # نماینده سطح ۲: بانک لینک دستی ندارد، کانفیگ تست هم خودکار از اعتبار حجمی ساخته می‌شود
+        volume_gb = db.get_setting("test_config_panel_volume_gb", "1")
+        duration_days = db.get_setting("test_config_panel_duration_days", "1")
+        rows = [
+            [InlineKeyboardButton(text=f"⚡️ خودکار: {volume_gb} گیگ / {duration_days} روز", callback_data="noop")],
+            [InlineKeyboardButton(text=toggle_text, callback_data="adm_test_toggle")],
+            [InlineKeyboardButton(text="⚙️ تنظیم حجم و مدت کانفیگ تست", callback_data="adm_test_set_volume")],
+            [InlineKeyboardButton(text="🔁 بازنشانی کانفیگ تست برای همه", callback_data="adm_reset_test_configs")],
+            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")],
+        ]
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
     remaining = db.count_available_test_configs()
     rows = [
         [InlineKeyboardButton(text=f"موجودی فعلی: {remaining} عدد", callback_data="noop")],

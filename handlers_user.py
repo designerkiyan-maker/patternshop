@@ -28,7 +28,7 @@ from sub_info import fetch_sub_info, format_sub_info_fa
 from stock_alerts import check_and_notify_low_stock
 import crypto_payment
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
-from reseller_auto_provision import provision_auto_config, ProvisionError
+from reseller_auto_provision import provision_auto_config, provision_test_config, ProvisionError
 
 
 async def _send_admin_notification(bot, admin_id, send_coro_factory, context_label: str, ref_id: int):
@@ -812,6 +812,20 @@ def create_user_router(db, is_main_bot: bool = True) -> Router:
         user = db.get_user(message.from_user.id)
         if user and user["test_used"] >= MAX_TEST_PER_USER:
             await message.answer("شما قبلاً کانفیگ تست خود را دریافت کرده‌اید. هر کاربر فقط یک بار مجاز به دریافت کانفیگ تست است.")
+            return
+
+        if not db.is_full_access_bot(is_main_bot):
+            # نماینده سطح ۲: کانفیگ تست هم خودکار و از اعتبار حجمی نماینده ساخته می‌شود
+            try:
+                result = await provision_test_config(db)
+            except ProvisionError as e:
+                await message.answer(f"⛔️ {e}")
+                return
+            db.mark_test_used(message.from_user.id)
+            await message.answer(
+                f"🧪 کانفیگ تست شما ({result['volume_gb']} گیگ، {result['duration_days']} روز):\n\n`{result['subscription_url']}`",
+                parse_mode="Markdown",
+            )
             return
 
         panel_server = db.get_panel_server_for_usage("test_config")

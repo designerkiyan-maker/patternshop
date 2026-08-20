@@ -45,6 +45,11 @@ class AdminAddTestConfigs(StatesGroup):
     waiting_links = State()
 
 
+class AdminTestConfigSettings(StatesGroup):
+    waiting_volume = State()
+    waiting_duration = State()
+
+
 class AdminForceJoin(StatesGroup):
     waiting_channel = State()
 

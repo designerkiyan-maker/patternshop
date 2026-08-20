@@ -31,6 +31,7 @@ from states import (
     AdminAddProduct,
     AdminAddConfigs,
     AdminAddTestConfigs,
+    AdminTestConfigSettings,
     AdminForceJoin,
     AdminEditButton,
     AdminSetCard,
@@ -411,6 +412,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_add_configs(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
+        if not db.is_full_access_bot(is_main_bot):
+            await call.answer("این بخش برای نمایندگی سطح ۲ فعال نیست.", show_alert=True)
+            return
         products = db.get_all_products()
         if not products:
             await call.answer("ابتدا باید یک محصول بسازید.", show_alert=True)
@@ -496,7 +500,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_test_menu(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        await replace_admin_view(call, "🧪 مدیریت کانفیگ تست:", reply_markup=kb.admin_test_menu_kb(db))
+        await replace_admin_view(call, "🧪 مدیریت کانفیگ تست:", reply_markup=kb.admin_test_menu_kb(db, is_main_bot))
         await call.answer()
 
     @router.callback_query(F.data == "adm_test_toggle")
@@ -505,13 +509,16 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return await deny_mid(call)
         current = db.get_setting("test_enabled", "1")
         db.set_setting("test_enabled", "0" if current == "1" else "1")
-        await safe_edit(call, "🧪 مدیریت کانفیگ تست:", reply_markup=kb.admin_test_menu_kb(db))
+        await safe_edit(call, "🧪 مدیریت کانفیگ تست:", reply_markup=kb.admin_test_menu_kb(db, is_main_bot))
         await call.answer("وضعیت کانفیگ تست تغییر کرد.")
 
     @router.callback_query(F.data == "adm_test_add")
     async def cb_admin_test_add(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
+        if not db.is_full_access_bot(is_main_bot):
+            await call.answer("این بخش برای نمایندگی سطح ۲ فعال نیست.", show_alert=True)
+            return
         await state.set_state(AdminAddTestConfigs.waiting_links)
         await safe_edit(call, 
             "لینک‌های کانفیگ تست را ارسال کنید (هر لینک در یک خط):", reply_markup=kb.admin_back_kb()
@@ -524,6 +531,42 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         db.add_test_configs(links)
         await state.clear()
         await message.answer(f"✅ {len(links)} لینک تست اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    @router.callback_query(F.data == "adm_test_set_volume")
+    async def cb_admin_test_set_volume(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        if db.is_full_access_bot(is_main_bot):
+            await call.answer("این بخش فقط برای نمایندگی سطح ۲ است.", show_alert=True)
+            return
+        await state.set_state(AdminTestConfigSettings.waiting_volume)
+        await safe_edit(call, "کانفیگ تست چند گیگابایت باشد؟ فقط عدد وارد کنید (مثال: 1):", reply_markup=kb.admin_back_kb())
+        await call.answer()
+
+    @router.message(AdminTestConfigSettings.waiting_volume)
+    async def process_test_volume(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً فقط عدد صحیح و بزرگ‌تر از صفر وارد کنید. مثال: 1")
+            return
+        await state.update_data(volume_gb=int(text))
+        await state.set_state(AdminTestConfigSettings.waiting_duration)
+        await message.answer("کانفیگ تست چند روز اعتبار داشته باشد؟ فقط عدد وارد کنید (مثال: 1):")
+
+    @router.message(AdminTestConfigSettings.waiting_duration)
+    async def process_test_duration(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً فقط عدد صحیح و بزرگ‌تر از صفر وارد کنید. مثال: 1")
+            return
+        data = await state.get_data()
+        db.set_setting("test_config_panel_volume_gb", str(data["volume_gb"]))
+        db.set_setting("test_config_panel_duration_days", text)
+        await state.clear()
+        await message.answer(
+            f"✅ کانفیگ تست تنظیم شد: {data['volume_gb']} گیگ / {text} روز.",
+            reply_markup=kb.admin_panel_kb(db, is_main_bot),
+        )
 
     # -------------------------------------------------------------------
     # عضویت اجباری در کانال

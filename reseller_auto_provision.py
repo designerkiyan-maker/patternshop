@@ -91,3 +91,14 @@ async def provision_auto_config(local_db: Database, product, quantity: int = 1) 
     )
 
     return built
+
+
+async def provision_test_config(local_db: Database) -> dict:
+    """کانفیگ تست برای نماینده‌ی سطح ۲: مثل provision_auto_config ولی حجم/مدت را از
+    تنظیمات محلی («test_config_panel_volume_gb»/«test_config_panel_duration_days») می‌خواند
+    و همان‌طور از اعتبار حجمی نماینده کم می‌کند (کانفیگ تست هم مصرف واقعی روی پنل دارد)."""
+    volume_gb = int(local_db.get_setting("test_config_panel_volume_gb", "1") or 1)
+    duration_days = int(local_db.get_setting("test_config_panel_duration_days", "1") or 1)
+    fake_product = {"name": "کانفیگ تست", "auto_provision_volume_gb": volume_gb, "duration_days": duration_days}
+    built = await provision_auto_config(local_db, fake_product, quantity=1)
+    return built[0]
