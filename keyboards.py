@@ -105,12 +105,12 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False, is_main_bot: boo
     def row_reseller_panel():
         if not is_reseller:
             return None
-        return [_styled_button("🧑‍💼 پنل نمایندگی", "primary")]
+        return [_styled_button(settings.get("btn_reseller_panel", "🧑‍💼 پنل نمایندگی"), settings.get("btn_reseller_panel_style", "primary"))]
 
     def row_reseller_request():
         if not show_reseller_request:
             return None
-        return [_styled_button("🏪 درخواست نمایندگی سطح ۲", "primary")]
+        return [_styled_button(settings.get("btn_reseller_request", "🏪 درخواست نمایندگی سطح ۲"), settings.get("btn_reseller_request_style", "primary"))]
 
     builders = {
         "miniapp": row_miniapp,
@@ -122,6 +122,8 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False, is_main_bot: boo
         "btn_wheel": row_wheel,
         "btn_contact": row_contact,
         "btn_admin_panel": row_admin_panel,
+        "btn_reseller_panel": row_reseller_panel,
+        "btn_reseller_request": row_reseller_request,
     }
 
     rows = []
@@ -132,15 +134,6 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False, is_main_bot: boo
         row = builder()
         if row:
             rows.append(row)
-
-    if is_reseller:
-        row = row_reseller_panel()
-        if row:
-            rows.insert(1 if rows else 0, row)
-    elif show_reseller_request:
-        row = row_reseller_request()
-        if row:
-            rows.insert(1 if rows else 0, row)
 
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
@@ -512,6 +505,8 @@ BUTTON_LABELS = {
     "btn_wallet": "دکمه کیف پول",
     "btn_wheel": "دکمه گردونه شانس",
     "btn_admin_panel": "دکمه پنل مدیریت",
+    "btn_reseller_panel": "دکمه پنل نمایندگی",
+    "btn_reseller_request": "دکمه درخواست نمایندگی سطح ۲",
 }
 
 

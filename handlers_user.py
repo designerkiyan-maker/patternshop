@@ -867,7 +867,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     # پنل نمایندگی (ساخت کانفیگ از استخر حجم بدون پرداخت جداگانه)
     # -----------------------------------------------------------------------
 
-    @router.message(F.text == "🧑‍💼 پنل نمایندگی")
+    @router.message(F.text.func(lambda t: t == db.get_setting("btn_reseller_panel", "🧑‍💼 پنل نمایندگی")))
     async def reseller_panel_open(message: Message, state: FSMContext):
         if not db.is_reseller(message.from_user.id):
             return
@@ -1222,7 +1222,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     def _senior_admin_ids():
         return [a["telegram_id"] for a in db.list_admins_with_roles() if a["role"] in ("owner", "admin")]
 
-    @router.message(F.text == "🏪 درخواست نمایندگی سطح ۲")
+    @router.message(F.text.func(lambda t: t == db.get_setting("btn_reseller_request", "🏪 درخواست نمایندگی سطح ۲")))
     async def reseller_request_start(message: Message, state: FSMContext):
         if not is_main_bot:
             return

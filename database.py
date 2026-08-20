@@ -128,8 +128,16 @@ MENU_BUTTON_META = {
     "btn_wheel": {"label": "دکمه گردونه شانس", "toggle_key": "wheel_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_contact": {"label": "دکمه ارتباط با پشتیبانی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
     "btn_admin_panel": {"label": "دکمه پنل مدیریت", "toggle_key": None, "admin_only": True, "has_text": True, "has_style": True},
+    # این دو دکمه بر اساس وضعیت کاربر (نماینده بودن/نبودن) به‌صورت پویا نمایش داده می‌شوند،
+    # نه با یک toggle سراسری؛ به همین دلیل toggle_key ندارند ولی مثل بقیه‌ی دکمه‌ها
+    # متن/رنگ قابل تنظیم و در چیدمان منو قابل جابجایی هستند.
+    "btn_reseller_panel": {"label": "دکمه پنل نمایندگی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
+    "btn_reseller_request": {"label": "دکمه درخواست نمایندگی سطح ۲", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
 }
-DEFAULT_MENU_ORDER = ["miniapp", "btn_buy", "btn_test", "btn_my_orders", "btn_wallet", "btn_referral", "btn_wheel", "btn_contact", "btn_admin_panel"]
+DEFAULT_MENU_ORDER = [
+    "miniapp", "btn_reseller_panel", "btn_reseller_request", "btn_buy", "btn_test",
+    "btn_my_orders", "btn_wallet", "btn_referral", "btn_wheel", "btn_contact", "btn_admin_panel",
+]
 
 
 class Database:
