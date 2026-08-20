@@ -1322,6 +1322,8 @@ class BannerItem(BaseModel):
     cta: str = ""
     nav: str
     bg: str = ""
+    image: Optional[str] = ""
+    image_only: bool = False
     enabled: bool = True
 
 
@@ -1341,6 +1343,19 @@ def api_banners(auth=Depends(get_verified_user)):
 def api_admin_get_banners(auth=Depends(require_senior_admin)):
     _, db, _ = auth
     return db.get_banners()
+
+
+@app.post("/api/admin/banners/upload-image")
+async def api_admin_upload_banner_image(photo: UploadFile = File(...), auth=Depends(require_senior_admin)):
+    """آپلود عکس آماده برای یک بنر؛ به‌صورت data URI برمی‌گردد تا در فرم بنر
+    ذخیره و همراه بقیه‌ی بنرها با POST /api/admin/banners ثبت شود."""
+    if not photo.content_type or not photo.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="فقط فایل عکس پذیرفته می‌شود.")
+    photo_bytes = await photo.read()
+    if len(photo_bytes) > MAX_HEADER_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="حجم عکس نباید بیشتر از ۲ مگابایت باشد.")
+    data_uri = f"data:{photo.content_type};base64,{base64.b64encode(photo_bytes).decode('ascii')}"
+    return {"status": "ok", "image": data_uri}
 
 
 @app.post("/api/admin/banners")
@@ -1363,6 +1378,11 @@ def api_admin_save_banners(body: BannersUpdate, auth=Depends(require_senior_admi
             raise HTTPException(status_code=400, detail=f"متن دکمه‌ی بنر شماره {idx + 1} بیش از حد طولانی است.")
         if b.nav not in BANNER_NAV_TARGETS:
             raise HTTPException(status_code=400, detail=f"مقصد بنر شماره {idx + 1} نامعتبر است.")
+        image = (b.image or "").strip()
+        if image and not image.startswith("data:image/"):
+            raise HTTPException(status_code=400, detail=f"تصویر بنر شماره {idx + 1} نامعتبر است.")
+        if len(image) > 2_900_000:  # ~2MB فایل اصلی بعد از base64 حدوداً همین اندازه می‌شود
+            raise HTTPException(status_code=400, detail=f"حجم تصویر بنر شماره {idx + 1} بیش از حد مجاز است.")
         bg = b.bg.strip() or "linear-gradient(120deg, #0d1420, #142845 55%, #1c3f6e)"
         clean.append({
             "id": b.id or f"b_{secrets.token_hex(4)}",
@@ -1372,6 +1392,8 @@ def api_admin_save_banners(body: BannersUpdate, auth=Depends(require_senior_admi
             "cta": cta,
             "nav": b.nav,
             "bg": bg,
+            "image": image,
+            "image_only": bool(b.image_only) and bool(image),
             "enabled": bool(b.enabled),
         })
     db.set_banners(clean)
