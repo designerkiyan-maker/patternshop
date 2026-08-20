@@ -82,6 +82,16 @@ html[data-theme="aurora-ice"] {
   --sun-a: #eaffff; --sun-b: #a0fff0; --sun-c: #7fd8ff;
   --grid-line: rgba(127, 216, 255, 0.5);
 }
+html[data-theme="clean-light"] {
+  --bg: #f2f5f2; --bg2: #ffffff; --bg-elevated: #ffffff;
+  --pink: #4fb84a; --orange: #ffb020; --cyan: #2f9e57; --violet: #3fcf6e; --amber: #ffb020; --danger: #e5484d;
+  --glass: rgba(20, 40, 25, 0.035); --glass-2: rgba(20, 40, 25, 0.055); --glass-brd: rgba(20, 40, 25, 0.1); --border-soft: rgba(20, 40, 25, 0.08);
+  --text: #161c17; --text-muted: #7c8880;
+  --font-disp: var(--font-body);
+  --font-mono: "Vazirmatn", -apple-system, Tahoma, sans-serif;
+  --header-g1: #ffffff; --header-g2: #ffffff; --header-g3: #ffffff; --header-g4: #ffffff;
+  --grid-line: rgba(20, 40, 25, 0.06);
+}
 
 /* ===================================================================
    Base
@@ -782,3 +792,104 @@ textarea.input { font-family: var(--font-mono); min-height: 90px; }
 }
 #tabbar button svg { width: 18px; height: 18px; transition: filter 0.15s ease; }
 #tabbar button.active { color: #160a2e; background: linear-gradient(135deg, var(--pink), var(--violet)); font-weight: 700; }
+
+/* ===================================================================
+   Clean Light — modern flat theme (inspired by reference screenshots)
+   Structural overrides on top of the token set defined above.
+=================================================================== */
+html[data-theme="clean-light"] body { background: var(--bg); }
+html[data-theme="clean-light"] .grid-fx { display: none; }
+
+html[data-theme="clean-light"] header.horizon {
+  height: 128px;
+  border-bottom: 1px solid var(--border-soft);
+}
+html[data-theme="clean-light"] header.horizon::before {
+  background: var(--bg2);
+  opacity: 1;
+}
+html[data-theme="clean-light"] .sun,
+html[data-theme="clean-light"] .grid-floor { display: none; }
+html[data-theme="clean-light"] header.horizon.has-logo .brand-logo {
+  width: 42px; height: 42px;
+  left: auto; right: 16px; top: 16px; bottom: auto; transform: none;
+  box-shadow: 0 3px 10px rgba(20, 40, 25, 0.18), 0 0 0 3px var(--bg2);
+  animation: none;
+}
+html[data-theme="clean-light"] .topline { color: var(--text-muted); }
+html[data-theme="clean-light"] .brand { font-weight: 800; font-size: 14.5px; color: var(--text); text-shadow: none; }
+html[data-theme="clean-light"] .live { color: var(--cyan); }
+html[data-theme="clean-light"] .dot { background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
+html[data-theme="clean-light"] .greet h1 { color: var(--text); text-shadow: none; font-weight: 800; }
+html[data-theme="clean-light"] .header-sub { color: var(--text-muted); }
+
+html[data-theme="clean-light"] .eyebrow { color: var(--cyan); }
+html[data-theme="clean-light"] .eyebrow::after { background: linear-gradient(90deg, rgba(20, 40, 25, 0.12), transparent); }
+
+html[data-theme="clean-light"] .card {
+  background: var(--bg2);
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  border: 1px solid var(--border-soft);
+  box-shadow: 0 3px 16px -4px rgba(20, 40, 25, 0.09);
+}
+html[data-theme="clean-light"] .card::before { display: none; }
+html[data-theme="clean-light"] .card h3 .ic { color: #fff; }
+
+html[data-theme="clean-light"] .stat-row { border-bottom-color: var(--border-soft); }
+html[data-theme="clean-light"] .stat-row b {
+  background: none; -webkit-text-fill-color: unset;
+  color: var(--cyan);
+}
+
+html[data-theme="clean-light"] .btn {
+  color: #0d2b12;
+  box-shadow: 0 6px 16px -6px rgba(47, 158, 87, 0.45);
+}
+html[data-theme="clean-light"] .btn.outline {
+  background: var(--bg2); color: var(--text); border: 1px solid var(--border-soft);
+  backdrop-filter: none;
+}
+html[data-theme="clean-light"] .btn:disabled { background: #eef1ee; color: var(--text-muted); }
+html[data-theme="clean-light"] .btn.violet { color: #fff; }
+
+html[data-theme="clean-light"] .badge {
+  background: rgba(20, 40, 25, 0.06); color: var(--text-muted); border-color: var(--border-soft);
+}
+html[data-theme="clean-light"] .badge.approved { background: rgba(47, 158, 87, 0.12); color: #1f7a41; border-color: rgba(47, 158, 87, 0.35); }
+html[data-theme="clean-light"] .badge.pending { background: rgba(255, 176, 32, 0.14); color: #9a6300; border-color: rgba(255, 176, 32, 0.4); }
+html[data-theme="clean-light"] .badge.rejected { background: rgba(229, 72, 77, 0.12); color: #c1272d; border-color: rgba(229, 72, 77, 0.35); }
+
+html[data-theme="clean-light"] .sub-info { background: rgba(20, 40, 25, 0.03); }
+html[data-theme="clean-light"] .progress-track { background: rgba(20, 40, 25, 0.08); }
+
+html[data-theme="clean-light"] .link-box {
+  background: #f2f6f2; color: #1f7a41; border-color: var(--border-soft);
+}
+html[data-theme="clean-light"] .qr-row img { border-color: var(--border-soft); }
+
+html[data-theme="clean-light"] .reels { background: #eef2ee; box-shadow: inset 0 2px 8px rgba(20, 40, 25, 0.08); }
+html[data-theme="clean-light"] .reel { background: #fff; border-color: var(--border-soft); }
+html[data-theme="clean-light"] .spin-cta {
+  background: radial-gradient(circle at 35% 30%, #b9ecab, var(--pink) 55%, var(--violet));
+  color: #0d2b12; box-shadow: 0 8px 18px -6px rgba(47, 158, 87, 0.45);
+}
+html[data-theme="clean-light"] .jackpot-result { background: var(--bg); }
+
+html[data-theme="clean-light"] .bank-card-holder { color: #f3ecff; }
+html[data-theme="clean-light"] .bank-card-holder-label { color: rgba(255, 255, 255, 0.6); }
+
+html[data-theme="clean-light"] .skel {
+  background: linear-gradient(100deg, #eef1ee 30%, #f8faf8 50%, #eef1ee 70%);
+  border-color: var(--border-soft);
+}
+
+html[data-theme="clean-light"] .chat-messages::-webkit-scrollbar-thumb,
+html[data-theme="clean-light"] main::-webkit-scrollbar-thumb { background: var(--border-soft); }
+
+html[data-theme="clean-light"] #tabbar {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border-soft);
+  box-shadow: 0 10px 30px -14px rgba(20, 40, 25, 0.22);
+}
+html[data-theme="clean-light"] #tabbar button { color: var(--text-muted); }
+html[data-theme="clean-light"] #tabbar button.active { color: #0d2b12; }
