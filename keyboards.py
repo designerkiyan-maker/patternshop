@@ -290,36 +290,131 @@ def _styled_inline(db, text: str, callback_data: str, style_key: str) -> InlineK
     return InlineKeyboardButton(text=text, callback_data=callback_data, style=style)
 
 
+# ---------------------------------------------------------------------------
+# دسته‌بندی پنل مدیریت: هر دسته یک زیرمنوی مجزا می‌شود تا صفحه‌ی اصلی پنل
+# شلوغ نباشد. ترتیب دسته‌ها بر اساس میزان استفاده‌ی روزمره‌ی ادمین چیده شده.
+# ---------------------------------------------------------------------------
+ADMIN_PANEL_CATEGORIES = [
+    ("daily", "📋 کارهای روزانه", [
+        "adm_pending_orders",
+        "adm_pending_topups",
+        "adm_crypto_payments",
+        "adm_reseller_requests_menu",
+    ]),
+    ("products", "📦 محصولات و کانفیگ", [
+        "adm_categories",
+        "adm_products",
+        "adm_add_configs",
+        "adm_random_cfg",
+        "adm_test_menu",
+        "adm_custom_config_settings",
+    ]),
+    ("resellers", "🤝 نمایندگی‌ها", [
+        "adm_resellers_menu",
+        "adm_credit_resellers_menu",
+        "adm_referral_settings",
+    ]),
+    ("finance", "💰 مالی و پرداخت", [
+        "adm_discounts_menu",
+        "adm_set_card",
+        "adm_set_plisio",
+    ]),
+    ("alerts", "🔔 یادآوری‌ها و هشدارها", [
+        "adm_renewal_settings",
+        "adm_volume_reminder_settings",
+        "adm_stock_alert_settings",
+        "adm_wheel_settings",
+        "adm_forcejoin_menu",
+    ]),
+    ("appearance", "🎨 ظاهر و رنگ‌بندی", [
+        "adm_edit_buttons",
+        "adm_edit_welcome",
+        "adm_panel_colors_menu",
+        "adm_buyflow_colors_menu",
+    ]),
+    ("management", "👥 مدیریت و آمار", [
+        "adm_admins_menu",
+        "adm_broadcast",
+        "adm_stats",
+        "adm_backup_menu",
+    ]),
+]
+
+# دو آیتم زیر واقعی نیستند (منوی رنگ‌بندی هستند نه اکشن مستقیم) اما برای اینکه
+# در دسته‌ی «ظاهر» قابل نمایش باشند، برچسب/کال‌بک‌شان اینجا تعریف می‌شود.
+_EXTRA_PANEL_ITEM_LABELS = {
+    "adm_panel_colors_menu": "🎨 رنگ‌آمیزی دکمه‌های پنل مدیریت",
+    "adm_buyflow_colors_menu": "🎨 رنگ‌آمیزی دکمه‌های مسیر خرید",
+}
+
+
+def _admin_item_label_and_cb(key: str):
+    if key in _EXTRA_PANEL_ITEM_LABELS:
+        return _EXTRA_PANEL_ITEM_LABELS[key], key
+    for item_key, label, callback_data in ADMIN_PANEL_ITEMS:
+        if item_key == key:
+            return label, callback_data
+    return key, key
+
+
+def _is_item_visible(db, key: str, is_main_bot: bool) -> bool:
+    if key in ("adm_resellers_menu", "adm_credit_resellers_menu", "adm_reseller_requests_menu") and not is_main_bot:
+        # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده، فروش اعتبار یا مدیریت
+        # درخواست‌های نمایندگی سطح ۲ (که فقط از بات اصلی قابل درخواست است) را ندارند
+        return False
+    if key == "adm_custom_config_settings" and not db.is_full_access_bot(is_main_bot):
+        # ساخت کانفیگ شخصی به اتصال مستقیم پنل VPN نیاز دارد که فقط از بات اصلی یا نمایندگی کامل قابل مدیریت است
+        return False
+    if key == "adm_add_configs" and not db.is_full_access_bot(is_main_bot):
+        # نماینده سطح ۲ بانک لینک دستی ندارد؛ محصولاتش همیشه خودکار از اعتبار حجمی تامین می‌شوند
+        return False
+    return True
+
+
 def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
-    """کیبورد پنل مدیریت با چیدمان دو ستونه برای کاهش ارتفاع منو."""
+    """کیبورد سطح اول پنل مدیریت: فقط دسته‌ها نمایش داده می‌شوند، نه هر ۲۶ آیتم."""
     rows = []
     current_row = []
-
-    for key, label, callback_data in ADMIN_PANEL_ITEMS:
-        if key in ("adm_resellers_menu", "adm_credit_resellers_menu", "adm_reseller_requests_menu") and not is_main_bot:
-            # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده، فروش اعتبار یا مدیریت
-            # درخواست‌های نمایندگی سطح ۲ (که فقط از بات اصلی قابل درخواست است) را ندارند
+    for cat_key, cat_label, item_keys in ADMIN_PANEL_CATEGORIES:
+        visible_items = [k for k in item_keys if _is_item_visible(db, k, is_main_bot)]
+        if not visible_items:
             continue
-        if key == "adm_custom_config_settings" and not db.is_full_access_bot(is_main_bot):
-            # ساخت کانفیگ شخصی به اتصال مستقیم پنل VPN نیاز دارد که فقط از بات اصلی یا نمایندگی کامل قابل مدیریت است
-            continue
-        if key == "adm_add_configs" and not db.is_full_access_bot(is_main_bot):
-            # نماینده سطح ۲ بانک لینک دستی ندارد؛ محصولاتش همیشه خودکار از اعتبار حجمی تامین می‌شوند
-            continue
-
-        current_row.append(_styled_inline(db, label, callback_data, f"{key}_style"))
+        current_row.append(InlineKeyboardButton(text=cat_label, callback_data=f"adm_cat:{cat_key}"))
         if len(current_row) == 2:
             rows.append(current_row)
             current_row = []
-
     if current_row:
         rows.append(current_row)
-
-    rows.append([
-        InlineKeyboardButton(text="🎨 رنگ‌آمیزی دکمه‌های پنل", callback_data="adm_panel_colors_menu"),
-        InlineKeyboardButton(text="🎨 رنگ‌آمیزی دکمه‌های خرید", callback_data="adm_buyflow_colors_menu"),
-    ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_category_kb(db, is_main_bot: bool, cat_key: str) -> InlineKeyboardMarkup:
+    """زیرمنوی یک دسته: آیتم‌های همان دسته با چیدمان دو ستونه + بازگشت."""
+    item_keys = next((items for key, _, items in ADMIN_PANEL_CATEGORIES if key == cat_key), [])
+    rows = []
+    current_row = []
+    for key in item_keys:
+        if not _is_item_visible(db, key, is_main_bot):
+            continue
+        label, callback_data = _admin_item_label_and_cb(key)
+        if key in _EXTRA_PANEL_ITEM_LABELS:
+            current_row.append(InlineKeyboardButton(text=label, callback_data=callback_data))
+        else:
+            current_row.append(_styled_inline(db, label, callback_data, f"{key}_style"))
+        if len(current_row) == 2:
+            rows.append(current_row)
+            current_row = []
+    if current_row:
+        rows.append(current_row)
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت به پنل مدیریت", callback_data="adm_back_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_category_label(cat_key: str) -> str:
+    for key, label, _ in ADMIN_PANEL_CATEGORIES:
+        if key == cat_key:
+            return label
+    return "🔧 پنل مدیریت"
 
 
 def admin_backup_menu_kb() -> InlineKeyboardMarkup:
@@ -347,19 +442,27 @@ def admin_restore_waiting_kb() -> InlineKeyboardMarkup:
 
 
 def admin_panel_colors_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
+    """رنگ‌آمیزی دکمه‌های پنل مدیریت، گروه‌بندی‌شده بر اساس همان دسته‌های پنل
+    تا پیدا کردن دکمه‌ی موردنظر برای تغییر رنگ ساده‌تر باشد."""
     rows = []
-    for key, label, _ in ADMIN_PANEL_ITEMS:
-        if key in ("adm_resellers_menu", "adm_credit_resellers_menu") and not is_main_bot:
+    for cat_key, cat_label, item_keys in ADMIN_PANEL_CATEGORIES:
+        # آیتم‌های منوی رنگ (خودشان) در این لیست معنا ندارند
+        real_items = [k for k in item_keys if k not in _EXTRA_PANEL_ITEM_LABELS]
+        visible_items = [k for k in real_items if _is_item_visible(db, k, is_main_bot)]
+        if not visible_items:
             continue
-        current_style = db.get_setting(f"{key}_style", "")
-        style_icon = {"primary": "🔵", "success": "🟢", "danger": "🔴", "": "⚪️"}.get(current_style, "⚪️")
-        rows.append(
-            [
-                InlineKeyboardButton(text=f"{style_icon} {label}", callback_data="noop"),
-                InlineKeyboardButton(text="🎨 تغییر رنگ", callback_data=f"adm_btn_color_menu:{key}"),
-            ]
-        )
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+        rows.append([InlineKeyboardButton(text=f"── {cat_label} ──", callback_data="noop")])
+        for key in visible_items:
+            label, _ = _admin_item_label_and_cb(key)
+            current_style = db.get_setting(f"{key}_style", "")
+            style_icon = {"primary": "🔵", "success": "🟢", "danger": "🔴", "": "⚪️"}.get(current_style, "⚪️")
+            rows.append(
+                [
+                    InlineKeyboardButton(text=f"{style_icon} {label}", callback_data="noop"),
+                    InlineKeyboardButton(text="🎨 تغییر رنگ", callback_data=f"adm_btn_color_menu:{key}"),
+                ]
+            )
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:appearance")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -383,7 +486,7 @@ def buy_flow_colors_kb(db) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🎨 تغییر رنگ", callback_data=f"adm_btn_color_menu:{key}"),
             ]
         )
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:appearance")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -523,7 +626,7 @@ def admin_edit_buttons_kb(db) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🎨 تغییر رنگ", callback_data=f"adm_btn_color_menu:{key}"),
             ]
         )
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:appearance")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

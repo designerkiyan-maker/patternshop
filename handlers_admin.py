@@ -206,6 +206,16 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_noop(call: CallbackQuery):
         await call.answer()
 
+    @router.callback_query(F.data.startswith("adm_cat:"))
+    async def cb_admin_category(call: CallbackQuery, state: FSMContext):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        await state.clear()
+        cat_key = call.data.split(":", 1)[1]
+        title = kb.admin_category_label(cat_key)
+        await replace_admin_view(call, f"{title}:", reply_markup=kb.admin_category_kb(db, is_main_bot, cat_key))
+        await call.answer()
+
     # -------------------------------------------------------------------
     # مدیریت دسته‌بندی‌ها
     # -------------------------------------------------------------------
@@ -2836,6 +2846,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         for item_key, label in kb.BUY_FLOW_COLOR_ITEMS:
             if item_key == key:
                 return label
+        if key in kb._EXTRA_PANEL_ITEM_LABELS:
+            return kb._EXTRA_PANEL_ITEM_LABELS[key]
         return key
 
     def _is_panel_item_key(key: str) -> bool:
