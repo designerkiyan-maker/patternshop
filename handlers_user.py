@@ -159,7 +159,7 @@ def create_user_router(db, is_main_bot: bool = True) -> Router:
     @router.callback_query(F.data == "custom_config_start")
     async def cb_custom_config_start(call: CallbackQuery, state: FSMContext):
         await call.answer()
-        if not is_main_bot:
+        if not db.is_full_access_bot(is_main_bot):
             return
         try:
             await call.message.delete()
@@ -190,11 +190,16 @@ def create_user_router(db, is_main_bot: bool = True) -> Router:
         await call.answer()
 
     def _product_confirm_text(product, quantity: int, stock: int, wallet_credit: int) -> str:
+        stock_line = (
+            "⚡️ این محصول خودکار و لحظه‌ای ساخته می‌شود (محدودیت موجودی ندارد)\n"
+            if product["is_auto_provision"] else
+            f"📊 موجودی: {stock} عدد\n"
+        )
         text = (
             f"📦 {product['name']}\n"
             f"💰 قیمت واحد: {product['price']:,} تومان\n"
             f"📝 توضیحات: {product['description'] or '---'}\n"
-            f"📊 موجودی: {stock} عدد\n"
+            f"{stock_line}"
         )
         if quantity > 1:
             text += f"\n🔢 تعداد انتخابی: {quantity} عدد\n💵 جمع کل: {product['price'] * quantity:,} تومان\n"
@@ -432,7 +437,7 @@ def create_user_router(db, is_main_bot: bool = True) -> Router:
 
             if product["is_auto_provision"]:
                 try:
-                    result = await provision_auto_config(db, product)
+                    prov_results = await provision_auto_config(db, product, quantity)
                 except ProvisionError as e:
                     db.reject_order(order_id)
                     await _notify_admins_of_order(bot, order_id)
@@ -442,7 +447,7 @@ def create_user_router(db, is_main_bot: bool = True) -> Router:
                     await call.answer()
                     return
                 db.approve_order_auto(order_id)
-                links = [result["subscription_url"]]
+                links = [r["subscription_url"] for r in prov_results]
             else:
                 results = db.take_unused_configs(product_id, call.from_user.id, quantity)
                 if not results:
@@ -596,7 +601,7 @@ def create_user_router(db, is_main_bot: bool = True) -> Router:
         return "\n".join(lines)
 
     async def custom_config_start(message: Message, state: FSMContext):
-        if not is_main_bot:
+        if not db.is_full_access_bot(is_main_bot):
             await message.answer("این بخش در حال حاضر غیرفعال است.")
             return
         settings = db.get_custom_config_settings()

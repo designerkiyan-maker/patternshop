@@ -33,7 +33,6 @@ class AdminAddProduct(StatesGroup):
     waiting_price = State()
     waiting_desc = State()
     waiting_duration = State()
-    waiting_auto_provision_choice = State()
     waiting_auto_provision_volume = State()
 
 
@@ -102,6 +101,7 @@ class AdminAddResellerBot(StatesGroup):
     waiting_token = State()
     waiting_owner_id = State()
     waiting_owner_name = State()
+    waiting_level = State()
 
 
 class AdminWheelSettings(StatesGroup):

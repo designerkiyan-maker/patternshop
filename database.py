@@ -496,6 +496,7 @@ class Database:
             ("orders", "quantity", "INTEGER DEFAULT 1"),
             ("configs", "order_id", "INTEGER"),
             ("reseller_bots", "link_slug", "TEXT"),
+            ("reseller_bots", "reseller_level", "INTEGER DEFAULT 2"),
             ("crypto_invoices", "expires_at", "TEXT"),
             # ساخت کانفیگ شخصی: سفارش‌های این نوع از همان جدول orders رد می‌شوند
             # (تا کارت‌به‌کارت/کیف‌پول/کریپتو بدون تغییر کار کنند) و product_id
@@ -771,6 +772,14 @@ class Database:
             row = conn.execute("SELECT telegram_id FROM admins WHERE role='owner' LIMIT 1").fetchone()
             return row["telegram_id"] if row else None
 
+    def is_full_access_bot(self, is_main_bot: bool) -> bool:
+        """بات اصلی و نماینده‌ی «سطح ۱ (کامل)» به همه‌ی امکانات (پنل VPN شخصی، ساخت
+        کانفیگ دستی، بانک لینک برای محصولات) دسترسی دارند. نماینده‌ی «سطح ۲» فقط
+        می‌تواند محصولات خودکار-از-اعتبار-حجمی بفروشد و به پنل/کانفیگ دستی دسترسی ندارد."""
+        if is_main_bot:
+            return True
+        return self.get_setting("reseller_level", "2") == "1"
+
     def get_admin_role(self, tg_id: int):
         """نقش ادمین را برمی‌گرداند: 'owner' | 'admin' | 'mid' | 'support' | None (اگر ادمین نباشد)."""
         with self._get_conn() as conn:
@@ -1001,8 +1010,9 @@ class Database:
             ).fetchone()
             if prod and prod["is_auto_provision"]:
                 # این محصولات لحظه‌ی خرید و به‌صورت خودکار از اعتبار حجمی نماینده ساخته می‌شوند؛
-                # «موجودی» به معنای بانک لینک برایشان معنا ندارد، همیشه در دسترس نمایش داده می‌شوند.
-                return 1
+                # عدد ثابتی به‌عنوان سقفِ معقول تعداد قابل‌خرید در یک سفارش برمی‌گردد (نه موجودی واقعی)،
+                # کفایت واقعی اعتبار همان لحظه‌ی خرید در provision_auto_config چک می‌شود.
+                return 20
             row = conn.execute(
                 "SELECT COUNT(*) c FROM configs WHERE product_id=? AND is_used=0", (product_id,)
             ).fetchone()
@@ -1652,12 +1662,13 @@ class Database:
     # ثبت‌نام بات‌های نمایندگی (فقط در دیتابیس بات اصلی معنا دارد)
     # -----------------------------------------------------------------------
 
-    def register_reseller_bot(self, bot_token: str, bot_username: str, owner_telegram_id: int, owner_name: str, db_path: str) -> int:
+    def register_reseller_bot(self, bot_token: str, bot_username: str, owner_telegram_id: int, owner_name: str,
+                               db_path: str, reseller_level: int = 2) -> int:
         with self._get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO reseller_bots (bot_token, bot_username, owner_telegram_id, owner_name, db_path) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (bot_token, bot_username, owner_telegram_id, owner_name, db_path),
+                "INSERT INTO reseller_bots (bot_token, bot_username, owner_telegram_id, owner_name, db_path, reseller_level) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (bot_token, bot_username, owner_telegram_id, owner_name, db_path, reseller_level),
             )
             return cur.lastrowid
 
@@ -1670,6 +1681,10 @@ class Database:
     def get_reseller_bot(self, bot_id: int):
         with self._get_conn() as conn:
             return conn.execute("SELECT * FROM reseller_bots WHERE id=?", (bot_id,)).fetchone()
+
+    def set_reseller_level(self, bot_id: int, level: int):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE reseller_bots SET reseller_level=? WHERE id=?", (level, bot_id))
 
     def get_reseller_bot_by_slug(self, slug: str):
         with self._get_conn() as conn:

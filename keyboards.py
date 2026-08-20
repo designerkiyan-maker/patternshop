@@ -145,7 +145,7 @@ def menu_for_user(db, user_tg_id: int) -> ReplyKeyboardMarkup:
 
 def categories_kb(db, categories, is_main_bot: bool = True) -> InlineKeyboardMarkup:
     rows = []
-    if is_main_bot and db.get_setting("custom_config_enabled", "0") == "1":
+    if db.is_full_access_bot(is_main_bot) and db.get_setting("custom_config_enabled", "0") == "1":
         rows.append([_styled_inline(db, "🛠 ساخت کانفیگ شخصی", "custom_config_start", "btn_custom_config_style")])
     for cat in categories:
         rows.append([_styled_inline(db, f"📁 {cat['name']}", f"cat:{cat['id']}", "btn_cat_select_style")])
@@ -290,8 +290,8 @@ def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
         if key in ("adm_resellers_menu", "adm_credit_resellers_menu") and not is_main_bot:
             # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده یا فروش اعتبار ندارند
             continue
-        if key == "adm_custom_config_settings" and not is_main_bot:
-            # ساخت کانفیگ شخصی به اتصال مستقیم پنل VPN نیاز دارد که فقط از بات اصلی مدیریت می‌شود
+        if key == "adm_custom_config_settings" and not db.is_full_access_bot(is_main_bot):
+            # ساخت کانفیگ شخصی به اتصال مستقیم پنل VPN نیاز دارد که فقط از بات اصلی یا نمایندگی کامل قابل مدیریت است
             continue
 
         current_row.append(_styled_inline(db, label, callback_data, f"{key}_style"))
@@ -378,13 +378,6 @@ def admin_back_kb(callback_data="adm_back_panel") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت به پنل مدیریت", callback_data=callback_data)]]
     )
-
-
-def product_supply_type_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔗 بانک لینک (دستی)", callback_data="prod_supply:bank")],
-        [InlineKeyboardButton(text="⚡️ خودکار از اعتبار حجمی", callback_data="prod_supply:auto")],
-    ])
 
 
 def admin_categories_kb(categories) -> InlineKeyboardMarkup:
@@ -736,9 +729,9 @@ def custom_config_menu_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
             callback_data="adm_custom_config_edit_range",
         )],
     ]
-    if is_main_bot:
-        # اتصال پنل VPN فقط توسط بات اصلی مدیریت می‌شود؛ بات‌های نمایندگی
-        # از استخر حجمی که ادمین تعیین می‌کند استفاده می‌کنند، نه پنل خودشان.
+    if db.is_full_access_bot(is_main_bot):
+        # اتصال پنل VPN فقط توسط بات اصلی یا نمایندگی سطح کامل مدیریت می‌شود؛ نمایندگی سطح ۲
+        # از استخر حجمی که ادمین بات اصلی تعیین می‌کند استفاده می‌کند، نه پنل خودش.
         rows.append([InlineKeyboardButton(text="🖥 مدیریت سرورهای پنل", callback_data="adm_panel_servers")])
     rows.append([InlineKeyboardButton(text="💰 مدیریت قیمت‌گذاری بر اساس بازه", callback_data="adm_pricing_tiers")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_back_panel")])
@@ -835,11 +828,13 @@ def resellers_kb(resellers) -> InlineKeyboardMarkup:
     rows = []
     for r in resellers:
         state_icon = "🟢" if r["is_active"] else "🔴"
+        level = r["reseller_level"] if "reseller_level" in r.keys() else 2
+        level_icon = "⭐️کامل" if level == 1 else "۲محدود"
         label = r["bot_username"] or r["bot_token"][:10] + "..."
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"{state_icon} @{label} - {r['owner_name'] or r['owner_telegram_id']}",
+                    text=f"{state_icon} @{label} - {r['owner_name'] or r['owner_telegram_id']} ({level_icon})",
                     callback_data="noop",
                 )
             ]
@@ -847,6 +842,7 @@ def resellers_kb(resellers) -> InlineKeyboardMarkup:
         rows.append(
             [
                 InlineKeyboardButton(text="تغییر وضعیت", callback_data=f"adm_resbot_toggle:{r['id']}"),
+                InlineKeyboardButton(text="🔁 تغییر سطح", callback_data=f"adm_resbot_level:{r['id']}"),
                 InlineKeyboardButton(text="🗑حذف", callback_data=f"adm_resbot_del:{r['id']}"),
             ]
         )

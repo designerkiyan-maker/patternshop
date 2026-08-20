@@ -368,7 +368,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         await state.update_data(duration_days=int(text))
 
-        if is_main_bot:
+        if db.is_full_access_bot(is_main_bot):
             data = await state.get_data()
             db.add_product(data["category_id"], data["name"], data["price"], data["description"], data["duration_days"])
             db.log_admin_action(message.from_user.id, "product_add", f"محصول «{data['name']}» | قیمت: {data['price']:,}")
@@ -376,28 +376,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("✅ محصول با موفقیت اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
             return
 
-        await state.set_state(AdminAddProduct.waiting_auto_provision_choice)
-        await message.answer(
-            "نوع تأمین این محصول چیست؟\n\n"
-            "🔗 بانک لینک: باید خودت از قبل لینک کانفیگ آماده و اضافه کنی.\n"
-            "⚡️ خودکار از اعتبار حجمی: لحظه‌ی خرید مشتری، کانفیگ خودش از اعتبار حجمی‌ات ساخته و تحویل می‌شود.",
-            reply_markup=kb.product_supply_type_kb(),
-        )
-
-    @router.callback_query(F.data == "prod_supply:bank", AdminAddProduct.waiting_auto_provision_choice)
-    async def cb_product_supply_bank(call: CallbackQuery, state: FSMContext):
-        data = await state.get_data()
-        db.add_product(data["category_id"], data["name"], data["price"], data["description"], data["duration_days"])
-        db.log_admin_action(call.from_user.id, "product_add", f"محصول «{data['name']}» | قیمت: {data['price']:,}")
-        await state.clear()
-        await call.answer()
-        await call.message.answer("✅ محصول با موفقیت اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
-
-    @router.callback_query(F.data == "prod_supply:auto", AdminAddProduct.waiting_auto_provision_choice)
-    async def cb_product_supply_auto(call: CallbackQuery, state: FSMContext):
+        # نمایندگی سطح ۲: به پنل/بانک لینک دسترسی ندارد، همیشه خودکار از اعتبار حجمی است - سوالی پرسیده نمی‌شود
         await state.set_state(AdminAddProduct.waiting_auto_provision_volume)
-        await call.answer()
-        await call.message.answer("این محصول چند گیگابایت باشد؟ فقط عدد وارد کنید (مثال: 30):")
+        await message.answer("این محصول چند گیگابایت باشد؟ فقط عدد وارد کنید (مثال: 30):")
 
     @router.message(AdminAddProduct.waiting_auto_provision_volume)
     async def process_product_auto_provision_volume(message: Message, state: FSMContext):
@@ -726,8 +707,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         product = db.get_product(order["product_id"])
 
         if product and product["is_auto_provision"]:
+            quantity = order["quantity"] or 1
             try:
-                result = await provision_auto_config(db, product)
+                prov_results = await provision_auto_config(db, product, quantity)
             except ProvisionError as e:
                 await call.answer(f"⛔️ {e}", show_alert=True)
                 return
@@ -741,7 +723,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 await bot.send_message(order["user_id"], f"✅ خرید شما تایید شد!\n📦 محصول: {product['name']}")
                 await deliver_config_to_user(
                     bot, order["user_id"], product["name"],
-                    [result["subscription_url"]], final_price=order["final_price"], order_id=order_id,
+                    [r["subscription_url"] for r in prov_results], final_price=order["final_price"], order_id=order_id,
                 )
             except Exception:
                 pass
@@ -1304,7 +1286,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_custom_config_settings")
     async def cb_admin_custom_config_settings(call: CallbackQuery):
-        if not is_main_bot:
+        if not db.is_full_access_bot(is_main_bot):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -1318,7 +1300,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_custom_config_toggle")
     async def cb_admin_custom_config_toggle(call: CallbackQuery):
-        if not is_main_bot:
+        if not db.is_full_access_bot(is_main_bot):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -1367,7 +1349,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_panel_servers")
     async def cb_admin_panel_servers(call: CallbackQuery):
-        if not is_main_bot:
+        if not db.is_full_access_bot(is_main_bot):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -1376,7 +1358,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_panel_server_add")
     async def cb_admin_panel_server_add(call: CallbackQuery, state: FSMContext):
-        if not is_main_bot:
+        if not db.is_full_access_bot(is_main_bot):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -1516,7 +1498,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_view:"))
     async def cb_admin_panel_server_view(call: CallbackQuery):
-        if not is_main_bot:
+        if not db.is_full_access_bot(is_main_bot):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -1544,7 +1526,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_template:"))
     async def cb_admin_panel_server_template(call: CallbackQuery, state: FSMContext):
-        if not is_main_bot:
+        if not db.is_full_access_bot(is_main_bot):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -1585,7 +1567,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_test:"))
     async def cb_admin_panel_server_test(call: CallbackQuery):
-        if not is_main_bot:
+        if not db.is_full_access_bot(is_main_bot):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -1604,7 +1586,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_usage:"))
     async def cb_admin_panel_server_usage_toggle(call: CallbackQuery):
-        if not is_main_bot:
+        if not db.is_full_access_bot(is_main_bot):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -1640,7 +1622,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_toggle:"))
     async def cb_admin_panel_server_toggle(call: CallbackQuery):
-        if not is_main_bot:
+        if not db.is_full_access_bot(is_main_bot):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -1660,7 +1642,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_delete:"))
     async def cb_admin_panel_server_delete(call: CallbackQuery):
-        if not is_main_bot:
+        if not db.is_full_access_bot(is_main_bot):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -2034,6 +2016,35 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await safe_edit(call, "🏪 مدیریت بات‌های نمایندگی:", reply_markup=kb.resellers_kb(bots))
             await call.answer("وضعیت تغییر کرد و اعمال شد.")
 
+        @router.callback_query(F.data.startswith("adm_resbot_level:"))
+        async def cb_admin_resbot_level(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            bot_id = callback_id(call.data, "adm_resbot_level")
+            if bot_id is None:
+                await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+                return
+            reseller_bot = db.get_reseller_bot(bot_id)
+            if not reseller_bot:
+                return await call.answer("یافت نشد.", show_alert=True)
+
+            current_level = reseller_bot["reseller_level"] if "reseller_level" in reseller_bot.keys() else 2
+            new_level = 2 if current_level == 1 else 1
+            db.set_reseller_level(bot_id, new_level)
+
+            try:
+                reseller_db = Database(resolve_db_path(reseller_bot["db_path"]))
+                reseller_db.set_setting("reseller_level", str(new_level))
+                if new_level == 2:
+                    reseller_db.set_setting("custom_config_enabled", "0")
+            except Exception:
+                pass
+
+            bots = db.list_reseller_bots()
+            level_label = "کامل" if new_level == 1 else "سطح ۲ (محدود)"
+            await safe_edit(call, f"🏪 مدیریت بات‌های نمایندگی:", reply_markup=kb.resellers_kb(bots))
+            await call.answer(f"سطح این نمایندگی به «{level_label}» تغییر کرد.")
+
         @router.callback_query(F.data.startswith("adm_resbot_del:"))
         async def cb_admin_resbot_del(call: CallbackQuery):
             if not senior_admin_only(call.from_user.id):
@@ -2106,33 +2117,55 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
         @router.message(AdminAddResellerBot.waiting_owner_name)
         async def process_resbot_owner_name(message: Message, state: FSMContext):
+            await state.update_data(resbot_owner_name=message.text.strip())
+            await state.set_state(AdminAddResellerBot.waiting_level)
+            await message.answer(
+                "سطح این نمایندگی چیست؟\n\n"
+                "1️⃣ نمایندگی کامل: به همه‌ی امکانات (پنل VPN شخصی، ساخت کانفیگ دستی، بانک لینک) دسترسی کامل دارد.\n"
+                "2️⃣ نمایندگی سطح ۲: فقط می‌تواند از اعتبار حجمی خودش محصول خودکار بفروشد؛ به پنل و ساخت کانفیگ دستی دسترسی ندارد.\n\n"
+                "فقط عدد 1 یا 2 را ارسال کنید:"
+            )
+
+        @router.message(AdminAddResellerBot.waiting_level)
+        async def process_resbot_level(message: Message, state: FSMContext):
+            text = message.text.strip()
+            if text not in ("1", "2"):
+                await message.answer("لطفاً فقط عدد 1 یا 2 را ارسال کنید.")
+                return
+            level = int(text)
             data = await state.get_data()
             token = data["resbot_token"]
             username = data["resbot_username"]
             owner_id = data["resbot_owner_id"]
-            owner_name = message.text.strip()
+            owner_name = data["resbot_owner_name"]
 
             os.makedirs(RESELLER_DBS_DIR, exist_ok=True)
             db_path = os.path.join(RESELLER_DBS_DIR, f"{username}.db")
 
-            reseller_id = db.register_reseller_bot(token, username, owner_id, owner_name, db_path)
+            reseller_id = db.register_reseller_bot(token, username, owner_id, owner_name, db_path, reseller_level=level)
 
             started = False
             if bot_manager:
                 started = await bot_manager.start_bot(token, db_path, owner_id, is_main_bot=False)
 
             # دیتابیس همین نماینده باید بداند شناسه‌ی خودش در جدول reseller_bots (بات اصلی) چیست
-            # تا بتواند لینک مینی‌اپ اختصاصی خودش را بسازد (?b=<reseller_id>)
+            # تا بتواند لینک مینی‌اپ اختصاصی خودش را بسازد (?b=<reseller_id>)، و سطح دسترسی‌اش چیست
             reseller_db = Database(db_path)
             reseller_db.init_db(owner_id=owner_id)
             reseller_db.set_setting("miniapp_tenant_id", str(reseller_id))
+            reseller_db.set_setting("reseller_level", str(level))
+            if level == 2:
+                # نمایندگی سطح ۲ نباید هرگز حالت کانفیگ دستی/شخصی روشن داشته باشد
+                reseller_db.set_setting("custom_config_enabled", "0")
 
             await state.clear()
             status_text = "✅ بات نمایندگی راه‌اندازی و همین الان روشن شد." if started else \
                 "⚠️ بات ثبت شد ولی راه‌اندازی زنده انجام نشد؛ با ری‌استارت سرویس اصلی خودکار روشن می‌شود."
+            level_label = "کامل" if level == 1 else "سطح ۲ (محدود)"
             await message.answer(
                 f"{status_text}\n\n"
                 f"🤖 بات: @{username}\n"
+                f"🏷 سطح نمایندگی: {level_label}\n"
                 f"👤 نماینده: {owner_name} ({owner_id})\n\n"
                 f"این بات کاملاً مستقل است و تمام امکانات (کد تخفیف، زیرمجموعه‌گیری، کیف پول، کانفیگ تست) را "
                 f"از صفر و جدا از بات اصلی دارد. نماینده باید با /start به بات خودش (@{username}) وارد شود.",
