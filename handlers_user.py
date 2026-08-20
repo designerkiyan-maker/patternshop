@@ -1248,7 +1248,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         await state.update_data(resreq_volume=int(text))
         await state.set_state(ResellerRequestFlow.waiting_text)
         await message.answer(
-            "توضیح بده: چرا نمایندگی می‌خوای و قراره چطور بفروشی (چند خط کافیه):",
+            "اگه توضیحی دارید (چرا نمایندگی می‌خوای و قراره چطور بفروشی) ارسال کنید، "
+            "در غیر این صورت «ندارم» را ارسال کنید:",
             reply_markup=kb.cancel_kb(),
         )
 
@@ -1256,8 +1257,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     async def reseller_request_text(message: Message, state: FSMContext, bot: Bot):
         request_text = (message.text or "").strip()
         if not request_text:
-            await message.answer("لطفاً متن درخواست را ارسال کنید.")
+            await message.answer("لطفاً متن درخواست را ارسال کنید یا «ندارم» را بفرستید.")
             return
+        if request_text in ("ندارم", "ندارم.", "-", "_"):
+            request_text = "توضیحی ارائه نشده."
         data = await state.get_data()
         volume_gb = data.get("resreq_volume")
         await state.clear()
