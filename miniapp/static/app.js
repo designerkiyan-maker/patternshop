@@ -1651,6 +1651,7 @@ const STYLE_OPTIONS = [
 ];
 
 let adminSection = "stats"; // stats | menu | branding | catalog | tickets | livechat | sales | users | resellers
+let adminGroup = null; // گروه فعلاً باز در پنل مدیریت (سطح اول ناوبری)
 let adminCatalogView = { level: "categories" }; // categories | products | configs
 let adminPanelsView = { level: "servers" }; // servers | pricing
 let adminTicketView = { level: "list" }; // list | thread
@@ -1659,17 +1660,30 @@ let adminPresenceTimer = null;
 let adminLiveChatPollTimer = null;
 
 const ADMIN_TABS = [
-  { key: "stats", label: "آمار", fullOnly: true, seniorOnly: true },
-  { key: "menu", label: "چیدمان منو", fullOnly: true, seniorOnly: true },
-  { key: "branding", label: "برندینگ", fullOnly: true, seniorOnly: true },
-  { key: "catalog", label: "محصولات", fullOnly: true, seniorOnly: true },
-  { key: "panels", label: "پنل‌های VPN", fullOnly: true, seniorOnly: true },
-  { key: "users", label: "مدیریت کاربران", fullOnly: true },
-  { key: "sales", label: "فروش", fullOnly: true, seniorOnly: true },
-  { key: "livechat", label: "پشتیبانی زنده", fullOnly: false },
-  { key: "tickets", label: "تیکت‌ها", fullOnly: false },
-  { key: "adminlog", label: "لاگ ادمین", fullOnly: true, seniorOnly: true },
-  { key: "backup", label: "بکاپ", fullOnly: true, ownerOnly: true },
+  { key: "stats", label: "📊 آمار", fullOnly: true, seniorOnly: true },
+  { key: "sales", label: "💰 فروش", fullOnly: true, seniorOnly: true },
+  { key: "catalog", label: "📦 محصولات", fullOnly: true, seniorOnly: true },
+  { key: "panels", label: "🖥 پنل‌های VPN", fullOnly: true, seniorOnly: true },
+  { key: "users", label: "👤 کاربران", fullOnly: true },
+  { key: "resellers", label: "🏪 نمایندگی‌ها", fullOnly: true, seniorOnly: true, mainBotOnly: true },
+  { key: "livechat", label: "💬 پشتیبانی زنده", fullOnly: false },
+  { key: "tickets", label: "🎫 تیکت‌ها", fullOnly: false },
+  { key: "menu", label: "🧩 چیدمان منو", fullOnly: true, seniorOnly: true },
+  { key: "branding", label: "🎨 برندینگ", fullOnly: true, seniorOnly: true },
+  { key: "adminlog", label: "📜 لاگ ادمین", fullOnly: true, seniorOnly: true },
+  { key: "backup", label: "🗄 بکاپ", fullOnly: true, ownerOnly: true },
+];
+
+// دسته‌بندی سطح اول پنل مدیریت مینی‌اپ: به‌جای یک ردیف طولانیِ ۱۲ تایی از
+// تب‌های قابل اسکرول، ادمین اول یک گروه را انتخاب می‌کند و سپس زیرتب‌های
+// همان گروه (در صورت وجود بیش از یک مورد) نمایش داده می‌شود.
+const ADMIN_TAB_GROUPS = [
+  { key: "overview", label: "📊 آمار و فروش", tabs: ["stats", "sales"] },
+  { key: "catalog_panels", label: "📦 محصولات و پنل‌ها", tabs: ["catalog", "panels"] },
+  { key: "people", label: "👥 کاربران و نمایندگی", tabs: ["users", "resellers"] },
+  { key: "support", label: "💬 پشتیبانی", tabs: ["livechat", "tickets"] },
+  { key: "appearance", label: "🎨 منو و برندینگ", tabs: ["menu", "branding"] },
+  { key: "system", label: "🗂 سیستم", tabs: ["adminlog", "backup"] },
 ];
 
 async function renderAdmin() {
@@ -1687,24 +1701,44 @@ async function renderAdmin() {
   const isOwner = adminRole === "owner";
   const isSenior = adminRole === "owner" || adminRole === "admin";
   const visibleTabs = ADMIN_TABS.filter(
-    (t) => (!isSupport || !t.fullOnly) && (!t.seniorOnly || isSenior) && (!t.ownerOnly || isOwner)
+    (t) =>
+      (!isSupport || !t.fullOnly) &&
+      (!t.seniorOnly || isSenior) &&
+      (!t.ownerOnly || isOwner) &&
+      (!t.mainBotOnly || isMainBot)
   );
-  if (!visibleTabs.some((t) => t.key === adminSection) && adminSection !== "resellers") {
-    adminSection = visibleTabs[0].key;
+  const visibleKeys = new Set(visibleTabs.map((t) => t.key));
+
+  // گروه‌هایی که حداقل یک تب قابل‌مشاهده دارند
+  const visibleGroups = ADMIN_TAB_GROUPS
+    .map((g) => ({ ...g, tabs: g.tabs.filter((k) => visibleKeys.has(k)) }))
+    .filter((g) => g.tabs.length > 0);
+
+  // اگر تب فعلی در هیچ گروه قابل‌مشاهده‌ای نیست (مثلاً به‌خاطر تغییر نقش)، ریست کن
+  if (!visibleKeys.has(adminSection)) {
+    adminSection = visibleGroups.length ? visibleGroups[0].tabs[0] : "";
   }
-  if (adminSection === "resellers" && !(isSenior && isMainBot)) {
-    adminSection = visibleTabs[0].key;
+  // گروه فعلی را از روی تب فعال پیدا کن (اگر قبلاً تعیین نشده یا دیگر معتبر نیست)
+  let currentGroup = visibleGroups.find((g) => g.key === adminGroup);
+  if (!currentGroup || !currentGroup.tabs.includes(adminSection)) {
+    currentGroup = visibleGroups.find((g) => g.tabs.includes(adminSection)) || visibleGroups[0];
   }
+  adminGroup = currentGroup ? currentGroup.key : null;
+
+  const tabLabel = (key) => (ADMIN_TABS.find((t) => t.key === key) || {}).label || key;
 
   const prevTabsEl = document.getElementById("admin-section-tabs");
   const prevScrollLeft = prevTabsEl ? prevTabsEl.scrollLeft : 0;
   content.innerHTML = `
     ${isSupport ? `<div class="banner" style="margin-bottom:10px"><div class="banner-title"><span class="ic">🎧</span>نقش شما: پشتیبان (دسترسی محدود)</div></div>` : ""}
     ${isMid ? `<div class="banner" style="margin-bottom:10px"><div class="banner-title"><span class="ic">🥈</span>نقش شما: ادمین میانی (بدون آمار/فروش/نمایندگی/برندینگ/محصولات)</div></div>` : ""}
-    <div class="segmented" id="admin-section-tabs">
-      ${visibleTabs.map((t) => `<button class="seg-btn ${adminSection === t.key ? "active" : ""}" data-section="${t.key}">${t.label}</button>`).join("")}
-      ${(isSenior && isMainBot) ? `<button class="seg-btn ${adminSection === "resellers" ? "active" : ""}" data-section="resellers">نمایندگی‌ها</button>` : ""}
+    <div class="segmented-group" id="admin-group-tabs">
+      ${visibleGroups.map((g) => `<button class="seg-btn-group ${adminGroup === g.key ? "active" : ""}" data-group="${g.key}">${g.label}</button>`).join("")}
     </div>
+    ${currentGroup && currentGroup.tabs.length > 1 ? `
+    <div class="segmented" id="admin-section-tabs">
+      ${currentGroup.tabs.map((k) => `<button class="seg-btn ${adminSection === k ? "active" : ""}" data-section="${k}">${tabLabel(k)}</button>`).join("")}
+    </div>` : ""}
     <div id="admin-section-body">${skeleton(4)}</div>
   `;
   const newTabsEl = document.getElementById("admin-section-tabs");
@@ -1713,6 +1747,21 @@ async function renderAdmin() {
     const activeBtn = newTabsEl.querySelector(".seg-btn.active");
     if (activeBtn) activeBtn.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
+  document.querySelectorAll("#admin-group-tabs .seg-btn-group").forEach((b) => {
+    b.onclick = () => {
+      const g = visibleGroups.find((x) => x.key === b.dataset.group);
+      if (!g) return;
+      if (adminSection !== "livechat") clearInterval(adminLiveChatPollTimer);
+      adminGroup = g.key;
+      adminSection = g.tabs[0];
+      if (adminSection === "catalog") adminCatalogView = { level: "categories" };
+      if (adminSection === "panels") adminPanelsView = { level: "servers" };
+      if (adminSection === "tickets") adminTicketView = { level: "list" };
+      if (adminSection === "livechat") adminLiveChatView = { level: "list" };
+      if (adminSection === "users") adminUserView = { level: "list", filter: "all", query: "" };
+      renderAdmin();
+    };
+  });
   document.querySelectorAll("#admin-section-tabs .seg-btn").forEach((b) => {
     b.onclick = () => {
       if (adminSection !== "livechat") clearInterval(adminLiveChatPollTimer);

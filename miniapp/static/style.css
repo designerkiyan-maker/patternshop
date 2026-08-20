@@ -759,6 +759,19 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
 }
 .seg-btn.active { background: var(--cyan); color: #06222a; font-weight: 700; }
 
+/* گروه‌بندی سطح اول پنل مدیریت مینی‌اپ: چیدمان شبکه‌ای به‌جای ردیف اسکرولی،
+   تا انتخاب دسته‌ی اصلی (آمار/محصولات/کاربران/...) در نگاه اول واضح باشد. */
+.segmented-group {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  margin-bottom: 12px;
+}
+.seg-btn-group {
+  border: 1px solid var(--glass-brd); background: var(--bg-elevated); color: var(--text-muted);
+  padding: 12px 8px; border-radius: var(--radius-sm); font-family: var(--font-body);
+  font-size: 12.5px; font-weight: 600; cursor: pointer; text-align: center;
+}
+.seg-btn-group.active { background: var(--cyan); color: #06222a; border-color: var(--cyan); }
+
 .admin-list-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 10px 0; border-bottom: 1px solid var(--glass-brd);
