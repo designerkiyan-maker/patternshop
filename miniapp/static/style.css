@@ -273,12 +273,13 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
   animation: cardPop 0.32s cubic-bezier(.2, .9, .3, 1.2);
 }
 .quick-item:active { transform: scale(0.96); filter: brightness(0.97); }
-.quick-item .q-label { font-size: 12.5px; font-weight: 700; color: var(--text); }
+.quick-item .q-label { font-size: 13px; font-weight: 700; color: var(--text); }
 .quick-item .q-ic {
-  width: 32px; height: 32px; border-radius: 10px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center; font-size: 15px;
-  background: linear-gradient(135deg, var(--pink), var(--violet));
+  width: 26px; height: 26px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--pink);
 }
+.quick-item .q-ic svg { width: 100%; height: 100%; }
 .quick-item.full { grid-column: 1 / -1; }
 
 /* ===================================================================
@@ -376,6 +377,8 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
   display: flex; align-items: center; justify-content: center; font-size: 17px;
   background: linear-gradient(135deg, var(--pink), var(--violet)); color: #fff;
 }
+.list-row-ic.line { background: none; color: var(--pink); width: 24px; height: 24px; }
+.list-row-ic.line svg { width: 100%; height: 100%; }
 .list-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .list-row-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
 .list-row-sub { font-size: 11.5px; color: var(--text-muted); }
@@ -946,7 +949,7 @@ html[data-theme="clean-light"] .quick-item {
   border: 1px solid var(--border-soft);
   box-shadow: 0 2px 12px -4px rgba(20, 40, 25, 0.08);
 }
-html[data-theme="clean-light"] .quick-item .q-ic { color: #fff; }
+html[data-theme="clean-light"] .quick-item .q-ic { color: var(--pink); }
 
 html[data-theme="clean-light"] .list-row {
   background: var(--bg2);

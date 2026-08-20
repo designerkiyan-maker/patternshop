@@ -517,6 +517,15 @@ async function renderTicketThread(body) {
 // ---------------------------------------------------------------------------
 // تب خانه
 // ---------------------------------------------------------------------------
+// آیکون‌های خطی (outline) برای گرید دسترسی سریع — هم‌راستا با آیکون‌های نوار پایین
+const ICON_STORE = `<svg viewBox="0 0 24 24" fill="none"><path d="M4 8h16l-1.2 10.2a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 8V6a4 4 0 0 1 8 0v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+const ICON_SHIELD = `<svg viewBox="0 0 24 24" fill="none"><path d="M12 2 4 6v6c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V6l-8-4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 12.2 11.3 14l3.2-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICON_WALLET = `<svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="6" width="17" height="12.5" rx="2.2" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 10h17" stroke="currentColor" stroke-width="1.8"/><circle cx="16.5" cy="14.2" r="1.3" fill="currentColor"/></svg>`;
+const ICON_PROFILE = `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.4" stroke="currentColor" stroke-width="1.8"/><path d="M5 19.5c0-3.6 3.1-6.2 7-6.2s7 2.6 7 6.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+const ICON_SUPPORT = `<svg viewBox="0 0 24 24" fill="none"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7A2.5 2.5 0 0 1 17.5 16H10l-4 3.5V16H6.5A2.5 2.5 0 0 1 4 13.5v-7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
+const ICON_REFERRAL = `<svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8.5" r="2.7" stroke="currentColor" stroke-width="1.8"/><path d="M4 19c0-3 2.3-5 5-5s5 2 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="17" cy="7.5" r="2.1" stroke="currentColor" stroke-width="1.8"/><path d="M15.5 13c2.2.3 3.8 2 3.8 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+const ICON_TEST = `<svg viewBox="0 0 24 24" fill="none"><path d="M9 3h6M10 3v6.5L5.5 18a2 2 0 0 0 1.8 3h9.4a2 2 0 0 0 1.8-3L14 9.5V3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 15h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+
 function setHeaderWallet(amount) {
   const el = document.getElementById("header-wallet-amount");
   if (el) el.textContent = `${fmt(amount)} تومان`;
@@ -636,11 +645,11 @@ async function renderHome() {
 
       <div class="eyebrow">دسترسی سریع</div>
       <div class="quick-grid">
-        <div class="quick-item" data-nav="store"><span class="q-label">خرید سرویس جدید</span><span class="q-ic">🛍</span></div>
-        <div class="quick-item" data-nav="services"><span class="q-label">سرویس‌های من</span><span class="q-ic">🛡</span></div>
-        <div class="quick-item" data-nav="wallet"><span class="q-label">کیف پول</span><span class="q-ic">👛</span></div>
-        <div class="quick-item" data-nav="profile"><span class="q-label">حساب کاربری</span><span class="q-ic">👤</span></div>
-        <div class="quick-item full" data-nav="support"><span class="q-label">پشتیبانی</span><span class="q-ic">💬</span></div>
+        <div class="quick-item" data-nav="store"><span class="q-label">خرید سرویس جدید</span><span class="q-ic">${ICON_STORE}</span></div>
+        <div class="quick-item" data-nav="services"><span class="q-label">سرویس‌های من</span><span class="q-ic">${ICON_SHIELD}</span></div>
+        <div class="quick-item" data-nav="wallet"><span class="q-label">کیف پول</span><span class="q-ic">${ICON_WALLET}</span></div>
+        <div class="quick-item" data-nav="profile"><span class="q-label">حساب کاربری</span><span class="q-ic">${ICON_PROFILE}</span></div>
+        <div class="quick-item full" data-nav="support"><span class="q-label">پشتیبانی</span><span class="q-ic">${ICON_SUPPORT}</span></div>
       </div>
 
       <div class="eyebrow">سرویس‌های من</div>
@@ -704,35 +713,35 @@ async function renderProfile() {
       <div class="card">
         <div class="list-row" data-nav="wallet">
           <div class="list-row-main">
-            <div class="list-row-ic">👛</div>
+            <div class="list-row-ic line">${ICON_WALLET}</div>
             <div class="list-row-text"><div class="list-row-title">کیف پول و افزایش موجودی</div></div>
           </div>
           <span class="list-row-chev">‹</span>
         </div>
         <div class="list-row" data-nav="services">
           <div class="list-row-main">
-            <div class="list-row-ic">🛡</div>
+            <div class="list-row-ic line">${ICON_SHIELD}</div>
             <div class="list-row-text"><div class="list-row-title">سرویس‌های من</div></div>
           </div>
           <span class="list-row-chev">‹</span>
         </div>
         <div class="list-row" data-nav="referral">
           <div class="list-row-main">
-            <div class="list-row-ic">🤝</div>
+            <div class="list-row-ic line">${ICON_REFERRAL}</div>
             <div class="list-row-text"><div class="list-row-title">زیرمجموعه‌گیری</div></div>
           </div>
           <span class="list-row-chev">‹</span>
         </div>
         <div class="list-row" data-nav="test">
           <div class="list-row-main">
-            <div class="list-row-ic">🧪</div>
+            <div class="list-row-ic line">${ICON_TEST}</div>
             <div class="list-row-text"><div class="list-row-title">دریافت کانفیگ تست</div></div>
           </div>
           <span class="list-row-chev">‹</span>
         </div>
         <div class="list-row" data-nav="support">
           <div class="list-row-main">
-            <div class="list-row-ic">💬</div>
+            <div class="list-row-ic line">${ICON_SUPPORT}</div>
             <div class="list-row-text"><div class="list-row-title">پشتیبانی</div></div>
           </div>
           <span class="list-row-chev">‹</span>
