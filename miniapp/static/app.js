@@ -2098,6 +2098,31 @@ const BANNER_BG_PRESETS = [
   "linear-gradient(120deg, #1a1405, #3d2f0a 55%, #5e480f)",
 ];
 
+const BANNER_ANGLE_OPTIONS = [
+  { value: "90", label: "↓ عمودی" },
+  { value: "120", label: "↘ مورب (پیش‌فرض)" },
+  { value: "180", label: "← افقی (راست به چپ)" },
+  { value: "0", label: "→ افقی (چپ به راست)" },
+  { value: "45", label: "↗ مورب معکوس" },
+];
+
+// از یک رشته‌ی گرادیان CSS، اولین یا دومین کد رنگ هگز را استخراج می‌کند (برای
+// مقداردهی اولیه‌ی انتخاب‌گرهای رنگی)؛ اگر چیزی پیدا نشود یک پیش‌فرض برمی‌گرداند.
+function bannerGradientColorAt(bgStr, index) {
+  const matches = String(bgStr || "").match(/#[0-9a-fA-F]{3,8}/g) || [];
+  if (matches[index]) {
+    let hex = matches[index];
+    if (hex.length === 4) hex = "#" + [...hex.slice(1)].map((c) => c + c).join(""); // #abc -> #aabbcc
+    return hex.slice(0, 7);
+  }
+  return index === 0 ? "#150c22" : "#431f66";
+}
+
+function bannerGradientAngle(bgStr) {
+  const m = String(bgStr || "").match(/linear-gradient\(\s*(\d+)deg/);
+  return m ? m[1] : "120";
+}
+
 async function renderAdminBannersSection() {
   const body = document.getElementById("admin-section-body");
   body.innerHTML = skeleton(3);
@@ -2165,6 +2190,21 @@ function renderAdminBannerList() {
       if (adminBannerItems[Number(input.dataset.idx)].image) return;
       const preview = document.querySelector(`.banner-preview[data-idx="${input.dataset.idx}"]`);
       if (preview) preview.style.background = input.value;
+    };
+  });
+  list.querySelectorAll(".banner-color1-input, .banner-color2-input, .banner-angle-input").forEach((el) => {
+    el.onchange = () => {
+      const idx = el.dataset.idx;
+      const c1 = document.querySelector(`.banner-color1-input[data-idx="${idx}"]`).value;
+      const c2 = document.querySelector(`.banner-color2-input[data-idx="${idx}"]`).value;
+      const angle = document.querySelector(`.banner-angle-input[data-idx="${idx}"]`).value;
+      const gradient = `linear-gradient(${angle}deg, ${c1}, ${c2})`;
+      const bgInput = document.querySelector(`.banner-bg-input[data-idx="${idx}"]`);
+      if (bgInput) bgInput.value = gradient;
+      if (!adminBannerItems[Number(idx)].image) {
+        const preview = document.querySelector(`.banner-preview[data-idx="${idx}"]`);
+        if (preview) preview.style.background = gradient;
+      }
     };
   });
   list.querySelectorAll(".banner-image-upload").forEach((btn) => {
@@ -2252,9 +2292,25 @@ function adminBannerRow(item, idx) {
           ${BANNER_NAV_OPTIONS.map((o) => `<option value="${o.value}" ${o.value === item.nav ? "selected" : ""}>${o.label}</option>`).join("")}
         </select>
         <label class="field-label">رنگ پس‌زمینه (وقتی عکس آپلود نشده باشد)</label>
+        <p class="hint-text" style="margin-top:0">با دو دکمه‌ی رنگی زیر، صفحه‌ی کامل انتخاب رنگ باز می‌شه (طیف کامل + تیرگی/روشنی، دقیقاً مثل فتوشاپ) و ازشون یک گرادیان دورنگ می‌سازه. اگه دلت یک رنگ ساده (بدون گرادیان) بخواد، هر دو رنگ رو یکی انتخاب کن.</p>
+        <div class="banner-color-picker-row">
+          <label class="banner-color-picker">
+            <input type="color" class="banner-color1-input" data-idx="${idx}" value="${bannerGradientColorAt(item.bg, 0)}" />
+            <span>رنگ شروع</span>
+          </label>
+          <label class="banner-color-picker">
+            <input type="color" class="banner-color2-input" data-idx="${idx}" value="${bannerGradientColorAt(item.bg, 1)}" />
+            <span>رنگ پایان</span>
+          </label>
+          <select class="input banner-angle-input" data-idx="${idx}" style="width:auto;flex:1">
+            ${BANNER_ANGLE_OPTIONS.map((a) => `<option value="${a.value}" ${a.value === bannerGradientAngle(item.bg) ? "selected" : ""}>${a.label}</option>`).join("")}
+          </select>
+        </div>
+        <p class="hint-text" style="margin:6px 0 4px">یا از پیش‌فرض‌های آماده انتخاب کن:</p>
         <div class="banner-bg-swatches">
           ${BANNER_BG_PRESETS.map((bg) => `<button type="button" class="banner-bg-swatch" data-idx="${idx}" data-bg="${bg}" style="background:${bg}"></button>`).join("")}
         </div>
+        <label class="field-label">کد CSS نهایی (می‌تونی دستی هم ویرایش کنی)</label>
         <input class="input banner-bg-input" data-idx="${idx}" type="text" value="${escHtml(item.bg || "")}" placeholder="کد گرادیان/رنگ CSS دلخواه" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:11px" />
         <label class="menu-toggle">
           <input type="checkbox" class="banner-enabled-input" data-idx="${idx}" ${item.enabled !== false ? "checked" : ""} />
