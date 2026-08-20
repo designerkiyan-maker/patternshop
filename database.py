@@ -559,6 +559,20 @@ class Database:
             ("custom_configs", "volume_reminder_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "source", "TEXT DEFAULT 'custom_config'"),
             ("users", "reseller_panel_id", "INTEGER"),
+            # نصب‌های قدیمی‌تر ممکن است جدول reseller_requests را قبل از اضافه‌شدن
+            # این ستون‌ها ساخته باشند (چون CREATE TABLE IF NOT EXISTS در آن حالت
+            # هیچ ستونی اضافه نمی‌کند)؛ برای جلوگیری از خطای «no column named ...»
+            # موقع ثبت درخواست نمایندگی، این ستون‌ها را هم مهاجرت می‌کنیم.
+            ("reseller_requests", "volume_gb", "INTEGER DEFAULT 0"),
+            ("reseller_requests", "price_toman", "INTEGER"),
+            ("reseller_requests", "panel_server_id", "INTEGER"),
+            ("reseller_requests", "receipt_file_id", "TEXT"),
+            ("reseller_requests", "bot_token", "TEXT"),
+            ("reseller_requests", "bot_username", "TEXT"),
+            ("reseller_requests", "owner_telegram_id", "INTEGER"),
+            ("reseller_requests", "reject_reason", "TEXT"),
+            ("reseller_requests", "reviewed_by", "INTEGER"),
+            ("reseller_requests", "updated_at", "TEXT"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
