@@ -270,6 +270,7 @@ class Database:
                     product_id INTEGER NOT NULL,
                     status TEXT DEFAULT 'pending',
                     receipt_file_id TEXT,
+                    receipt_type TEXT DEFAULT 'photo',
                     config_id INTEGER,
                     admin_chat_id INTEGER,
                     admin_message_id INTEGER,
@@ -304,6 +305,7 @@ class Database:
                     amount INTEGER NOT NULL,
                     status TEXT DEFAULT 'pending',
                     receipt_file_id TEXT,
+                    receipt_type TEXT DEFAULT 'photo',
                     admin_chat_id INTEGER,
                     admin_message_id INTEGER,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -479,6 +481,7 @@ class Database:
                     price_toman INTEGER,
                     panel_server_id INTEGER,
                     receipt_file_id TEXT,
+                    receipt_type TEXT DEFAULT 'photo',
                     bot_token TEXT,
                     bot_username TEXT,
                     owner_telegram_id INTEGER,
@@ -517,6 +520,8 @@ class Database:
             ("orders", "discount_code_id", "INTEGER"),
             ("orders", "discount_amount", "INTEGER DEFAULT 0"),
             ("orders", "final_price", "INTEGER"),
+            ("orders", "receipt_type", "TEXT DEFAULT 'photo'"),
+            ("wallet_topups", "receipt_type", "TEXT DEFAULT 'photo'"),
             ("users", "last_wheel_spin_at", "TEXT"),
             ("discount_codes", "expires_at", "TEXT"),
             ("discount_codes", "source", "TEXT"),
@@ -569,6 +574,7 @@ class Database:
             ("reseller_requests", "price_toman", "INTEGER"),
             ("reseller_requests", "panel_server_id", "INTEGER"),
             ("reseller_requests", "receipt_file_id", "TEXT"),
+            ("reseller_requests", "receipt_type", "TEXT DEFAULT 'photo'"),
             ("reseller_requests", "bot_token", "TEXT"),
             ("reseller_requests", "bot_username", "TEXT"),
             ("reseller_requests", "owner_telegram_id", "INTEGER"),
@@ -580,19 +586,6 @@ class Database:
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
-
-        # مهاجرت وضعیت درخواست‌های نمایندگی از نسخه‌های قدیمی.
-        # در نسخه‌های قدیمی ممکن است درخواست جدید با status='pending' ذخیره شده
-        # باشد، در حالی که منطق فعلی مدیر فقط 'pending_review' را معتبر می‌داند؛
-        # در نتیجه با زدن «تأیید و تعیین هزینه» پیام «این درخواست دیگر معتبر نیست»
-        # نمایش داده می‌شد. این تبدیل فقط روی جدول reseller_requests اعمال می‌شود
-        # و وضعیت‌های معتبر نسخه فعلی را دست‌نخورده باقی می‌گذارد.
-        if self._column_exists(conn, "reseller_requests", "status"):
-            conn.execute(
-                "UPDATE reseller_requests SET status='pending_review' "
-                "WHERE status IN ('pending', '') OR status IS NULL"
-            )
-
         conn.execute("CREATE INDEX IF NOT EXISTS idx_configs_order_id ON configs(order_id)")
 
     # -----------------------------------------------------------------------
@@ -1062,11 +1055,36 @@ class Database:
     # -----------------------------------------------------------------------
 
     def add_configs(self, product_id: int, links: list):
+        """افزودن لینک‌های بانک کانفیگ با حذف تکراری‌ها.
+
+        تکراری بودن هم نسبت به کل بانک کانفیگ بررسی می‌شود و هم نسبت به
+        لینک‌های تکراری داخل همان پیام. خروجی: (added_count, duplicate_count).
+        """
+        added = 0
+        duplicates = 0
         with self._get_conn() as conn:
-            conn.executemany(
-                "INSERT INTO configs (product_id, link) VALUES (?, ?)",
-                [(product_id, link.strip()) for link in links if link.strip()],
-            )
+            # normalize فقط برای تشخیص است؛ مقدار ذخیره‌شده همان لینک تمیزشده است.
+            existing = {
+                (row["link"] or "").strip()
+                for row in conn.execute("SELECT link FROM configs").fetchall()
+                if (row["link"] or "").strip()
+            }
+            seen = set()
+            for raw in links:
+                link = (raw or "").strip()
+                if not link:
+                    continue
+                if link in existing or link in seen:
+                    duplicates += 1
+                    continue
+                conn.execute(
+                    "INSERT INTO configs (product_id, link) VALUES (?, ?)",
+                    (product_id, link),
+                )
+                seen.add(link)
+                existing.add(link)
+                added += 1
+        return added, duplicates
 
     def count_available_configs(self, product_id: int) -> int:
         with self._get_conn() as conn:
@@ -1279,9 +1297,12 @@ class Database:
                 (datetime.utcnow().isoformat(), order_id),
             )
 
-    def set_order_receipt(self, order_id: int, file_id: str):
+    def set_order_receipt(self, order_id: int, file_id: str, receipt_type: str = "photo"):
         with self._get_conn() as conn:
-            conn.execute("UPDATE orders SET receipt_file_id=? WHERE id=?", (file_id, order_id))
+            conn.execute(
+                "UPDATE orders SET receipt_file_id=?, receipt_type=? WHERE id=?",
+                (file_id, receipt_type, order_id),
+            )
 
     def set_order_admin_message(self, order_id: int, admin_chat_id: int, admin_message_id: int):
         with self._get_conn() as conn:
@@ -1679,9 +1700,12 @@ class Database:
             )
             return cur.lastrowid
 
-    def set_topup_receipt(self, topup_id: int, file_id: str):
+    def set_topup_receipt(self, topup_id: int, file_id: str, receipt_type: str = "photo"):
         with self._get_conn() as conn:
-            conn.execute("UPDATE wallet_topups SET receipt_file_id=? WHERE id=?", (file_id, topup_id))
+            conn.execute(
+                "UPDATE wallet_topups SET receipt_file_id=?, receipt_type=? WHERE id=?",
+                (file_id, receipt_type, topup_id),
+            )
 
     def set_topup_admin_message(self, topup_id: int, admin_chat_id: int, admin_message_id: int):
         with self._get_conn() as conn:
@@ -2668,8 +2692,10 @@ class Database:
     def reject_reseller_request(self, request_id: int, status: str, admin_id: int, reason: str = None):
         self.set_reseller_request_status(request_id, status, reviewed_by=admin_id, reject_reason=reason)
 
-    def set_reseller_request_receipt(self, request_id: int, file_id: str):
-        self.set_reseller_request_status(request_id, "awaiting_payment_review", receipt_file_id=file_id)
+    def set_reseller_request_receipt(self, request_id: int, file_id: str, receipt_type: str = "photo"):
+        self.set_reseller_request_status(
+            request_id, "awaiting_payment_review", receipt_file_id=file_id, receipt_type=receipt_type
+        )
 
     def approve_reseller_request_payment(self, request_id: int, admin_id: int):
         self.set_reseller_request_status(request_id, "awaiting_bot_info", reviewed_by=admin_id)

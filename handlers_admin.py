@@ -89,6 +89,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         دسته‌بندی‌ها/کانفیگ‌بانک) را ندارند."""
         return db.is_senior_admin(user_id)
 
+
+    async def _send_receipt(bot: Bot, chat_id: int, file_id: str, receipt_type: str, caption: str, reply_markup=None):
+        """ارسال رسید ذخیره‌شده؛ رسیدهای قدیمی photo فرض می‌شوند."""
+        if (receipt_type or "photo") == "document":
+            return await bot.send_document(chat_id, file_id, caption=caption, reply_markup=reply_markup)
+        return await bot.send_photo(chat_id, file_id, caption=caption, reply_markup=reply_markup)
+
     def owner_only(user_id: int) -> bool:
         """فقط مالک اصلی بات (تعیین‌شده در env)؛ برای مدیریت خود ادمین‌ها."""
         return db.is_owner(user_id)
@@ -473,32 +480,17 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def process_add_configs(message: Message, state: FSMContext):
         data = await state.get_data()
         product_id = data["product_id"]
-        links = [line for line in message.text.splitlines() if line.strip()]
+        links = [line for line in (message.text or "").splitlines() if line.strip()]
         added_count, duplicate_count = db.add_configs(product_id, links)
         await state.clear()
         stock = db.count_available_configs(product_id)
-
-        if duplicate_count and added_count:
-            result_text = (
-                f"✅ {added_count} کانفیگ جدید اضافه شد.\n"
-                f"⚠️ {duplicate_count} کانفیگ تکراری بود و اضافه نشد.\n"
-                f"📊 موجودی فعلی این محصول: {stock} عدد"
-            )
-        elif duplicate_count:
-            result_text = (
-                f"⚠️ تعداد {duplicate_count} کانفیگ تکراری بود و اضافه نشد.\n"
-                f"📊 موجودی فعلی این محصول: {stock} عدد"
-            )
-        else:
-            result_text = (
-                f"✅ {added_count} کانفیگ اضافه شد.\n"
-                f"📊 موجودی فعلی این محصول: {stock} عدد"
-            )
-
-        await message.answer(
-            result_text,
-            reply_markup=kb.admin_panel_kb(db, is_main_bot),
-        )
+        text = f"✅ {added_count} لینک با موفقیت اضافه شد."
+        if duplicate_count:
+            text += f"\n⚠️ تعداد {duplicate_count} کانفیگ تکراری بود و اضافه نشد."
+        if not added_count and not duplicate_count:
+            text = "⚠️ هیچ لینک معتبری دریافت نشد."
+        text += f"\n📊 موجودی فعلی این محصول: {stock} عدد"
+        await message.answer(text, reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
     # -------------------------------------------------------------------
     # دریافت یک کانفیگ رندوم آزاد (خارج از فرآیند سفارش، برای فروش دستی)
@@ -720,7 +712,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if qty > 1:
             caption += f" × {qty}"
         if order["receipt_file_id"]:
-            await bot.send_photo(call.from_user.id, order["receipt_file_id"], caption=caption, reply_markup=kb.order_review_kb(order_id))
+            await _send_receipt(
+                bot, call.from_user.id, order["receipt_file_id"], (order["receipt_type"] if "receipt_type" in order.keys() else "photo"),
+                caption, kb.order_review_kb(order_id)
+            )
         else:
             await call.message.answer(caption, reply_markup=kb.order_review_kb(order_id))
         await call.answer()
@@ -1005,7 +1000,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         caption = f"شارژ کیف پول #{topup_id}\nکاربر: {topup['user_id']}\nمبلغ: {topup['amount']:,} تومان"
         if topup["receipt_file_id"]:
-            await bot.send_photo(call.from_user.id, topup["receipt_file_id"], caption=caption, reply_markup=kb.topup_review_kb(topup_id))
+            await _send_receipt(
+                bot, call.from_user.id, topup["receipt_file_id"], (topup["receipt_type"] if "receipt_type" in topup.keys() else "photo"),
+                caption, kb.topup_review_kb(topup_id)
+            )
         else:
             await call.message.answer(caption, reply_markup=kb.topup_review_kb(topup_id))
         await call.answer()
