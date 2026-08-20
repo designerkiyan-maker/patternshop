@@ -52,6 +52,7 @@ from backup import create_backup, restore_backup, is_valid_sqlite_db
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
+from reseller_auto_provision import provision_auto_config, ProvisionError
 
 app = FastAPI(title="V2Ray Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -752,11 +753,16 @@ async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
         raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
     quantity = max(1, body.quantity)
     product = db.get_product(body.product_id)
-    stock = db.count_available_configs(body.product_id)
-    if not product or stock <= 0:
+    if not product:
         raise HTTPException(status_code=400, detail="این محصول موجود نیست.")
-    if quantity > stock:
-        raise HTTPException(status_code=400, detail=f"موجودی کافی نیست. فقط {stock} عدد موجود است.")
+    if product["is_auto_provision"]:
+        quantity = 1  # هر خرید = یک کانفیگ تازه از اعتبار حجمی
+    else:
+        stock = db.count_available_configs(body.product_id)
+        if stock <= 0:
+            raise HTTPException(status_code=400, detail="این محصول موجود نیست.")
+        if quantity > stock:
+            raise HTTPException(status_code=400, detail=f"موجودی کافی نیست. فقط {stock} عدد موجود است.")
 
     total_price = product["price"] * quantity
     discount_code_id = None
@@ -785,6 +791,20 @@ async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
     order = db.get_order(order_id)
 
     if order["final_price"] <= 0:
+        if product["is_auto_provision"]:
+            try:
+                result = await provision_auto_config(db, product)
+            except ProvisionError as e:
+                db.reject_order(order_id)
+                raise HTTPException(status_code=409, detail=str(e))
+            db.approve_order_auto(order_id)
+            db.reward_referrer_if_first_purchase(tg_id, order["final_price"] or total_price)
+            return {
+                "status": "approved", "order_id": order_id,
+                "link": result["subscription_url"], "links": [result["subscription_url"]],
+                "expires_at": None,
+            }
+
         results = db.take_unused_configs(body.product_id, tg_id, quantity)
         if not results:
             db.reject_order(order_id)
@@ -944,6 +964,41 @@ async def api_plisio_webhook(request: Request, tenant: Tenant = Depends(get_tena
         order = db.get_order(order_id)
         if order and order["status"] == "pending":
             product = db.get_product(order["product_id"])
+
+            if product and product["is_auto_provision"]:
+                try:
+                    result = await provision_auto_config(db, product)
+                except ProvisionError as e:
+                    admin_ids = db.list_admins()
+                    async with aiohttp.ClientSession() as session:
+                        for admin_id in admin_ids:
+                            try:
+                                await session.post(
+                                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                                    json={
+                                        "chat_id": admin_id,
+                                        "text": f"⚠️ سفارش #{order_id} با کریپتو پرداخت شد ولی ساخت خودکار کانفیگ ناموفق بود: {e}\nلطفاً دستی رسیدگی کنید.",
+                                    },
+                                )
+                            except Exception:
+                                pass
+                    return {"status": "ok"}
+
+                db.approve_order_auto(order_id)
+                db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or product["price"])
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        await session.post(
+                            f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                            json={
+                                "chat_id": order["user_id"],
+                                "text": f"✅ پرداخت کریپتو تایید شد!\n📦 محصول: {product['name']}\n\n{result['subscription_url']}",
+                            },
+                        )
+                except Exception:
+                    pass
+                return {"status": "ok"}
+
             quantity = order["quantity"] or 1
             results = db.take_unused_configs(order["product_id"], order["user_id"], quantity)
             if results:
