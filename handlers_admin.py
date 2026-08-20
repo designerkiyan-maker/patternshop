@@ -2556,7 +2556,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 return await deny_mid(call)
             requests = db.list_open_reseller_requests()
             if not requests:
-                await call.answer("درخواست بازی برای نمایندگی وجود ندارد.", show_alert=True)
+                await call.answer("درخواست باز برای نمایندگی وجود ندارد.", show_alert=True)
                 return
             await replace_admin_view(
                 call,
@@ -2613,7 +2613,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             else:
                 await safe_edit(
                     call,
-                    f"📋 درخواست‌های باز نمایندگی\n\n✅ درخواست #{request_id} کنسل شد. دیگر درخواست بازی باقی نمانده.",
+                    f"📋 درخواست‌های باز نمایندگی\n\n✅ درخواست #{request_id} کنسل شد. دیگر درخواست باز دیگری باقی نمانده.",
                     reply_markup=kb.admin_back_kb(),
                 )
             await call.answer("درخواست کنسل شد.")
