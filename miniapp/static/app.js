@@ -575,16 +575,21 @@ function renderPromoCarousel(slides) {
   return `
     <div class="promo-carousel">
       <div class="promo-track" id="promo-track">
-        ${slides.map((s) => `
-          <div class="promo-slide" data-nav="${s.nav}" style="--promo-bg:${s.bg}">
+        ${slides.map((s) => {
+          const bgStyle = s.image ? `url('${s.image}') center/cover no-repeat` : s.bg;
+          return `
+          <div class="promo-slide ${s.image && s.image_only ? "promo-slide-image-only" : ""}" data-nav="${s.nav}" style="--promo-bg:${bgStyle}">
+            ${s.image && s.image_only ? "" : `
             <div class="promo-slide-body">
               <div class="promo-slide-title">${s.title}</div>
               <div class="promo-slide-sub">${s.sub}</div>
               <div class="promo-slide-cta">‹ ${s.cta}</div>
             </div>
             <div class="promo-slide-icon">${s.icon}</div>
+            `}
           </div>
-        `).join("")}
+        `;
+        }).join("")}
       </div>
       ${slides.length > 1 ? `<div class="promo-dots">${slides.map((_, i) => `<span class="${i === 0 ? "active" : ""}"></span>`).join("")}</div>` : ""}
     </div>
@@ -2116,6 +2121,8 @@ async function renderAdminBannersSection() {
         cta: "مشاهده",
         nav: "store",
         bg: BANNER_BG_PRESETS[0],
+        image: "",
+        image_only: false,
         enabled: true,
       });
       renderAdminBannerList();
@@ -2147,19 +2154,58 @@ function renderAdminBannerList() {
       const bg = sw.dataset.bg;
       const input = document.querySelector(`.banner-bg-input[data-idx="${idx}"]`);
       if (input) input.value = bg;
-      const preview = document.querySelector(`.banner-preview[data-idx="${idx}"]`);
-      if (preview) preview.style.background = bg;
+      if (!adminBannerItems[idx].image) {
+        const preview = document.querySelector(`.banner-preview[data-idx="${idx}"]`);
+        if (preview) preview.style.background = bg;
+      }
     };
   });
   list.querySelectorAll(".banner-bg-input").forEach((input) => {
     input.oninput = () => {
+      if (adminBannerItems[Number(input.dataset.idx)].image) return;
       const preview = document.querySelector(`.banner-preview[data-idx="${input.dataset.idx}"]`);
       if (preview) preview.style.background = input.value;
+    };
+  });
+  list.querySelectorAll(".banner-image-upload").forEach((btn) => {
+    btn.onclick = async () => {
+      const idx = Number(btn.dataset.idx);
+      const errBox = document.getElementById(`banner-image-error-${idx}`);
+      errBox.textContent = "";
+      const fileInput = document.querySelector(`.banner-image-file[data-idx="${idx}"]`);
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) { errBox.textContent = "ابتدا یک عکس انتخاب کن."; return; }
+      const fd = new FormData();
+      fd.append("photo", file);
+      btn.disabled = true;
+      btn.textContent = "در حال آپلود...";
+      try {
+        collectBannerEdits();
+        const res = await apiUpload("/api/admin/banners/upload-image", fd);
+        adminBannerItems[idx].image = res.image;
+        adminBannerItems[idx].image_only = true;
+        tg.HapticFeedback.notificationOccurred("success");
+        renderAdminBannerList();
+      } catch (e) {
+        errBox.textContent = e.message;
+        btn.disabled = false;
+        btn.textContent = "📤 آپلود این عکس";
+      }
+    };
+  });
+  list.querySelectorAll(".banner-image-clear").forEach((btn) => {
+    btn.onclick = () => {
+      collectBannerEdits();
+      const idx = Number(btn.dataset.idx);
+      adminBannerItems[idx].image = "";
+      adminBannerItems[idx].image_only = false;
+      renderAdminBannerList();
     };
   });
 }
 
 function adminBannerRow(item, idx) {
+  const previewBg = item.image ? `url('${item.image}') center/cover no-repeat` : (item.bg || BANNER_BG_PRESETS[0]);
   return `
     <div class="menu-row" data-idx="${idx}">
       <div class="menu-row-top">
@@ -2171,10 +2217,30 @@ function adminBannerRow(item, idx) {
         </div>
       </div>
       <div class="menu-row-body">
-        <div class="banner-preview" data-idx="${idx}" style="background:${item.bg || BANNER_BG_PRESETS[0]}">
+        <div class="banner-preview" data-idx="${idx}" style="background:${previewBg}">
+          ${item.image && item.image_only ? "" : `
           <span class="banner-preview-icon banner-icon-input-wrap"><input class="banner-icon-input" data-idx="${idx}" type="text" value="${escHtml(item.icon || "")}" maxlength="4" /></span>
           <span class="banner-preview-title">${escHtml(item.title || "بنر جدید")}</span>
+          `}
         </div>
+
+        <p class="hint-text" style="margin-top:0">🖼 می‌تونی به‌جای رنگ گرادیانی، یک عکسِ از قبل طراحی‌شده برای این بنر آپلود کنی. اندازه‌ی پیشنهادی: عرض ۱۲۰۰ پیکسل، ارتفاع ۴۰۰ پیکسل (نسبت تقریبی ۳:۱ — همون شکل کشیده‌ی بنرهای بالای صفحه)، فرمت JPG / PNG / WebP، حجم زیر ۲ مگابایت. عکسی با نسبت دیگه هم کار می‌کنه ولی ممکنه بالا/پایینش برش بخوره چون کل کادر رو پر می‌کنه (cover).</p>
+        <div id="banner-image-preview-${idx}">
+          ${item.image ? `<img src="${item.image}" style="width:100%;max-width:260px;border-radius:10px;border:1px solid var(--glass-brd);margin-bottom:8px;display:block" />` : ""}
+        </div>
+        <input type="file" accept="image/*" class="banner-image-file" data-idx="${idx}" style="margin-bottom:8px" />
+        <div class="field-error" id="banner-image-error-${idx}"></div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <button type="button" class="btn small outline banner-image-upload" data-idx="${idx}">📤 آپلود این عکس</button>
+          ${item.image ? `<button type="button" class="btn small outline danger banner-image-clear" data-idx="${idx}">🗑 حذف عکس</button>` : ""}
+        </div>
+        ${item.image ? `
+        <label class="menu-toggle" style="margin-bottom:10px">
+          <input type="checkbox" class="banner-imageonly-input" data-idx="${idx}" ${item.image_only ? "checked" : ""} />
+          <span>فقط عکس نمایش داده شود (بدون آیکون/عنوان روی آن — برای بنرهای آماده مناسب‌تره)</span>
+        </label>
+        ` : ""}
+
         <label class="field-label">عنوان بنر</label>
         <input class="input banner-title-input" data-idx="${idx}" type="text" value="${escHtml(item.title || "")}" placeholder="مثال: خرید سرویس جدید!" style="direction:rtl;text-align:right;font-family:var(--font-body)" />
         <label class="field-label">توضیح کوتاه</label>
@@ -2185,7 +2251,7 @@ function adminBannerRow(item, idx) {
         <select class="input banner-nav-input" data-idx="${idx}">
           ${BANNER_NAV_OPTIONS.map((o) => `<option value="${o.value}" ${o.value === item.nav ? "selected" : ""}>${o.label}</option>`).join("")}
         </select>
-        <label class="field-label">رنگ پس‌زمینه</label>
+        <label class="field-label">رنگ پس‌زمینه (وقتی عکس آپلود نشده باشد)</label>
         <div class="banner-bg-swatches">
           ${BANNER_BG_PRESETS.map((bg) => `<button type="button" class="banner-bg-swatch" data-idx="${idx}" data-bg="${bg}" style="background:${bg}"></button>`).join("")}
         </div>
@@ -2217,6 +2283,9 @@ function collectBannerEdits() {
   });
   document.querySelectorAll(".banner-bg-input").forEach((el) => {
     adminBannerItems[Number(el.dataset.idx)].bg = el.value;
+  });
+  document.querySelectorAll(".banner-imageonly-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].image_only = el.checked;
   });
   document.querySelectorAll(".banner-enabled-input").forEach((el) => {
     adminBannerItems[Number(el.dataset.idx)].enabled = el.checked;

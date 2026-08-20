@@ -312,6 +312,7 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
   content: ""; position: absolute; inset: 0; z-index: 0;
   background: var(--promo-bg, linear-gradient(120deg, #10151c, #1c2733));
 }
+.promo-slide-image-only { padding: 0; min-height: 0; aspect-ratio: 3 / 1; }
 .promo-slide-icon, .promo-slide-body { position: relative; z-index: 1; }
 .promo-slide-icon { font-size: 40px; flex-shrink: 0; filter: drop-shadow(0 0 12px rgba(126,249,255,.35)); }
 .promo-slide-title { font-size: 15px; font-weight: 800; margin-bottom: 4px; }
