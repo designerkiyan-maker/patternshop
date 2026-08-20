@@ -31,6 +31,8 @@ DEFAULT_BANNERS = [
         "cta": "شروع خرید",
         "nav": "store",
         "bg": "linear-gradient(120deg, #0d1a12, #123a20 55%, #17532c)",
+        "image": "",
+        "image_only": False,
         "enabled": True,
     },
     {
@@ -41,6 +43,8 @@ DEFAULT_BANNERS = [
         "cta": "گفت‌وگو با پشتیبانی",
         "nav": "support",
         "bg": "linear-gradient(120deg, #150c22, #2a1440 55%, #431f66)",
+        "image": "",
+        "image_only": False,
         "enabled": True,
     },
 ]
