@@ -14,19 +14,14 @@
 <div id="app">
   <div class="grid-fx" aria-hidden="true"></div>
 
-  <header class="horizon {{HEADER_LOGO_CLASS}}">
-    <div class="sun" aria-hidden="true"></div>
-    {{HEADER_LOGO_HTML}}
-    <div class="grid-floor" aria-hidden="true"></div>
-    <div class="horizon-content">
-      <div class="topline">
-        <span class="brand">{{STORE_NAME}}</span>
-        <span class="live"><span class="dot"></span>ONLINE</span>
-      </div>
-      <div class="greet">
-        <h1 id="greeting">در حال بارگذاری...</h1>
-        <p class="header-sub">{{BANNER_TEXT}}</p>
-      </div>
+  <header class="topbar {{HEADER_LOGO_CLASS}}">
+    <button class="wallet-chip" id="header-wallet-btn" type="button">
+      <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="6" width="17" height="12.5" rx="2.2" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 10h17" stroke="currentColor" stroke-width="1.8"/><circle cx="16.5" cy="14.2" r="1.3" fill="currentColor"/></svg>
+      <span id="header-wallet-amount">۰ تومان</span>
+    </button>
+    <div class="topbar-brand">
+      <span class="brand">{{STORE_NAME}}</span>
+      <span class="brand-avatar">{{HEADER_LOGO_HTML}}<span class="brand-avatar-fallback" aria-hidden="true">🤖</span></span>
     </div>
   </header>
 
@@ -34,39 +29,28 @@
 
   <nav id="tabbar">
     <button data-tab="home" class="active">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M4 11.5 12 4l8 7.5M6 10v9h5v-5h2v5h5v-9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg class="ic-outline" viewBox="0 0 24 24" fill="none"><path d="M4 11.5 12 4l8 7.5M6 10v9h5v-5h2v5h5v-9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg class="ic-filled" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.2 3 11h2v9h6v-6h2v6h6v-9h2L12 3.2Z"/></svg>
       <span>خانه</span>
     </button>
-    <button data-tab="services">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 4 6v6c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V6l-8-4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 12.2 11.3 14l3.2-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span>سرویس‌ها</span>
-    </button>
     <button data-tab="store">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h16l-1.2 10.2a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 8V6a4 4 0 0 1 8 0v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="ic-outline" viewBox="0 0 24 24" fill="none"><path d="M4 8h16l-1.2 10.2a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 8V6a4 4 0 0 1 8 0v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="ic-filled" viewBox="0 0 24 24" fill="currentColor"><path d="M8 6a4 4 0 1 1 8 0v1.2h2.4a1 1 0 0 1 1 .9l1.1 10.3a2.4 2.4 0 0 1-2.4 2.6H7.9a2.4 2.4 0 0 1-2.4-2.6L6.6 8.1a1 1 0 0 1 1-.9H10V6Zm2 1.2h4V6a2 2 0 0 0-4 0v1.2Z"/></svg>
       <span>فروشگاه</span>
     </button>
-    <button data-tab="test">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M9 3h6M10 3v6.5L5.5 18a2 2 0 0 0 1.8 3h9.4a2 2 0 0 0 1.8-3L14 9.5V3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 15h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      <span>تست</span>
+    <button data-tab="services">
+      <svg class="ic-outline" viewBox="0 0 24 24" fill="none"><path d="M12 2 4 6v6c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V6l-8-4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 12.2 11.3 14l3.2-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg class="ic-filled" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.3 3.4 5.2v6.4c0 5.5 3.7 9.9 8.6 11.5 4.9-1.6 8.6-6 8.6-11.5V5.2L12 1.3Zm-.9 14.4-3.3-3.3 1.4-1.4 1.9 1.9 4.6-4.6 1.4 1.4-6 6Z"/></svg>
+      <span>سرویس‌ها</span>
     </button>
-    <button data-tab="wheel">
-      <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4.5" width="16" height="15" rx="2.2" stroke="currentColor" stroke-width="1.8"/><path d="M4 9.5h16" stroke="currentColor" stroke-width="1.8"/><circle cx="8.3" cy="14" r="1.15" fill="currentColor"/><circle cx="12" cy="14" r="1.15" fill="currentColor"/><circle cx="15.7" cy="14" r="1.15" fill="currentColor"/></svg>
-      <span>جکپات</span>
-    </button>
-    <button data-tab="referral">
-      <svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8.5" r="2.7" stroke="currentColor" stroke-width="1.8"/><path d="M4 19c0-3 2.3-5 5-5s5 2 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="17" cy="7.5" r="2.1" stroke="currentColor" stroke-width="1.8"/><path d="M15.5 13c2.2.3 3.8 2 3.8 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      <span>زیرمجموعه</span>
-    </button>
-    <button data-tab="support">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7A2.5 2.5 0 0 1 17.5 16H10l-4 3.5V16H6.5A2.5 2.5 0 0 1 4 13.5v-7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-      <span>پشتیبانی</span>
-    </button>
-    <button data-tab="wallet">
-      <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="6" width="17" height="12.5" rx="2.2" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 10h17" stroke="currentColor" stroke-width="1.8"/><circle cx="16.5" cy="14.2" r="1.3" fill="currentColor"/></svg>
-      <span>کیف پول</span>
+    <button data-tab="profile">
+      <svg class="ic-outline" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.4" stroke="currentColor" stroke-width="1.8"/><path d="M5 19.5c0-3.6 3.1-6.2 7-6.2s7 2.6 7 6.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="ic-filled" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="7.8" r="3.8"/><path d="M12 12.6c-4.4 0-8 2.9-8 7.4 0 .6.4 1 1 1h14c.6 0 1-.4 1-1 0-4.5-3.6-7.4-8-7.4Z"/></svg>
+      <span>پروفایل</span>
     </button>
     <button data-tab="admin" id="admin-tab-btn" style="display:none">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 4 6v6c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V6l-8-4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 12.2 11.3 14l3.2-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg class="ic-outline" viewBox="0 0 24 24" fill="none"><path d="M12 2 4 6v6c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V6l-8-4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 12.2 11.3 14l3.2-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg class="ic-filled" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.3 3.4 5.2v6.4c0 5.5 3.7 9.9 8.6 11.5 4.9-1.6 8.6-6 8.6-11.5V5.2L12 1.3Zm-.9 14.4-3.3-3.3 1.4-1.4 1.9 1.9 4.6-4.6 1.4 1.4-6 6Z"/></svg>
       <span>مدیریت</span>
     </button>
   </nav>

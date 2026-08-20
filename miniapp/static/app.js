@@ -5,7 +5,6 @@ try { tg.setHeaderColor("#0a0e17"); tg.setBackgroundColor("#0a0e17"); } catch (e
 
 const initData = tg.initData; // برای هدر X-Init-Data به بک‌اند فرستاده می‌شود
 const content = document.getElementById("content");
-const greeting = document.getElementById("greeting");
 
 // شناسه‌ی نماینده (اگر مینی‌اپ از یک بات نمایندگی باز شده باشد) - از URL خوانده می‌شود
 // و به تمام درخواست‌های API اضافه می‌شود تا سرور دیتابیس/توکن درست را انتخاب کند.
@@ -518,16 +517,98 @@ async function renderTicketThread(body) {
 // ---------------------------------------------------------------------------
 // تب خانه
 // ---------------------------------------------------------------------------
+function setHeaderWallet(amount) {
+  const el = document.getElementById("header-wallet-amount");
+  if (el) el.textContent = `${fmt(amount)} تومان`;
+}
+
+function promoSlides({ me, expiring, referralLink }) {
+  const slides = [
+    {
+      bg: "linear-gradient(120deg, #0d1a12, #123a20 55%, #17532c)",
+      icon: "🛒",
+      title: "خرید سرویس جدید!",
+      sub: "سرویس مورد نظرتو انتخاب کن و در چند ثانیه فعالش کن!",
+      cta: "شروع خرید",
+      nav: "store",
+    },
+  ];
+  if (expiring && expiring.length > 0) {
+    slides.push({
+      bg: "linear-gradient(120deg, #2b1608, #4d2510 55%, #7a3a14)",
+      icon: "⏰",
+      title: "سرویس شما رو به اتمام است",
+      sub: `${expiring.length} سرویس نزدیک به تاریخ انقضا. برای تمدید ضربه بزن.`,
+      cta: "تمدید سرویس",
+      nav: "services",
+    });
+  }
+  if (referralLink) {
+    slides.push({
+      bg: "linear-gradient(120deg, #0d1420, #142845 55%, #1c3f6e)",
+      icon: "🤝",
+      title: "دوستاتو دعوت کن",
+      sub: "با دعوت از دوستان، اعتبار رایگان به کیف پولت اضافه کن.",
+      cta: "مشاهده لینک دعوت",
+      nav: "referral",
+    });
+  }
+  slides.push({
+    bg: "linear-gradient(120deg, #150c22, #2a1440 55%, #431f66)",
+    icon: "💬",
+    title: "پشتیبانی ۲۴ ساعته",
+    sub: "هر سوالی داشتی، همین‌جا از پشتیبانی بپرس.",
+    cta: "گفت‌وگو با پشتیبانی",
+    nav: "support",
+  });
+  return slides;
+}
+
+function renderPromoCarousel(slides) {
+  return `
+    <div class="promo-carousel">
+      <div class="promo-track" id="promo-track">
+        ${slides.map((s) => `
+          <div class="promo-slide" data-nav="${s.nav}" style="--promo-bg:${s.bg}">
+            <div class="promo-slide-body">
+              <div class="promo-slide-title">${s.title}</div>
+              <div class="promo-slide-sub">${s.sub}</div>
+              <div class="promo-slide-cta">‹ ${s.cta}</div>
+            </div>
+            <div class="promo-slide-icon">${s.icon}</div>
+          </div>
+        `).join("")}
+      </div>
+      ${slides.length > 1 ? `<div class="promo-dots">${slides.map((_, i) => `<span class="${i === 0 ? "active" : ""}"></span>`).join("")}</div>` : ""}
+    </div>
+  `;
+}
+
+function wirePromoCarousel(root) {
+  const track = root.querySelector("#promo-track");
+  if (!track) return;
+  track.querySelectorAll(".promo-slide[data-nav]").forEach((el) => {
+    el.onclick = () => switchTab(el.dataset.nav);
+  });
+  const dots = root.querySelectorAll(".promo-dots span");
+  if (!dots.length) return;
+  track.addEventListener("scroll", () => {
+    const idx = Math.round(track.scrollLeft / track.clientWidth);
+    dots.forEach((d, i) => d.classList.toggle("active", i === idx));
+  }, { passive: true });
+}
+
 async function renderHome() {
   content.innerHTML = skeleton(3);
   try {
-    const [me, orders, customConfigs, expiring] = await Promise.all([
+    const [me, orders, customConfigs, expiring, referral] = await Promise.all([
       api("/api/me"),
       api("/api/orders"),
       api("/api/custom-configs").catch(() => []),
       api("/api/expiring").catch(() => []),
+      api("/api/referral").catch(() => null),
     ]);
-    greeting.textContent = `سلام ${me.first_name} 👋`;
+    setHeaderWallet(me.wallet_credit);
     const active = orders.filter((o) => o.status === "approved" && !o.is_custom_config);
     const customCards = customConfigs.map((c) => ({
       id: `cc-${c.id}`,
@@ -543,45 +624,128 @@ async function renderHome() {
     const adminTabBtn = document.getElementById("admin-tab-btn");
     if (adminTabBtn) adminTabBtn.style.display = me.is_admin ? "" : "none";
 
-    content.innerHTML = `
-      ${expiring.length > 0 ? expiringBanner(expiring) : ""}
+    const slides = promoSlides({ me, expiring, referralLink: referral && referral.link });
 
-      <div class="stat-grid">
-        <div class="stat-card"><div class="stat-num">${fmt(allActive.length)}</div><div class="stat-label">سرویس فعال</div></div>
-        <div class="stat-card"><div class="stat-num">${fmt(me.wallet_credit)}</div><div class="stat-label">موجودی کیف پول (تومان)</div></div>
+    content.innerHTML = `
+      <div class="home-greet">
+        <h1>👋 سلام ${me.first_name}</h1>
+        <p>خوش آمدی</p>
       </div>
+
+      ${renderPromoCarousel(slides)}
 
       <div class="eyebrow">دسترسی سریع</div>
       <div class="quick-grid">
         <div class="quick-item" data-nav="store"><span class="q-label">خرید سرویس جدید</span><span class="q-ic">🛍</span></div>
         <div class="quick-item" data-nav="services"><span class="q-label">سرویس‌های من</span><span class="q-ic">🛡</span></div>
         <div class="quick-item" data-nav="wallet"><span class="q-label">کیف پول</span><span class="q-ic">👛</span></div>
-        <div class="quick-item" data-nav="referral"><span class="q-label">زیرمجموعه‌گیری</span><span class="q-ic">🤝</span></div>
-        <div class="quick-item" data-nav="test"><span class="q-label">کانفیگ تست</span><span class="q-ic">🧪</span></div>
-        <div class="quick-item" data-nav="support"><span class="q-label">پشتیبانی</span><span class="q-ic">💬</span></div>
+        <div class="quick-item" data-nav="profile"><span class="q-label">حساب کاربری</span><span class="q-ic">👤</span></div>
+        <div class="quick-item full" data-nav="support"><span class="q-label">پشتیبانی</span><span class="q-ic">💬</span></div>
       </div>
 
-      <div class="eyebrow">آمار حساب</div>
-      <div class="card">
-        <div class="stat-row"><span>👥 زیرمجموعه‌ها</span><b>${fmt(me.referral_count)}</b></div>
-        <div class="stat-row"><span>📦 تعداد سفارش</span><b>${fmt(me.orders_count)}</b></div>
-      </div>
-
-      <div class="eyebrow">سرویس‌های فعال</div>
+      <div class="eyebrow">سرویس‌های من</div>
       <div class="card">
         ${allActive.length === 0
-          ? `<div class="state-msg"><span class="ic">◌</span>سرویس فعالی ندارید.</div>`
+          ? `<div class="state-msg"><span class="ic">◌</span>هنوز سرویسی ندارید.<br><span style="font-size:11.5px">از فروشگاه یک سرویس بخرید تا اینجا نمایش داده شود.</span></div>`
           : allActive.map(orderCard).join("")}
       </div>
     `;
     content.querySelectorAll(".quick-item[data-nav]").forEach((el) => {
       el.onclick = () => switchTab(el.dataset.nav);
     });
+    wirePromoCarousel(content);
     allActive.filter((o) => o.link).forEach((o) => {
       const links = (o.links && o.links.length) ? o.links : [o.link];
       links.forEach((link, idx) => loadSubInfo(`${o.id}-${idx}`, link));
     });
     wireAddToAppButtons(content);
+  } catch (e) {
+    content.innerHTML = errorState(e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب پروفایل
+// ---------------------------------------------------------------------------
+async function renderProfile() {
+  content.innerHTML = skeleton(3);
+  try {
+    const [me, orders, customConfigs] = await Promise.all([
+      api("/api/me"),
+      api("/api/orders"),
+      api("/api/custom-configs").catch(() => []),
+    ]);
+    setHeaderWallet(me.wallet_credit);
+    const active = orders.filter((o) => o.status === "approved" && !o.is_custom_config);
+    const activeCustom = customConfigs.filter((c) => !c.expires_at || new Date(c.expires_at) > new Date());
+    const activeCount = active.length + activeCustom.length;
+
+    const tgUser = (tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
+    const username = me.username || tgUser.username || "";
+    const photoUrl = tgUser.photo_url || "";
+    const initial = (me.first_name || "؟").trim().charAt(0).toUpperCase();
+
+    content.innerHTML = `
+      <div class="card profile-hero">
+        <div class="profile-avatar-wrap">
+          <div class="profile-avatar">${photoUrl ? `<img src="${photoUrl}" alt="" />` : initial}</div>
+        </div>
+        <div class="profile-name">${me.first_name || ""}</div>
+        ${username ? `<div class="profile-meta-row" id="copy-username"><span>📋</span>@${username}</div>` : ""}
+        <div class="profile-meta-row" id="copy-userid"><span>📋</span>شناسه: ${me.telegram_id}</div>
+
+        <div class="profile-info-grid">
+          <div class="stat-card"><div class="stat-num">${fmt(activeCount)}</div><div class="stat-label">سرویس فعال</div></div>
+          <div class="stat-card"><div class="stat-num">${fmt(me.wallet_credit)}</div><div class="stat-label">موجودی کیف پول</div></div>
+          <div class="profile-info-row"><span>تاریخ عضویت</span><b>${me.joined_at ? toJalaliStr(me.joined_at) : "-"}</b></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="list-row" data-nav="wallet">
+          <div class="list-row-main">
+            <div class="list-row-ic">👛</div>
+            <div class="list-row-text"><div class="list-row-title">کیف پول و افزایش موجودی</div></div>
+          </div>
+          <span class="list-row-chev">‹</span>
+        </div>
+        <div class="list-row" data-nav="services">
+          <div class="list-row-main">
+            <div class="list-row-ic">🛡</div>
+            <div class="list-row-text"><div class="list-row-title">سرویس‌های من</div></div>
+          </div>
+          <span class="list-row-chev">‹</span>
+        </div>
+        <div class="list-row" data-nav="referral">
+          <div class="list-row-main">
+            <div class="list-row-ic">🤝</div>
+            <div class="list-row-text"><div class="list-row-title">زیرمجموعه‌گیری</div></div>
+          </div>
+          <span class="list-row-chev">‹</span>
+        </div>
+        <div class="list-row" data-nav="test">
+          <div class="list-row-main">
+            <div class="list-row-ic">🧪</div>
+            <div class="list-row-text"><div class="list-row-title">دریافت کانفیگ تست</div></div>
+          </div>
+          <span class="list-row-chev">‹</span>
+        </div>
+        <div class="list-row" data-nav="support">
+          <div class="list-row-main">
+            <div class="list-row-ic">💬</div>
+            <div class="list-row-text"><div class="list-row-title">پشتیبانی</div></div>
+          </div>
+          <span class="list-row-chev">‹</span>
+        </div>
+      </div>
+    `;
+    content.querySelectorAll(".list-row[data-nav]").forEach((el) => {
+      el.onclick = () => switchTab(el.dataset.nav);
+    });
+    const cu = document.getElementById("copy-username");
+    if (cu) cu.onclick = (e) => { e.stopPropagation(); navigator.clipboard.writeText("@" + username); tg.HapticFeedback.notificationOccurred("success"); notify("کپی شد."); };
+    const ci = document.getElementById("copy-userid");
+    if (ci) ci.onclick = (e) => { e.stopPropagation(); navigator.clipboard.writeText(String(me.telegram_id)); tg.HapticFeedback.notificationOccurred("success"); notify("کپی شد."); };
   } catch (e) {
     content.innerHTML = errorState(e.message);
   }
@@ -1167,11 +1331,11 @@ async function renderStore() {
 
     if (storeCategoryView == null) {
       content.innerHTML = `
-        <div class="eyebrow">دسته‌بندی محصولات</div>
+        <div class="eyebrow">یک دسته را انتخاب کنید</div>
         ${categories.map((c) => `
           <div class="list-row" data-cat="${c.id}">
             <div class="list-row-main">
-              <span class="list-row-ic">▣</span>
+              <div class="list-row-ic">🏬</div>
               <div class="list-row-text">
                 <span class="list-row-title">${c.name}</span>
                 <span class="list-row-sub">${c.products.length} محصول</span>
@@ -1417,6 +1581,7 @@ async function renderWallet() {
   content.innerHTML = skeleton(2);
   try {
     const me = await api("/api/me");
+    setHeaderWallet(me.wallet_credit);
     content.innerHTML = `
       <div class="eyebrow">کیف پول</div>
       <div class="card">
@@ -3746,6 +3911,7 @@ const tabs = {
   home: renderHome,
   store: enterStoreTab,
   services: enterServicesTab,
+  profile: renderProfile,
   test: renderTestConfig,
   wheel: renderWheel,
   referral: renderReferral,
@@ -3768,5 +3934,8 @@ function switchTab(name) {
 }
 
 document.querySelectorAll("#tabbar button").forEach((b) => b.onclick = () => switchTab(b.dataset.tab));
+
+const headerWalletBtn = document.getElementById("header-wallet-btn");
+if (headerWalletBtn) headerWalletBtn.onclick = () => switchTab("wallet");
 
 switchTab("home");

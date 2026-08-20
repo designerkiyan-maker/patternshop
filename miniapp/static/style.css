@@ -130,71 +130,47 @@ body {
 }
 
 /* ===================================================================
-   Header — retrowave sun + horizon
+   Header — compact flat top bar (wallet chip + brand)
 =================================================================== */
-header.horizon {
+header.topbar {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   flex-shrink: 0;
-  height: 172px;
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border-soft);
+}
+.wallet-chip {
+  display: flex; align-items: center; gap: 7px;
+  border: 1px solid var(--glass-brd);
+  background: var(--glass);
+  color: var(--text);
+  padding: 8px 13px; border-radius: 999px;
+  font-family: var(--font-body); font-size: 12.5px; font-weight: 700;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: transform .12s ease;
+}
+.wallet-chip:active { transform: scale(0.95); }
+.wallet-chip svg { width: 17px; height: 17px; flex-shrink: 0; color: var(--cyan); }
+.topbar-brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.brand { font-family: var(--font-body); font-size: 14px; font-weight: 800; color: var(--text); white-space: nowrap; }
+.brand-avatar {
+  position: relative;
+  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--pink), var(--violet));
   overflow: hidden;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
-header.horizon::before {
-  content: "";
-  position: absolute; inset: 0;
-  background: linear-gradient(180deg, var(--header-g1) 0%, var(--header-g2) 40%, var(--header-g3) 65%, var(--header-g4) 100%);
-  opacity: 0.85;
-}
-.sun {
-  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
-  width: 130px; height: 130px; border-radius: 50%;
-  background: linear-gradient(180deg, var(--sun-a), var(--sun-b) 45%, var(--sun-c) 100%);
-  box-shadow: 0 0 60px 10px rgba(255, 90, 140, 0.45);
-  -webkit-mask-image: repeating-linear-gradient(180deg, #000 0 3px, transparent 3px 6px);
-  mask-image: repeating-linear-gradient(180deg, #000 0 3px, transparent 3px 6px);
-  animation: sunRise 0.9s ease-out;
-}
-@keyframes sunRise { from { transform: translateX(-50%) translateY(24px); opacity: 0; } to { transform: translateX(-50%) translateY(0); opacity: 1; } }
-/* دکمه‌ی لوگوی سفارشی که می‌تواند به‌جای خورشید انیمیشنی نمایش داده شود */
-.brand-logo { display: none; }
-header.horizon.has-logo .sun { display: none; }
-header.horizon.has-logo .brand-logo {
-  display: block;
-  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
-  width: 108px; height: 108px; border-radius: 50%;
-  object-fit: cover;
-  box-shadow: 0 0 40px 8px rgba(255, 90, 140, 0.4), 0 0 0 3px rgba(255, 255, 255, 0.15);
-  animation: sunRise 0.9s ease-out;
-}
-.grid-floor {
-  position: absolute; left: 0; right: 0; bottom: 0; height: 78px;
-  background-image:
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: 32px 18px;
-  transform: perspective(140px) rotateX(55deg); transform-origin: bottom;
-  mask-image: linear-gradient(180deg, transparent, black 40%);
-  -webkit-mask-image: linear-gradient(180deg, transparent, black 40%);
-}
-.horizon-content {
-  position: absolute; inset: 0; z-index: 2;
-  display: flex; flex-direction: column; justify-content: flex-start;
-  padding: 14px 16px;
-}
-.topline { display: flex; justify-content: space-between; align-items: center; font-size: 10px; letter-spacing: 1px; color: rgba(255, 255, 255, 0.75); font-family: var(--font-mono); }
-.brand { font-family: var(--font-disp); font-size: 13px; letter-spacing: 1px; text-shadow: 0 0 14px rgba(255, 138, 61, 0.6); }
-.live { display: flex; align-items: center; gap: 5px; font-weight: 600; }
-.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); animation: blink 1.5s infinite; }
-@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
-.greet { margin-top: auto; }
-.greet h1 { font-size: 19px; font-weight: 800; text-shadow: 0 0 18px rgba(255, 47, 146, 0.55); }
-.header-sub { font-size: 11.5px; color: rgba(255, 255, 255, 0.7); margin-top: 4px; }
-@media (prefers-reduced-motion: reduce) {
-  .sun { animation: none; }
-  .brand-logo { animation: none; }
-  .dot { animation: none; }
-}
+.brand-avatar-fallback { font-size: 16px; line-height: 1; }
+.brand-logo { display: none; width: 34px; height: 34px; border-radius: 50%; object-fit: cover; }
+header.topbar.has-logo .brand-logo { display: block; }
+header.topbar.has-logo .brand-avatar-fallback { display: none; }
+header.topbar.has-logo .brand-avatar { background: none; }
 
 /* ===================================================================
    Content area
@@ -303,6 +279,81 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
   display: flex; align-items: center; justify-content: center; font-size: 15px;
   background: linear-gradient(135deg, var(--pink), var(--violet));
 }
+.quick-item.full { grid-column: 1 / -1; }
+
+/* ===================================================================
+   Home greeting (moved out of header — sits at top of #content)
+=================================================================== */
+.home-greet { margin-bottom: 14px; }
+.home-greet h1 { font-size: 19px; font-weight: 800; color: var(--text); }
+.home-greet p { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; }
+
+/* ===================================================================
+   Promo banner carousel (صفحه خانه)
+=================================================================== */
+.promo-carousel {
+  position: relative; margin-bottom: 16px;
+  border-radius: var(--radius-lg); overflow: hidden;
+}
+.promo-track {
+  display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none; border-radius: var(--radius-lg);
+}
+.promo-track::-webkit-scrollbar { display: none; }
+.promo-slide {
+  flex: 0 0 100%; scroll-snap-align: start;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  min-height: 108px; padding: 18px 18px;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  color: #f4f2ff; position: relative; overflow: hidden;
+}
+.promo-slide::before {
+  content: ""; position: absolute; inset: 0; z-index: 0;
+  background: var(--promo-bg, linear-gradient(120deg, #10151c, #1c2733));
+}
+.promo-slide-icon, .promo-slide-body { position: relative; z-index: 1; }
+.promo-slide-icon { font-size: 40px; flex-shrink: 0; filter: drop-shadow(0 0 12px rgba(126,249,255,.35)); }
+.promo-slide-title { font-size: 15px; font-weight: 800; margin-bottom: 4px; }
+.promo-slide-sub { font-size: 11.5px; opacity: 0.85; line-height: 1.6; max-width: 200px; }
+.promo-slide-cta {
+  display: inline-flex; align-items: center; gap: 4px; margin-top: 8px;
+  font-size: 11.5px; font-weight: 700; color: var(--cyan);
+}
+.promo-dots { display: flex; justify-content: center; gap: 5px; margin-top: 8px; }
+.promo-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--glass-brd); transition: background .15s ease, width .15s ease; }
+.promo-dots span.active { background: var(--pink); width: 16px; border-radius: 4px; }
+
+/* ===================================================================
+   Profile page
+=================================================================== */
+.profile-hero { text-align: center; }
+.profile-avatar-wrap { display: flex; justify-content: center; margin-bottom: 12px; }
+.profile-avatar {
+  width: 92px; height: 92px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--pink), var(--violet));
+  font-size: 32px; font-weight: 800; color: #fff;
+  overflow: hidden; box-shadow: 0 6px 20px -8px rgba(255, 47, 146, 0.5);
+}
+.profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.profile-name { font-size: 19px; font-weight: 800; color: var(--text); margin-bottom: 4px; }
+.profile-meta-row {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 12.5px; color: var(--text-muted); margin-bottom: 3px;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.profile-meta-row svg { width: 13px; height: 13px; opacity: 0.7; }
+.profile-info-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px;
+}
+.profile-info-row {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--glass); border: 1px solid var(--glass-brd);
+  border-radius: var(--radius-sm); padding: 12px 14px;
+  font-size: 12.5px; color: var(--text-muted);
+}
+.profile-info-row b { color: var(--text); font-weight: 700; font-size: 13px; }
 
 /* ===================================================================
    List rows (دسته‌بندی فروشگاه، ردیف‌های ناوبری)
@@ -841,31 +892,32 @@ textarea.input { font-family: var(--font-mono); min-height: 90px; }
 .chat-send-btn svg { width: 19px; height: 19px; }
 
 /* ===================================================================
-   Tab bar — floating holo pill
+   Tab bar — flat bottom nav (matches reference screenshots)
 =================================================================== */
 #tabbar {
   position: relative; z-index: 1; flex-shrink: 0;
   display: flex;
-  margin: 0 12px calc(10px + env(safe-area-inset-bottom));
-  padding: 6px;
-  border-radius: 22px;
-  background: rgba(20, 10, 45, 0.75);
-  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--glass-brd);
-  box-shadow: 0 12px 40px -12px rgba(0, 0, 0, 0.6);
+  padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+  background: var(--bg2);
+  border-top: 1px solid var(--border-soft);
 }
 #tabbar button {
   flex: 1; min-width: 0;
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  padding: 9px 2px 7px;
-  border: none; background: none; border-radius: 16px;
-  font-family: var(--font-body); font-size: 9.2px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 2px 6px;
+  border: none; background: none; border-radius: 12px;
+  font-family: var(--font-body); font-size: 10.5px; font-weight: 600;
   color: var(--text-muted);
   position: relative; white-space: nowrap;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition: color 0.15s ease;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
 }
-#tabbar button svg { width: 18px; height: 18px; transition: filter 0.15s ease; }
-#tabbar button.active { color: #160a2e; background: linear-gradient(135deg, var(--pink), var(--violet)); font-weight: 700; }
+#tabbar button svg { width: 22px; height: 22px; }
+#tabbar button .ic-filled { display: none; }
+#tabbar button.active .ic-outline { display: none; }
+#tabbar button.active .ic-filled { display: block; }
+#tabbar button.active { color: var(--pink); font-weight: 700; }
+#tabbar button:active { transform: scale(0.94); }
 
 /* ===================================================================
    Clean Light — modern flat theme (inspired by reference screenshots)
@@ -873,29 +925,7 @@ textarea.input { font-family: var(--font-mono); min-height: 90px; }
 =================================================================== */
 html[data-theme="clean-light"] body { background: var(--bg); }
 html[data-theme="clean-light"] .grid-fx { display: none; }
-
-html[data-theme="clean-light"] header.horizon {
-  height: 128px;
-  border-bottom: 1px solid var(--border-soft);
-}
-html[data-theme="clean-light"] header.horizon::before {
-  background: var(--bg2);
-  opacity: 1;
-}
-html[data-theme="clean-light"] .sun,
-html[data-theme="clean-light"] .grid-floor { display: none; }
-html[data-theme="clean-light"] header.horizon.has-logo .brand-logo {
-  width: 42px; height: 42px;
-  left: auto; right: 16px; top: 16px; bottom: auto; transform: none;
-  box-shadow: 0 3px 10px rgba(20, 40, 25, 0.18), 0 0 0 3px var(--bg2);
-  animation: none;
-}
-html[data-theme="clean-light"] .topline { color: var(--text-muted); }
-html[data-theme="clean-light"] .brand { font-weight: 800; font-size: 14.5px; color: var(--text); text-shadow: none; }
-html[data-theme="clean-light"] .live { color: var(--cyan); }
-html[data-theme="clean-light"] .dot { background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
-html[data-theme="clean-light"] .greet h1 { color: var(--text); text-shadow: none; font-weight: 800; }
-html[data-theme="clean-light"] .header-sub { color: var(--text-muted); }
+html[data-theme="clean-light"] #tabbar button.active { color: #2f9e57; }
 
 html[data-theme="clean-light"] .eyebrow { color: var(--cyan); }
 html[data-theme="clean-light"] .eyebrow::after { background: linear-gradient(90deg, rgba(20, 40, 25, 0.12), transparent); }
@@ -980,10 +1010,4 @@ html[data-theme="clean-light"] .skel {
 html[data-theme="clean-light"] .chat-messages::-webkit-scrollbar-thumb,
 html[data-theme="clean-light"] main::-webkit-scrollbar-thumb { background: var(--border-soft); }
 
-html[data-theme="clean-light"] #tabbar {
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid var(--border-soft);
-  box-shadow: 0 10px 30px -14px rgba(20, 40, 25, 0.22);
-}
-html[data-theme="clean-light"] #tabbar button { color: var(--text-muted); }
-html[data-theme="clean-light"] #tabbar button.active { color: #0d2b12; }
+html[data-theme="clean-light"] #tabbar { background: #ffffff; }
