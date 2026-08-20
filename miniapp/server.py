@@ -61,7 +61,8 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 # تم‌های قابل انتخاب برای مینی‌اپ (هر تننت/نماینده جدا انتخاب می‌کند)
 MINIAPP_THEMES = {
-    "synthwave": "🌅 سینت‌ویو (پیش‌فرض)",
+    "clean-light": "🌿 مینیمال روشن (پیش‌فرض)",
+    "synthwave": "🌅 سینت‌ویو",
     "neon-mint": "🟢 نئون مینت",
     "royal-violet": "👑 بنفش سلطنتی",
     "blood-moon": "🔴 ماه خونین",
@@ -254,9 +255,9 @@ def serve_index(tenant: Tenant = Depends(get_tenant)):
     html = html.replace("{{STORE_NAME}}", html_lib.escape(store_name))
     html = html.replace("{{BANNER_TEXT}}", html_lib.escape(banner_text))
 
-    theme = tenant.db.get_setting("miniapp_theme", "synthwave")
+    theme = tenant.db.get_setting("miniapp_theme", "clean-light")
     if theme not in MINIAPP_THEMES:
-        theme = "synthwave"
+        theme = "clean-light"
     html = html.replace("{{THEME}}", theme)
 
     header_image = tenant.db.get_setting("header_image_data", "")
@@ -2422,9 +2423,9 @@ class BrandingUpdate(BaseModel):
 @app.get("/api/admin/settings/branding")
 def api_admin_get_branding(auth=Depends(require_senior_admin)):
     _, db, _ = auth
-    theme = db.get_setting("miniapp_theme", "synthwave")
+    theme = db.get_setting("miniapp_theme", "clean-light")
     if theme not in MINIAPP_THEMES:
-        theme = "synthwave"
+        theme = "clean-light"
     return {
         "store_name": db.get_setting("store_name", "⚡ SHOP VPN"),
         "banner_text": db.get_setting("miniapp_banner_text", "اتصال امن و پایدار برقرار است"),
