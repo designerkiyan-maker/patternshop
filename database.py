@@ -1986,6 +1986,11 @@ class Database:
                 (now, now),
             )
 
+    def cancel_and_delete_crypto_invoice(self, invoice_id: int):
+        """لغو دستی توسط ادمین: فاکتور بلافاصله از دیتابیس حذف می‌شود (منتظر ۷ روز نمی‌ماند)."""
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM crypto_invoices WHERE id=?", (invoice_id,))
+
     def purge_old_crypto_invoices(self, days: int = 7):
         """فاکتورهای کریپتوی نهایی‌شده (تکمیل/منقضی/لغو/خطا/مغایرت) که بیش از N روز از
         آخرین به‌روزرسانی‌شان گذشته را برای همیشه حذف می‌کند، تا لیست پنل مدیریت شلوغ نماند."""

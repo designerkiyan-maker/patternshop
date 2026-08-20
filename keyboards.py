@@ -694,12 +694,15 @@ def crypto_invoices_kb(invoices) -> InlineKeyboardMarkup:
     for inv in invoices:
         st = status_text.get(inv["status"], inv["status"] or "---")
         kind = kind_text.get(inv["kind"], inv["kind"])
-        rows.append([
+        row = [
             InlineKeyboardButton(
                 text=f"{st} | {kind} #{inv['ref_id']} | {inv['amount_toman']:,} تومان",
                 callback_data=f"view_crypto_invoice:{inv['id']}",
             )
-        ])
+        ]
+        if inv["status"] in ("new", "pending"):
+            row.append(InlineKeyboardButton(text="❌ لغو", callback_data=f"cancel_crypto_invoice:{inv['id']}"))
+        rows.append(row)
     rows.append([InlineKeyboardButton(text="🔄 بروزرسانی", callback_data="adm_crypto_payments")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:daily")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

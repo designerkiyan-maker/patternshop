@@ -994,9 +994,41 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         rows = []
         if invoice["invoice_url"] and invoice["status"] in ("new", "pending"):
             rows.append([InlineKeyboardButton(text="🔗 باز کردن فاکتور", url=invoice["invoice_url"])])
+        if invoice["status"] in ("new", "pending"):
+            rows.append([InlineKeyboardButton(text="❌ لغو و حذف فاکتور", callback_data=f"cancel_crypto_invoice:{invoice['id']}")])
         rows.append([InlineKeyboardButton(text="⬅️ بازگشت به پرداخت‌های کریپتو", callback_data="adm_crypto_payments")])
         await replace_admin_view(call, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
         await call.answer()
+
+    @router.callback_query(F.data.startswith("cancel_crypto_invoice:"))
+    async def cb_cancel_crypto_invoice(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        invoice_id = callback_id(call.data, "cancel_crypto_invoice")
+        if invoice_id is None:
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
+        invoice = db.get_crypto_invoice(invoice_id)
+        if not invoice:
+            await call.answer("فاکتور یافت نشد یا قبلاً حذف شده.", show_alert=True)
+        else:
+            db.cancel_and_delete_crypto_invoice(invoice_id)
+            await call.answer("✅ فاکتور لغو و حذف شد.")
+
+        db.expire_stale_crypto_invoices()
+        db.purge_old_crypto_invoices(days=7)
+        invoices = db.get_crypto_invoices(50)
+        if not invoices:
+            await replace_admin_view(call, "🪙 پرداخت‌های کریپتو\n\nهیچ پرداخت کریپتویی ثبت نشده است.",
+                                      reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                                          [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:daily")]
+                                      ]))
+            return
+        await replace_admin_view(
+            call,
+            "🪙 پرداخت‌های کریپتو\n\nاین پرداخت‌ها به‌صورت خودکار تایید می‌شوند و در بخش سفارش‌ها/شارژهای دستی نمایش داده نمی‌شوند.",
+            reply_markup=kb.crypto_invoices_kb(invoices),
+        )
 
     @router.callback_query(F.data.startswith("view_topup:"))
     async def cb_view_topup(call: CallbackQuery, bot: Bot):
