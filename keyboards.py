@@ -841,6 +841,15 @@ def topup_review_kb(topup_id) -> InlineKeyboardMarkup:
 # مدیریت بات‌های نمایندگی (فقط در بات اصلی)
 # ---------------------------------------------------------------------------
 
+def resbot_del_confirm_kb(bot_id) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="🗑 فقط حذف (دیتابیس نگه داشته شود)", callback_data=f"adm_resbot_delc:{bot_id}:0")],
+        [InlineKeyboardButton(text="🗑💥 حذف + پاک‌کردن دیتابیس", callback_data=f"adm_resbot_delc:{bot_id}:1")],
+        [InlineKeyboardButton(text="انصراف", callback_data="adm_resellers_menu")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def resellers_kb(resellers) -> InlineKeyboardMarkup:
     rows = []
     for r in resellers:

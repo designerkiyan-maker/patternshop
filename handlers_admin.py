@@ -9,6 +9,7 @@
 import os
 import asyncio
 import tempfile
+import logging
 
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
@@ -57,6 +58,8 @@ from states import (
     AdminCustomConfigSettings,
     AdminResetTestConfig,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Router:
@@ -2096,13 +2099,41 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if bot_id is None:
                 await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
                 return
+            await safe_edit(call,
+                "⚠️ آیا از حذف این بات نمایندگی مطمئنی؟\n\nدیتابیس آن (شامل کاربران، کیف پول، کانفیگ‌ها) پاک شود یا فقط برای احتیاط نگه داشته شود؟",
+                reply_markup=kb.resbot_del_confirm_kb(bot_id),
+            )
+            await call.answer()
+
+        @router.callback_query(F.data.startswith("adm_resbot_delc:"))
+        async def cb_admin_resbot_del_confirm(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            parts = call.data.split(":")
+            if len(parts) != 3 or not parts[1].isdigit() or parts[2] not in ("0", "1"):
+                await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+                return
+            bot_id, purge = int(parts[1]), parts[2] == "1"
             reseller_bot = db.get_reseller_bot(bot_id)
             if reseller_bot and bot_manager:
                 await bot_manager.stop_bot(reseller_bot["bot_token"])
             db.delete_reseller_bot(bot_id)
+
+            db_purged = False
+            if purge and reseller_bot:
+                resolved_path = resolve_db_path(reseller_bot["db_path"])
+                try:
+                    if os.path.exists(resolved_path):
+                        os.remove(resolved_path)
+                        db_purged = True
+                except OSError:
+                    logger.exception("پاک‌کردن فایل دیتابیس نماینده ناموفق بود: %s", resolved_path)
+
             bots = db.list_reseller_bots()
-            await safe_edit(call, 
-                "🏪 مدیریت بات‌های نمایندگی:\n\n⚠️ بات متوقف شد. فایل دیتابیسش برای احتیاط پاک نشد.",
+            note = "⚠️ بات متوقف و حذف شد."
+            note += " دیتابیسش هم پاک شد." if db_purged else " فایل دیتابیسش برای احتیاط پاک نشد."
+            await safe_edit(call,
+                f"🏪 مدیریت بات‌های نمایندگی:\n\n{note}",
                 reply_markup=kb.resellers_kb(bots),
             )
             await call.answer("بات نمایندگی حذف شد.")

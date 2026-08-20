@@ -329,6 +329,13 @@ class Database:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS pending_db_purges (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    bot_token TEXT NOT NULL,
+                    db_path TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS support_messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
@@ -1722,6 +1729,21 @@ class Database:
     def delete_reseller_bot(self, bot_id: int):
         with self._get_conn() as conn:
             conn.execute("DELETE FROM reseller_bots WHERE id=?", (bot_id,))
+
+    def queue_db_purge(self, bot_token: str, db_path: str):
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO pending_db_purges (bot_token, db_path) VALUES (?, ?)",
+                (bot_token, db_path),
+            )
+
+    def list_pending_db_purges(self):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM pending_db_purges").fetchall()
+
+    def remove_pending_db_purge(self, purge_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM pending_db_purges WHERE id=?", (purge_id,))
 
     # -----------------------------------------------------------------------
     # فاکتورهای پرداخت کریپتو (Plisio)

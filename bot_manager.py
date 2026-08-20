@@ -9,6 +9,7 @@
 
 import asyncio
 import logging
+import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -249,5 +250,19 @@ class BotManager:
                         logger.info(
                             "بات نمایندگی (token=...%s) توسط reconcile متوقف شد (غیرفعال/حذف‌شده).", token[-6:]
                         )
+
+                # پاک‌کردن فایل دیتابیس نماینده‌های حذف‌شده فقط بعد از اطمینان از
+                # اینکه بات‌شان کاملاً متوقف شده (تا با یک connection زنده روی
+                # همان فایل رقابت نکند و باعث ساخته‌شدن دوباره‌ی یک دیتابیس خالی نشود).
+                for purge_row in main_db.list_pending_db_purges():
+                    if purge_row["bot_token"] in self.instances:
+                        continue
+                    try:
+                        if os.path.exists(purge_row["db_path"]):
+                            os.remove(purge_row["db_path"])
+                        main_db.remove_pending_db_purge(purge_row["id"])
+                        logger.info("فایل دیتابیس نماینده‌ی حذف‌شده پاک شد: %s", purge_row["db_path"])
+                    except OSError:
+                        logger.exception("پاک‌کردن فایل دیتابیس نماینده ناموفق بود: %s", purge_row["db_path"])
             except Exception:
                 logger.exception("خطا در حلقه‌ی reconcile نمایندگی‌ها.")
