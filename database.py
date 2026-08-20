@@ -14,8 +14,36 @@ import sqlite3
 import secrets
 import threading
 import time
+import json
 from datetime import datetime, timedelta
 from contextlib import contextmanager
+
+
+# بنرهای پیش‌فرض کاروسل بالای صفحه‌ی خانه‌ی مینی‌اپ (قابل مدیریت از پنل ادمین
+# > ظاهر > بنرها). ساختار هر بنر: آیکون (اموجی)، عنوان، توضیح کوتاه، متن دکمه،
+# گرادیانِ پس‌زمینه و اینکه ضربه‌زدن روی بنر کاربر را به کدام تب مینی‌اپ ببرد.
+DEFAULT_BANNERS = [
+    {
+        "id": "b_store",
+        "icon": "🛒",
+        "title": "خرید سرویس جدید!",
+        "sub": "سرویس مورد نظرتو انتخاب کن و در چند ثانیه فعالش کن!",
+        "cta": "شروع خرید",
+        "nav": "store",
+        "bg": "linear-gradient(120deg, #0d1a12, #123a20 55%, #17532c)",
+        "enabled": True,
+    },
+    {
+        "id": "b_support",
+        "icon": "💬",
+        "title": "پشتیبانی ۲۴ ساعته",
+        "sub": "هر سوالی داشتی، همین‌جا از پشتیبانی بپرس.",
+        "cta": "گفت‌وگو با پشتیبانی",
+        "nav": "support",
+        "bg": "linear-gradient(120deg, #150c22, #2a1440 55%, #431f66)",
+        "enabled": True,
+    },
+]
 
 
 DEFAULT_SETTINGS = {
@@ -696,6 +724,29 @@ class Database:
             if k not in clean:
                 clean.append(k)
         self.set_setting("menu_order", json.dumps(clean, ensure_ascii=False))
+
+    # -----------------------------------------------------------------------
+    # بنرهای کاروسل بالای صفحه‌ی خانه‌ی مینی‌اپ
+    # -----------------------------------------------------------------------
+
+    def get_banners(self) -> list:
+        """لیست بنرهای سفارشی کاروسل خانه را برمی‌گرداند. اولین بار که خوانده
+        می‌شود، با بنرهای پیش‌فرض (خرید سرویس / پشتیبانی) مقداردهی می‌شود تا
+        رفتار مینی‌اپ برای نصب‌های قبلی بدون تغییر بماند."""
+        raw = self.get_setting("miniapp_banners", "")
+        if not raw:
+            self.set_banners(DEFAULT_BANNERS)
+            return [dict(b) for b in DEFAULT_BANNERS]
+        try:
+            banners = json.loads(raw)
+            if not isinstance(banners, list):
+                raise ValueError
+        except (ValueError, TypeError):
+            return [dict(b) for b in DEFAULT_BANNERS]
+        return banners
+
+    def set_banners(self, banners: list):
+        self.set_setting("miniapp_banners", json.dumps(banners, ensure_ascii=False))
 
     # -----------------------------------------------------------------------
     # کاربران
