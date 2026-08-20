@@ -554,7 +554,7 @@ async function renderHome() {
       <div class="eyebrow">دسترسی سریع</div>
       <div class="quick-grid">
         <div class="quick-item" data-nav="store"><span class="q-label">خرید سرویس جدید</span><span class="q-ic">🛍</span></div>
-        <div class="quick-item" data-nav="home"><span class="q-label">سرویس‌های من</span><span class="q-ic">🛡</span></div>
+        <div class="quick-item" data-nav="services"><span class="q-label">سرویس‌های من</span><span class="q-ic">🛡</span></div>
         <div class="quick-item" data-nav="wallet"><span class="q-label">کیف پول</span><span class="q-ic">👛</span></div>
         <div class="quick-item" data-nav="referral"><span class="q-label">زیرمجموعه‌گیری</span><span class="q-ic">🤝</span></div>
         <div class="quick-item" data-nav="test"><span class="q-label">کانفیگ تست</span><span class="q-ic">🧪</span></div>
@@ -658,6 +658,104 @@ function referralCard(r) {
       <div class="link-box" style="margin-top:8px">${r.link}</div>
       <button class="btn small outline" id="copy-referral-btn" data-link="${r.link}" style="width:100%;margin-top:8px">📋 کپی لینک دعوت</button>
       ` : ""}
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// تب سرویس‌ها (لیست کامل با جست‌وجو و فیلتر وضعیت)
+// ---------------------------------------------------------------------------
+
+let servicesFilter = "all"; // all | active | expired | inactive
+let servicesQuery = "";
+
+function enterServicesTab() {
+  servicesFilter = "all";
+  servicesQuery = "";
+  renderServices();
+}
+
+function serviceStatusKey(o) {
+  if (o.status !== "approved") return "inactive";
+  if (o.expires_at) {
+    if (new Date(o.expires_at) < new Date()) return "expired";
+  }
+  return "active";
+}
+
+async function renderServices() {
+  content.innerHTML = skeleton(3);
+  try {
+    const [orders, customConfigs] = await Promise.all([
+      api("/api/orders"),
+      api("/api/custom-configs").catch(() => []),
+    ]);
+    const customCards = customConfigs.map((c) => ({
+      id: `cc-${c.id}`,
+      product_name: `🛠 کانفیگ شخصی «${c.username}» (${c.volume_gb} گیگ / ${c.duration_days} روز)`,
+      quantity: 1,
+      status: "approved",
+      is_custom_config: true,
+      link: c.subscription_url,
+      links: c.subscription_url ? [c.subscription_url] : [],
+      expires_at: c.expires_at || null,
+    }));
+    const all = [...orders, ...customCards];
+
+    const FILTERS = [
+      { key: "all", label: "همه" },
+      { key: "active", label: "فعال" },
+      { key: "expired", label: "منقضی" },
+      { key: "inactive", label: "غیرفعال" },
+    ];
+    const filtered = all.filter((o) => {
+      if (servicesFilter !== "all" && serviceStatusKey(o) !== servicesFilter) return false;
+      if (servicesQuery && !o.product_name.toLowerCase().includes(servicesQuery.toLowerCase())) return false;
+      return true;
+    });
+
+    content.innerHTML = `
+      <input class="input" id="services-search" type="text" placeholder="جست‌وجوی سرویس..."
+        style="direction:rtl;text-align:right;margin-bottom:10px" value="${escHtml(servicesQuery)}" />
+      <div class="chip-row">
+        ${FILTERS.map((f) => `<button class="chip ${servicesFilter === f.key ? "active" : ""}" data-filter="${f.key}">${f.label}</button>`).join("")}
+      </div>
+      <div id="services-list">
+        ${filtered.length === 0
+          ? `<div class="state-msg"><span class="ic">◌</span>سرویسی یافت نشد.</div>`
+          : `<div class="card">${filtered.map((o) => serviceStatusKey(o) === "active" ? orderCard(o) : serviceInactiveRow(o)).join("")}</div>`}
+      </div>
+    `;
+
+    document.getElementById("services-search").oninput = (e) => {
+      servicesQuery = e.target.value;
+      renderServices();
+    };
+    content.querySelectorAll(".chip[data-filter]").forEach((el) => {
+      el.onclick = () => { servicesFilter = el.dataset.filter; renderServices(); };
+    });
+
+    filtered.filter((o) => serviceStatusKey(o) === "active" && o.link).forEach((o) => {
+      const links = (o.links && o.links.length) ? o.links : [o.link];
+      links.forEach((link, idx) => loadSubInfo(`${o.id}-${idx}`, link));
+    });
+    wireAddToAppButtons(content);
+  } catch (e) {
+    content.innerHTML = errorState(e.message);
+  }
+}
+
+function serviceInactiveRow(o) {
+  const key = serviceStatusKey(o);
+  const badgeClass = key === "expired" ? "pending" : "rejected";
+  const label = key === "expired" ? "منقضی‌شده" : (o.status === "pending" ? "در انتظار تایید" : "رد‌شده");
+  const exp = o.expires_at ? toJalaliStr(o.expires_at) : "";
+  return `
+    <div class="order-block">
+      <div class="stat-row">
+        <span>${o.product_name}${o.quantity > 1 ? ` × ${o.quantity}` : ""}</span>
+        <span class="badge ${badgeClass}">${label}${exp ? ` · ${exp}` : ""}</span>
+      </div>
     </div>
   `;
 }
@@ -1053,6 +1151,8 @@ function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, s
 // ---------------------------------------------------------------------------
 // تب فروشگاه
 // ---------------------------------------------------------------------------
+let storeCategoryView = null; // null = لیست دسته‌بندی‌ها، وگرنه شناسه دسته‌بندی انتخاب‌شده
+
 async function renderStore() {
   content.innerHTML = skeleton(4);
   try {
@@ -1063,10 +1163,43 @@ async function renderStore() {
     }
     window._storeProducts = {};
     categories.forEach((c) => c.products.forEach((p) => { window._storeProducts[p.id] = p; }));
-    content.innerHTML = categories.map((c) => `
+    window._storeCategories = categories;
+
+    if (storeCategoryView == null) {
+      content.innerHTML = `
+        <div class="eyebrow">دسته‌بندی محصولات</div>
+        ${categories.map((c) => `
+          <div class="list-row" data-cat="${c.id}">
+            <div class="list-row-main">
+              <span class="list-row-ic">▣</span>
+              <div class="list-row-text">
+                <span class="list-row-title">${c.name}</span>
+                <span class="list-row-sub">${c.products.length} محصول</span>
+              </div>
+            </div>
+            <span class="list-row-chev">‹</span>
+          </div>
+        `).join("")}
+      `;
+      content.querySelectorAll(".list-row[data-cat]").forEach((el) => {
+        el.onclick = () => { storeCategoryView = parseInt(el.dataset.cat, 10); renderStore(); };
+      });
+      return;
+    }
+
+    const cat = categories.find((c) => c.id === storeCategoryView);
+    if (!cat) { storeCategoryView = null; return renderStore(); }
+    content.innerHTML = `
+      <div class="list-row" id="store-back-row">
+        <div class="list-row-main">
+          <span class="list-row-ic">‹</span>
+          <div class="list-row-text"><span class="list-row-title">بازگشت به دسته‌بندی‌ها</span></div>
+        </div>
+      </div>
+      <div class="eyebrow">${cat.name}</div>
       <div class="card">
-        <h3><span class="ic">▣</span>${c.name}</h3>
-        ${c.products.map((p) => `
+        <h3><span class="ic">▣</span>${cat.name}</h3>
+        ${cat.products.map((p) => `
           <div class="product">
             <div>
               <div class="product-name">${p.name}</div>
@@ -1079,10 +1212,16 @@ async function renderStore() {
           </div>
         `).join("")}
       </div>
-    `).join("");
+    `;
+    document.getElementById("store-back-row").onclick = () => { storeCategoryView = null; renderStore(); };
   } catch (e) {
     content.innerHTML = errorState(e.message);
   }
+}
+
+function enterStoreTab() {
+  storeCategoryView = null;
+  renderStore();
 }
 
 function openProductPurchase(productId) {
@@ -3605,7 +3744,8 @@ async function renderAdminResellersSection() {
 
 const tabs = {
   home: renderHome,
-  store: renderStore,
+  store: enterStoreTab,
+  services: enterServicesTab,
   test: renderTestConfig,
   wheel: renderWheel,
   referral: renderReferral,

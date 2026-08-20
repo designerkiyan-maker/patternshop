@@ -305,6 +305,54 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
 }
 
 /* ===================================================================
+   List rows (دسته‌بندی فروشگاه، ردیف‌های ناوبری)
+=================================================================== */
+.list-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--glass);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--glass-brd);
+  border-radius: var(--radius-lg);
+  padding: 15px 16px; margin-bottom: 10px;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: transform .12s ease, filter .12s ease;
+  animation: cardPop 0.32s cubic-bezier(.2, .9, .3, 1.2);
+}
+.list-row:active { transform: scale(0.98); filter: brightness(0.97); }
+.list-row-main { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.list-row-ic {
+  width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 17px;
+  background: linear-gradient(135deg, var(--pink), var(--violet)); color: #fff;
+}
+.list-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.list-row-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.list-row-sub { font-size: 11.5px; color: var(--text-muted); }
+.list-row-chev { color: var(--text-muted); font-size: 16px; flex-shrink: 0; }
+
+/* ===================================================================
+   Filter chips (تب سرویس‌ها)
+=================================================================== */
+.chip-row {
+  display: flex; gap: 8px; margin-bottom: 14px;
+  overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.chip-row::-webkit-scrollbar { display: none; }
+.chip {
+  flex: 0 0 auto;
+  border: 1px solid var(--glass-brd);
+  background: var(--glass);
+  color: var(--text-muted);
+  padding: 8px 16px; border-radius: 999px;
+  font-family: var(--font-body); font-size: 12.5px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+  transition: background .15s ease, color .15s ease;
+}
+.chip.active { background: linear-gradient(135deg, var(--pink), var(--violet)); color: #160a2e; border-color: transparent; font-weight: 700; }
+
+/* ===================================================================
    Buttons
 =================================================================== */
 .btn {
@@ -869,6 +917,17 @@ html[data-theme="clean-light"] .quick-item {
   box-shadow: 0 2px 12px -4px rgba(20, 40, 25, 0.08);
 }
 html[data-theme="clean-light"] .quick-item .q-ic { color: #fff; }
+
+html[data-theme="clean-light"] .list-row {
+  background: var(--bg2);
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  border: 1px solid var(--border-soft);
+  box-shadow: 0 2px 12px -4px rgba(20, 40, 25, 0.08);
+}
+html[data-theme="clean-light"] .chip {
+  background: var(--bg2); border-color: var(--border-soft); color: var(--text-muted);
+}
+html[data-theme="clean-light"] .chip.active { color: #0d2b12; }
 
 html[data-theme="clean-light"] .stat-row { border-bottom-color: var(--border-soft); }
 html[data-theme="clean-light"] .stat-row b {
