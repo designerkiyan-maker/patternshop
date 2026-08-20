@@ -2123,6 +2123,168 @@ function bannerGradientAngle(bgStr) {
   return m ? m[1] : "120";
 }
 
+function updateBannerGradientFromControls(idx) {
+  const c1 = document.querySelector(`.banner-color-swatch-btn[data-idx="${idx}"][data-which="1"]`).dataset.color;
+  const c2 = document.querySelector(`.banner-color-swatch-btn[data-idx="${idx}"][data-which="2"]`).dataset.color;
+  const angle = document.querySelector(`.banner-angle-input[data-idx="${idx}"]`).value;
+  const gradient = `linear-gradient(${angle}deg, ${c1}, ${c2})`;
+  const bgInput = document.querySelector(`.banner-bg-input[data-idx="${idx}"]`);
+  if (bgInput) bgInput.value = gradient;
+  if (!adminBannerItems[Number(idx)].image) {
+    const preview = document.querySelector(`.banner-preview[data-idx="${idx}"]`);
+    if (preview) preview.style.background = gradient;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// انتخاب‌گر کامل رنگ (طیف کامل + تیرگی/روشنی + هیو) — چون input[type=color]
+// داخل مرورگر درون‌برنامه‌ای تلگرام روی همه‌ی گوشی‌ها درست کار نمی‌کند، یک
+// پیکر رنگ اختصاصی با HTML/CSS/Pointer Events ساخته شده که در همه‌جا یکسان کار می‌کند.
+// ---------------------------------------------------------------------------
+
+function hsvToRgb(h, s, v) {
+  s /= 100; v /= 100;
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  let r, g, b;
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
+function rgbToHex(r, g, b) {
+  return "#" + [r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("");
+}
+
+function hsvToHex(h, s, v) {
+  return rgbToHex(...hsvToRgb(h, s, v));
+}
+
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || "").trim());
+  if (!m) return [21, 12, 34];
+  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+}
+
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0;
+  if (d !== 0) {
+    if (max === r) h = (((g - b) / d) % 6) * 60;
+    else if (max === g) h = ((b - r) / d + 2) * 60;
+    else h = ((r - g) / d + 4) * 60;
+    if (h < 0) h += 360;
+  }
+  return [h, max === 0 ? 0 : (d / max) * 100, max * 100];
+}
+
+function hexToHsv(hex) {
+  return rgbToHsv(...hexToRgb(hex));
+}
+
+function openColorPickerModal(initialHex, onConfirm) {
+  const [h0, s0, v0] = hexToHsv(initialHex);
+  const state = { h: h0, s: s0, v: v0 };
+
+  const overlay = document.createElement("div");
+  overlay.className = "color-picker-overlay";
+  overlay.innerHTML = `
+    <div class="color-picker-modal">
+      <div class="color-picker-picker-row">
+        <div class="color-picker-sv" id="cp-sv"><div class="color-picker-sv-thumb" id="cp-sv-thumb"></div></div>
+        <div class="color-picker-hue" id="cp-hue"><div class="color-picker-hue-thumb" id="cp-hue-thumb"></div></div>
+      </div>
+      <div class="color-picker-bottom">
+        <div class="color-picker-preview" id="cp-preview"></div>
+        <input class="input color-picker-hex" id="cp-hex" type="text" maxlength="7" />
+      </div>
+      <div class="color-picker-actions">
+        <button type="button" class="btn outline" id="cp-cancel">انصراف</button>
+        <button type="button" class="btn" id="cp-ok">✓ تایید انتخاب</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const svEl = overlay.querySelector("#cp-sv");
+  const svThumb = overlay.querySelector("#cp-sv-thumb");
+  const hueEl = overlay.querySelector("#cp-hue");
+  const hueThumb = overlay.querySelector("#cp-hue-thumb");
+  const preview = overlay.querySelector("#cp-preview");
+  const hexInput = overlay.querySelector("#cp-hex");
+
+  function render() {
+    svEl.style.background = `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent), hsl(${state.h}, 100%, 50%)`;
+    svThumb.style.left = `${state.s}%`;
+    svThumb.style.top = `${100 - state.v}%`;
+    hueThumb.style.top = `${(state.h / 360) * 100}%`;
+    const hex = hsvToHex(state.h, state.s, state.v);
+    preview.style.background = hex;
+    hexInput.value = hex;
+  }
+  render();
+
+  function setSvFromPoint(clientX, clientY) {
+    const rect = svEl.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    state.s = x * 100;
+    state.v = (1 - y) * 100;
+    render();
+  }
+  function setHueFromPoint(clientY) {
+    const rect = hueEl.getBoundingClientRect();
+    const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    state.h = y * 360;
+    render();
+  }
+
+  let draggingSv = false, draggingHue = false;
+  svEl.addEventListener("pointerdown", (e) => {
+    draggingSv = true;
+    svEl.setPointerCapture(e.pointerId);
+    setSvFromPoint(e.clientX, e.clientY);
+  });
+  svEl.addEventListener("pointermove", (e) => { if (draggingSv) setSvFromPoint(e.clientX, e.clientY); });
+  svEl.addEventListener("pointerup", () => { draggingSv = false; });
+  svEl.addEventListener("pointercancel", () => { draggingSv = false; });
+
+  hueEl.addEventListener("pointerdown", (e) => {
+    draggingHue = true;
+    hueEl.setPointerCapture(e.pointerId);
+    setHueFromPoint(e.clientY);
+  });
+  hueEl.addEventListener("pointermove", (e) => { if (draggingHue) setHueFromPoint(e.clientY); });
+  hueEl.addEventListener("pointerup", () => { draggingHue = false; });
+  hueEl.addEventListener("pointercancel", () => { draggingHue = false; });
+
+  hexInput.addEventListener("change", () => {
+    let v = hexInput.value.trim();
+    if (!v.startsWith("#")) v = "#" + v;
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+      const [h, s, val] = hexToHsv(v);
+      state.h = h; state.s = s; state.v = val;
+      render();
+    }
+  });
+
+  function close() { overlay.remove(); }
+  overlay.querySelector("#cp-cancel").onclick = close;
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector("#cp-ok").onclick = () => {
+    const hex = hexInput.value;
+    close();
+    onConfirm(hex);
+  };
+}
+
 async function renderAdminBannersSection() {
   const body = document.getElementById("admin-section-body");
   body.innerHTML = skeleton(3);
@@ -2192,19 +2354,17 @@ function renderAdminBannerList() {
       if (preview) preview.style.background = input.value;
     };
   });
-  list.querySelectorAll(".banner-color1-input, .banner-color2-input, .banner-angle-input").forEach((el) => {
-    el.onchange = () => {
-      const idx = el.dataset.idx;
-      const c1 = document.querySelector(`.banner-color1-input[data-idx="${idx}"]`).value;
-      const c2 = document.querySelector(`.banner-color2-input[data-idx="${idx}"]`).value;
-      const angle = document.querySelector(`.banner-angle-input[data-idx="${idx}"]`).value;
-      const gradient = `linear-gradient(${angle}deg, ${c1}, ${c2})`;
-      const bgInput = document.querySelector(`.banner-bg-input[data-idx="${idx}"]`);
-      if (bgInput) bgInput.value = gradient;
-      if (!adminBannerItems[Number(idx)].image) {
-        const preview = document.querySelector(`.banner-preview[data-idx="${idx}"]`);
-        if (preview) preview.style.background = gradient;
-      }
+  list.querySelectorAll(".banner-color-swatch-btn, .banner-angle-input").forEach((el) => {
+    if (el.classList.contains("banner-angle-input")) {
+      el.onchange = () => updateBannerGradientFromControls(el.dataset.idx);
+      return;
+    }
+    el.onclick = () => {
+      openColorPickerModal(el.dataset.color, (hex) => {
+        el.dataset.color = hex;
+        el.style.background = hex;
+        updateBannerGradientFromControls(el.dataset.idx);
+      });
     };
   });
   list.querySelectorAll(".banner-image-upload").forEach((btn) => {
@@ -2294,14 +2454,14 @@ function adminBannerRow(item, idx) {
         <label class="field-label">رنگ پس‌زمینه (وقتی عکس آپلود نشده باشد)</label>
         <p class="hint-text" style="margin-top:0">با دو دکمه‌ی رنگی زیر، صفحه‌ی کامل انتخاب رنگ باز می‌شه (طیف کامل + تیرگی/روشنی، دقیقاً مثل فتوشاپ) و ازشون یک گرادیان دورنگ می‌سازه. اگه دلت یک رنگ ساده (بدون گرادیان) بخواد، هر دو رنگ رو یکی انتخاب کن.</p>
         <div class="banner-color-picker-row">
-          <label class="banner-color-picker">
-            <input type="color" class="banner-color1-input" data-idx="${idx}" value="${bannerGradientColorAt(item.bg, 0)}" />
+          <div class="banner-color-picker">
+            <button type="button" class="banner-color-swatch-btn" data-idx="${idx}" data-which="1" data-color="${bannerGradientColorAt(item.bg, 0)}" style="background:${bannerGradientColorAt(item.bg, 0)}"></button>
             <span>رنگ شروع</span>
-          </label>
-          <label class="banner-color-picker">
-            <input type="color" class="banner-color2-input" data-idx="${idx}" value="${bannerGradientColorAt(item.bg, 1)}" />
+          </div>
+          <div class="banner-color-picker">
+            <button type="button" class="banner-color-swatch-btn" data-idx="${idx}" data-which="2" data-color="${bannerGradientColorAt(item.bg, 1)}" style="background:${bannerGradientColorAt(item.bg, 1)}"></button>
             <span>رنگ پایان</span>
-          </label>
+          </div>
           <select class="input banner-angle-input" data-idx="${idx}" style="width:auto;flex:1">
             ${BANNER_ANGLE_OPTIONS.map((a) => `<option value="${a.value}" ${a.value === bannerGradientAngle(item.bg) ? "selected" : ""}>${a.label}</option>`).join("")}
           </select>
