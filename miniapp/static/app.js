@@ -1084,7 +1084,9 @@ function renderPurchasePanel(productId, p, quantity, discountCode) {
     <div class="card">
       <h3><span class="ic">📦</span>${p.name}</h3>
       <div class="stat-row"><span>قیمت واحد</span><b>${fmt(p.price)} تومان</b></div>
-      <div class="stat-row"><span>موجودی</span><b>${p.stock} عدد</b></div>
+      ${p.is_auto_provision
+        ? `<div class="stat-row"><span>تأمین</span><b>⚡️ خودکار و لحظه‌ای</b></div>`
+        : `<div class="stat-row"><span>موجودی</span><b>${p.stock} عدد</b></div>`}
       <div class="qty-stepper">
         <button class="btn small outline" id="qty-dec-btn" ${quantity <= 1 ? "disabled" : ""}>➖</button>
         <span class="qty-value">${quantity}</span>
