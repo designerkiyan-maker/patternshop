@@ -11,9 +11,10 @@ import asyncio
 import tempfile
 import logging
 
-from aiogram import Router, F, Bot
+from aiogram import Router, F, Bot, Dispatcher
 from aiogram.types import Message, CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.base import StorageKey
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
 
@@ -57,6 +58,8 @@ from states import (
     AdminAddPricingTier,
     AdminCustomConfigSettings,
     AdminResetTestConfig,
+    ResellerRequestFlow,
+    AdminResellerRequestFlow,
 )
 
 logger = logging.getLogger(__name__)
@@ -2245,6 +2248,170 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 f"از صفر و جدا از بات اصلی دارد. نماینده باید با /start به بات خودش (@{username}) وارد شود.",
                 reply_markup=kb.admin_panel_kb(db, is_main_bot),
             )
+
+        # ---------------------------------------------------------------
+        # درخواست خودکار نمایندگی سطح ۲ (بررسی، تعیین هزینه، تایید پرداخت)
+        # ---------------------------------------------------------------
+
+        @router.callback_query(F.data.startswith("resreq_approve:"))
+        async def cb_resreq_approve(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            request_id = int(call.data.split(":")[1])
+            req = db.get_reseller_request(request_id)
+            if not req or req["status"] != "pending_review":
+                await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+                return
+            panels = db.get_panel_servers(active_only=True)
+            await call.message.answer(
+                "🔗 این نماینده روی کدام پنل کانفیگ بسازد؟\n(نماینده هیچ‌وقت آدرس/مشخصات این پنل را نمی‌بیند.)",
+                reply_markup=kb.reseller_request_panel_pick_kb(request_id, panels),
+            )
+            await call.answer()
+
+        @router.callback_query(F.data.startswith("resreq_panel:"))
+        async def cb_resreq_panel(call: CallbackQuery, state: FSMContext):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            _, request_id_str, panel_id_str = call.data.split(":")
+            request_id, panel_id = int(request_id_str), int(panel_id_str)
+            req = db.get_reseller_request(request_id)
+            if not req or req["status"] != "pending_review":
+                await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+                return
+            await state.update_data(resreq_request_id=request_id, resreq_panel_id=panel_id or None)
+            await state.set_state(AdminResellerRequestFlow.waiting_price)
+            await call.message.answer(f"💰 هزینه‌ی این نمایندگی (به تومان) چقدر باشد؟ فقط عدد ارسال کنید:")
+            await call.answer()
+
+        @router.message(AdminResellerRequestFlow.waiting_price)
+        async def process_resreq_price(message: Message, state: FSMContext, bot: Bot):
+            text = (message.text or "").strip().replace(",", "")
+            if not text.isdigit() or int(text) <= 0:
+                await message.answer("لطفاً یک عدد صحیح و مثبت ارسال کنید.")
+                return
+            price = int(text)
+            data = await state.get_data()
+            request_id, panel_id = data.get("resreq_request_id"), data.get("resreq_panel_id")
+            req = db.get_reseller_request(request_id) if request_id else None
+            await state.clear()
+            if not req or req["status"] != "pending_review":
+                await message.answer("این درخواست دیگر معتبر نیست.")
+                return
+
+            db.quote_reseller_request(request_id, price, panel_id, message.from_user.id)
+            db.log_admin_action(
+                message.from_user.id, "reseller_request_quote",
+                f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {price:,}",
+            )
+            await message.answer(f"✅ هزینه برای کاربر ارسال شد ({price:,} تومان).")
+            try:
+                await bot.send_message(
+                    req["user_id"],
+                    f"🏪 درخواست نمایندگی #{request_id} شما تایید شد!\n\n"
+                    f"💰 هزینه‌ی نمایندگی: {price:,} تومان\n"
+                    f"📦 حجم: {req['volume_gb']:,} گیگ\n\n"
+                    f"در صورت موافقت روی «پرداخت می‌کنم» بزنید:",
+                    reply_markup=kb.reseller_request_pay_kb(request_id),
+                )
+            except Exception:
+                pass
+
+        @router.callback_query(F.data.startswith("resreq_reject:"))
+        async def cb_resreq_reject(call: CallbackQuery, state: FSMContext):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            request_id = int(call.data.split(":")[1])
+            req = db.get_reseller_request(request_id)
+            if not req or req["status"] != "pending_review":
+                await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+                return
+            await state.update_data(resreq_reject_id=request_id, resreq_reject_status="rejected")
+            await state.set_state(AdminResellerRequestFlow.waiting_reject_reason)
+            await call.message.answer("دلیل رد درخواست را بنویسید (برای کاربر ارسال می‌شود):")
+            await call.answer()
+
+        @router.callback_query(F.data.startswith("resreq_payreject:"))
+        async def cb_resreq_payreject(call: CallbackQuery, state: FSMContext):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            request_id = int(call.data.split(":")[1])
+            req = db.get_reseller_request(request_id)
+            if not req or req["status"] != "awaiting_payment_review":
+                await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+                return
+            await state.update_data(resreq_reject_id=request_id, resreq_reject_status="payment_rejected")
+            await state.set_state(AdminResellerRequestFlow.waiting_reject_reason)
+            await call.message.answer("دلیل رد پرداخت را بنویسید (برای کاربر ارسال می‌شود):")
+            await call.answer()
+
+        @router.message(AdminResellerRequestFlow.waiting_reject_reason)
+        async def process_resreq_reject_reason(message: Message, state: FSMContext, bot: Bot):
+            reason = (message.text or "").strip()
+            data = await state.get_data()
+            request_id = data.get("resreq_reject_id")
+            status = data.get("resreq_reject_status", "rejected")
+            req = db.get_reseller_request(request_id) if request_id else None
+            await state.clear()
+            if not req:
+                await message.answer("این درخواست دیگر معتبر نیست.")
+                return
+
+            db.reject_reseller_request(request_id, status, message.from_user.id, reason)
+            db.log_admin_action(
+                message.from_user.id, "reseller_request_reject",
+                f"درخواست #{request_id} | کاربر {req['user_id']} | وضعیت: {status} | دلیل: {reason}",
+            )
+            await message.answer("✅ ثبت شد و به کاربر اطلاع داده شد.")
+            label = "درخواست نمایندگی" if status == "rejected" else "پرداخت درخواست نمایندگی"
+            try:
+                await bot.send_message(
+                    req["user_id"],
+                    f"❌ متاسفانه {label} شما (#{request_id}) رد شد.\n\nدلیل: {reason}",
+                )
+            except Exception:
+                pass
+
+        @router.callback_query(F.data.startswith("resreq_payok:"))
+        async def cb_resreq_payok(call: CallbackQuery, bot: Bot, dispatcher: Dispatcher):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            request_id = int(call.data.split(":")[1])
+            req = db.get_reseller_request(request_id)
+            if not req or req["status"] != "awaiting_payment_review":
+                await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+                return
+
+            db.approve_reseller_request_payment(request_id, call.from_user.id)
+            db.log_admin_action(
+                call.from_user.id, "reseller_request_payment_approve",
+                f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {req['price_toman']:,}",
+            )
+
+            user_state = FSMContext(
+                storage=dispatcher.storage,
+                key=StorageKey(bot_id=bot.id, chat_id=req["user_id"], user_id=req["user_id"]),
+            )
+            await user_state.set_state(ResellerRequestFlow.waiting_bot_token)
+            await user_state.update_data(resreq_request_id=request_id)
+
+            try:
+                await bot.send_message(
+                    req["user_id"],
+                    "✅ پرداخت شما تایید شد!\n\n"
+                    "حالا توکن بات نماینده‌ی خودتان را ارسال کنید (همانی که از @BotFather گرفته‌اید):",
+                )
+            except Exception:
+                pass
+
+            try:
+                await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ پرداخت تایید شد.")
+            except Exception:
+                try:
+                    await safe_edit(call, (call.message.text or "") + "\n\n✅ پرداخت تایید شد.")
+                except Exception:
+                    pass
+            await call.answer("پرداخت تایید شد.")
 
         # ---------------------------------------------------------------
         # نمایندگی حجمی (استخر اعتبار داخل همین بات اصلی، بدون نمایش پنل)

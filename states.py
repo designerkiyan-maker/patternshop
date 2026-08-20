@@ -177,3 +177,16 @@ class CustomConfigFlow(StatesGroup):
 class ResellerFlow(StatesGroup):
     waiting_username = State()
     waiting_volume = State()
+
+
+class ResellerRequestFlow(StatesGroup):
+    waiting_volume = State()
+    waiting_text = State()
+    waiting_receipt = State()
+    waiting_bot_token = State()
+    waiting_owner_id = State()
+
+
+class AdminResellerRequestFlow(StatesGroup):
+    waiting_price = State()
+    waiting_reject_reason = State()

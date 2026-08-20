@@ -461,6 +461,26 @@ class Database:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_reseller_credit_log_user ON reseller_credit_log(user_id);
+
+                CREATE TABLE IF NOT EXISTS reseller_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    volume_gb INTEGER NOT NULL,
+                    request_text TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending_review',
+                    price_toman INTEGER,
+                    panel_server_id INTEGER,
+                    receipt_file_id TEXT,
+                    bot_token TEXT,
+                    bot_username TEXT,
+                    owner_telegram_id INTEGER,
+                    reject_reason TEXT,
+                    reviewed_by INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_reseller_requests_user ON reseller_requests(user_id);
+                CREATE INDEX IF NOT EXISTS idx_reseller_requests_status ON reseller_requests(status);
                 """
             )
 
@@ -1679,6 +1699,10 @@ class Database:
             )
             return cur.lastrowid
 
+    def get_reseller_bot_by_token(self, bot_token: str):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM reseller_bots WHERE bot_token=?", (bot_token,)).fetchone()
+
     def list_reseller_bots(self, active_only: bool = False):
         with self._get_conn() as conn:
             if active_only:
@@ -2478,3 +2502,74 @@ class Database:
                 if server:
                     return server
         return self.get_panel_server_for_usage("reseller")
+
+    # -----------------------------------------------------------------------
+    # درخواست خودکار نمایندگی سطح ۲ (ثبت، تایید هزینه، پرداخت، تحویل)
+    # -----------------------------------------------------------------------
+
+    _RESELLER_REQUEST_OPEN_STATUSES = (
+        "pending_review", "awaiting_payment", "awaiting_payment_review", "awaiting_bot_info",
+    )
+
+    def create_reseller_request(self, user_id: int, volume_gb: int, request_text: str) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO reseller_requests (user_id, volume_gb, request_text) VALUES (?, ?, ?)",
+                (user_id, volume_gb, request_text),
+            )
+            return cur.lastrowid
+
+    def get_reseller_request(self, request_id: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM reseller_requests WHERE id=?", (request_id,)).fetchone()
+
+    def get_open_reseller_request(self, user_id: int):
+        placeholders = ",".join("?" * len(self._RESELLER_REQUEST_OPEN_STATUSES))
+        with self._get_conn() as conn:
+            return conn.execute(
+                f"SELECT * FROM reseller_requests WHERE user_id=? AND status IN ({placeholders}) "
+                f"ORDER BY id DESC LIMIT 1",
+                (user_id, *self._RESELLER_REQUEST_OPEN_STATUSES),
+            ).fetchone()
+
+    def list_reseller_requests(self, status: str = None):
+        with self._get_conn() as conn:
+            if status:
+                return conn.execute(
+                    "SELECT * FROM reseller_requests WHERE status=? ORDER BY id DESC", (status,)
+                ).fetchall()
+            return conn.execute("SELECT * FROM reseller_requests ORDER BY id DESC").fetchall()
+
+    def set_reseller_request_status(self, request_id: int, status: str, **fields):
+        cols, values = ["status=?", "updated_at=CURRENT_TIMESTAMP"], [status]
+        for key, value in fields.items():
+            cols.append(f"{key}=?")
+            values.append(value)
+        values.append(request_id)
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE reseller_requests SET {', '.join(cols)} WHERE id=?", values)
+
+    def quote_reseller_request(self, request_id: int, price_toman: int, panel_server_id: int, admin_id: int):
+        self.set_reseller_request_status(
+            request_id, "awaiting_payment",
+            price_toman=price_toman, panel_server_id=panel_server_id, reviewed_by=admin_id,
+        )
+
+    def reject_reseller_request(self, request_id: int, status: str, admin_id: int, reason: str = None):
+        self.set_reseller_request_status(request_id, status, reviewed_by=admin_id, reject_reason=reason)
+
+    def set_reseller_request_receipt(self, request_id: int, file_id: str):
+        self.set_reseller_request_status(request_id, "awaiting_payment_review", receipt_file_id=file_id)
+
+    def approve_reseller_request_payment(self, request_id: int, admin_id: int):
+        self.set_reseller_request_status(request_id, "awaiting_bot_info", reviewed_by=admin_id)
+
+    def set_reseller_request_bot(self, request_id: int, token: str, username: str):
+        self.set_reseller_request_status(
+            request_id, "awaiting_bot_info", bot_token=token, bot_username=username,
+        )
+
+    def complete_reseller_request(self, request_id: int, owner_telegram_id: int):
+        self.set_reseller_request_status(
+            request_id, "completed", owner_telegram_id=owner_telegram_id,
+        )

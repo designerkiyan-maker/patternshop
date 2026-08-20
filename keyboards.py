@@ -56,7 +56,8 @@ def miniapp_inline_kb(miniapp_url: str) -> InlineKeyboardMarkup:
     ])
 
 
-def main_menu_kb(db, is_admin: bool, is_reseller: bool = False) -> ReplyKeyboardMarkup:
+def main_menu_kb(db, is_admin: bool, is_reseller: bool = False, is_main_bot: bool = True,
+                  show_reseller_request: bool = False) -> ReplyKeyboardMarkup:
     settings = db.get_all_settings()
     order = db.get_menu_order()
     miniapp_url = _miniapp_url(db)
@@ -106,6 +107,11 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False) -> ReplyKeyboard
             return None
         return [_styled_button("🧑‍💼 پنل نمایندگی", "primary")]
 
+    def row_reseller_request():
+        if not show_reseller_request:
+            return None
+        return [_styled_button("🏪 درخواست نمایندگی سطح ۲", "primary")]
+
     builders = {
         "miniapp": row_miniapp,
         "btn_buy": row_buy,
@@ -131,12 +137,21 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False) -> ReplyKeyboard
         row = row_reseller_panel()
         if row:
             rows.insert(1 if rows else 0, row)
+    elif show_reseller_request:
+        row = row_reseller_request()
+        if row:
+            rows.insert(1 if rows else 0, row)
 
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
-def menu_for_user(db, user_tg_id: int) -> ReplyKeyboardMarkup:
-    return main_menu_kb(db, db.is_admin(user_tg_id), db.is_reseller(user_tg_id))
+def menu_for_user(db, user_tg_id: int, is_main_bot: bool = True) -> ReplyKeyboardMarkup:
+    show_reseller_request = (
+        is_main_bot
+        and not db.is_reseller(user_tg_id)
+        and not db.get_open_reseller_request(user_tg_id)
+    )
+    return main_menu_kb(db, db.is_admin(user_tg_id), db.is_reseller(user_tg_id), is_main_bot, show_reseller_request)
 
 
 # ---------------------------------------------------------------------------
@@ -840,6 +855,39 @@ def topup_review_kb(topup_id) -> InlineKeyboardMarkup:
 # ---------------------------------------------------------------------------
 # مدیریت بات‌های نمایندگی (فقط در بات اصلی)
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# درخواست خودکار نمایندگی سطح ۲
+# ---------------------------------------------------------------------------
+
+def reseller_request_review_kb(request_id) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ تایید و تعیین هزینه", callback_data=f"resreq_approve:{request_id}")],
+        [InlineKeyboardButton(text="❌ رد درخواست", callback_data=f"resreq_reject:{request_id}")],
+    ])
+
+
+def reseller_request_panel_pick_kb(request_id, panels) -> InlineKeyboardMarkup:
+    rows = []
+    for p in panels:
+        rows.append([InlineKeyboardButton(text=f"🖥 {p['name']}", callback_data=f"resreq_panel:{request_id}:{p['id']}")])
+    rows.append([InlineKeyboardButton(text="↩️ خودکار (اولین پنل فعالِ نمایندگی)", callback_data=f"resreq_panel:{request_id}:0")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def reseller_request_pay_kb(request_id) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ پرداخت می‌کنم", callback_data=f"resreq_pay:{request_id}")],
+        [InlineKeyboardButton(text="❌ انصراف", callback_data=f"resreq_cancel:{request_id}")],
+    ])
+
+
+def reseller_request_payment_review_kb(request_id) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ تایید پرداخت", callback_data=f"resreq_payok:{request_id}")],
+        [InlineKeyboardButton(text="❌ رد پرداخت", callback_data=f"resreq_payreject:{request_id}")],
+    ])
+
 
 def resbot_del_confirm_kb(bot_id) -> InlineKeyboardMarkup:
     rows = [
