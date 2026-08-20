@@ -179,6 +179,17 @@ def require_senior_admin(auth=Depends(get_verified_user)):
     return auth
 
 
+def require_full_access_admin(auth=Depends(get_verified_user)):
+    """مثل require_senior_admin، ولی علاوه بر آن بات‌های نمایندگیِ سطح ۲ (محدود) را هم رد می‌کند؛
+    اتصال پنل VPN و ساخت کانفیگ دستی فقط برای بات اصلی و نمایندگی سطح کامل مجاز است."""
+    tg_id, db, tenant = auth
+    if not db.is_senior_admin(tg_id):
+        raise HTTPException(status_code=403, detail="این بخش فقط برای مالک و مدیر کامل در دسترس است.")
+    if not db.is_full_access_bot(not tenant.tenant_id):
+        raise HTTPException(status_code=403, detail="⛔️ اتصال پنل VPN و ساخت کانفیگ دستی فقط از طریق بات اصلی یا نمایندگی کامل مدیریت می‌شود.")
+    return auth
+
+
 def require_main_admin(auth=Depends(get_verified_user)):
     """مدیریت بات‌های نمایندگی: فقط مالک یا مدیر کامل بات اصلی (نه ادمین میانی/پشتیبان،
     نه بات‌های نمایندگی)."""
@@ -357,6 +368,7 @@ def api_catalog(auth=Depends(get_verified_user)):
                     "price": p["price"],
                     "description": p["description"],
                     "stock": db.count_available_configs(p["id"]),
+                    "is_auto_provision": bool(p["is_auto_provision"]),
                 }
                 for p in products
             ],
@@ -756,7 +768,7 @@ async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
     if not product:
         raise HTTPException(status_code=400, detail="این محصول موجود نیست.")
     if product["is_auto_provision"]:
-        quantity = 1  # هر خرید = یک کانفیگ تازه از اعتبار حجمی
+        pass  # سقفی برای تعداد نیست؛ کافی بودن اعتبار حجمی لحظه‌ی ساخت واقعی چک می‌شود
     else:
         stock = db.count_available_configs(body.product_id)
         if stock <= 0:
@@ -793,15 +805,16 @@ async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
     if order["final_price"] <= 0:
         if product["is_auto_provision"]:
             try:
-                result = await provision_auto_config(db, product)
+                prov_results = await provision_auto_config(db, product, quantity)
             except ProvisionError as e:
                 db.reject_order(order_id)
                 raise HTTPException(status_code=409, detail=str(e))
             db.approve_order_auto(order_id)
             db.reward_referrer_if_first_purchase(tg_id, order["final_price"] or total_price)
+            links = [r["subscription_url"] for r in prov_results]
             return {
                 "status": "approved", "order_id": order_id,
-                "link": result["subscription_url"], "links": [result["subscription_url"]],
+                "link": links[0], "links": links,
                 "expires_at": None,
             }
 
@@ -966,8 +979,9 @@ async def api_plisio_webhook(request: Request, tenant: Tenant = Depends(get_tena
             product = db.get_product(order["product_id"])
 
             if product and product["is_auto_provision"]:
+                quantity = order["quantity"] or 1
                 try:
-                    result = await provision_auto_config(db, product)
+                    prov_results = await provision_auto_config(db, product, quantity)
                 except ProvisionError as e:
                     admin_ids = db.list_admins()
                     async with aiohttp.ClientSession() as session:
@@ -986,13 +1000,14 @@ async def api_plisio_webhook(request: Request, tenant: Tenant = Depends(get_tena
 
                 db.approve_order_auto(order_id)
                 db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or product["price"])
+                links_text = "\n".join(r["subscription_url"] for r in prov_results)
                 try:
                     async with aiohttp.ClientSession() as session:
                         await session.post(
                             f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
                             json={
                                 "chat_id": order["user_id"],
-                                "text": f"✅ پرداخت کریپتو تایید شد!\n📦 محصول: {product['name']}\n\n{result['subscription_url']}",
+                                "text": f"✅ پرداخت کریپتو تایید شد!\n📦 محصول: {product['name']}\n\n{links_text}",
                             },
                         )
                 except Exception:
@@ -1415,13 +1430,13 @@ def _panel_server_public(s) -> dict:
 
 
 @app.get("/api/admin/panel-servers")
-def api_admin_list_panel_servers(auth=Depends(require_senior_admin)):
+def api_admin_list_panel_servers(auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     return [_panel_server_public(s) for s in db.get_panel_servers()]
 
 
 @app.post("/api/admin/panel-servers")
-async def api_admin_add_panel_server(body: PanelServerCreate, auth=Depends(require_senior_admin)):
+async def api_admin_add_panel_server(body: PanelServerCreate, auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     admin_id, _, _ = auth
     if not body.name.strip() or not body.api_url.strip() or not body.api_username.strip() or not body.api_password.strip():
@@ -1502,7 +1517,7 @@ async def api_admin_set_xui_config(server_id: int, body: PanelServerXuiConfig, a
 
 
 @app.patch("/api/admin/panel-servers/{server_id}")
-def api_admin_edit_panel_server(server_id: int, body: PanelServerUpdate, auth=Depends(require_senior_admin)):
+def api_admin_edit_panel_server(server_id: int, body: PanelServerUpdate, auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     if not db.get_panel_server(server_id):
         raise HTTPException(status_code=404, detail="سرور یافت نشد.")
@@ -1514,7 +1529,7 @@ def api_admin_edit_panel_server(server_id: int, body: PanelServerUpdate, auth=De
 
 
 @app.post("/api/admin/panel-servers/{server_id}/template")
-async def api_admin_set_panel_server_template(server_id: int, body: PanelServerSetTemplate, auth=Depends(require_senior_admin)):
+async def api_admin_set_panel_server_template(server_id: int, body: PanelServerSetTemplate, auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     server = db.get_panel_server(server_id)
     if not server:
@@ -1533,7 +1548,7 @@ async def api_admin_set_panel_server_template(server_id: int, body: PanelServerS
 
 
 @app.post("/api/admin/panel-servers/{server_id}/toggle")
-def api_admin_toggle_panel_server(server_id: int, auth=Depends(require_senior_admin)):
+def api_admin_toggle_panel_server(server_id: int, auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     server = db.get_panel_server(server_id)
     if not server:
@@ -1543,7 +1558,7 @@ def api_admin_toggle_panel_server(server_id: int, auth=Depends(require_senior_ad
 
 
 @app.post("/api/admin/panel-servers/{server_id}/usage/{kind}")
-def api_admin_toggle_panel_server_usage(server_id: int, kind: str, auth=Depends(require_senior_admin)):
+def api_admin_toggle_panel_server_usage(server_id: int, kind: str, auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     if kind not in ("custom", "test"):
         raise HTTPException(status_code=400, detail="نوع مصرف نامعتبر است.")
@@ -1556,7 +1571,7 @@ def api_admin_toggle_panel_server_usage(server_id: int, kind: str, auth=Depends(
 
 
 @app.post("/api/admin/panel-servers/{server_id}/test")
-async def api_admin_test_panel_server(server_id: int, auth=Depends(require_senior_admin)):
+async def api_admin_test_panel_server(server_id: int, auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     server = db.get_panel_server(server_id)
     if not server:
@@ -1570,7 +1585,7 @@ async def api_admin_test_panel_server(server_id: int, auth=Depends(require_senio
 
 
 @app.delete("/api/admin/panel-servers/{server_id}")
-def api_admin_delete_panel_server(server_id: int, auth=Depends(require_senior_admin)):
+def api_admin_delete_panel_server(server_id: int, auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     admin_id, _, _ = auth
     if not db.get_panel_server(server_id):
@@ -1581,7 +1596,7 @@ def api_admin_delete_panel_server(server_id: int, auth=Depends(require_senior_ad
 
 
 @app.get("/api/admin/custom-config/settings")
-def api_admin_get_custom_config_settings(auth=Depends(require_senior_admin)):
+def api_admin_get_custom_config_settings(auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     settings = db.get_custom_config_settings()
     settings["test_volume_gb"] = int(db.get_setting("test_config_panel_volume_gb", "1") or 1)
@@ -1590,7 +1605,7 @@ def api_admin_get_custom_config_settings(auth=Depends(require_senior_admin)):
 
 
 @app.post("/api/admin/custom-config/settings")
-def api_admin_update_custom_config_settings(body: CustomConfigSettingsUpdate, auth=Depends(require_senior_admin)):
+def api_admin_update_custom_config_settings(body: CustomConfigSettingsUpdate, auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     if body.enabled is not None:
         db.set_setting("custom_config_enabled", "1" if body.enabled else "0")
@@ -1615,7 +1630,7 @@ def api_admin_update_custom_config_settings(body: CustomConfigSettingsUpdate, au
 
 
 @app.get("/api/admin/custom-config/pricing-tiers")
-def api_admin_list_pricing_tiers(auth=Depends(require_senior_admin)):
+def api_admin_list_pricing_tiers(auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     tiers = db.get_pricing_tiers()
     return [
@@ -1625,7 +1640,7 @@ def api_admin_list_pricing_tiers(auth=Depends(require_senior_admin)):
 
 
 @app.post("/api/admin/custom-config/pricing-tiers")
-def api_admin_add_pricing_tier(body: PricingTierCreate, auth=Depends(require_senior_admin)):
+def api_admin_add_pricing_tier(body: PricingTierCreate, auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     if body.from_gb <= 0 or body.price_per_gb <= 0:
         raise HTTPException(status_code=400, detail="مقادیر باید مثبت باشند.")
@@ -1636,7 +1651,7 @@ def api_admin_add_pricing_tier(body: PricingTierCreate, auth=Depends(require_sen
 
 
 @app.delete("/api/admin/custom-config/pricing-tiers/{tier_id}")
-def api_admin_delete_pricing_tier(tier_id: int, auth=Depends(require_senior_admin)):
+def api_admin_delete_pricing_tier(tier_id: int, auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     db.delete_pricing_tier(tier_id)
     return {"status": "ok"}
