@@ -2538,9 +2538,33 @@ class Database:
 
     def create_reseller_request(self, user_id: int, volume_gb: int, request_text: str) -> int:
         with self._get_conn() as conn:
+            known = {"user_id": user_id, "volume_gb": volume_gb, "request_text": request_text}
+            fields = list(known.keys())
+            values = list(known.values())
+            # بعضی نصب‌های خیلی قدیمی ممکن است ستون‌های اضافی/الزامی (NOT NULL بدون
+            # مقدار پیش‌فرض) در جدول reseller_requests داشته باشند که کد فعلی اصلاً
+            # از آن‌ها استفاده نمی‌کند (مثلاً باقی‌مانده از نسخه‌های قدیمی‌تر پروژه).
+            # به‌جای اینکه با هر نصب قدیمی دوباره به خطای «NOT NULL constraint
+            # failed» بخوریم، این ستون‌های ناشناخته را این‌جا پویا شناسایی کرده
+            # و برایشان یک مقدار بی‌ضرر بر اساس نوعشان می‌فرستیم.
+            for row in conn.execute("PRAGMA table_info(reseller_requests)").fetchall():
+                name = row["name"]
+                if name in known or name in ("id", "status", "created_at", "updated_at"):
+                    continue
+                if row["notnull"] and row["dflt_value"] is None:
+                    col_type = (row["type"] or "").upper()
+                    if "INT" in col_type:
+                        fallback = 0
+                    elif any(t in col_type for t in ("REAL", "FLOA", "DOUB")):
+                        fallback = 0.0
+                    else:
+                        fallback = ""
+                    fields.append(name)
+                    values.append(fallback)
+            placeholders = ", ".join("?" for _ in fields)
             cur = conn.execute(
-                "INSERT INTO reseller_requests (user_id, volume_gb, request_text) VALUES (?, ?, ?)",
-                (user_id, volume_gb, request_text),
+                f"INSERT INTO reseller_requests ({', '.join(fields)}) VALUES ({placeholders})",
+                values,
             )
             return cur.lastrowid
 
