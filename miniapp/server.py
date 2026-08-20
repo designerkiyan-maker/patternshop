@@ -1304,6 +1304,81 @@ def api_admin_save_menu(body: MenuLayoutUpdate, auth=Depends(require_senior_admi
 
 
 # ---------------------------------------------------------------------------
+# بنرهای کاروسل بالای صفحه‌ی خانه‌ی مینی‌اپ
+# ---------------------------------------------------------------------------
+
+# مقصدهای مجاز برای ضربه‌زدن روی یک بنر؛ باید دقیقاً با کلیدهای شیء `tabs`
+# در app.js (سوییچ تب‌های مینی‌اپ) یکی باشد.
+BANNER_NAV_TARGETS = {
+    "home", "store", "services", "profile", "wallet", "support", "referral", "test", "wheel", "admin",
+}
+
+
+class BannerItem(BaseModel):
+    id: Optional[str] = None
+    icon: str = ""
+    title: str
+    sub: str = ""
+    cta: str = ""
+    nav: str
+    bg: str = ""
+    enabled: bool = True
+
+
+class BannersUpdate(BaseModel):
+    banners: list[BannerItem]
+
+
+@app.get("/api/banners")
+def api_banners(auth=Depends(get_verified_user)):
+    """لیست بنرهای فعال کاروسل خانه (برای نمایش به همه‌ی کاربران)."""
+    _, db, _ = auth
+    banners = db.get_banners()
+    return [b for b in banners if b.get("enabled", True)]
+
+
+@app.get("/api/admin/banners")
+def api_admin_get_banners(auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    return db.get_banners()
+
+
+@app.post("/api/admin/banners")
+def api_admin_save_banners(body: BannersUpdate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    if len(body.banners) > 20:
+        raise HTTPException(status_code=400, detail="حداکثر ۲۰ بنر مجاز است.")
+    clean = []
+    for idx, b in enumerate(body.banners):
+        title = b.title.strip()
+        if not title:
+            raise HTTPException(status_code=400, detail=f"عنوان بنر شماره {idx + 1} نمی‌تواند خالی باشد.")
+        if len(title) > 40:
+            raise HTTPException(status_code=400, detail=f"عنوان بنر شماره {idx + 1} بیش از حد طولانی است.")
+        sub = b.sub.strip()
+        if len(sub) > 120:
+            raise HTTPException(status_code=400, detail=f"توضیح بنر شماره {idx + 1} بیش از حد طولانی است.")
+        cta = b.cta.strip() or "مشاهده"
+        if len(cta) > 30:
+            raise HTTPException(status_code=400, detail=f"متن دکمه‌ی بنر شماره {idx + 1} بیش از حد طولانی است.")
+        if b.nav not in BANNER_NAV_TARGETS:
+            raise HTTPException(status_code=400, detail=f"مقصد بنر شماره {idx + 1} نامعتبر است.")
+        bg = b.bg.strip() or "linear-gradient(120deg, #0d1420, #142845 55%, #1c3f6e)"
+        clean.append({
+            "id": b.id or f"b_{secrets.token_hex(4)}",
+            "icon": (b.icon or "✨").strip()[:8],
+            "title": title,
+            "sub": sub,
+            "cta": cta,
+            "nav": b.nav,
+            "bg": bg,
+            "enabled": bool(b.enabled),
+        })
+    db.set_banners(clean)
+    return {"status": "ok", "banners": clean}
+
+
+# ---------------------------------------------------------------------------
 # مدیریت (فقط ادمین) - دسته‌بندی‌ها و محصولات
 # ---------------------------------------------------------------------------
 
