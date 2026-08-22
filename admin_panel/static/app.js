@@ -1091,8 +1091,32 @@ async function renderPanels() {
 }
 
 /* ============================================================ settings === */
+const RATE_SOURCE_LABEL = { tgju: 'tgju.org', nobitex: 'نوبیتکس', wallex: 'والکس', arzdigital: 'ارزدیجیتال' };
+
+function rateCardHtml(r) {
+  const rateTxt = r.rate ? `${fmt(r.rate)} تومان` : '—';
+  const sourceTxt = r.source ? (RATE_SOURCE_LABEL[r.source] || r.source) : '—';
+  const errTxt = !r.ok ? `<span class="card-sub" style="color:var(--rose)">دریافت زنده ناموفق بود؛ ${r.rate ? 'مقدار کش قدیمی نمایش داده شده.' : 'مقداری در کش نیست.'} (${esc(r.error || '')})</span>` : '';
+  return `
+    <div class="card" style="margin-bottom:18px" id="rate-card">
+      <div class="card-head">
+        <h3>نرخ ارز (دلار به تومان)</h3>
+        <button class="btn btn-sm" id="rate-refresh">🔄 رفرش کش</button>
+      </div>
+      <div class="chip-row">
+        <span class="chip mono">نرخ فعلی: ${rateTxt}</span>
+        <span class="chip">منبع: ${sourceTxt}</span>
+        <span class="chip mono">آخرین بروزرسانی: ${fmtDate(r.updated_at)}</span>
+      </div>
+      ${errTxt}
+    </div>`;
+}
+
 async function renderSettings() {
-  const settings = await apiGet('/settings');
+  const [settings, rate] = await Promise.all([
+    apiGet('/settings'),
+    apiGet('/exchange-rate').catch(e => ({ ok: false, rate: null, source: null, updated_at: null, error: e.message })),
+  ]);
   const fields = [
     ['shop_name', 'نام فروشگاه'],
     ['miniapp_banner_text', 'متن بنر Mini App'],
@@ -1101,6 +1125,7 @@ async function renderSettings() {
   ];
   const cur = loadTheme();
   setContent(`
+    ${rateCardHtml(rate)}
     <div class="card" style="margin-bottom:18px">
       <div class="card-head">
         <h3>ظاهر پنل</h3>
@@ -1143,6 +1168,18 @@ async function renderSettings() {
       }
       toast('تنظیمات ذخیره شد.');
     } catch (e) { handleErr(e); }
+  });
+  $('#rate-refresh').addEventListener('click', async () => {
+    const btn = $('#rate-refresh');
+    btn.disabled = true; btn.textContent = 'در حال دریافت...';
+    try {
+      await apiPost('/exchange-rate/refresh');
+      toast('نرخ بروزرسانی شد.');
+    } catch (e) {
+      handleErr(e);
+    } finally {
+      renderSettings();
+    }
   });
 }
 
