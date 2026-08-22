@@ -225,6 +225,7 @@ const NAV = [
   { key: 'broadcast', label: 'پیام همگانی', icon: 'broadcast', role: 'full' },
   { key: 'resellers', label: 'نمایندگی‌ها', icon: 'resellers', role: 'senior' },
   { key: 'panels', label: 'پنل‌های VPN', icon: 'panels', role: 'senior' },
+  { key: 'system', label: 'سیستم و نگهداری', icon: 'logs', role: 'senior' },
   { key: 'settings', label: 'تنظیمات و برندینگ', icon: 'settings', role: 'senior' },
   { key: 'logs', label: 'لاگ فعالیت ادمین‌ها', icon: 'logs', role: 'senior' },
   { key: 'webadmins', label: 'کاربران پنل', icon: 'webadmins', role: 'owner' },
@@ -348,6 +349,7 @@ async function renderPage(tab) {
       case 'broadcast': return renderBroadcast();
       case 'resellers': return renderResellers();
       case 'panels': return renderPanels();
+      case 'system': return renderSystem();
       case 'settings': return renderSettings();
       case 'logs': return renderLogs();
       case 'webadmins': return renderWebAdmins();
@@ -1205,6 +1207,44 @@ async function renderWebAdmins() {
     if (!confirm('این حساب حذف شود؟')) return;
     try { await apiDelete(`/web-admins/${b.dataset.del}`); toast('حذف شد.'); renderWebAdmins(); } catch (e) { handleErr(e); }
   }));
+}
+
+/* ============================================================= system === */
+async function renderSystem() {
+  const jobs = await apiGet('/system/jobs');
+  const r = jobs.renewal;
+  const stockRows = jobs.stock;
+  const lowCount = stockRows.filter(p => p.low).length;
+
+  setContent(`
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-head"><h3>یادآوری‌های تمدید/حجم</h3></div>
+      <p class="card-sub" style="margin-bottom:10px">این بخش فقط وضعیت آخرین اجرا را نشان می‌دهد؛ زمان‌بندی اجرا (هر ۱ ساعت) از کد بات کنترل می‌شود و از اینجا قابل تغییر نیست.</p>
+      <div class="chip-row">
+        <span class="chip">آخرین اجرا: ${r.last_run ? fmtDate(r.last_run) : 'هنوز اجرا نشده'}</span>
+        <span class="chip">یادآوری تاریخ ارسال‌شده: ${fmt(r.last_date_sent)}</span>
+        <span class="chip">یادآوری حجم ارسال‌شده: ${fmt(r.last_volume_sent)}</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>وضعیت لحظه‌ای موجودی محصولات</h3>
+        <span class="card-sub">${lowCount ? `${lowCount} محصول زیر آستانه هشدار` : 'همه محصولات موجودی کافی دارند'}</span>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>محصول</th><th>موجودی</th><th>آستانه هشدار</th><th>وضعیت</th></tr></thead>
+        <tbody>${stockRows.map(p => `<tr>
+          <td>${esc(p.name)}</td>
+          <td class="mono">${fmt(p.stock)}</td>
+          <td class="mono">${fmt(p.threshold)}</td>
+          <td>${p.low
+            ? `<span class="badge badge-rejected">کم${p.alerted ? ' · هشدار ارسال شد' : ''}</span>`
+            : '<span class="badge badge-approved">کافی</span>'}</td>
+        </tr>`).join('') || `<tr><td colspan="4" class="empty-state"><div class="icon">${svg('empty')}</div>محصولی برای نمایش نیست</td></tr>`}</tbody>
+      </table></div>
+    </div>
+  `);
 }
 
 /* ============================================================= account === */
