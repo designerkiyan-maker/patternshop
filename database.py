@@ -1318,6 +1318,32 @@ class Database:
                 conn.execute("UPDATE products SET low_stock_alert_sent=0 WHERE id=?", (product_id,))
             return False
 
+    def get_low_stock_overview(self):
+        """وضعیت لحظه‌ای موجودی همه‌ی محصولات (غیرِ auto-provision) برای نمایش فقط‌خواندنی
+        در پنل وب — بدون تغییر وضعیت هشدار (بر خلاف check_low_stock_alert_state)."""
+        threshold = int(self.get_setting("low_stock_threshold", "3") or 3)
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT p.id, p.name, p.low_stock_alert_sent,
+                       (SELECT COUNT(*) FROM configs c WHERE c.product_id = p.id AND c.is_used = 0) AS stock
+                FROM products p
+                WHERE p.is_auto_provision = 0
+                ORDER BY p.name
+                """
+            ).fetchall()
+        out = []
+        for r in rows:
+            out.append({
+                "id": r["id"],
+                "name": r["name"],
+                "stock": r["stock"],
+                "threshold": threshold,
+                "low": r["stock"] <= threshold,
+                "alerted": bool(r["low_stock_alert_sent"]),
+            })
+        return out
+
     def get_unused_configs(self, product_id: int):
         with self._get_conn() as conn:
             return conn.execute(
