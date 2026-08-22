@@ -70,6 +70,7 @@ img, svg, table{ max-width:100%; }
 .bg-blobs i:nth-child(3){ width:380px; height:380px; background:var(--fuchsia); top:40%; left:50%; opacity:.16; animation-duration:30s; animation-delay:-9s; }
 @keyframes drift{ 0%{ transform:translate(0,0) scale(1); } 100%{ transform:translate(40px,-30px) scale(1.12); } }
 @media (prefers-reduced-motion: reduce){ .bg-blobs i{ animation:none; } }
+.cyber-overlay{ display:none; }
 
 h1,h2,h3,h4{ font-family:var(--font-body); margin:0; }
 ::selection{ background:rgba(139,92,246,.3); color:var(--text); }
@@ -498,58 +499,157 @@ html[data-style="5"] .topbar-clock{ font-family:var(--font-mono); letter-spacing
 html[data-style="5"] .nav-item.active{ box-shadow:inset 3px 0 0 var(--cyan); }
 html[data-style="5"] .value.mono{ text-shadow:0 0 18px rgba(0,229,255,.25); }
 
-/* ---- style 6 · پرمیوم سیگنال (Dark Premium / SaaS) ------------------
-   جهت‌گیری: کنسول شبانه‌ی یک هاب VPN پرمیوم — سطوح شیشه‌ای ملایم روی
-   زمینه‌ی سرمه‌ای خیلی تیره، یک لهجه‌ی «سیگنال» فیروزه‌ای برای هرچیز
-   زنده/متصل (دکمه‌ی اصلی، live-dot، وضعیت موفق) و یک لهجه‌ی طلایی
-   برای عناصر پرمیوم (نمایندگی، درآمد، هشدار). بدون گرادیان‌های رنگین‌کمانی،
-   بدون بلاب‌های شناور — آرامش و اعتماد یک پنل مالی حرفه‌ای.
-------------------------------------------------------------------- */
+/* ===================================================================
+   style 6 · سایبرپانک // NEXUS — تم پیش‌فرض جدید
+   جهت‌گیری: کنسول یک مرکز عملیات امنیتی. زمینه‌ی مشکی-نیلی خیلی تیره،
+   شبکه‌ی نقطه‌چین کم‌رنگ، لهجه‌های نئونی مجنتا/سیان/کهربایی به‌جای
+   بنفش-صورتی پیش‌فرض. کارت‌ها با براکت‌های HUD در گوشه‌ها، تایپوگرافی
+   Chakra Petch برای اعداد/تیترها، افکت گلیچ روی برندها، اسکن‌لاین و
+   شبکه‌ی متحرک به‌عنوان امضای بصری پس‌زمینه.
+=================================================================== */
 html[data-style="6"]{
-  --font-body:"Vazirmatn",-apple-system,Tahoma,sans-serif;
-  --font-mono:"JetBrains Mono",ui-monospace,"Vazirmatn",monospace;
-  --radius:16px; --radius-sm:11px; --radius-xs:8px;
+  --font-display:"Chakra Petch","Vazirmatn",-apple-system,Tahoma,sans-serif;
+  --radius:6px; --radius-sm:4px; --radius-xs:3px;
 }
 html[data-style="6"] .bg-blobs{ display:none; }
 html[data-style="6"][data-mode="dark"]{
-  --bg:#0A0D14; --bg-2:#0D1119; --surface:rgba(19,24,38,.72); --surface-2:#1A2032; --surface-hi:rgba(50,230,196,.06);
-  --shadow-dark:rgba(0,0,0,.55); --shadow-light:rgba(255,255,255,.02);
-  --border:rgba(255,255,255,.08); --border-soft:rgba(255,255,255,.05);
-  --text:#EDEFF5; --text-muted:#8C93A8; --text-dim:#4B5266;
-  --violet:#32E6C4; --fuchsia:#1FA98F; --cyan:#6C8EFF; --amber:#E7B84E; --emerald:#32E6C4; --rose:#FF6B7A;
-  --neu-out:0 1px 0 var(--shadow-light) inset, 0 10px 28px -14px var(--shadow-dark);
-  --neu-out-sm:0 1px 0 var(--shadow-light) inset, 0 6px 16px -10px var(--shadow-dark);
-  --neu-in:inset 0 0 0 1px rgba(255,255,255,.07);
+  --bg:#05070d; --bg-2:#03040a; --surface:#0c1220; --surface-2:#111a2f; --surface-hi:rgba(33,230,193,.07);
+  --border:rgba(33,230,193,.2); --border-soft:rgba(33,230,193,.1);
+  --text:#e7ecf7; --text-muted:#7c8aac; --text-dim:#44507a;
+  --violet:#ff2e88; --fuchsia:#ff6fb3; --cyan:#21e6c1; --amber:#ffb020; --emerald:#2be6a8; --rose:#ff3f6b;
+  --neu-out:0 0 0 1px rgba(33,230,193,.14), 0 0 28px rgba(255,46,136,.05);
+  --neu-out-sm:0 0 0 1px rgba(33,230,193,.12), 0 0 14px rgba(33,230,193,.05);
+  --neu-in:inset 0 0 0 1px rgba(33,230,193,.18), inset 0 0 10px rgba(0,0,0,.4);
 }
 html[data-style="6"][data-mode="light"]{
-  --bg:#F3F6F8; --bg-2:#ECF0F3; --surface:rgba(255,255,255,.78); --surface-2:#F5F8FA; --surface-hi:rgba(15,169,143,.06);
-  --shadow-dark:rgba(20,35,45,.12); --shadow-light:rgba(255,255,255,.9);
-  --border:rgba(20,35,45,.1); --border-soft:rgba(20,35,45,.06);
-  --text:#121826; --text-muted:#5C6479; --text-dim:#9AA1B0;
-  --violet:#0FA98F; --fuchsia:#0C8A75; --cyan:#3E63D6; --amber:#B8860B; --emerald:#0FA98F; --rose:#D9455A;
-  --neu-out:0 6px 18px -10px var(--shadow-dark); --neu-out-sm:0 3px 10px -6px var(--shadow-dark); --neu-in:inset 0 0 0 1px var(--border);
+  --bg:#eef3f6; --bg-2:#e4ebef; --surface:#ffffff; --surface-2:#f1f6f8; --surface-hi:rgba(0,150,130,.06);
+  --border:rgba(0,120,110,.2); --border-soft:rgba(0,120,110,.1);
+  --text:#08131a; --text-muted:#4a6470; --text-dim:#9db0b8;
+  --violet:#d61a72; --fuchsia:#e2508f; --cyan:#00958a; --amber:#b9760c; --emerald:#0f9e78; --rose:#d4304f;
+  --neu-out:0 0 0 1px rgba(0,120,110,.14), 0 6px 22px rgba(0,120,110,.08);
+  --neu-out-sm:0 0 0 1px rgba(0,120,110,.1), 0 3px 10px rgba(0,120,110,.06);
+  --neu-in:inset 0 0 0 1px rgba(0,120,110,.16);
 }
+
+/* --- پس‌زمینه: شبکه‌ی نقطه‌چین + وینیت ------------------------------ */
 html[data-style="6"] body{
   background-image:
-    radial-gradient(1100px 600px at 88% -10%, rgba(50,230,196,.08), transparent 60%),
-    radial-gradient(900px 520px at -10% 110%, rgba(231,184,78,.06), transparent 55%);
+    radial-gradient(ellipse 70% 55% at 50% -5%, rgba(255,46,136,.10), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 100% 100%, rgba(33,230,193,.08), transparent 55%),
+    linear-gradient(var(--border-soft) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-soft) 1px, transparent 1px);
+  background-size:auto, auto, 42px 42px, 42px 42px;
   background-color:var(--bg);
 }
-html[data-style="6"] .card, html[data-style="6"] .sidebar, html[data-style="6"] .topbar, html[data-style="6"] .modal, html[data-style="6"] .login-card{
-  backdrop-filter:blur(16px); position:relative;
+html[data-style="6"] .cyber-overlay{ display:block; position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
+html[data-style="6"] .cyber-scan{
+  position:absolute; left:0; right:0; height:180px; top:-180px;
+  background:linear-gradient(to bottom, transparent, rgba(33,230,193,.05), transparent);
+  animation:cyberSweep 7s linear infinite;
 }
-html[data-style="6"] .card::before{
-  content:""; position:absolute; inset:0; border-radius:inherit; padding:1px; pointer-events:none;
-  background:linear-gradient(135deg, rgba(50,230,196,.3), transparent 35%, transparent 70%, rgba(231,184,78,.22));
-  -webkit-mask:linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite:xor; mask-composite:exclude;
+@keyframes cyberSweep{ 0%{ transform:translateY(-180px); } 100%{ transform:translateY(100vh); } }
+html[data-style="6"] .cyber-grid{
+  position:absolute; inset:0;
+  background:repeating-linear-gradient(to bottom, rgba(255,255,255,.012) 0, rgba(255,255,255,.012) 1px, transparent 1px, transparent 3px);
+  mix-blend-mode:overlay;
 }
-html[data-style="6"] .btn-primary{ box-shadow:0 10px 24px -10px rgba(50,230,196,.45); }
-html[data-style="6"] .live-dot{ box-shadow:0 0 10px 2px rgba(50,230,196,.55); }
-html[data-style="6"] .topbar-clock{ font-family:var(--font-mono); letter-spacing:.03em; }
-html[data-style="6"] .nav-item.active{ box-shadow:inset 3px 0 0 var(--violet); }
-html[data-style="6"] .stat-icon, html[data-style="6"] .brand-mark, html[data-style="6"] .me-avatar{ box-shadow:0 0 14px -3px currentColor, var(--neu-out-sm); }
-html[data-style="6"] .badge-owner{ background:rgba(231,184,78,.16); color:var(--amber); }
+html[data-style="6"] .cyber-vignette{
+  position:absolute; inset:0;
+  background:radial-gradient(ellipse 85% 65% at 50% 0%, transparent 40%, var(--bg) 95%);
+}
+@media (prefers-reduced-motion: reduce){ html[data-style="6"] .cyber-scan{ animation:none; } }
+
+/* --- تایپوگرافی ------------------------------------------------------ */
+html[data-style="6"] h1, html[data-style="6"] h2, html[data-style="6"] h3, html[data-style="6"] h4,
+html[data-style="6"] .brand-text strong, html[data-style="6"] .login-brand h1,
+html[data-style="6"] .value, html[data-style="6"] .stat-card .value{
+  font-family:var(--font-display); letter-spacing:.02em;
+}
+html[data-style="6"] .topbar h2{ text-transform:uppercase; font-size:16px; letter-spacing:.06em; }
+html[data-style="6"] .stat-card .value{ text-shadow:0 0 16px rgba(33,230,193,.28); }
+html[data-style="6"] .nav-section{ color:var(--cyan); opacity:.55; }
+
+/* --- گلیچ برای برندها (متن ثابت با data-txt) -------------------------- */
+html[data-style="6"] .glitch-txt{ position:relative; display:inline-block; }
+html[data-style="6"] .glitch-txt::before, html[data-style="6"] .glitch-txt::after{
+  content:attr(data-txt); position:absolute; inset:0; background:transparent; overflow:hidden;
+}
+html[data-style="6"] .glitch-txt::before{ color:var(--violet); animation:glitch1 4.4s infinite linear alternate-reverse; }
+html[data-style="6"] .glitch-txt::after{ color:var(--cyan); animation:glitch2 3.6s infinite linear alternate-reverse; }
+@keyframes glitch1{
+  0%,92%,100%{ clip-path:inset(0 0 100% 0); transform:translate(0); }
+  93%{ clip-path:inset(10% 0 60% 0); transform:translate(-2px,1px); }
+  95%{ clip-path:inset(60% 0 5% 0); transform:translate(2px,-1px); }
+  97%{ clip-path:inset(30% 0 40% 0); transform:translate(-1px,0); }
+}
+@keyframes glitch2{
+  0%,90%,100%{ clip-path:inset(0 0 100% 0); transform:translate(0); }
+  91%{ clip-path:inset(70% 0 10% 0); transform:translate(2px,0); }
+  94%{ clip-path:inset(15% 0 70% 0); transform:translate(-2px,1px); }
+  96%{ clip-path:inset(45% 0 20% 0); transform:translate(1px,-1px); }
+}
+@media (prefers-reduced-motion: reduce){
+  html[data-style="6"] .glitch-txt::before, html[data-style="6"] .glitch-txt::after{ animation:none; display:none; }
+}
+
+/* --- کارت‌ها: براکت‌های HUD در گوشه‌ها -------------------------------- */
+html[data-style="6"] .card, html[data-style="6"] .login-card, html[data-style="6"] .modal{ position:relative; }
+html[data-style="6"] .card::before, html[data-style="6"] .login-card::before, html[data-style="6"] .modal::before,
+html[data-style="6"] .card::after, html[data-style="6"] .login-card::after, html[data-style="6"] .modal::after{
+  content:""; position:absolute; width:14px; height:14px; pointer-events:none; opacity:.8;
+}
+html[data-style="6"] .card::before, html[data-style="6"] .login-card::before, html[data-style="6"] .modal::before{
+  top:-1px; inset-inline-start:-1px; border-top:2px solid var(--cyan); border-inline-start:2px solid var(--cyan);
+}
+html[data-style="6"] .card::after, html[data-style="6"] .login-card::after, html[data-style="6"] .modal::after{
+  bottom:-1px; inset-inline-end:-1px; border-bottom:2px solid var(--violet); border-inline-end:2px solid var(--violet);
+}
+html[data-style="6"] .stat-card:hover{ transform:translateY(-3px); box-shadow:var(--neu-out), 0 16px 30px -16px rgba(255,46,136,.35); }
+
+/* --- دکمه‌ها ------------------------------------------------------- */
+html[data-style="6"] .btn{ border-radius:var(--radius-sm); text-transform:uppercase; font-size:12.5px; letter-spacing:.04em; }
+html[data-style="6"] .btn-primary{ box-shadow:0 0 0 1px rgba(255,46,136,.4), 0 10px 26px -10px rgba(255,46,136,.6); }
+html[data-style="6"] .btn-primary:hover{ box-shadow:0 0 0 1px var(--violet), 0 0 22px rgba(255,46,136,.55); }
+html[data-style="6"] .btn:not(.btn-primary):not(.btn-danger):not(.btn-ghost):hover{ border-color:var(--cyan); color:var(--cyan); box-shadow:var(--neu-out-sm), 0 0 14px rgba(33,230,193,.25); }
+html[data-style="6"] .tab-btn.active, html[data-style="6"] .mode-toggle button.active{ box-shadow:0 0 0 1px var(--violet), 0 0 16px rgba(255,46,136,.4); }
+
+/* --- سایدبار / ناوبری ------------------------------------------------ */
+html[data-style="6"] .sidebar{ border-inline-start:1px solid var(--border-soft); background:linear-gradient(180deg, var(--surface), var(--bg-2)); }
+html[data-style="6"] .brand-mark, html[data-style="6"] .login-logo{
+  border-radius:8px; clip-path:polygon(18% 0,82% 0,100% 18%,100% 82%,82% 100%,18% 100%,0 82%,0 18%);
+}
+html[data-style="6"] .login-logo::after{ display:none; }
+html[data-style="6"] .nav-item{ border-radius:var(--radius-sm); border-inline-start:2px solid transparent; }
+html[data-style="6"] .nav-item.active{ border-inline-start-color:var(--cyan); background:linear-gradient(90deg, rgba(33,230,193,.1), transparent); }
+html[data-style="6"] .nav-icon{ border-radius:8px; }
+html[data-style="6"] .nav-item .dot-count{ background:rgba(255,46,136,.16); color:var(--violet); }
+
+/* --- بار بالا: ساعت و نشانگر زنده -------------------------------------- */
+html[data-style="6"] .topbar{ background:rgba(5,7,13,.78); border-bottom:1px solid var(--border-soft); }
+html[data-style="6"] .topbar-clock{ font-family:var(--font-mono); letter-spacing:.06em; border:1px solid var(--border-soft); box-shadow:none; }
+html[data-style="6"] .live-dot{ background:var(--cyan); box-shadow:0 0 0 0 rgba(33,230,193,.55); animation:cyberLive 1.8s infinite; }
+@keyframes cyberLive{ 0%{ box-shadow:0 0 0 0 rgba(33,230,193,.55); } 70%{ box-shadow:0 0 0 9px rgba(33,230,193,0); } }
+
+/* --- جدول‌ها و نشان‌ها -------------------------------------------------- */
+html[data-style="6"] thead th{ font-family:var(--font-mono); letter-spacing:.08em; color:var(--cyan); opacity:.75; }
+html[data-style="6"] tbody tr{ border-inline-start:2px solid transparent; }
+html[data-style="6"] tbody tr:hover{ border-inline-start-color:var(--cyan); background:rgba(33,230,193,.05); }
+html[data-style="6"] .badge{ border-radius:3px; border:1px solid currentColor; background:transparent !important; }
+html[data-style="6"] .mono{ letter-spacing:.02em; }
+
+/* --- فرم‌ها / مودال ---------------------------------------------------- */
+html[data-style="6"] .field input, html[data-style="6"] .input, select.input{ border-radius:var(--radius-sm); }
+html[data-style="6"] .field input:focus, html[data-style="6"] .input:focus{ border-color:var(--cyan); box-shadow:var(--neu-in), 0 0 0 3px rgba(33,230,193,.16); }
+html[data-style="6"] .modal-backdrop{ background:rgba(2,3,7,.75); }
+html[data-style="6"] .toast{ border-inline-start-color:var(--cyan); }
+html[data-style="6"] .toast.error{ border-inline-start-color:var(--rose); }
+
+/* --- هیرو / اورویت داشبورد ---------------------------------------------- */
+html[data-style="6"] .hero{ background:linear-gradient(135deg, #0c1220 0%, #0a0e1a 45%, #070a12 100%); border:1px solid var(--border-soft); }
+html[data-style="6"] .hero-orbit .o1{ border-color:rgba(33,230,193,.4); }
+html[data-style="6"] .hero-orbit .o2{ border-color:rgba(255,46,136,.4); }
+html[data-style="6"] .hero-orbit .dot{ background:var(--violet); box-shadow:0 0 10px var(--violet); }
+html[data-style="6"] .res-ring::before{ box-shadow:var(--neu-in); }
 
 /* پیل‌های ترافیک زنده (KB/s آپلود/دانلود) برای امضای بصری این تم */
 .pulse-ticker{ display:flex; gap:10px; flex-wrap:wrap; margin:-6px 0 18px; }

@@ -6,7 +6,7 @@
 <title>پنل مدیریت ShopVPN</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/assets/style.css">
 <script>
 (function(){
@@ -24,6 +24,11 @@
 <body>
 
 <div class="bg-blobs" aria-hidden="true"><i></i><i></i><i></i></div>
+<div class="cyber-overlay" aria-hidden="true">
+  <div class="cyber-grid"></div>
+  <div class="cyber-scan"></div>
+  <div class="cyber-vignette"></div>
+</div>
 
 <!-- ===================== صفحه‌ی ورود ===================== -->
 <div id="login-screen" class="login-screen">
@@ -33,7 +38,7 @@
   <form id="login-form" class="login-card">
     <div class="login-brand">
       <div class="login-logo">SV</div>
-      <h1>پنل مدیریت ShopVPN</h1>
+      <h1 class="glitch-txt" data-txt="پنل مدیریت ShopVPN">پنل مدیریت ShopVPN</h1>
       <p>برای ورود، اطلاعات حساب پنل وب را وارد کن</p>
     </div>
     <label class="field">
@@ -55,7 +60,7 @@
     <div class="sidebar-brand">
       <div class="brand-mark">SV</div>
       <div class="brand-text">
-        <strong>ShopVPN</strong>
+        <strong class="glitch-txt" data-txt="ShopVPN">ShopVPN</strong>
         <span>پنل مدیریت</span>
       </div>
     </div>

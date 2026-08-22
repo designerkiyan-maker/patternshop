@@ -6,12 +6,12 @@ let CURRENT_TAB = 'dashboard';
 
 /* ============================================================= theme === */
 const THEMES = [
+  { id: '6', name: 'سایبرپانک // NEXUS', desc: 'پیش‌فرض جدید — رادار زنده، گلیچ، شبکه‌ی نئونی', colors: ['#ff2e88', '#21e6c1', '#ffb020'] },
   { id: '1', name: 'فلت کورپوریت', desc: 'ساده، تمیز، اداری', colors: ['#0f6e5f', '#1f7ae0', '#c78a10'] },
-  { id: '2', name: 'نئون گلس', desc: 'همان طرح پیش‌فرض ShopVPN', colors: ['#8B5CF6', '#EC4899', '#22D3EE'] },
+  { id: '2', name: 'نئون گلس', desc: 'طرح کلاسیک ShopVPN', colors: ['#8B5CF6', '#EC4899', '#22D3EE'] },
   { id: '3', name: 'ترمینال عملیاتی', desc: 'مونوسپیس، حس اتاق سرور', colors: ['#3ddc84', '#ff6b52', '#e0b23c'] },
   { id: '4', name: 'بنتوی نرم', desc: 'گرم، گرد، صمیمی', colors: ['#d97757', '#5b8a72', '#c99a3a'] },
   { id: '5', name: 'پالس شبکه', desc: 'HUD تیره، درخشش نئونی، حس اتاق کنترل', colors: ['#00e5ff', '#7c5cff', '#ff4fd8'] },
-  { id: '6', name: 'پرمیوم سیگنال', desc: 'تیره، شیشه‌ای ملایم، فیروزه‌ای/طلایی — حس یک هاب VPN حرفه‌ای', colors: ['#32E6C4', '#E7B84E', '#6C8EFF'] },
 ];
 function loadTheme() {
   try { return JSON.parse(localStorage.getItem('sv-theme')) || { style: '6', mode: 'dark' }; }
