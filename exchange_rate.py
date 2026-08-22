@@ -13,6 +13,7 @@
 از کار نیفتد.
 """
 
+import asyncio
 import time
 import logging
 import re
@@ -24,7 +25,31 @@ logger = logging.getLogger("exchange_rate")
 
 _cache = {"rate": None, "ts": 0.0, "source": None}
 CACHE_TTL_SECONDS = 300  # ۵ دقیقه
-REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=8)
+REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10)
+RETRY_COUNT = 2  # هر منبع تا این تعداد بار تلاش می‌شود قبل از رد شدن به منبع بعدی
+
+# هدر مرورگر واقعی؛ چون بدون این هدرها بعضی سایت‌ها (مثل tgju پشت Cloudflare)
+# درخواست‌های خالی/کتابخانه‌ای را بلاک یا با صفحه‌ی چلنج پاسخ می‌دهند.
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7",
+}
+
+
+def _make_connector() -> aiohttp.TCPConnector:
+    """سعی می‌کند از یک resolver با DNS عمومی (کلودفلر/گوگل) استفاده کند تا
+    مشکل معمول 'Name or service not known' روی برخی سرورها که resolver
+    پیش‌فرضشان دامنه‌های .ir را درست resolve نمی‌کند، دور زده شود. اگر
+    پکیج aiodns نصب نباشد (وابستگی AsyncResolver)، بی‌صدا به resolver
+    پیش‌فرض سیستم برمی‌گردد."""
+    try:
+        resolver = aiohttp.AsyncResolver(nameservers=["1.1.1.1", "8.8.8.8"])
+        return aiohttp.TCPConnector(resolver=resolver)
+    except Exception as e:
+        logger.warning("AsyncResolver در دسترس نیست (احتمالاً aiodns نصب نیست)؛ استفاده از resolver پیش‌فرض: %s", e)
+        return aiohttp.TCPConnector()
 
 # مجموعه‌ای از الگوهای احتمالی برای استخراج نرخ دلار از tgju.org.
 # ⚠️ tgju به‌مرور ساختار صفحه‌اش را عوض می‌کند و هر الگوی تکی دیر یا زود
@@ -53,6 +78,16 @@ _TGJU_PATTERNS = [
     ("class_price_span", re.compile(
         r'دلار[^<]{0,10}<[^>]+class=["\'][^"\']*(?:info-price|price)[^"\']*["\'][^>]*>\s*([\d,]{4,10})'
     )),
+    # ۵) ردیف جدول/کارت با id یا data-market-row مربوط به price_dollar_rl،
+    #    مستقل از نام کلاس دقیق ستون قیمت (پوشش تغییرات آینده‌ی مارک‌آپ).
+    ("row_id_nearby", re.compile(
+        r'(?:id|data-market-row)=["\']price_dollar_rl["\'][^>]{0,400}?>\s*([\d,]{4,10})'
+    )),
+    # ۶) آخرین راه‌حل عمومی: اولین عدد شبیه قیمت بلافاصله بعد از عبارت
+    #    «قیمت دلار» یا «دلار آمریکا» در هر جای صفحه.
+    ("generic_after_label", re.compile(
+        r'(?:قیمت\s*دلار|دلار\s*آمریکا)[^\d]{0,40}([\d,]{4,10})'
+    )),
 ]
 
 
@@ -80,7 +115,7 @@ async def _from_tgju(session: aiohttp.ClientSession) -> float:
     async with session.get(
         "https://www.tgju.org/currency",
         timeout=REQUEST_TIMEOUT,
-        headers={"User-Agent": "Mozilla/5.0"},
+        headers=BROWSER_HEADERS,
     ) as resp:
         if resp.status != 200:
             raise ValueError(f"HTTP {resp.status}")
@@ -121,6 +156,7 @@ async def _from_nobitex(session: aiohttp.ClientSession) -> float:
         "https://api.nobitex.ir/market/stats",
         json={"srcCurrency": "usdt", "dstCurrency": "rls"},
         timeout=REQUEST_TIMEOUT,
+        headers=BROWSER_HEADERS,
     ) as resp:
         if resp.status != 200:
             raise ValueError(f"HTTP {resp.status}")
@@ -133,6 +169,7 @@ async def _from_wallex(session: aiohttp.ClientSession) -> float:
     async with session.get(
         "https://api.wallex.ir/v1/markets",
         timeout=REQUEST_TIMEOUT,
+        headers=BROWSER_HEADERS,
     ) as resp:
         if resp.status != 200:
             raise ValueError(f"HTTP {resp.status}")
@@ -164,11 +201,15 @@ async def _from_coingecko(session: aiohttp.ClientSession) -> float:
         "https://api.coingecko.com/api/v3/simple/price",
         params={"ids": "tether", "vs_currencies": "irr"},
         timeout=REQUEST_TIMEOUT,
+        headers=BROWSER_HEADERS,
     ) as resp:
         if resp.status != 200:
             raise ValueError(f"HTTP {resp.status}")
         data = await resp.json(content_type=None)
-    rial = float(data["tether"]["irr"])
+    tether = data.get("tether") or {}
+    if "irr" not in tether:
+        raise ValueError("coingecko برای جفت tether/irr مقداری برنگرداند (شاید این جفت‌ارز دیگر پشتیبانی نمی‌شود).")
+    rial = float(tether["irr"])
     if rial <= 0:
         raise ValueError("مقدار نامعتبر.")
     return round(rial / 10)
@@ -197,21 +238,27 @@ async def get_usd_to_toman_rate(manual_fallback: Optional[float] = None) -> floa
         return _cache["rate"]
 
     errors = []
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(connector=_make_connector()) as session:
         for name, provider in _PROVIDERS:
-            try:
-                toman = await provider(session)
-                if toman <= 0:
-                    raise ValueError("نرخ دریافتی نامعتبر است (<= 0).")
-                _cache["rate"] = toman
-                _cache["ts"] = now
-                _cache["source"] = name
-                logger.info("نرخ دلار از منبع '%s' دریافت شد: %s تومان", name, toman)
-                return toman
-            except Exception as e:
-                errors.append(_fmt_err(name, e))
-                logger.warning("دریافت نرخ از منبع '%s' ناموفق بود: %s", name, e)
-                continue
+            last_err = None
+            for attempt in range(1, RETRY_COUNT + 1):
+                try:
+                    toman = await provider(session)
+                    if toman <= 0:
+                        raise ValueError("نرخ دریافتی نامعتبر است (<= 0).")
+                    _cache["rate"] = toman
+                    _cache["ts"] = now
+                    _cache["source"] = name
+                    logger.info("نرخ دلار از منبع '%s' دریافت شد: %s تومان", name, toman)
+                    return toman
+                except Exception as e:
+                    last_err = e
+                    if attempt < RETRY_COUNT:
+                        logger.warning("تلاش %s/%s برای منبع '%s' ناموفق بود، تلاش دوباره: %s", attempt, RETRY_COUNT, name, e)
+                        await asyncio.sleep(1)
+                    continue
+            errors.append(_fmt_err(name, last_err))
+            logger.warning("دریافت نرخ از منبع '%s' ناموفق بود: %s", name, last_err)
 
     logger.error("دریافت نرخ دلار از همه‌ی منابع ناموفق بود: %s", " | ".join(errors))
     if _cache["rate"]:
