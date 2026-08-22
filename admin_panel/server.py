@@ -116,6 +116,47 @@ def api_dashboard(start: Optional[str] = None, end: Optional[str] = None, admin=
     return db.get_sales_stats(start, end)
 
 
+# ------------------------------------------------------------------ system --
+
+
+@app.get("/api/system/stats")
+def api_system_stats(admin=Depends(get_current_admin)):
+    """وضعیت لحظه‌ای منابع سرور (CPU / RAM / دیسک) برای نمایش در صفحه‌ی خانه."""
+    try:
+        import psutil
+    except ImportError:
+        raise HTTPException(500, "psutil نصب نیست. دستور: pip install psutil")
+
+    cpu_percent = psutil.cpu_percent(interval=0.3)
+    cpu_count = psutil.cpu_count(logical=True) or 1
+
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+
+    try:
+        load1, load5, load15 = os.getloadavg()
+    except (OSError, AttributeError):
+        load1 = load5 = load15 = None
+
+    return {
+        "cpu": {
+            "percent": round(cpu_percent, 1),
+            "cores": cpu_count,
+            "load1": load1, "load5": load5, "load15": load15,
+        },
+        "ram": {
+            "percent": round(mem.percent, 1),
+            "used_gb": round(mem.used / (1024 ** 3), 1),
+            "total_gb": round(mem.total / (1024 ** 3), 1),
+        },
+        "disk": {
+            "percent": round(disk.percent, 1),
+            "used_gb": round(disk.used / (1024 ** 3), 1),
+            "total_gb": round(disk.total / (1024 ** 3), 1),
+        },
+    }
+
+
 # ------------------------------------------------------------------ orders --
 
 
