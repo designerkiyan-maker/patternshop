@@ -26,15 +26,45 @@ _cache = {"rate": None, "ts": 0.0, "source": None}
 CACHE_TTL_SECONDS = 300  # ۵ دقیقه
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=8)
 
-# الگوی نوار قیمت لحظه‌ای پایین صفحات tgju.org، مثلا: "دلار</b> 1,878,000 (0%)"
-# عدد بلافاصله با درصد تغییر داخل پرانتز همراه است که این را از اشاره‌های
-# متنی دیگر به «دلار» داخل مقالات سایت متمایز می‌کند.
-_TGJU_PATTERN = re.compile(r"دلار[^0-9]{0,20}([\d,]{4,10})\s*\([-\d.]+%\)")
-# الگوی پشتیبان: ساختار جدول/کارت‌های tgju معمولاً data-price روی دلار آمریکا
-# دارد؛ مستقل از متن اطراف و مقاوم‌تر در برابر تغییر چیدمان صفحه.
-_TGJU_PATTERN_FALLBACK = re.compile(
-    r'price_dollar_rl["\']?[^{}]{0,40}?["\']p["\']\s*:\s*["\']([\d,]{4,10})["\']'
-)
+# مجموعه‌ای از الگوهای احتمالی برای استخراج نرخ دلار از tgju.org.
+# ⚠️ tgju به‌مرور ساختار صفحه‌اش را عوض می‌کند و هر الگوی تکی دیر یا زود
+# می‌شکند؛ به‌جای یک regex، چند الگوی مستقل از هم را امتحان می‌کنیم تا با
+# یک تغییر جزئی در HTML کل منبع از کار نیفتد. هر الگو یک اسم دارد تا در
+# لاگ مشخص شود کدام‌یک (اگر هیچ‌کدام) جواب داده — این برای دیباگ سریع‌تر
+# دفعه‌ی بعدی که سایت دوباره عوض شود ضروری است.
+_TGJU_PATTERNS = [
+    # ۱) نوار قیمت لحظه‌ای بالای صفحه، مثلا: "دلار</b> 1,878,000 (0%)"
+    ("inline_change", re.compile(r"دلار[^0-9]{0,20}([\d,]{4,10})\s*\([-\d.]+%\)")),
+    # ۲) دیتای JSON تعبیه‌شده در صفحه با کلید price_dollar_rl و فیلد p (قیمت)
+    #    - چه با کوتیشن تک/دوتایی، چه با فاصله‌ی متفاوت بین کلید/مقدار.
+    ("embedded_json_p", re.compile(
+        r'price_dollar_rl["\']?\s*[:,][^{}]{0,60}?["\']p["\']\s*:\s*["\']?([\d,]{4,10})["\']?'
+    )),
+    # ۳) ویجت/جدول‌های جدیدتر که data-price روی خود تگ می‌گذارند، معمولاً
+    #    نزدیک یک لینک یا سطر مربوط به price_dollar_rl.
+    ("data_price_attr", re.compile(
+        r'price_dollar_rl["\'][^>]{0,200}?data-price=["\']([\d,]{4,10})["\']'
+    )),
+    ("data_price_attr_reverse", re.compile(
+        r'data-price=["\']([\d,]{4,10})["\'][^>]{0,200}?price_dollar_rl'
+    )),
+    # ۴) span/div با کلاس رایج قیمت، بلافاصله بعد از کلمه‌ی «دلار» (بدون
+    #    وابستگی به وجود درصد تغییر جلوی آن).
+    ("class_price_span", re.compile(
+        r'دلار[^<]{0,10}<[^>]+class=["\'][^"\']*(?:info-price|price)[^"\']*["\'][^>]*>\s*([\d,]{4,10})'
+    )),
+]
+
+
+def _sanity_check_toman(rial_or_toman_raw: int, divide_by_10: bool) -> Optional[float]:
+    """بررسی می‌کند عدد استخراج‌شده واقعاً می‌تواند نرخ دلار به تومان باشد
+    (رد کردن اعداد بی‌ربط مثل شناسه‌ها یا کدهای دیگر که گاهی الگوهای عمومی
+    اشتباهی می‌گیرند). بازه‌ی عمدا وسیع تا با نوسان نرخ نیازی به آپدیت مکرر
+    این حد و مرز نباشد."""
+    toman = round(rial_or_toman_raw / 10) if divide_by_10 else rial_or_toman_raw
+    if 10_000 <= toman <= 100_000_000:
+        return toman
+    return None
 
 
 def _fmt_err(name: str, e: Exception) -> str:
@@ -55,13 +85,35 @@ async def _from_tgju(session: aiohttp.ClientSession) -> float:
         if resp.status != 200:
             raise ValueError(f"HTTP {resp.status}")
         html = await resp.text()
-    match = _TGJU_PATTERN.search(html) or _TGJU_PATTERN_FALLBACK.search(html)
-    if not match:
-        raise ValueError("الگوی قیمت دلار در صفحه tgju.org پیدا نشد (شاید ساختار سایت تغییر کرده).")
-    rial = int(match.group(1).replace(",", ""))
-    if rial <= 0:
-        raise ValueError("مقدار نامعتبر.")
-    return round(rial / 10)  # ریال به تومان
+
+    for pattern_name, pattern in _TGJU_PATTERNS:
+        for match in pattern.finditer(html):
+            raw = int(match.group(1).replace(",", ""))
+            if raw <= 0:
+                continue
+            # صفحه‌ی tgju نرخ را به ریال می‌دهد؛ چون همه‌ی الگوها از یک واحد
+            # (ریال) می‌خوانند، همیشه بر ۱۰ تقسیم می‌کنیم تا به تومان برسیم.
+            toman = _sanity_check_toman(raw, divide_by_10=True)
+            if toman is not None:
+                logger.info("نرخ دلار از tgju با الگوی '%s' استخراج شد: %s تومان", pattern_name, toman)
+                return toman
+        # این الگو یا اصلاً چیزی پیدا نکرد یا هرچی پیدا کرد از بازه‌ی
+        # منطقی خارج بود؛ برو سراغ الگوی بعدی.
+
+    # هیچ‌کدام از الگوها جواب نداد: برای دیباگ سریع‌تر دفعه‌ی بعد، یک تکه
+    # از HTML اطراف اولین اشاره به «دلار» را در لاگ (نه در پیام خطای کاربر)
+    # ثبت می‌کنیم تا بشود الگوی جدید سایت را از روی آن نوشت.
+    idx = html.find("دلار")
+    if idx != -1:
+        snippet = html[max(0, idx - 100): idx + 300].replace("\n", " ")
+        logger.warning("tgju: هیچ الگویی جواب نداد؛ تکه‌ی HTML اطراف 'دلار' برای دیباگ: %s", snippet)
+    else:
+        logger.warning("tgju: کلمه‌ی 'دلار' اصلاً در HTML دریافتی پیدا نشد (شاید صفحه‌ی بلاک/چلنج برگشته).")
+
+    raise ValueError(
+        "الگوی قیمت دلار در صفحه tgju.org پیدا نشد (شاید ساختار سایت تغییر کرده، یا سرور "
+        "به‌جای صفحه‌ی واقعی یک صفحه‌ی بلاک/چلنج ربات گرفته). جزئیات بیشتر در لاگ سرور."
+    )
 
 
 async def _from_nobitex(session: aiohttp.ClientSession) -> float:
