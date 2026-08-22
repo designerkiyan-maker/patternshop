@@ -6,6 +6,28 @@ let CURRENT_TAB = 'dashboard';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+/* ============================================================= icons === */
+const ICONS = {
+  dashboard: '<rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect>',
+  orders: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path>',
+  topups: '<rect x="1" y="4" width="22" height="16" rx="2.5"></rect><line x1="1" y1="10" x2="23" y2="10"></line>',
+  users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>',
+  catalog: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line>',
+  discounts: '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z"></path><circle cx="7" cy="7" r="1.4"></circle>',
+  tickets: '<path d="M21 11.5a8.38 8.38 0 0 1-4.5 7.4 8.5 8.5 0 0 1-7.6-.1L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 8-8.5h.5a8.48 8.48 0 0 1 8 8v.5Z"></path>',
+  resellers: '<rect x="2" y="7" width="20" height="14" rx="2.5"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>',
+  panels: '<rect x="2" y="3" width="20" height="7" rx="2"></rect><rect x="2" y="14" width="20" height="7" rx="2"></rect><line x1="6" y1="6.5" x2="6.01" y2="6.5"></line><line x1="6" y1="17.5" x2="6.01" y2="17.5"></line>',
+  settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"></path>',
+  logs: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line>',
+  webadmins: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path>',
+  account: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line>',
+  revenue: '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline>',
+  check: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>',
+  empty: '<path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z"></path>',
+};
+const svg = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
 const fmt = n => (n === null || n === undefined) ? '—' : Number(n).toLocaleString('fa-IR');
 const fmtDate = iso => iso ? new Date(iso.replace(' ', 'T') + (iso.includes('Z') ? '' : 'Z')).toLocaleString('fa-IR') : '—';
 const esc = s => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -52,19 +74,19 @@ function openModal(title, bodyHtml, onMount) {
 
 /* ============================================================== nav === */
 const NAV = [
-  { key: 'dashboard', label: 'داشبورد', icon: '📊', role: 'any' },
-  { key: 'orders', label: 'سفارش‌ها', icon: '🧾', role: 'any' },
-  { key: 'topups', label: 'شارژ کیف پول', icon: '💳', role: 'any' },
-  { key: 'users', label: 'کاربران', icon: '👥', role: 'any' },
-  { key: 'catalog', label: 'محصولات و بانک کانفیگ', icon: '📦', role: 'senior' },
-  { key: 'discounts', label: 'کدهای تخفیف', icon: '🏷️', role: 'senior' },
-  { key: 'tickets', label: 'تیکت‌ها', icon: '🎫', role: 'any' },
-  { key: 'resellers', label: 'نمایندگی‌ها', icon: '🤝', role: 'senior' },
-  { key: 'panels', label: 'پنل‌های VPN', icon: '🖥️', role: 'senior' },
-  { key: 'settings', label: 'تنظیمات و برندینگ', icon: '⚙️', role: 'senior' },
-  { key: 'logs', label: 'لاگ فعالیت ادمین‌ها', icon: '📜', role: 'senior' },
-  { key: 'webadmins', label: 'کاربران پنل', icon: '🔐', role: 'owner' },
-  { key: 'account', label: 'حساب من', icon: '🙋', role: 'any' },
+  { key: 'dashboard', label: 'داشبورد', icon: 'dashboard', role: 'any' },
+  { key: 'orders', label: 'سفارش‌ها', icon: 'orders', role: 'any' },
+  { key: 'topups', label: 'شارژ کیف پول', icon: 'topups', role: 'any' },
+  { key: 'users', label: 'کاربران', icon: 'users', role: 'any' },
+  { key: 'catalog', label: 'محصولات و بانک کانفیگ', icon: 'catalog', role: 'senior' },
+  { key: 'discounts', label: 'کدهای تخفیف', icon: 'discounts', role: 'senior' },
+  { key: 'tickets', label: 'تیکت‌ها', icon: 'tickets', role: 'any' },
+  { key: 'resellers', label: 'نمایندگی‌ها', icon: 'resellers', role: 'senior' },
+  { key: 'panels', label: 'پنل‌های VPN', icon: 'panels', role: 'senior' },
+  { key: 'settings', label: 'تنظیمات و برندینگ', icon: 'settings', role: 'senior' },
+  { key: 'logs', label: 'لاگ فعالیت ادمین‌ها', icon: 'logs', role: 'senior' },
+  { key: 'webadmins', label: 'کاربران پنل', icon: 'webadmins', role: 'owner' },
+  { key: 'account', label: 'حساب من', icon: 'account', role: 'any' },
 ];
 const FULL_ROLES = ['owner', 'admin', 'mid'];
 const SENIOR_ROLES = ['owner', 'admin'];
@@ -80,7 +102,7 @@ function renderNav() {
   const el = $('#nav-tunnel');
   el.innerHTML = NAV.filter(n => canSee(n.role)).map(n => `
     <div class="nav-item ${n.key === CURRENT_TAB ? 'active' : ''}" data-tab="${n.key}">
-      <span>${n.icon}</span><span>${n.label}</span>
+      <span class="nav-icon">${svg(n.icon)}</span><span>${n.label}</span>
     </div>`).join('');
   $$('.nav-item', el).forEach(item => item.addEventListener('click', () => goTo(item.dataset.tab)));
 }
@@ -183,18 +205,34 @@ async function renderDashboard() {
 
   setContent(`
     <div class="grid grid-4">
-      <div class="card stat-card"><span class="label">درآمد (۱۴ روز اخیر)</span>
+      <div class="card stat-card">
+        <div class="stat-top">
+          <span class="stat-icon stat-icon-signal">${svg('revenue')}</span>
+          <span class="delta ${deltaCls} mono">${deltaSign} ${Math.abs(s.revenue_change_pct ?? 0)}%</span>
+        </div>
         <span class="value mono">${fmt(s.revenue)}</span>
-        <span class="delta ${deltaCls} mono">${deltaSign} ${s.revenue_change_pct ?? 0}%</span></div>
-      <div class="card stat-card"><span class="label">سفارش‌های تایید شده</span>
+        <span class="label">درآمد (۱۴ روز اخیر)</span>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-top">
+          <span class="stat-icon stat-icon-indigo">${svg('check')}</span>
+          <div class="ring" style="--pct:${s.conversion_rate}"><span>${s.conversion_rate}٪</span></div>
+        </div>
         <span class="value mono">${fmt(s.approved)}</span>
-        <span class="card-sub">نرخ تبدیل ${s.conversion_rate}%</span></div>
-      <div class="card stat-card"><span class="label">کاربران کل</span>
+        <span class="label">سفارش‌های تایید شده · نرخ تبدیل</span>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-top"><span class="stat-icon stat-icon-amber">${svg('users')}</span></div>
         <span class="value mono">${fmt(s.total_users)}</span>
-        <span class="card-sub">${fmt(s.new_users)} کاربر جدید در این بازه</span></div>
-      <div class="card stat-card"><span class="label">تیکت‌های باز</span>
+        <span class="label">کاربران کل</span>
+        <span class="card-sub">${fmt(s.new_users)} کاربر جدید در این بازه</span>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-top"><span class="stat-icon stat-icon-coral">${svg('tickets')}</span></div>
         <span class="value mono">${fmt(s.open_tickets)}</span>
-        <span class="card-sub">${fmt(s.active_configs)} کانفیگ فعال</span></div>
+        <span class="label">تیکت‌های باز</span>
+        <span class="card-sub">${fmt(s.active_configs)} کانفیگ فعال</span>
+      </div>
     </div>
 
     <div class="grid grid-2" style="margin-top:16px">
@@ -246,7 +284,7 @@ async function renderOrders() {
               <button class="btn btn-primary btn-sm" data-approve="${o.id}">تایید</button>
               <button class="btn btn-danger btn-sm" data-reject="${o.id}">رد</button>
             </td>` : ''}
-          </tr>`).join('') || `<tr><td colspan="7" class="empty-state"><div class="icon">🧾</div>سفارشی در این وضعیت نیست</td></tr>`}
+          </tr>`).join('') || `<tr><td colspan="7" class="empty-state"><div class="icon">${svg('empty')}</div>سفارشی در این وضعیت نیست</td></tr>`}
         </tbody>
       </table></div>
     </div>
@@ -283,7 +321,7 @@ async function renderTopups() {
             <button class="btn btn-primary btn-sm" data-approve="${t.id}">تایید</button>
             <button class="btn btn-danger btn-sm" data-reject="${t.id}">رد</button>
           </td>` : ''}
-        </tr>`).join('') || `<tr><td colspan="5" class="empty-state"><div class="icon">💳</div>درخواستی در این وضعیت نیست</td></tr>`}</tbody>
+        </tr>`).join('') || `<tr><td colspan="5" class="empty-state"><div class="icon">${svg('empty')}</div>درخواستی در این وضعیت نیست</td></tr>`}</tbody>
       </table></div>
     </div>
   `);
@@ -322,7 +360,7 @@ async function renderUsers() {
               ? `<button class="btn btn-sm" data-unblock="${u.telegram_id}">رفع مسدودی</button>`
               : `<button class="btn btn-danger btn-sm" data-block="${u.telegram_id}">مسدودسازی</button>`) : ''}
           </td>
-        </tr>`).join('') || `<tr><td colspan="6" class="empty-state"><div class="icon">👥</div>کاربری یافت نشد</td></tr>`}</tbody>
+        </tr>`).join('') || `<tr><td colspan="6" class="empty-state"><div class="icon">${svg('empty')}</div>کاربری یافت نشد</td></tr>`}</tbody>
       </table></div>
       <div class="pager">${Array.from({ length: pages }, (_, i) => i + 1).map(p => `<button class="btn btn-sm ${p === usersState.page ? 'btn-primary' : ''}" data-page="${p}">${p}</button>`).join('')}</div>
     </div>
