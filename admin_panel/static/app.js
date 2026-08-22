@@ -1235,14 +1235,22 @@ function rateCardHtml(r) {
     </div>`;
 }
 
+const SETTINGS_TABS = [
+  { key: 'content', label: '📝 محتوا و متن‌ها' },
+  { key: 'payment', label: '💳 پرداخت و مالی' },
+  { key: 'campaign', label: '🎯 کمپین و مشارکت' },
+  { key: 'services', label: '⚙️ سرویس‌های ویژه' },
+];
+
 const SETTINGS_GROUPS = [
-  { title: 'متن‌های پایه', fields: [
+  // ---------------------------------------------------------- محتوا و متن‌ها
+  { tab: 'content', title: 'متن‌های پایه', fields: [
     { key: 'store_name', label: 'نام فروشگاه', type: 'text' },
     { key: 'welcome_text', label: 'متن خوش‌آمدگویی (شروع ربات)', type: 'textarea' },
     { key: 'contact_text', label: 'متن ابتدای بخش ارتباط با پشتیبانی', type: 'textarea' },
     { key: 'after_buy_text', label: 'متن راهنمای پرداخت (بعد از انتخاب محصول)', type: 'textarea' },
   ]},
-  { title: 'دکمه‌های منوی ربات', fields: [
+  { tab: 'content', title: 'دکمه‌های منوی ربات', fields: [
     { key: 'btn_buy', label: 'متن دکمه خرید کانفیگ', type: 'text' },
     { key: 'btn_test', label: 'متن دکمه کانفیگ تست', type: 'text' },
     { key: 'test_enabled', label: 'نمایش دکمه کانفیگ تست', type: 'bool' },
@@ -1253,32 +1261,48 @@ const SETTINGS_GROUPS = [
     { key: 'btn_contact', label: 'متن دکمه ارتباط با پشتیبانی', type: 'text' },
     { key: 'btn_admin_panel', label: 'متن دکمه پنل مدیریت (فقط برای ادمین‌ها)', type: 'text' },
   ]},
-  { title: 'کارت بانکی', fields: [
+  { tab: 'content', title: 'برندینگ و Mini App', fields: [
+    { key: 'miniapp_banner_text', label: 'متن بنر Mini App', type: 'text' },
+    { key: 'header_image_data', label: 'تصویر هدر / لوگو', type: 'image' },
+  ]},
+
+  // ------------------------------------------------------------ پرداخت و مالی
+  { tab: 'payment', title: 'کارت بانکی', fields: [
     { key: 'card_number', label: 'شماره کارت', type: 'text' },
     { key: 'card_holder', label: 'نام صاحب کارت', type: 'text' },
   ]},
-  { title: 'عضویت اجباری کانال', fields: [
+  { tab: 'payment', title: 'پرداخت کریپتو (Plisio)', fields: [
+    { key: 'crypto_payment_enabled', label: 'فعال بودن پرداخت کریپتو', type: 'bool' },
+    { key: 'plisio_api_key', label: 'کلید API درگاه Plisio', type: 'password' },
+  ]},
+  { tab: 'payment', title: 'موجودی و نرخ ارز پشتیبان', fields: [
+    { key: 'low_stock_threshold', label: 'آستانه هشدار موجودی کم', type: 'number' },
+    { key: 'manual_usd_rate_toman', label: 'نرخ دلار دستی (پشتیبان — فقط وقتی همه‌ی منابع زنده شکست بخورند استفاده می‌شود)', type: 'number' },
+  ]},
+
+  // -------------------------------------------------------- کمپین و مشارکت
+  { tab: 'campaign', title: 'عضویت اجباری کانال', fields: [
     { key: 'force_join_enabled', label: 'فعال بودن عضویت اجباری', type: 'bool' },
     { key: 'force_join_channel', label: 'آیدی کانال (مثلاً ‎@mychannel)', type: 'text' },
   ]},
-  { title: 'زیرمجموعه‌گیری (رفرال)', fields: [
+  { tab: 'campaign', title: 'زیرمجموعه‌گیری (رفرال)', fields: [
     { key: 'referral_enabled', label: 'فعال بودن سیستم رفرال', type: 'bool' },
     { key: 'referral_percent', label: 'درصد پورسانت رفرال', type: 'number' },
   ]},
-  { title: 'گردونه شانس', fields: [
+  { tab: 'campaign', title: 'گردونه شانس', fields: [
     { key: 'wheel_enabled', label: 'فعال بودن گردونه شانس', type: 'bool' },
     { key: 'wheel_win_percent', label: 'درصد احتمال برد در هر چرخش', type: 'number' },
     { key: 'wheel_prizes', label: 'درصدهای تخفیف ممکن (با کاما جدا کنید، مثلاً 10,20,30,50)', type: 'text' },
     { key: 'wheel_code_expiry_hours', label: 'اعتبار کد جایزه پس از برد (ساعت)', type: 'number' },
     { key: 'wheel_cooldown_hours', label: 'فاصله مجاز بین دو چرخش هر کاربر (ساعت)', type: 'number' },
   ]},
-  { title: 'یادآوری تمدید سرویس', fields: [
+  { tab: 'campaign', title: 'یادآوری تمدید سرویس', fields: [
     { key: 'renewal_reminder_enabled', label: 'فعال بودن یادآوری', type: 'bool' },
     { key: 'renewal_reminder_days_before', label: 'چند روز قبل از انقضا یادآوری ارسال شود', type: 'number' },
     { key: 'renewal_discount_percent', label: 'درصد تخفیف کد تشویقی تمدید', type: 'number' },
     { key: 'renewal_discount_expiry_hours', label: 'اعتبار کد تشویقی تمدید (ساعت)', type: 'number' },
   ]},
-  { title: 'یادآوری اتمام حجم', fields: [
+  { tab: 'campaign', title: 'یادآوری اتمام حجم', fields: [
     { key: 'volume_reminder_enabled', label: 'فعال بودن یادآوری', type: 'bool' },
     { key: 'volume_reminder_mode', label: 'مبنای هشدار', type: 'select', options: [['percent', 'بر اساس درصد مصرف'], ['gb', 'بر اساس حجم باقی‌مانده']] },
     { key: 'volume_reminder_percent', label: 'درصد مصرف برای هشدار (حالت درصد)', type: 'number' },
@@ -1286,28 +1310,18 @@ const SETTINGS_GROUPS = [
     { key: 'volume_discount_percent', label: 'درصد تخفیف کد تشویقی اتمام حجم', type: 'number' },
     { key: 'volume_discount_expiry_hours', label: 'اعتبار کد تشویقی اتمام حجم (ساعت)', type: 'number' },
   ]},
-  { title: 'کانفیگ تست رایگان', fields: [
+
+  // ------------------------------------------------------ سرویس‌های ویژه
+  { tab: 'services', title: 'کانفیگ تست رایگان', fields: [
     { key: 'test_config_panel_volume_gb', label: 'حجم کانفیگ تست (گیگابایت)', type: 'number' },
     { key: 'test_config_panel_duration_days', label: 'مدت اعتبار کانفیگ تست (روز)', type: 'number' },
   ]},
-  { title: 'کانفیگ شخصی/سفارشی', fields: [
+  { tab: 'services', title: 'کانفیگ شخصی/سفارشی', fields: [
     { key: 'custom_config_enabled', label: 'فعال بودن ساخت کانفیگ شخصی', type: 'bool' },
     { key: 'custom_config_min_gb', label: 'حداقل حجم مجاز (گیگ)', type: 'number' },
     { key: 'custom_config_max_gb', label: 'حداکثر حجم مجاز (گیگ)', type: 'number' },
     { key: 'custom_config_duration_days', label: 'مدت اعتبار (روز)', type: 'number' },
     { key: 'btn_custom_config', label: 'متن دکمه ساخت کانفیگ شخصی', type: 'text' },
-  ]},
-  { title: 'پرداخت کریپتو (Plisio)', fields: [
-    { key: 'crypto_payment_enabled', label: 'فعال بودن پرداخت کریپتو', type: 'bool' },
-    { key: 'plisio_api_key', label: 'کلید API درگاه Plisio', type: 'password' },
-  ]},
-  { title: 'Mini App و برندینگ', fields: [
-    { key: 'miniapp_banner_text', label: 'متن بنر Mini App', type: 'text' },
-    { key: 'header_image_data', label: 'تصویر هدر / لوگو', type: 'image' },
-  ]},
-  { title: 'موجودی و نرخ ارز', fields: [
-    { key: 'low_stock_threshold', label: 'آستانه هشدار موجودی کم', type: 'number' },
-    { key: 'manual_usd_rate_toman', label: 'نرخ دلار دستی (پشتیبان — فقط وقتی همه‌ی منابع زنده شکست بخورند استفاده می‌شود)', type: 'number' },
   ]},
 ];
 
@@ -1350,10 +1364,16 @@ function settingsFieldHtml(f, settings) {
     <input class="input" type="${f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}" data-key="${f.key}" data-type="text" value="${esc(val)}"></label>`;
 }
 
+let settingsActiveTab = 'content';
+
 function renderSettingsGroups(settings) {
+  const seen = new Set();
   return `<div class="settings-accordion" id="settings-accordion">
-    ${SETTINGS_GROUPS.map((g, i) => `
-      <div class="settings-group ${i === 0 ? 'open' : ''}">
+    ${SETTINGS_GROUPS.map(g => {
+      const isFirstInTab = !seen.has(g.tab);
+      seen.add(g.tab);
+      return `
+      <div class="settings-group ${isFirstInTab ? 'open' : ''}" data-settings-tab="${g.tab}" style="${g.tab === settingsActiveTab ? '' : 'display:none'}">
         <button type="button" class="settings-group-head">
           <span>${esc(g.title)}</span>
           <span class="settings-group-arrow">˅</span>
@@ -1361,8 +1381,21 @@ function renderSettingsGroups(settings) {
         <div class="settings-group-body"><div class="form-grid">
           ${g.fields.map(f => settingsFieldHtml(f, settings)).join('')}
         </div></div>
-      </div>`).join('')}
+      </div>`;
+    }).join('')}
   </div>`;
+}
+
+function settingsTabsHtml() {
+  return `<div class="tabs" id="settings-tabs-nav">
+    ${SETTINGS_TABS.map(t => `<button type="button" class="tab-btn ${t.key === settingsActiveTab ? 'active' : ''}" data-tab="${t.key}">${t.label}</button>`).join('')}
+  </div>`;
+}
+
+function switchSettingsTab(tab, root) {
+  settingsActiveTab = tab;
+  $$('#settings-tabs-nav .tab-btn', root).forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  $$('[data-settings-tab]', root).forEach(el => { el.style.display = el.dataset.settingsTab === tab ? '' : 'none'; });
 }
 
 function bindSettingsGroupEvents(root) {
@@ -1509,29 +1542,16 @@ async function renderSettings() {
     apiGet('/exchange-rate').catch(e => ({ ok: false, rate: null, source: null, updated_at: null, error: e.message })),
     apiGet('/settings/menu-order').catch(() => []),
   ]);
-  const cur = loadTheme();
   setContent(`
-    ${rateCardHtml(rate)}
-    <div class="card" style="margin-bottom:18px">
-      <div class="card-head">
-        <h3>ظاهر پنل</h3>
-        <div class="mode-toggle" id="mode-toggle">
-          <button data-mode="light" class="${cur.mode === 'light' ? 'active' : ''}">☀️ روشن</button>
-          <button data-mode="dark" class="${cur.mode === 'dark' ? 'active' : ''}">🌙 تیره</button>
-        </div>
-      </div>
-      <div class="theme-grid" id="theme-grid">
-        ${THEMES.map(t => `
-          <div class="theme-opt ${cur.style === t.id ? 'active' : ''}" data-style="${t.id}">
-            <div class="swatch">${t.colors.map(c => `<i style="background:${c}"></i>`).join('')}</div>
-            <strong>${esc(t.name)}</strong>
-            <span>${esc(t.desc)}</span>
-          </div>`).join('')}
-      </div>
-      <span class="card-sub">هر وقت خواستی می‌تونی طرح یا حالت روشن/تیره رو عوض کنی؛ فقط برای همین مرورگر ذخیره می‌شود.</span>
+    ${settingsTabsHtml()}
+
+    <div data-settings-tab="content" style="${settingsActiveTab === 'content' ? '' : 'display:none'}">
+      ${menuOrderCardHtml(menuOrder)}
     </div>
 
-    ${menuOrderCardHtml(menuOrder)}
+    <div data-settings-tab="payment" style="${settingsActiveTab === 'payment' ? '' : 'display:none'}">
+      ${rateCardHtml(rate)}
+    </div>
 
     ${renderSettingsGroups(settings)}
 
@@ -1539,14 +1559,7 @@ async function renderSettings() {
       <button class="btn btn-primary btn-block" id="settings-save">ذخیره تغییرات</button>
     </div>
   `);
-  $$('.theme-opt', content()).forEach(el => el.addEventListener('click', () => {
-    applyTheme(el.dataset.style, loadTheme().mode);
-    $$('.theme-opt', content()).forEach(o => o.classList.toggle('active', o === el));
-  }));
-  $$('#mode-toggle button', content()).forEach(btn => btn.addEventListener('click', () => {
-    applyTheme(loadTheme().style, btn.dataset.mode);
-    $$('#mode-toggle button', content()).forEach(b => b.classList.toggle('active', b === btn));
-  }));
+  $$('#settings-tabs-nav .tab-btn', content()).forEach(btn => btn.addEventListener('click', () => switchSettingsTab(btn.dataset.tab, content())));
   bindSettingsGroupEvents(content());
   renderMenuOrderList();
   $('#menu-order-save').addEventListener('click', saveMenuOrder);
@@ -1865,7 +1878,27 @@ async function renderSystem() {
 
 /* ============================================================= account === */
 async function renderAccount() {
+  const cur = loadTheme();
   setContent(`
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-head">
+        <h3>ظاهر پنل</h3>
+        <div class="mode-toggle" id="mode-toggle">
+          <button data-mode="light" class="${cur.mode === 'light' ? 'active' : ''}">☀️ روشن</button>
+          <button data-mode="dark" class="${cur.mode === 'dark' ? 'active' : ''}">🌙 تیره</button>
+        </div>
+      </div>
+      <div class="theme-grid" id="theme-grid">
+        ${THEMES.map(t => `
+          <div class="theme-opt ${cur.style === t.id ? 'active' : ''}" data-style="${t.id}">
+            <div class="swatch">${t.colors.map(c => `<i style="background:${c}"></i>`).join('')}</div>
+            <strong>${esc(t.name)}</strong>
+            <span>${esc(t.desc)}</span>
+          </div>`).join('')}
+      </div>
+      <span class="card-sub">این یک ترجیح شخصیه و فقط برای همین مرورگر ذخیره می‌شود؛ روی نمایش پنل برای بقیه‌ی ادمین‌ها اثری ندارد.</span>
+    </div>
+
     <div class="card" style="max-width:420px">
       <div class="card-head"><h3>تغییر پسورد</h3></div>
       <div class="form-grid">
@@ -1875,6 +1908,14 @@ async function renderAccount() {
       </div>
     </div>
   `);
+  $$('.theme-opt', content()).forEach(el => el.addEventListener('click', () => {
+    applyTheme(el.dataset.style, loadTheme().mode);
+    $$('.theme-opt', content()).forEach(o => o.classList.toggle('active', o === el));
+  }));
+  $$('#mode-toggle button', content()).forEach(btn => btn.addEventListener('click', () => {
+    applyTheme(loadTheme().style, btn.dataset.mode);
+    $$('#mode-toggle button', content()).forEach(b => b.classList.toggle('active', b === btn));
+  }));
   $('#acc-save').addEventListener('click', async () => {
     try {
       await apiPost('/me/password', { current_password: $('#acc-cur').value, new_password: $('#acc-new').value });
