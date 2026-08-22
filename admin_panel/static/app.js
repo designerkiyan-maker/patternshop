@@ -1211,18 +1211,183 @@ function rateCardHtml(r) {
     </div>`;
 }
 
+const SETTINGS_GROUPS = [
+  { title: 'متن‌های پایه', fields: [
+    { key: 'store_name', label: 'نام فروشگاه', type: 'text' },
+    { key: 'welcome_text', label: 'متن خوش‌آمدگویی (شروع ربات)', type: 'textarea' },
+    { key: 'contact_text', label: 'متن ابتدای بخش ارتباط با پشتیبانی', type: 'textarea' },
+    { key: 'after_buy_text', label: 'متن راهنمای پرداخت (بعد از انتخاب محصول)', type: 'textarea' },
+  ]},
+  { title: 'دکمه‌های منوی ربات', fields: [
+    { key: 'btn_buy', label: 'متن دکمه خرید کانفیگ', type: 'text' },
+    { key: 'btn_test', label: 'متن دکمه کانفیگ تست', type: 'text' },
+    { key: 'test_enabled', label: 'نمایش دکمه کانفیگ تست', type: 'bool' },
+    { key: 'btn_my_orders', label: 'متن دکمه سفارش‌های من', type: 'text' },
+    { key: 'btn_wallet', label: 'متن دکمه کیف پول', type: 'text' },
+    { key: 'btn_referral', label: 'متن دکمه زیرمجموعه‌گیری', type: 'text' },
+    { key: 'btn_wheel', label: 'متن دکمه گردونه شانس', type: 'text' },
+    { key: 'btn_contact', label: 'متن دکمه ارتباط با پشتیبانی', type: 'text' },
+    { key: 'btn_admin_panel', label: 'متن دکمه پنل مدیریت (فقط برای ادمین‌ها)', type: 'text' },
+  ]},
+  { title: 'کارت بانکی', fields: [
+    { key: 'card_number', label: 'شماره کارت', type: 'text' },
+    { key: 'card_holder', label: 'نام صاحب کارت', type: 'text' },
+  ]},
+  { title: 'عضویت اجباری کانال', fields: [
+    { key: 'force_join_enabled', label: 'فعال بودن عضویت اجباری', type: 'bool' },
+    { key: 'force_join_channel', label: 'آیدی کانال (مثلاً ‎@mychannel)', type: 'text' },
+  ]},
+  { title: 'زیرمجموعه‌گیری (رفرال)', fields: [
+    { key: 'referral_enabled', label: 'فعال بودن سیستم رفرال', type: 'bool' },
+    { key: 'referral_percent', label: 'درصد پورسانت رفرال', type: 'number' },
+  ]},
+  { title: 'گردونه شانس', fields: [
+    { key: 'wheel_enabled', label: 'فعال بودن گردونه شانس', type: 'bool' },
+    { key: 'wheel_win_percent', label: 'درصد احتمال برد در هر چرخش', type: 'number' },
+    { key: 'wheel_prizes', label: 'درصدهای تخفیف ممکن (با کاما جدا کنید، مثلاً 10,20,30,50)', type: 'text' },
+    { key: 'wheel_code_expiry_hours', label: 'اعتبار کد جایزه پس از برد (ساعت)', type: 'number' },
+    { key: 'wheel_cooldown_hours', label: 'فاصله مجاز بین دو چرخش هر کاربر (ساعت)', type: 'number' },
+  ]},
+  { title: 'یادآوری تمدید سرویس', fields: [
+    { key: 'renewal_reminder_enabled', label: 'فعال بودن یادآوری', type: 'bool' },
+    { key: 'renewal_reminder_days_before', label: 'چند روز قبل از انقضا یادآوری ارسال شود', type: 'number' },
+    { key: 'renewal_discount_percent', label: 'درصد تخفیف کد تشویقی تمدید', type: 'number' },
+    { key: 'renewal_discount_expiry_hours', label: 'اعتبار کد تشویقی تمدید (ساعت)', type: 'number' },
+  ]},
+  { title: 'یادآوری اتمام حجم', fields: [
+    { key: 'volume_reminder_enabled', label: 'فعال بودن یادآوری', type: 'bool' },
+    { key: 'volume_reminder_mode', label: 'مبنای هشدار', type: 'select', options: [['percent', 'بر اساس درصد مصرف'], ['gb', 'بر اساس حجم باقی‌مانده']] },
+    { key: 'volume_reminder_percent', label: 'درصد مصرف برای هشدار (حالت درصد)', type: 'number' },
+    { key: 'volume_reminder_gb_left', label: 'حجم باقی‌مانده برای هشدار — گیگ (حالت حجم)', type: 'number' },
+    { key: 'volume_discount_percent', label: 'درصد تخفیف کد تشویقی اتمام حجم', type: 'number' },
+    { key: 'volume_discount_expiry_hours', label: 'اعتبار کد تشویقی اتمام حجم (ساعت)', type: 'number' },
+  ]},
+  { title: 'کانفیگ تست رایگان', fields: [
+    { key: 'test_config_panel_volume_gb', label: 'حجم کانفیگ تست (گیگابایت)', type: 'number' },
+    { key: 'test_config_panel_duration_days', label: 'مدت اعتبار کانفیگ تست (روز)', type: 'number' },
+  ]},
+  { title: 'کانفیگ شخصی/سفارشی', fields: [
+    { key: 'custom_config_enabled', label: 'فعال بودن ساخت کانفیگ شخصی', type: 'bool' },
+    { key: 'custom_config_min_gb', label: 'حداقل حجم مجاز (گیگ)', type: 'number' },
+    { key: 'custom_config_max_gb', label: 'حداکثر حجم مجاز (گیگ)', type: 'number' },
+    { key: 'custom_config_duration_days', label: 'مدت اعتبار (روز)', type: 'number' },
+    { key: 'btn_custom_config', label: 'متن دکمه ساخت کانفیگ شخصی', type: 'text' },
+  ]},
+  { title: 'پرداخت کریپتو (Plisio)', fields: [
+    { key: 'crypto_payment_enabled', label: 'فعال بودن پرداخت کریپتو', type: 'bool' },
+    { key: 'plisio_api_key', label: 'کلید API درگاه Plisio', type: 'password' },
+  ]},
+  { title: 'Mini App و برندینگ', fields: [
+    { key: 'miniapp_banner_text', label: 'متن بنر Mini App', type: 'text' },
+    { key: 'header_image_data', label: 'تصویر هدر / لوگو', type: 'image' },
+  ]},
+  { title: 'موجودی و نرخ ارز', fields: [
+    { key: 'low_stock_threshold', label: 'آستانه هشدار موجودی کم', type: 'number' },
+    { key: 'manual_usd_rate_toman', label: 'نرخ دلار دستی (پشتیبان — فقط وقتی همه‌ی منابع زنده شکست بخورند استفاده می‌شود)', type: 'number' },
+  ]},
+];
+
+function settingsFieldHtml(f, settings) {
+  const val = settings[f.key] ?? '';
+  if (f.type === 'bool') {
+    const on = val === '1' || val === 1 || val === true;
+    return `
+      <label class="field field-row">
+        <span>${esc(f.label)}</span>
+        <span class="switch" data-key="${f.key}" data-type="bool" data-on="${on ? '1' : '0'}"><i></i></span>
+      </label>`;
+  }
+  if (f.type === 'textarea') {
+    return `<label class="field"><span>${esc(f.label)}</span>
+      <textarea class="input" rows="3" data-key="${f.key}" data-type="text">${esc(val)}</textarea></label>`;
+  }
+  if (f.type === 'select') {
+    return `<label class="field"><span>${esc(f.label)}</span>
+      <select class="input" data-key="${f.key}" data-type="text">
+        ${f.options.map(([v, l]) => `<option value="${v}" ${val === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+      </select></label>`;
+  }
+  if (f.type === 'image') {
+    return `
+      <label class="field">
+        <span>${esc(f.label)}</span>
+        <div class="image-field" data-key="${f.key}">
+          ${val ? `<img src="${val}" class="image-field-preview">` : '<span class="card-sub">تصویری تنظیم نشده</span>'}
+          <div class="image-field-actions">
+            <input type="file" accept="image/*" class="image-field-input" hidden>
+            <button type="button" class="btn btn-sm image-field-pick">انتخاب تصویر</button>
+            ${val ? '<button type="button" class="btn btn-sm btn-danger image-field-clear">حذف</button>' : ''}
+          </div>
+          <input type="hidden" data-key="${f.key}" data-type="text" value="${esc(val)}">
+        </div>
+      </label>`;
+  }
+  return `<label class="field"><span>${esc(f.label)}</span>
+    <input class="input" type="${f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}" data-key="${f.key}" data-type="text" value="${esc(val)}"></label>`;
+}
+
+function renderSettingsGroups(settings) {
+  return `<div class="settings-accordion" id="settings-accordion">
+    ${SETTINGS_GROUPS.map((g, i) => `
+      <div class="settings-group ${i === 0 ? 'open' : ''}">
+        <button type="button" class="settings-group-head">
+          <span>${esc(g.title)}</span>
+          <span class="settings-group-arrow">˅</span>
+        </button>
+        <div class="settings-group-body"><div class="form-grid">
+          ${g.fields.map(f => settingsFieldHtml(f, settings)).join('')}
+        </div></div>
+      </div>`).join('')}
+  </div>`;
+}
+
+function bindSettingsGroupEvents(root) {
+  $$('.settings-group-head', root).forEach(btn => btn.addEventListener('click', () => {
+    btn.parentElement.classList.toggle('open');
+  }));
+  $$('.switch', root).forEach(sw => sw.addEventListener('click', () => {
+    const on = sw.dataset.on !== '1';
+    sw.dataset.on = on ? '1' : '0';
+  }));
+  $$('.image-field', root).forEach(box => {
+    const fileInput = $('.image-field-input', box);
+    const hidden = $('input[type=hidden]', box);
+    $('.image-field-pick', box).addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => { hidden.value = reader.result; toast('تصویر انتخاب شد؛ برای ثبت روی «ذخیره تغییرات» بزن.'); };
+      reader.readAsDataURL(file);
+    });
+    const clearBtn = $('.image-field-clear', box);
+    if (clearBtn) clearBtn.addEventListener('click', () => { hidden.value = ''; box.querySelector('.image-field-preview')?.remove(); toast('تصویر حذف شد؛ برای ثبت روی «ذخیره تغییرات» بزن.'); });
+  });
+}
+
+async function collectAndSaveSettings(root, btn) {
+  const items = [];
+  $$('[data-key][data-type]', root).forEach(el => items.push({ key: el.dataset.key, value: el.value }));
+  $$('.switch[data-key]', root).forEach(sw => items.push({ key: sw.dataset.key, value: sw.dataset.on === '1' ? '1' : '0' }));
+  btn.disabled = true;
+  const prevTxt = btn.textContent; btn.textContent = 'در حال ذخیره...';
+  try {
+    for (const item of items) {
+      await apiPost('/settings', item);
+    }
+    toast('تنظیمات ذخیره شد.');
+  } catch (e) {
+    handleErr(e);
+  } finally {
+    btn.disabled = false; btn.textContent = prevTxt;
+  }
+}
+
 async function renderSettings() {
   const [settings, rate] = await Promise.all([
     apiGet('/settings'),
     apiGet('/exchange-rate').catch(e => ({ ok: false, rate: null, source: null, updated_at: null, error: e.message })),
   ]);
-  const fields = [
-    ['shop_name', 'نام فروشگاه'],
-    ['miniapp_banner_text', 'متن بنر Mini App'],
-    ['low_stock_threshold', 'آستانه هشدار موجودی کم'],
-    ['referral_percent', 'درصد پورسانت رفرال'],
-    ['manual_usd_rate_toman', 'نرخ دلار دستی (پشتیبان — فقط وقتی همه‌ی منابع زنده شکست بخورند استفاده می‌شود)'],
-  ];
   const cur = loadTheme();
   setContent(`
     ${rateCardHtml(rate)}
@@ -1245,13 +1410,11 @@ async function renderSettings() {
       <span class="card-sub">هر وقت خواستی می‌تونی طرح یا حالت روشن/تیره رو عوض کنی؛ فقط برای همین مرورگر ذخیره می‌شود.</span>
     </div>
 
-    <div class="card"><div class="form-grid">
-      ${fields.map(([key, label]) => `
-        <label class="field"><span>${label}</span>
-          <input class="input" data-key="${key}" value="${esc(settings[key] || '')}">
-        </label>`).join('')}
-      <button class="btn btn-primary" id="settings-save">ذخیره تغییرات</button>
-    </div></div>
+    ${renderSettingsGroups(settings)}
+
+    <div class="settings-save-bar">
+      <button class="btn btn-primary btn-block" id="settings-save">ذخیره تغییرات</button>
+    </div>
   `);
   $$('.theme-opt', content()).forEach(el => el.addEventListener('click', () => {
     applyTheme(el.dataset.style, loadTheme().mode);
@@ -1261,14 +1424,8 @@ async function renderSettings() {
     applyTheme(loadTheme().style, btn.dataset.mode);
     $$('#mode-toggle button', content()).forEach(b => b.classList.toggle('active', b === btn));
   }));
-  $('#settings-save').addEventListener('click', async () => {
-    try {
-      for (const inp of $$('[data-key]', content())) {
-        await apiPost('/settings', { key: inp.dataset.key, value: inp.value });
-      }
-      toast('تنظیمات ذخیره شد.');
-    } catch (e) { handleErr(e); }
-  });
+  bindSettingsGroupEvents(content());
+  $('#settings-save').addEventListener('click', () => collectAndSaveSettings(content(), $('#settings-save')));
   $('#rate-refresh').addEventListener('click', async () => {
     const btn = $('#rate-refresh');
     btn.disabled = true; btn.textContent = 'در حال دریافت...';

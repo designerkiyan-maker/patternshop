@@ -784,3 +784,40 @@ html[data-style="6"] .res-ring::before{ box-shadow:var(--neu-in); }
   .toolbar{ flex-direction:column; align-items:stretch; }
   .toolbar .input, .toolbar select.input{ flex:1 1 auto; }
 }
+
+/* -------------------------------------------------------- settings --- */
+.settings-accordion{ display:flex; flex-direction:column; gap:12px; margin-bottom:18px; }
+.settings-group{
+  background:linear-gradient(160deg, var(--surface-2), var(--surface));
+  border:1px solid var(--border-soft); border-radius:var(--radius-sm); overflow:hidden;
+}
+.settings-group-head{
+  width:100%; display:flex; align-items:center; justify-content:space-between;
+  padding:15px 18px; background:transparent; border:none; cursor:pointer;
+  color:var(--text); font-size:13.5px; font-weight:700; font-family:inherit; text-align:right;
+}
+.settings-group-arrow{ color:var(--text-muted); transition:transform .2s ease; }
+.settings-group.open .settings-group-arrow{ transform:rotate(180deg); }
+.settings-group-body{ display:none; padding:0 18px 18px; }
+.settings-group.open .settings-group-body{ display:block; }
+
+.field-row{ flex-direction:row !important; align-items:center; justify-content:space-between; gap:12px; }
+.field-row > span{ color:var(--text); font-size:13.5px; font-weight:600; }
+
+.switch{
+  --w:44px; --h:26px; width:var(--w); height:var(--h); border-radius:999px; flex-shrink:0;
+  background:var(--surface); border:1px solid var(--border); box-shadow:var(--neu-in);
+  position:relative; cursor:pointer; transition:.2s ease;
+}
+.switch i{
+  position:absolute; top:2px; right:2px; width:20px; height:20px; border-radius:50%;
+  background:var(--text-muted); transition:.2s ease;
+}
+.switch[data-on="1"]{ background:var(--grad-4); border-color:transparent; }
+.switch[data-on="1"] i{ right:calc(var(--w) - 22px); background:#fff; }
+
+.image-field{ display:flex; flex-direction:column; gap:10px; }
+.image-field-preview{ max-width:220px; max-height:100px; border-radius:12px; border:1px solid var(--border); object-fit:contain; background:var(--surface); }
+.image-field-actions{ display:flex; gap:8px; }
+
+.settings-save-bar{ position:sticky; bottom:12px; margin-top:4px; }
