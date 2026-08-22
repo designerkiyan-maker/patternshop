@@ -133,3 +133,14 @@ async def get_usd_to_toman_rate() -> float:
 def get_cache_status() -> dict:
     """برای دیباگ: وضعیت فعلی کش نرخ را برمی‌گرداند."""
     return dict(_cache)
+
+
+async def refresh_rate() -> dict:
+    """کش فعلی را نادیده می‌گیرد و نرخ را دوباره از منابع خارجی می‌گیرد
+    (برای دکمه‌ی «رفرش کش» در پنل وب). خروجی همان دیکشنری get_cache_status()
+    است، بعد از تلاش برای به‌روزرسانی. اگر همه‌ی منابع شکست بخورند، استثنای
+    get_usd_to_toman_rate بالا می‌رود (که اگر کش قدیمی موجود باشد به‌جایش
+    همان را برمی‌گرداند و استثنا صادر نمی‌کند)."""
+    _cache["ts"] = 0.0  # کش را باطل کن تا get_usd_to_toman_rate مجبور به فراخوانی منابع شود
+    await get_usd_to_toman_rate()
+    return get_cache_status()
