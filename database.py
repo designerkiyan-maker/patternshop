@@ -675,6 +675,8 @@ class Database:
             ("reseller_requests", "created_at", "TEXT"),
             ("reseller_requests", "updated_at", "TEXT"),
             ("web_admins", "permissions", "TEXT"),
+            ("admin_logs", "record_type", "TEXT"),
+            ("admin_logs", "record_id", "TEXT"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -707,6 +709,9 @@ class Database:
             )
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_configs_order_id ON configs(order_id)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_logs_record ON admin_logs(record_type, record_id)"
+        )
 
     # -----------------------------------------------------------------------
     # تنظیمات (settings)
@@ -1185,30 +1190,48 @@ class Database:
     # لاگ فعالیت ادمین (audit log)
     # -----------------------------------------------------------------------
 
-    def log_admin_action(self, admin_id: int, action: str, details: str = ""):
-        """ثبت یک رخداد حساس (تغییر موجودی کیف‌پول، ویرایش قیمت و ...) در لاگ فعالیت ادمین."""
+    def log_admin_action(self, admin_id: int, action: str, details: str = "",
+                          record_type: str = None, record_id=None):
+        """ثبت یک رخداد حساس (تغییر موجودی کیف‌پول، ویرایش قیمت و ...) در لاگ فعالیت ادمین.
+        record_type/record_id اختیاری‌اند و امکان فیلتر «تاریخچه‌ی یک رکورد خاص» را می‌دهند
+        (مثلاً همه‌ی رخدادهای سفارش #۱۲۳ یا کاربر ۱۲۳۴۵۶۷۸۹)."""
         with self._get_conn() as conn:
             conn.execute(
-                "INSERT INTO admin_logs (admin_id, action, details, created_at) VALUES (?,?,?,?)",
-                (admin_id, action, details, datetime.utcnow().isoformat()),
+                "INSERT INTO admin_logs (admin_id, action, details, record_type, record_id, created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (admin_id, action, details, record_type,
+                 str(record_id) if record_id is not None else None, datetime.utcnow().isoformat()),
             )
 
-    def get_admin_logs(self, limit: int = 50, offset: int = 0, admin_id: int = None):
+    def get_admin_logs(self, limit: int = 50, offset: int = 0, admin_id: int = None,
+                        action: str = None, record_type: str = None, record_id=None):
+        clauses, params = [], []
+        if admin_id is not None:
+            clauses.append("admin_id = ?")
+            params.append(admin_id)
+        if action:
+            clauses.append("action = ?")
+            params.append(action)
+        if record_type:
+            clauses.append("record_type = ?")
+            params.append(record_type)
+        if record_id is not None:
+            clauses.append("record_id = ?")
+            params.append(str(record_id))
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._get_conn() as conn:
-            if admin_id is not None:
-                total = conn.execute(
-                    "SELECT COUNT(*) c FROM admin_logs WHERE admin_id = ?", (admin_id,)
-                ).fetchone()["c"]
-                rows = conn.execute(
-                    "SELECT * FROM admin_logs WHERE admin_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
-                    (admin_id, limit, offset),
-                ).fetchall()
-            else:
-                total = conn.execute("SELECT COUNT(*) c FROM admin_logs").fetchone()["c"]
-                rows = conn.execute(
-                    "SELECT * FROM admin_logs ORDER BY id DESC LIMIT ? OFFSET ?", (limit, offset)
-                ).fetchall()
+            total = conn.execute(f"SELECT COUNT(*) c FROM admin_logs {where}", params).fetchone()["c"]
+            rows = conn.execute(
+                f"SELECT * FROM admin_logs {where} ORDER BY id DESC LIMIT ? OFFSET ?",
+                params + [limit, offset],
+            ).fetchall()
             return rows, total
+
+    def list_admin_log_actions(self):
+        """لیست یکتای انواع اکشن‌های ثبت‌شده، برای پر کردن فیلتر «نوع اکشن» در پنل."""
+        with self._get_conn() as conn:
+            rows = conn.execute("SELECT DISTINCT action FROM admin_logs ORDER BY action").fetchall()
+            return [r["action"] for r in rows]
 
     # -----------------------------------------------------------------------
     # دسته‌بندی‌ها
