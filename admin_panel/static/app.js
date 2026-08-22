@@ -1,0 +1,776 @@
+'use strict';
+
+/* ============================================================ state === */
+let ME = null;
+let CURRENT_TAB = 'dashboard';
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+const fmt = n => (n === null || n === undefined) ? '—' : Number(n).toLocaleString('fa-IR');
+const fmtDate = iso => iso ? new Date(iso.replace(' ', 'T') + (iso.includes('Z') ? '' : 'Z')).toLocaleString('fa-IR') : '—';
+const esc = s => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ============================================================== api === */
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, {
+    method: opts.method || 'GET',
+    credentials: 'include',
+    headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (res.status === 401) { showLogin(); throw new Error('unauthorized'); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || 'خطای ناشناخته');
+  return data;
+}
+const apiGet = p => api(p);
+const apiPost = (p, body) => api(p, { method: 'POST', body: body || {} });
+const apiPut = (p, body) => api(p, { method: 'PUT', body: body || {} });
+const apiDelete = p => api(p, { method: 'DELETE' });
+
+/* ============================================================ toast === */
+function toast(msg, isError = false) {
+  const root = $('#toast-root');
+  const el = document.createElement('div');
+  el.className = 'toast' + (isError ? ' error' : '');
+  el.textContent = msg;
+  root.appendChild(el);
+  setTimeout(() => el.remove(), 3800);
+}
+function handleErr(e) { if (e.message !== 'unauthorized') toast(e.message, true); }
+
+/* ============================================================ modal === */
+function openModal(title, bodyHtml, onMount) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `<div class="modal"><h3>${title}</h3><div class="modal-body">${bodyHtml}</div></div>`;
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.remove(); });
+  document.body.appendChild(backdrop);
+  if (onMount) onMount(backdrop.querySelector('.modal-body'), () => backdrop.remove());
+  return backdrop;
+}
+
+/* ============================================================== nav === */
+const NAV = [
+  { key: 'dashboard', label: 'داشبورد', icon: '📊', role: 'any' },
+  { key: 'orders', label: 'سفارش‌ها', icon: '🧾', role: 'any' },
+  { key: 'topups', label: 'شارژ کیف پول', icon: '💳', role: 'any' },
+  { key: 'users', label: 'کاربران', icon: '👥', role: 'any' },
+  { key: 'catalog', label: 'محصولات و بانک کانفیگ', icon: '📦', role: 'senior' },
+  { key: 'discounts', label: 'کدهای تخفیف', icon: '🏷️', role: 'senior' },
+  { key: 'tickets', label: 'تیکت‌ها', icon: '🎫', role: 'any' },
+  { key: 'resellers', label: 'نمایندگی‌ها', icon: '🤝', role: 'senior' },
+  { key: 'panels', label: 'پنل‌های VPN', icon: '🖥️', role: 'senior' },
+  { key: 'settings', label: 'تنظیمات و برندینگ', icon: '⚙️', role: 'senior' },
+  { key: 'logs', label: 'لاگ فعالیت ادمین‌ها', icon: '📜', role: 'senior' },
+  { key: 'webadmins', label: 'کاربران پنل', icon: '🔐', role: 'owner' },
+  { key: 'account', label: 'حساب من', icon: '🙋', role: 'any' },
+];
+const FULL_ROLES = ['owner', 'admin', 'mid'];
+const SENIOR_ROLES = ['owner', 'admin'];
+function canSee(navRole) {
+  if (navRole === 'any') return true;
+  if (navRole === 'senior') return SENIOR_ROLES.includes(ME.role);
+  if (navRole === 'owner') return ME.role === 'owner';
+  return false;
+}
+const ROLE_LABEL = { owner: 'مالک', admin: 'مدیر کامل', mid: 'ادمین میانی', support: 'پشتیبان' };
+
+function renderNav() {
+  const el = $('#nav-tunnel');
+  el.innerHTML = NAV.filter(n => canSee(n.role)).map(n => `
+    <div class="nav-item ${n.key === CURRENT_TAB ? 'active' : ''}" data-tab="${n.key}">
+      <span>${n.icon}</span><span>${n.label}</span>
+    </div>`).join('');
+  $$('.nav-item', el).forEach(item => item.addEventListener('click', () => goTo(item.dataset.tab)));
+}
+
+function goTo(tab) {
+  CURRENT_TAB = tab;
+  renderNav();
+  $('#page-title').textContent = NAV.find(n => n.key === tab)?.label || '';
+  renderPage(tab);
+}
+
+/* ============================================================= boot === */
+async function boot() {
+  try {
+    ME = await apiGet('/me');
+    showApp();
+  } catch (e) {
+    showLogin();
+  }
+}
+
+function showLogin() {
+  $('#app').hidden = true;
+  $('#login-screen').hidden = false;
+}
+
+function showApp() {
+  $('#login-screen').hidden = true;
+  $('#app').hidden = false;
+  $('#me-username').textContent = ME.username;
+  $('#me-role').textContent = ROLE_LABEL[ME.role] || ME.role;
+  $('#me-avatar').textContent = ME.username.slice(0, 2).toUpperCase();
+  tickClock();
+  setInterval(tickClock, 1000);
+  goTo('dashboard');
+}
+
+function tickClock() {
+  $('#topbar-clock').textContent = new Date().toLocaleString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+$('#login-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = $('#login-submit');
+  const errBox = $('#login-error');
+  errBox.hidden = true;
+  btn.disabled = true; btn.textContent = 'در حال ورود...';
+  try {
+    ME = await apiPost('/login', {
+      username: $('#login-username').value.trim(),
+      password: $('#login-password').value,
+    });
+    showApp();
+  } catch (e) {
+    errBox.textContent = e.message;
+    errBox.hidden = false;
+  } finally {
+    btn.disabled = false; btn.textContent = 'ورود';
+  }
+});
+
+$('#logout-btn').addEventListener('click', async () => {
+  await apiPost('/logout');
+  ME = null;
+  showLogin();
+});
+
+/* ============================================================== page === */
+function content() { return $('#content'); }
+function setContent(html) { content().innerHTML = html; }
+
+async function renderPage(tab) {
+  setContent('<div class="loading">در حال بارگذاری...</div>');
+  try {
+    switch (tab) {
+      case 'dashboard': return renderDashboard();
+      case 'orders': return renderOrders();
+      case 'topups': return renderTopups();
+      case 'users': return renderUsers();
+      case 'catalog': return renderCatalog();
+      case 'discounts': return renderDiscounts();
+      case 'tickets': return renderTickets();
+      case 'resellers': return renderResellers();
+      case 'panels': return renderPanels();
+      case 'settings': return renderSettings();
+      case 'logs': return renderLogs();
+      case 'webadmins': return renderWebAdmins();
+      case 'account': return renderAccount();
+    }
+  } catch (e) { handleErr(e); setContent(`<div class="empty-state">${esc(e.message)}</div>`); }
+}
+
+/* ========================================================= dashboard === */
+async function renderDashboard() {
+  const s = await apiGet('/dashboard');
+  const maxRev = Math.max(...s.daily_series.map(d => d.revenue), 1);
+  const spark = s.daily_series.map(d => `<i style="height:${Math.max((d.revenue / maxRev) * 100, 3)}%" title="${d.date}: ${fmt(d.revenue)} تومان"></i>`).join('');
+  const deltaCls = (s.revenue_change_pct ?? 0) >= 0 ? 'up' : 'down';
+  const deltaSign = (s.revenue_change_pct ?? 0) >= 0 ? '▲' : '▼';
+
+  setContent(`
+    <div class="grid grid-4">
+      <div class="card stat-card"><span class="label">درآمد (۱۴ روز اخیر)</span>
+        <span class="value mono">${fmt(s.revenue)}</span>
+        <span class="delta ${deltaCls} mono">${deltaSign} ${s.revenue_change_pct ?? 0}%</span></div>
+      <div class="card stat-card"><span class="label">سفارش‌های تایید شده</span>
+        <span class="value mono">${fmt(s.approved)}</span>
+        <span class="card-sub">نرخ تبدیل ${s.conversion_rate}%</span></div>
+      <div class="card stat-card"><span class="label">کاربران کل</span>
+        <span class="value mono">${fmt(s.total_users)}</span>
+        <span class="card-sub">${fmt(s.new_users)} کاربر جدید در این بازه</span></div>
+      <div class="card stat-card"><span class="label">تیکت‌های باز</span>
+        <span class="value mono">${fmt(s.open_tickets)}</span>
+        <span class="card-sub">${fmt(s.active_configs)} کانفیگ فعال</span></div>
+    </div>
+
+    <div class="grid grid-2" style="margin-top:16px">
+      <div class="card">
+        <div class="card-head"><h3>روند فروش روزانه</h3><span class="card-sub">${s.start_date} تا ${s.end_date}</span></div>
+        <div class="spark">${spark}</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>تفکیک درآمد</h3></div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div class="chip-row"><span class="chip">مستقیم: ${fmt(s.direct_revenue)}</span><span class="chip">رفرال: ${fmt(s.referral_revenue)}</span></div>
+          ${s.category_breakdown.map(c => `
+            <div style="display:flex;justify-content:space-between;font-size:13px">
+              <span>${esc(c.name)}</span><span class="mono">${fmt(c.revenue)} (${fmt(c.orders)})</span>
+            </div>`).join('') || '<span class="card-sub">داده‌ای برای این بازه نیست</span>'}
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="card-head"><h3>پرفروش‌ترین محصولات</h3></div>
+      <div class="table-wrap"><table><thead><tr><th>محصول</th><th>تعداد فروش</th><th>درآمد</th></tr></thead>
+      <tbody>${s.top_products.map(p => `<tr><td>${esc(p.name)}</td><td class="mono">${fmt(p.orders)}</td><td class="mono">${fmt(p.revenue)}</td></tr>`).join('') || `<tr><td colspan="3" class="empty-state">داده‌ای نیست</td></tr>`}</tbody></table></div>
+    </div>
+  `);
+}
+
+/* ============================================================ orders === */
+let ordersStatus = 'pending';
+async function renderOrders() {
+  const canAct = FULL_ROLES.includes(ME.role);
+  const orders = await apiGet(`/orders?status=${ordersStatus}`);
+  setContent(`
+    <div class="tabs">
+      ${['pending', 'approved', 'rejected'].map(s => `<button class="tab-btn ${s === ordersStatus ? 'active' : ''}" data-status="${s}">${{ pending: 'در انتظار', approved: 'تایید شده', rejected: 'رد شده' }[s]}</button>`).join('')}
+    </div>
+    <div class="card">
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>کاربر</th><th>محصول</th><th>تعداد</th><th>مبلغ</th><th>تاریخ</th>${canAct && ordersStatus === 'pending' ? '<th>عملیات</th>' : ''}</tr></thead>
+        <tbody>
+          ${orders.map(o => `<tr>
+            <td class="mono">#${o.id}</td>
+            <td>${esc(o.username || o.user_id)}</td>
+            <td>${esc(o.product_name)}</td>
+            <td class="mono">${fmt(o.quantity || 1)}</td>
+            <td class="mono">${fmt(o.final_price ?? o.base_price)}</td>
+            <td class="mono">${fmtDate(o.created_at)}</td>
+            ${canAct && ordersStatus === 'pending' ? `<td>
+              <button class="btn btn-primary btn-sm" data-approve="${o.id}">تایید</button>
+              <button class="btn btn-danger btn-sm" data-reject="${o.id}">رد</button>
+            </td>` : ''}
+          </tr>`).join('') || `<tr><td colspan="7" class="empty-state"><div class="icon">🧾</div>سفارشی در این وضعیت نیست</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+  `);
+  $$('.tab-btn', content()).forEach(b => b.addEventListener('click', () => { ordersStatus = b.dataset.status; renderOrders(); }));
+  $$('[data-approve]', content()).forEach(b => b.addEventListener('click', async () => {
+    b.disabled = true;
+    try { await apiPost(`/orders/${b.dataset.approve}/approve`); toast('سفارش تایید شد.'); renderOrders(); }
+    catch (e) { handleErr(e); b.disabled = false; }
+  }));
+  $$('[data-reject]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('سفارش رد شود؟')) return;
+    try { await apiPost(`/orders/${b.dataset.reject}/reject`); toast('سفارش رد شد.'); renderOrders(); }
+    catch (e) { handleErr(e); }
+  }));
+}
+
+/* ============================================================ topups === */
+let topupsStatus = 'pending';
+async function renderTopups() {
+  const canAct = FULL_ROLES.includes(ME.role);
+  const topups = await apiGet(`/topups?status=${topupsStatus}`);
+  setContent(`
+    <div class="tabs">
+      ${['pending', 'approved', 'rejected'].map(s => `<button class="tab-btn ${s === topupsStatus ? 'active' : ''}" data-status="${s}">${{ pending: 'در انتظار', approved: 'تایید شده', rejected: 'رد شده' }[s]}</button>`).join('')}
+    </div>
+    <div class="card">
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>کاربر</th><th>مبلغ</th><th>تاریخ</th>${canAct && topupsStatus === 'pending' ? '<th>عملیات</th>' : ''}</tr></thead>
+        <tbody>${topups.map(t => `<tr>
+          <td class="mono">#${t.id}</td><td>${esc(t.username || t.user_id)}</td>
+          <td class="mono">${fmt(t.amount)}</td><td class="mono">${fmtDate(t.created_at)}</td>
+          ${canAct && topupsStatus === 'pending' ? `<td>
+            <button class="btn btn-primary btn-sm" data-approve="${t.id}">تایید</button>
+            <button class="btn btn-danger btn-sm" data-reject="${t.id}">رد</button>
+          </td>` : ''}
+        </tr>`).join('') || `<tr><td colspan="5" class="empty-state"><div class="icon">💳</div>درخواستی در این وضعیت نیست</td></tr>`}</tbody>
+      </table></div>
+    </div>
+  `);
+  $$('.tab-btn', content()).forEach(b => b.addEventListener('click', () => { topupsStatus = b.dataset.status; renderTopups(); }));
+  $$('[data-approve]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/topups/${b.dataset.approve}/approve`); toast('شارژ تایید شد.'); renderTopups(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-reject]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('این شارژ رد شود؟')) return;
+    try { await apiPost(`/topups/${b.dataset.reject}/reject`); toast('رد شد.'); renderTopups(); } catch (e) { handleErr(e); }
+  }));
+}
+
+/* ============================================================= users === */
+let usersState = { q: '', status: 'all', page: 1 };
+async function renderUsers() {
+  const res = await apiGet(`/users?q=${encodeURIComponent(usersState.q)}&status=${usersState.status}&page=${usersState.page}`);
+  const pages = Math.max(Math.ceil(res.total / res.limit), 1);
+  setContent(`
+    <div class="toolbar">
+      <input class="input" id="user-search" placeholder="جستجو (آیدی، یوزرنیم، نام)..." value="${esc(usersState.q)}">
+      <select class="input" id="user-status">
+        ${[['all', 'همه'], ['active', 'فعال'], ['expired', 'منقضی'], ['blocked', 'مسدود']].map(([v, l]) => `<option value="${v}" ${v === usersState.status ? 'selected' : ''}>${l}</option>`).join('')}
+      </select>
+    </div>
+    <div class="card">
+      <div class="table-wrap"><table>
+        <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>نام</th><th>وضعیت</th><th>عضویت</th><th>عملیات</th></tr></thead>
+        <tbody>${res.items.map(u => `<tr>
+          <td class="mono">${u.telegram_id}</td><td>${esc(u.username || '—')}</td><td>${esc(u.first_name || '—')}</td>
+          <td>${u.is_blocked ? '<span class="badge badge-rejected">مسدود</span>' : '<span class="badge badge-approved">فعال</span>'}</td>
+          <td class="mono">${fmtDate(u.joined_at)}</td>
+          <td>
+            <button class="btn btn-ghost btn-sm" data-detail="${u.telegram_id}">جزئیات</button>
+            ${FULL_ROLES.includes(ME.role) ? (u.is_blocked
+              ? `<button class="btn btn-sm" data-unblock="${u.telegram_id}">رفع مسدودی</button>`
+              : `<button class="btn btn-danger btn-sm" data-block="${u.telegram_id}">مسدودسازی</button>`) : ''}
+          </td>
+        </tr>`).join('') || `<tr><td colspan="6" class="empty-state"><div class="icon">👥</div>کاربری یافت نشد</td></tr>`}</tbody>
+      </table></div>
+      <div class="pager">${Array.from({ length: pages }, (_, i) => i + 1).map(p => `<button class="btn btn-sm ${p === usersState.page ? 'btn-primary' : ''}" data-page="${p}">${p}</button>`).join('')}</div>
+    </div>
+  `);
+  $('#user-search').addEventListener('keydown', e => { if (e.key === 'Enter') { usersState.q = e.target.value; usersState.page = 1; renderUsers(); } });
+  $('#user-status').addEventListener('change', e => { usersState.status = e.target.value; usersState.page = 1; renderUsers(); });
+  $$('[data-page]', content()).forEach(b => b.addEventListener('click', () => { usersState.page = Number(b.dataset.page); renderUsers(); }));
+  $$('[data-block]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/users/${b.dataset.block}/block`); toast('کاربر مسدود شد.'); renderUsers(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-unblock]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/users/${b.dataset.unblock}/unblock`); toast('رفع مسدودیت شد.'); renderUsers(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-detail]', content()).forEach(b => b.addEventListener('click', () => showUserDetail(Number(b.dataset.detail))));
+}
+
+async function showUserDetail(tgId) {
+  const d = await apiGet(`/users/${tgId}`);
+  const isSenior = SENIOR_ROLES.includes(ME.role);
+  openModal(`کاربر ${esc(d.user.username || tgId)}`, `
+    <div class="chip-row" style="margin-bottom:14px">
+      <span class="chip">کیف پول: ${fmt(d.user.referral_credit)} تومان</span>
+      <span class="chip">زیرمجموعه‌ها: ${fmt(d.referral.count)}</span>
+      ${d.is_reseller ? `<span class="chip">اعتبار نمایندگی: ${fmt(d.reseller_credit)} گیگ</span>` : ''}
+    </div>
+    ${isSenior ? `<div class="form-row" style="margin-bottom:14px">
+      <input class="input" id="wallet-delta" type="number" placeholder="مبلغ (مثبت=افزایش، منفی=کاهش)">
+      <button class="btn btn-primary" id="wallet-submit">اعمال</button>
+    </div>` : ''}
+    <h4 style="font-size:13px;margin:10px 0">سفارش‌های اخیر</h4>
+    <div class="table-wrap"><table><thead><tr><th>#</th><th>محصول</th><th>مبلغ</th><th>وضعیت</th></tr></thead>
+    <tbody>${d.orders.slice(0, 10).map(o => `<tr><td class="mono">#${o.id}</td><td>${esc(o.product_name || '-')}</td><td class="mono">${fmt(o.final_price)}</td><td>${o.status}</td></tr>`).join('') || '<tr><td colspan="4" class="empty-state">سفارشی نیست</td></tr>'}</tbody></table></div>
+  `, (body, close) => {
+    const submitBtn = $('#wallet-submit', body);
+    if (submitBtn) submitBtn.addEventListener('click', async () => {
+      const delta = Number($('#wallet-delta', body).value);
+      if (!delta) return;
+      try { await apiPost(`/users/${tgId}/wallet`, { delta }); toast('کیف پول به‌روزرسانی شد.'); close(); }
+      catch (e) { handleErr(e); }
+    });
+  });
+}
+
+/* ============================================================ catalog === */
+let catalogTab = 'products';
+async function renderCatalog() {
+  const [categories, products] = await Promise.all([apiGet('/categories'), apiGet('/products')]);
+  setContent(`
+    <div class="tabs">
+      <button class="tab-btn ${catalogTab === 'products' ? 'active' : ''}" data-t="products">محصولات</button>
+      <button class="tab-btn ${catalogTab === 'categories' ? 'active' : ''}" data-t="categories">دسته‌بندی‌ها</button>
+    </div>
+    <div id="catalog-body"></div>
+  `);
+  $$('.tab-btn', content()).forEach(b => b.addEventListener('click', () => { catalogTab = b.dataset.t; renderCatalog(); }));
+
+  const body = $('#catalog-body');
+  if (catalogTab === 'categories') {
+    body.innerHTML = `
+      <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-cat">+ دسته‌بندی جدید</button></div>
+      <div class="card"><div class="table-wrap"><table><thead><tr><th>نام</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+      <tbody>${categories.map(c => `<tr>
+        <td>${esc(c.name)}</td>
+        <td>${c.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
+        <td><button class="btn btn-sm" data-toggle-cat="${c.id}">${c.is_active ? 'غیرفعال کن' : 'فعال کن'}</button>
+        <button class="btn btn-danger btn-sm" data-del-cat="${c.id}">حذف</button></td>
+      </tr>`).join('') || '<tr><td colspan="3" class="empty-state">دسته‌بندی‌ای نیست</td></tr>'}</tbody></table></div></div>`;
+    $('#add-cat').addEventListener('click', () => openModal('دسته‌بندی جدید', `
+      <div class="form-grid"><input class="input" id="cat-name" placeholder="نام دسته‌بندی">
+      <button class="btn btn-primary" id="cat-save">ثبت</button></div>`, (b, close) => {
+      $('#cat-save', b).addEventListener('click', async () => {
+        const name = $('#cat-name', b).value.trim(); if (!name) return;
+        try { await apiPost('/categories', { name }); toast('اضافه شد.'); close(); renderCatalog(); } catch (e) { handleErr(e); }
+      });
+    }));
+    $$('[data-toggle-cat]', body).forEach(b => b.addEventListener('click', async () => {
+      try { await apiPost(`/categories/${b.dataset.toggleCat}/toggle`); renderCatalog(); } catch (e) { handleErr(e); }
+    }));
+    $$('[data-del-cat]', body).forEach(b => b.addEventListener('click', async () => {
+      if (!confirm('حذف شود؟ (محصولات این دسته هم حذف می‌شوند)')) return;
+      try { await apiDelete(`/categories/${b.dataset.delCat}`); toast('حذف شد.'); renderCatalog(); } catch (e) { handleErr(e); }
+    }));
+    return;
+  }
+
+  body.innerHTML = `
+    <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-prod">+ محصول جدید</button></div>
+    <div class="card"><div class="table-wrap"><table><thead><tr><th>نام</th><th>دسته</th><th>قیمت</th><th>موجودی</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+    <tbody>${products.map(p => `<tr>
+      <td>${esc(p.name)}</td><td>${esc(p.category_name)}</td><td class="mono">${fmt(p.price)}</td>
+      <td class="mono">${p.is_auto_provision ? '<span class="chip">خودکار</span>' : fmt(p.stock)}</td>
+      <td>${p.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
+      <td>
+        ${!p.is_auto_provision ? `<button class="btn btn-sm" data-configs="${p.id}">بانک کانفیگ</button>` : ''}
+        <button class="btn btn-sm" data-toggle-prod="${p.id}">${p.is_active ? 'غیرفعال' : 'فعال'}</button>
+        <button class="btn btn-danger btn-sm" data-del-prod="${p.id}">حذف</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="6" class="empty-state">محصولی نیست</td></tr>'}</tbody></table></div></div>`;
+
+  $('#add-prod').addEventListener('click', () => openModal('محصول جدید', `
+    <div class="form-grid">
+      <select class="input" id="prod-cat">${categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+      <input class="input" id="prod-name" placeholder="نام محصول">
+      <div class="form-row"><input class="input" id="prod-price" type="number" placeholder="قیمت (تومان)">
+      <input class="input" id="prod-duration" type="number" placeholder="مدت (روز)" value="30"></div>
+      <textarea class="input" id="prod-desc" placeholder="توضیحات (اختیاری)" rows="2"></textarea>
+      <button class="btn btn-primary" id="prod-save">ثبت</button>
+    </div>`, (b, close) => {
+    $('#prod-save', b).addEventListener('click', async () => {
+      const name = $('#prod-name', b).value.trim();
+      const price = Number($('#prod-price', b).value);
+      if (!name || !price) return toast('نام و قیمت الزامی است.', true);
+      try {
+        await apiPost('/products', {
+          category_id: Number($('#prod-cat', b).value), name, price,
+          description: $('#prod-desc', b).value, duration_days: Number($('#prod-duration', b).value) || 30,
+        });
+        toast('محصول اضافه شد.'); close(); renderCatalog();
+      } catch (e) { handleErr(e); }
+    });
+  }));
+  $$('[data-toggle-prod]', body).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/products/${b.dataset.toggleProd}/toggle`); renderCatalog(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-del-prod]', body).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('این محصول حذف شود؟')) return;
+    try { await apiDelete(`/products/${b.dataset.delProd}`); toast('حذف شد.'); renderCatalog(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-configs]', body).forEach(b => b.addEventListener('click', () => showConfigBank(Number(b.dataset.configs))));
+}
+
+async function showConfigBank(productId) {
+  const configs = await apiGet(`/products/${productId}/configs`);
+  openModal('بانک کانفیگ', `
+    <textarea class="input" id="new-links" rows="4" placeholder="هر خط یک لینک کانفیگ..."></textarea>
+    <button class="btn btn-primary btn-block" id="add-links" style="margin-top:10px">افزودن لینک‌ها</button>
+    <h4 style="font-size:13px;margin:16px 0 8px">لینک‌های آزاد (${configs.length})</h4>
+    <div class="table-wrap" style="max-height:220px;overflow-y:auto">
+      <table><tbody>${configs.map(c => `<tr><td style="font-size:11px;word-break:break-all">${esc(c.link)}</td><td><button class="btn btn-danger btn-sm" data-del-cfg="${c.id}">حذف</button></td></tr>`).join('') || '<tr><td class="empty-state">خالی است</td></tr>'}</tbody></table>
+    </div>
+  `, (body, close) => {
+    $('#add-links', body).addEventListener('click', async () => {
+      const links = $('#new-links', body).value;
+      if (!links.trim()) return;
+      try {
+        const r = await apiPost(`/products/${productId}/configs`, { links });
+        toast(`${r.added} لینک اضافه شد${r.duplicates ? ` (${r.duplicates} تکراری نادیده گرفته شد)` : ''}.`);
+        close(); showConfigBank(productId);
+      } catch (e) { handleErr(e); }
+    });
+    $$('[data-del-cfg]', body).forEach(b => b.addEventListener('click', async () => {
+      try { await apiDelete(`/configs/${b.dataset.delCfg}`); close(); showConfigBank(productId); } catch (e) { handleErr(e); }
+    }));
+  });
+}
+
+/* ========================================================== discounts === */
+async function renderDiscounts() {
+  const codes = await apiGet('/discounts');
+  setContent(`
+    <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-code">+ کد تخفیف جدید</button></div>
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>کد</th><th>تخفیف</th><th>سقف استفاده</th><th>مصرف‌شده</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+      <tbody>${codes.map(c => `<tr>
+        <td class="mono">${esc(c.code)}</td>
+        <td>${c.percent ? c.percent + '%' : fmt(c.fixed_amount) + ' تومان'}</td>
+        <td class="mono">${c.max_uses ? fmt(c.max_uses) : 'نامحدود'}</td>
+        <td class="mono">${fmt(c.used_count)}</td>
+        <td>${c.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
+        <td><button class="btn btn-sm" data-toggle="${c.id}">${c.is_active ? 'غیرفعال' : 'فعال'}</button>
+        <button class="btn btn-danger btn-sm" data-del="${c.id}">حذف</button></td>
+      </tr>`).join('') || '<tr><td colspan="6" class="empty-state">کدی ثبت نشده</td></tr>'}</tbody>
+    </table></div></div>
+  `);
+  $('#add-code').addEventListener('click', () => openModal('کد تخفیف جدید', `
+    <div class="form-grid">
+      <input class="input" id="code-value" placeholder="کد (مثلا SUMMER20)">
+      <div class="form-row">
+        <input class="input" id="code-percent" type="number" placeholder="درصد تخفیف">
+        <input class="input" id="code-fixed" type="number" placeholder="یا مبلغ ثابت">
+      </div>
+      <input class="input" id="code-maxuses" type="number" placeholder="سقف تعداد استفاده (۰=نامحدود)" value="0">
+      <button class="btn btn-primary" id="code-save">ثبت</button>
+    </div>`, (b, close) => {
+    $('#code-save', b).addEventListener('click', async () => {
+      const code = $('#code-value', b).value.trim();
+      if (!code) return toast('کد را وارد کن.', true);
+      try {
+        await apiPost('/discounts', {
+          code,
+          percent: Number($('#code-percent', b).value) || null,
+          fixed_amount: Number($('#code-fixed', b).value) || null,
+          max_uses: Number($('#code-maxuses', b).value) || 0,
+        });
+        toast('کد اضافه شد.'); close(); renderDiscounts();
+      } catch (e) { handleErr(e); }
+    });
+  }));
+  $$('[data-toggle]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/discounts/${b.dataset.toggle}/toggle`); renderDiscounts(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('حذف شود؟')) return;
+    try { await apiDelete(`/discounts/${b.dataset.del}`); toast('حذف شد.'); renderDiscounts(); } catch (e) { handleErr(e); }
+  }));
+}
+
+/* ============================================================= tickets === */
+let ticketsStatusFilter = '';
+async function renderTickets() {
+  const tickets = await apiGet(`/tickets${ticketsStatusFilter ? '?status=' + ticketsStatusFilter : ''}`);
+  setContent(`
+    <div class="tabs">
+      ${[['', 'همه'], ['open', 'باز'], ['answered', 'پاسخ‌داده‌شده'], ['closed', 'بسته']].map(([v, l]) => `<button class="tab-btn ${v === ticketsStatusFilter ? 'active' : ''}" data-s="${v}">${l}</button>`).join('')}
+    </div>
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>کاربر</th><th>موضوع</th><th>وضعیت</th><th>آخرین بروزرسانی</th><th></th></tr></thead>
+      <tbody>${tickets.map(t => `<tr>
+        <td class="mono">#${t.id}</td><td>${esc(t.username || t.user_id)}</td><td>${esc(t.subject)}</td>
+        <td>${{ open: '<span class="badge badge-pending">باز</span>', answered: '<span class="badge badge-approved">پاسخ‌داده‌شده</span>', closed: '<span class="badge badge-rejected">بسته</span>' }[t.status] || t.status}</td>
+        <td class="mono">${fmtDate(t.updated_at)}</td>
+        <td><button class="btn btn-sm" data-open="${t.id}">مشاهده</button></td>
+      </tr>`).join('') || '<tr><td colspan="6" class="empty-state">تیکتی نیست</td></tr>'}</tbody>
+    </table></div></div>
+  `);
+  $$('.tab-btn', content()).forEach(b => b.addEventListener('click', () => { ticketsStatusFilter = b.dataset.s; renderTickets(); }));
+  $$('[data-open]', content()).forEach(b => b.addEventListener('click', () => showTicket(Number(b.dataset.open))));
+}
+
+async function showTicket(ticketId) {
+  const d = await apiGet(`/tickets/${ticketId}/messages`);
+  const canAct = FULL_ROLES.includes(ME.role);
+  openModal(`تیکت: ${esc(d.ticket.subject)}`, `
+    <div style="display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;margin-bottom:12px">
+      ${d.messages.map(m => `<div style="background:${m.sender === 'admin' ? 'var(--signal-dim)' : 'var(--panel-2)'};padding:8px 12px;border-radius:9px;font-size:13px">
+        <strong style="font-size:11px;color:var(--text-muted)">${m.sender === 'admin' ? 'ادمین' : 'کاربر'}</strong><br>${esc(m.message)}
+      </div>`).join('') || '<span class="card-sub">پیامی نیست</span>'}
+    </div>
+    ${canAct && d.ticket.status !== 'closed' ? `
+      <textarea class="input" id="ticket-reply" rows="2" placeholder="پاسخ..."></textarea>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="ticket-send">ارسال پاسخ</button>
+        <button class="btn btn-danger" id="ticket-close-btn">بستن تیکت</button>
+      </div>` : ''}
+  `, (body, close) => {
+    const send = $('#ticket-send', body);
+    if (send) send.addEventListener('click', async () => {
+      const message = $('#ticket-reply', body).value.trim();
+      if (!message) return;
+      try { await apiPost(`/tickets/${ticketId}/reply`, { message }); toast('پاسخ ارسال شد.'); close(); renderTickets(); } catch (e) { handleErr(e); }
+    });
+    const closeBtn = $('#ticket-close-btn', body);
+    if (closeBtn) closeBtn.addEventListener('click', async () => {
+      try { await apiPost(`/tickets/${ticketId}/close`); toast('تیکت بسته شد.'); close(); renderTickets(); } catch (e) { handleErr(e); }
+    });
+  });
+}
+
+/* =========================================================== resellers === */
+async function renderResellers() {
+  const resellers = await apiGet('/resellers');
+  setContent(`
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>اعتبار (گیگ)</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+      <tbody>${resellers.map(r => `<tr>
+        <td class="mono">${r.telegram_id}</td><td>${esc(r.username || '—')}</td>
+        <td class="mono">${fmt(r.reseller_credit_gb)}</td>
+        <td>${r.is_reseller ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
+        <td><button class="btn btn-sm" data-credit="${r.telegram_id}">تنظیم اعتبار</button></td>
+      </tr>`).join('') || '<tr><td colspan="5" class="empty-state">نماینده‌ای ثبت نشده</td></tr>'}</tbody>
+    </table></div></div>
+  `);
+  $$('[data-credit]', content()).forEach(b => b.addEventListener('click', () => openModal('تنظیم اعتبار حجمی', `
+    <div class="form-grid">
+      <input class="input" id="credit-delta" type="number" placeholder="مقدار (گیگ، منفی=کسر)">
+      <input class="input" id="credit-reason" placeholder="دلیل (اختیاری)">
+      <button class="btn btn-primary" id="credit-save">ثبت</button>
+    </div>`, (body, close) => {
+    $('#credit-save', body).addEventListener('click', async () => {
+      const delta_gb = Number($('#credit-delta', body).value);
+      if (!delta_gb) return;
+      try {
+        await apiPost(`/resellers/${b.dataset.credit}/credit`, { delta_gb, reason: $('#credit-reason', body).value });
+        toast('اعتبار به‌روزرسانی شد.'); close(); renderResellers();
+      } catch (e) { handleErr(e); }
+    });
+  })));
+}
+
+/* ============================================================== panels === */
+async function renderPanels() {
+  const servers = await apiGet('/panel-servers');
+  setContent(`
+    <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-panel">+ پنل جدید</button></div>
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>نام</th><th>نوع</th><th>آدرس</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+      <tbody>${servers.map(s => `<tr>
+        <td>${esc(s.name)}</td><td>${esc(s.type_label)}</td><td class="mono" style="direction:ltr;text-align:right">${esc(s.api_url)}</td>
+        <td>${s.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
+        <td><button class="btn btn-sm" data-test="${s.id}">تست اتصال</button>
+        <button class="btn btn-danger btn-sm" data-del="${s.id}">حذف</button></td>
+      </tr>`).join('') || '<tr><td colspan="5" class="empty-state">پنلی ثبت نشده</td></tr>'}</tbody>
+    </table></div></div>
+  `);
+  $('#add-panel').addEventListener('click', () => openModal('پنل جدید', `
+    <div class="form-grid">
+      <input class="input" id="p-name" placeholder="نام (مثلا سرور آلمان)">
+      <select class="input" id="p-type"><option value="pasarguard">PasarGuard</option><option value="3xui">3X-UI</option></select>
+      <input class="input" id="p-url" placeholder="آدرس پنل (https://...)">
+      <div class="form-row"><input class="input" id="p-user" placeholder="یوزرنیم"><input class="input" id="p-pass" type="password" placeholder="پسورد"></div>
+      <button class="btn btn-primary" id="p-save">ثبت</button>
+    </div>`, (body, close) => {
+    $('#p-save', body).addEventListener('click', async () => {
+      const name = $('#p-name', body).value.trim(), api_url = $('#p-url', body).value.trim();
+      if (!name || !api_url) return toast('نام و آدرس الزامی است.', true);
+      try {
+        await apiPost('/panel-servers', {
+          name, panel_type: $('#p-type', body).value, api_url,
+          api_username: $('#p-user', body).value, api_password: $('#p-pass', body).value,
+        });
+        toast('پنل اضافه شد.'); close(); renderPanels();
+      } catch (e) { handleErr(e); }
+    });
+  }));
+  $$('[data-test]', content()).forEach(b => b.addEventListener('click', async () => {
+    b.textContent = 'در حال تست...'; b.disabled = true;
+    try {
+      const r = await apiPost(`/panel-servers/${b.dataset.test}/test`);
+      toast(r.ok ? 'اتصال موفق بود.' : (r.error || 'اتصال ناموفق بود.'), !r.ok);
+    } catch (e) { handleErr(e); }
+    finally { b.textContent = 'تست اتصال'; b.disabled = false; }
+  }));
+  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('حذف شود؟')) return;
+    try { await apiDelete(`/panel-servers/${b.dataset.del}`); toast('حذف شد.'); renderPanels(); } catch (e) { handleErr(e); }
+  }));
+}
+
+/* ============================================================ settings === */
+async function renderSettings() {
+  const settings = await apiGet('/settings');
+  const fields = [
+    ['shop_name', 'نام فروشگاه'],
+    ['miniapp_banner_text', 'متن بنر Mini App'],
+    ['low_stock_threshold', 'آستانه هشدار موجودی کم'],
+    ['referral_percent', 'درصد پورسانت رفرال'],
+  ];
+  setContent(`
+    <div class="card"><div class="form-grid">
+      ${fields.map(([key, label]) => `
+        <label class="field"><span>${label}</span>
+          <input class="input" data-key="${key}" value="${esc(settings[key] || '')}">
+        </label>`).join('')}
+      <button class="btn btn-primary" id="settings-save">ذخیره تغییرات</button>
+    </div></div>
+  `);
+  $('#settings-save').addEventListener('click', async () => {
+    try {
+      for (const inp of $$('[data-key]', content())) {
+        await apiPost('/settings', { key: inp.dataset.key, value: inp.value });
+      }
+      toast('تنظیمات ذخیره شد.');
+    } catch (e) { handleErr(e); }
+  });
+}
+
+/* ================================================================ logs === */
+let logsPage = 1;
+async function renderLogs() {
+  const res = await apiGet(`/admin-logs?page=${logsPage}`);
+  const pages = Math.max(Math.ceil(res.total / res.limit), 1);
+  setContent(`
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>ادمین</th><th>عملیات</th><th>جزئیات</th><th>تاریخ</th></tr></thead>
+      <tbody>${res.items.map(l => `<tr><td class="mono">${l.admin_id}</td><td>${esc(l.action)}</td><td>${esc(l.details)}</td><td class="mono">${fmtDate(l.created_at)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty-state">لاگی ثبت نشده</td></tr>'}</tbody>
+    </table></div>
+    <div class="pager">${Array.from({ length: pages }, (_, i) => i + 1).map(p => `<button class="btn btn-sm ${p === logsPage ? 'btn-primary' : ''}" data-page="${p}">${p}</button>`).join('')}</div>
+    </div>
+  `);
+  $$('[data-page]', content()).forEach(b => b.addEventListener('click', () => { logsPage = Number(b.dataset.page); renderLogs(); }));
+}
+
+/* ========================================================== webadmins === */
+async function renderWebAdmins() {
+  const admins = await apiGet('/web-admins');
+  setContent(`
+    <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-admin">+ کاربر پنل جدید</button></div>
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>یوزرنیم</th><th>نقش</th><th>وضعیت</th><th>آخرین ورود</th><th>عملیات</th></tr></thead>
+      <tbody>${admins.map(a => `<tr>
+        <td>${esc(a.username)}</td>
+        <td><span class="badge badge-${a.role}">${ROLE_LABEL[a.role]}</span></td>
+        <td>${a.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
+        <td class="mono">${fmtDate(a.last_login)}</td>
+        <td>${a.role === 'owner' ? '<span class="card-sub">مالک</span>' : `
+          <select class="input" data-role="${a.id}" style="width:auto;display:inline-block">
+            ${['admin', 'mid', 'support'].map(r => `<option value="${r}" ${r === a.role ? 'selected' : ''}>${ROLE_LABEL[r]}</option>`).join('')}
+          </select>
+          <button class="btn btn-sm" data-toggle-active="${a.id}" data-active="${a.is_active}">${a.is_active ? 'غیرفعال' : 'فعال'}</button>
+          <button class="btn btn-danger btn-sm" data-del="${a.id}">حذف</button>`}</td>
+      </tr>`).join('')}</tbody>
+    </table></div></div>
+  `);
+  $('#add-admin').addEventListener('click', () => openModal('کاربر پنل جدید', `
+    <div class="form-grid">
+      <input class="input" id="na-user" placeholder="یوزرنیم">
+      <input class="input" id="na-pass" type="password" placeholder="پسورد (حداقل ۸ کاراکتر)">
+      <select class="input" id="na-role">${['admin', 'mid', 'support'].map(r => `<option value="${r}">${ROLE_LABEL[r]}</option>`).join('')}</select>
+      <button class="btn btn-primary" id="na-save">ثبت</button>
+    </div>`, (body, close) => {
+    $('#na-save', body).addEventListener('click', async () => {
+      try {
+        await apiPost('/web-admins', { username: $('#na-user', body).value.trim(), password: $('#na-pass', body).value, role: $('#na-role', body).value });
+        toast('کاربر ساخته شد.'); close(); renderWebAdmins();
+      } catch (e) { handleErr(e); }
+    });
+  }));
+  $$('[data-role]', content()).forEach(sel => sel.addEventListener('change', async () => {
+    try { await apiPost(`/web-admins/${sel.dataset.role}/role`, { role: sel.value }); toast('نقش تغییر کرد.'); } catch (e) { handleErr(e); renderWebAdmins(); }
+  }));
+  $$('[data-toggle-active]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/web-admins/${b.dataset.toggleActive}/active`, { active: b.dataset.active !== 'true' }); renderWebAdmins(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('این حساب حذف شود؟')) return;
+    try { await apiDelete(`/web-admins/${b.dataset.del}`); toast('حذف شد.'); renderWebAdmins(); } catch (e) { handleErr(e); }
+  }));
+}
+
+/* ============================================================= account === */
+async function renderAccount() {
+  setContent(`
+    <div class="card" style="max-width:420px">
+      <div class="card-head"><h3>تغییر پسورد</h3></div>
+      <div class="form-grid">
+        <input class="input" id="acc-cur" type="password" placeholder="پسورد فعلی">
+        <input class="input" id="acc-new" type="password" placeholder="پسورد جدید (حداقل ۸ کاراکتر)">
+        <button class="btn btn-primary" id="acc-save">تغییر پسورد</button>
+      </div>
+    </div>
+  `);
+  $('#acc-save').addEventListener('click', async () => {
+    try {
+      await apiPost('/me/password', { current_password: $('#acc-cur').value, new_password: $('#acc-new').value });
+      toast('پسورد تغییر کرد.');
+      $('#acc-cur').value = ''; $('#acc-new').value = '';
+    } catch (e) { handleErr(e); }
+  });
+}
+
+boot();

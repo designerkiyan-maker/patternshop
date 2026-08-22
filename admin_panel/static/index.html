@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>پنل مدیریت ShopVPN</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+
+<!-- ===================== صفحه‌ی ورود ===================== -->
+<div id="login-screen" class="login-screen">
+  <div class="login-signal" aria-hidden="true">
+    <span></span><span></span><span></span><span></span><span></span>
+  </div>
+  <form id="login-form" class="login-card">
+    <div class="login-brand">
+      <div class="login-logo">SV</div>
+      <h1>پنل مدیریت ShopVPN</h1>
+      <p>برای ورود، اطلاعات حساب پنل وب را وارد کن</p>
+    </div>
+    <label class="field">
+      <span>یوزرنیم</span>
+      <input type="text" id="login-username" autocomplete="username" required>
+    </label>
+    <label class="field">
+      <span>پسورد</span>
+      <input type="password" id="login-password" autocomplete="current-password" required>
+    </label>
+    <div id="login-error" class="login-error" hidden></div>
+    <button type="submit" class="btn btn-primary btn-block" id="login-submit">ورود</button>
+  </form>
+</div>
+
+<!-- ===================== اپ اصلی ===================== -->
+<div id="app" class="app" hidden>
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-mark">SV</div>
+      <div class="brand-text">
+        <strong>ShopVPN</strong>
+        <span>پنل مدیریت</span>
+      </div>
+    </div>
+
+    <nav class="nav-tunnel" id="nav-tunnel">
+      <!-- nav items injected by app.js -->
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="me-card" id="me-card">
+        <div class="me-avatar" id="me-avatar">?</div>
+        <div class="me-info">
+          <strong id="me-username">—</strong>
+          <span id="me-role">—</span>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-block" id="logout-btn">خروج</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <h2 id="page-title">داشبورد</h2>
+      <div class="topbar-actions">
+        <span class="live-dot" title="اتصال زنده"></span>
+        <span class="topbar-clock" id="topbar-clock"></span>
+      </div>
+    </header>
+
+    <main class="content" id="content">
+      <!-- page content injected by app.js -->
+    </main>
+  </div>
+</div>
+
+<div id="toast-root" class="toast-root"></div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>
