@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET
-from database import Database
+from database import Database, WEB_ADMIN_PERMISSIONS
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
 from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document
 from reseller_auto_provision import provision_auto_config, ProvisionError
@@ -53,19 +53,20 @@ def get_current_admin(request: Request):
     admin = db.get_web_admin(payload["id"])
     if not admin or not admin["is_active"]:
         raise HTTPException(401, "حساب کاربری غیرفعال یا حذف شده است.")
-    return {"id": admin["id"], "username": admin["username"], "role": admin["role"]}
+    return {
+        "id": admin["id"],
+        "username": admin["username"],
+        "role": admin["role"],
+        "permissions": db.get_web_admin_permissions(admin),
+    }
 
 
-def require_full(admin=Depends(get_current_admin)):
-    if not db.is_full_web_admin(admin["role"]):
-        raise HTTPException(403, "دسترسی کافی نیست.")
-    return admin
-
-
-def require_senior(admin=Depends(get_current_admin)):
-    if not db.is_senior_web_admin(admin["role"]):
-        raise HTTPException(403, "این بخش فقط برای مالک/مدیر کامل است.")
-    return admin
+def require_permission(permission: str):
+    def _dep(admin=Depends(get_current_admin)):
+        if admin["role"] != "owner" and permission not in admin["permissions"]:
+            raise HTTPException(403, "دسترسی کافی نیست.")
+        return admin
+    return _dep
 
 
 def require_owner(admin=Depends(get_current_admin)):
@@ -163,7 +164,7 @@ def api_system_stats(admin=Depends(get_current_admin)):
 
 
 @app.get("/api/system/jobs")
-def api_system_jobs(admin=Depends(require_senior)):
+def api_system_jobs(admin=Depends(require_permission("system"))):
     """وضعیت فقط‌خواندنیِ آخرین اجرای یادآوری‌های تمدید/حجم + وضعیت لحظه‌ای موجودی محصولات.
     زمان‌بندی این‌ها هاردکد است (renewal_reminder_loop در پردازش بات) و از اینجا قابل تغییر نیست."""
     return {
@@ -182,7 +183,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "backups")
 
 
 @app.get("/api/system/backup/status")
-def api_backup_status(admin=Depends(require_senior)):
+def api_backup_status(admin=Depends(require_permission("system"))):
     """آخرین وضعیت بکاپ‌ها؛ فقط‌خواندنی، برای نمایش در پنل."""
     if not os.path.isdir(BACKUP_DIR):
         return {"last_backup_at": None, "last_backup_size_mb": None, "count": 0}
@@ -200,7 +201,7 @@ def api_backup_status(admin=Depends(require_senior)):
 
 
 @app.post("/api/system/backup/create")
-async def api_backup_create(admin=Depends(require_owner)):
+async def api_backup_create(admin=Depends(require_permission("backup"))):
     """یک بکاپ فوری می‌سازد و به همه‌ی ادمین‌های تلگرامی همین بات ارسال می‌کند."""
     backup_path = await asyncio.to_thread(create_backup, DB_PATH, BACKUP_DIR, 14)
     if not backup_path:
@@ -286,7 +287,7 @@ def api_orders(status: str = "pending", admin=Depends(get_current_admin)):
 
 
 @app.post("/api/orders/{order_id}/approve")
-async def api_approve_order(order_id: int, admin=Depends(require_full)):
+async def api_approve_order(order_id: int, admin=Depends(require_permission("orders"))):
     order = db.get_order(order_id)
     if not order or order["status"] != "pending":
         raise HTTPException(400, "سفارش یافت نشد یا قبلاً بررسی شده.")
@@ -330,7 +331,7 @@ async def api_approve_order(order_id: int, admin=Depends(require_full)):
 
 
 @app.post("/api/orders/{order_id}/reject")
-async def api_reject_order(order_id: int, admin=Depends(require_full)):
+async def api_reject_order(order_id: int, admin=Depends(require_permission("orders"))):
     order = db.get_order(order_id)
     if not order or order["status"] != "pending":
         raise HTTPException(400, "سفارش یافت نشد یا قبلاً بررسی شده.")
@@ -356,7 +357,7 @@ def api_topups(status: str = "pending", admin=Depends(get_current_admin)):
 
 
 @app.post("/api/topups/{topup_id}/approve")
-async def api_approve_topup(topup_id: int, admin=Depends(require_full)):
+async def api_approve_topup(topup_id: int, admin=Depends(require_permission("orders"))):
     topup = db.get_topup(topup_id)
     if not topup:
         raise HTTPException(404, "یافت نشد.")
@@ -368,7 +369,7 @@ async def api_approve_topup(topup_id: int, admin=Depends(require_full)):
 
 
 @app.post("/api/topups/{topup_id}/reject")
-async def api_reject_topup(topup_id: int, admin=Depends(require_full)):
+async def api_reject_topup(topup_id: int, admin=Depends(require_permission("orders"))):
     topup = db.get_topup(topup_id)
     if not topup or topup["status"] != "pending":
         raise HTTPException(400, "یافت نشد یا قبلاً بررسی شده.")
@@ -405,14 +406,14 @@ def api_user_detail(tg_id: int, admin=Depends(get_current_admin)):
 
 
 @app.post("/api/users/{tg_id}/block")
-def api_block_user(tg_id: int, admin=Depends(require_full)):
+def api_block_user(tg_id: int, admin=Depends(require_permission("users"))):
     db.set_user_blocked(tg_id, True)
     db.log_admin_action(admin["id"], "user_block", f"کاربر {tg_id} مسدود شد (پنل وب - {admin['username']})")
     return {"ok": True}
 
 
 @app.post("/api/users/{tg_id}/unblock")
-def api_unblock_user(tg_id: int, admin=Depends(require_full)):
+def api_unblock_user(tg_id: int, admin=Depends(require_permission("users"))):
     db.set_user_blocked(tg_id, False)
     db.log_admin_action(admin["id"], "user_unblock", f"کاربر {tg_id} رفع مسدودیت شد (پنل وب - {admin['username']})")
     return {"ok": True}
@@ -423,7 +424,7 @@ class WalletAdjustBody(BaseModel):
 
 
 @app.post("/api/users/{tg_id}/wallet")
-async def api_adjust_wallet(tg_id: int, body: WalletAdjustBody, admin=Depends(require_senior)):
+async def api_adjust_wallet(tg_id: int, body: WalletAdjustBody, admin=Depends(require_permission("users"))):
     db.add_wallet_credit(tg_id, body.delta)
     db.log_admin_action(
         admin["id"], "wallet_adjust", f"کیف پول کاربر {tg_id} به میزان {body.delta:,} تغییر کرد (پنل وب - {admin['username']})"
@@ -447,26 +448,26 @@ def api_categories(admin=Depends(get_current_admin)):
 
 
 @app.post("/api/categories")
-def api_add_category(body: CategoryBody, admin=Depends(require_senior)):
+def api_add_category(body: CategoryBody, admin=Depends(require_permission("catalog"))):
     cat_id = db.add_category(body.name)
     db.log_admin_action(admin["id"], "category_add", body.name)
     return {"id": cat_id}
 
 
 @app.put("/api/categories/{cat_id}")
-def api_edit_category(cat_id: int, body: CategoryBody, admin=Depends(require_senior)):
+def api_edit_category(cat_id: int, body: CategoryBody, admin=Depends(require_permission("catalog"))):
     db.edit_category(cat_id, body.name)
     return {"ok": True}
 
 
 @app.post("/api/categories/{cat_id}/toggle")
-def api_toggle_category(cat_id: int, admin=Depends(require_senior)):
+def api_toggle_category(cat_id: int, admin=Depends(require_permission("catalog"))):
     db.toggle_category(cat_id)
     return {"ok": True}
 
 
 @app.delete("/api/categories/{cat_id}")
-def api_delete_category(cat_id: int, admin=Depends(require_senior)):
+def api_delete_category(cat_id: int, admin=Depends(require_permission("catalog"))):
     db.delete_category(cat_id)
     db.log_admin_action(admin["id"], "category_delete", str(cat_id))
     return {"ok": True}
@@ -491,7 +492,7 @@ def api_products(admin=Depends(get_current_admin)):
 
 
 @app.post("/api/products")
-def api_add_product(body: ProductBody, admin=Depends(require_senior)):
+def api_add_product(body: ProductBody, admin=Depends(require_permission("catalog"))):
     pid = db.add_product(
         body.category_id, body.name, body.price, body.description, body.duration_days,
         body.is_auto_provision, body.auto_provision_volume_gb,
@@ -508,20 +509,20 @@ class ProductEditBody(BaseModel):
 
 
 @app.put("/api/products/{product_id}")
-def api_edit_product(product_id: int, body: ProductEditBody, admin=Depends(require_senior)):
+def api_edit_product(product_id: int, body: ProductEditBody, admin=Depends(require_permission("catalog"))):
     db.edit_product(product_id, body.name, body.price, body.description, body.duration_days)
     db.log_admin_action(admin["id"], "product_edit", f"#{product_id} (پنل وب - {admin['username']})")
     return {"ok": True}
 
 
 @app.post("/api/products/{product_id}/toggle")
-def api_toggle_product(product_id: int, admin=Depends(require_senior)):
+def api_toggle_product(product_id: int, admin=Depends(require_permission("catalog"))):
     db.toggle_product(product_id)
     return {"ok": True}
 
 
 @app.delete("/api/products/{product_id}")
-def api_delete_product(product_id: int, admin=Depends(require_senior)):
+def api_delete_product(product_id: int, admin=Depends(require_permission("catalog"))):
     db.delete_product(product_id)
     db.log_admin_action(admin["id"], "product_delete", str(product_id))
     return {"ok": True}
@@ -535,12 +536,12 @@ class ConfigsAddBody(BaseModel):
 
 
 @app.get("/api/products/{product_id}/configs")
-def api_product_configs(product_id: int, admin=Depends(require_senior)):
+def api_product_configs(product_id: int, admin=Depends(require_permission("catalog"))):
     return rows_to_list(db.get_unused_configs(product_id))
 
 
 @app.post("/api/products/{product_id}/configs")
-def api_add_configs(product_id: int, body: ConfigsAddBody, admin=Depends(require_senior)):
+def api_add_configs(product_id: int, body: ConfigsAddBody, admin=Depends(require_permission("catalog"))):
     links = [l.strip() for l in body.links.splitlines() if l.strip()]
     added, duplicates = db.add_configs(product_id, links)
     db.log_admin_action(admin["id"], "configs_add", f"{added} لینک به محصول #{product_id} (پنل وب - {admin['username']})")
@@ -548,7 +549,7 @@ def api_add_configs(product_id: int, body: ConfigsAddBody, admin=Depends(require
 
 
 @app.delete("/api/configs/{config_id}")
-def api_delete_config(config_id: int, admin=Depends(require_senior)):
+def api_delete_config(config_id: int, admin=Depends(require_permission("catalog"))):
     db.delete_config(config_id)
     return {"ok": True}
 
@@ -565,25 +566,25 @@ class DiscountBody(BaseModel):
 
 
 @app.get("/api/discounts")
-def api_discounts(admin=Depends(require_senior)):
+def api_discounts(admin=Depends(require_permission("discounts"))):
     return rows_to_list(db.list_discount_codes())
 
 
 @app.post("/api/discounts")
-def api_add_discount(body: DiscountBody, admin=Depends(require_senior)):
+def api_add_discount(body: DiscountBody, admin=Depends(require_permission("discounts"))):
     code_id = db.create_discount_code(body.code, body.percent, body.fixed_amount, body.max_uses, body.expires_at)
     db.log_admin_action(admin["id"], "discount_add", body.code)
     return {"id": code_id}
 
 
 @app.post("/api/discounts/{code_id}/toggle")
-def api_toggle_discount(code_id: int, admin=Depends(require_senior)):
+def api_toggle_discount(code_id: int, admin=Depends(require_permission("discounts"))):
     db.toggle_discount_code(code_id)
     return {"ok": True}
 
 
 @app.delete("/api/discounts/{code_id}")
-def api_delete_discount(code_id: int, admin=Depends(require_senior)):
+def api_delete_discount(code_id: int, admin=Depends(require_permission("discounts"))):
     db.delete_discount_code(code_id)
     return {"ok": True}
 
@@ -613,7 +614,7 @@ class TicketReplyBody(BaseModel):
 
 
 @app.post("/api/tickets/{ticket_id}/reply")
-async def api_ticket_reply(ticket_id: int, body: TicketReplyBody, admin=Depends(require_full)):
+async def api_ticket_reply(ticket_id: int, body: TicketReplyBody, admin=Depends(require_permission("tickets"))):
     ticket = db.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(404, "یافت نشد.")
@@ -624,7 +625,7 @@ async def api_ticket_reply(ticket_id: int, body: TicketReplyBody, admin=Depends(
 
 
 @app.post("/api/tickets/{ticket_id}/close")
-def api_ticket_close(ticket_id: int, admin=Depends(require_full)):
+def api_ticket_close(ticket_id: int, admin=Depends(require_permission("tickets"))):
     db.close_ticket(ticket_id)
     return {"ok": True}
 
@@ -637,7 +638,7 @@ class BroadcastBody(BaseModel):
 
 
 @app.post("/api/broadcast")
-async def api_broadcast(body: BroadcastBody, admin=Depends(require_full)):
+async def api_broadcast(body: BroadcastBody, admin=Depends(require_permission("broadcast"))):
     text = (body.message or "").strip()
     if not text:
         raise HTTPException(400, "متن پیام نمی‌تواند خالی باشد.")
@@ -756,7 +757,7 @@ async def api_support_send(user_id: int, body: SupportReplyBody, admin=Depends(g
 
 
 @app.get("/api/resellers")
-def api_resellers(admin=Depends(require_senior)):
+def api_resellers(admin=Depends(require_permission("resellers"))):
     return rows_to_list(db.get_resellers())
 
 
@@ -766,7 +767,7 @@ class ResellerCreditBody(BaseModel):
 
 
 @app.post("/api/resellers/{tg_id}/credit")
-async def api_adjust_reseller_credit(tg_id: int, body: ResellerCreditBody, admin=Depends(require_senior)):
+async def api_adjust_reseller_credit(tg_id: int, body: ResellerCreditBody, admin=Depends(require_permission("resellers"))):
     db.adjust_reseller_credit(tg_id, body.delta_gb, admin_id=admin["id"], reason=body.reason or "تنظیم از پنل وب")
     db.log_admin_action(
         admin["id"], "reseller_credit_adjust",
@@ -777,7 +778,7 @@ async def api_adjust_reseller_credit(tg_id: int, body: ResellerCreditBody, admin
 
 
 @app.get("/api/resellers/{tg_id}/log")
-def api_reseller_log(tg_id: int, admin=Depends(require_senior)):
+def api_reseller_log(tg_id: int, admin=Depends(require_permission("resellers"))):
     return rows_to_list(db.get_reseller_credit_log(tg_id, limit=50))
 
 
@@ -786,13 +787,13 @@ class ResellerToggleBody(BaseModel):
 
 
 @app.post("/api/resellers/{tg_id}/status")
-def api_reseller_status(tg_id: int, body: ResellerToggleBody, admin=Depends(require_senior)):
+def api_reseller_status(tg_id: int, body: ResellerToggleBody, admin=Depends(require_permission("resellers"))):
     db.set_reseller_status(tg_id, body.enabled)
     return {"ok": True}
 
 
 @app.get("/api/resellers/analytics/cohort")
-def api_reseller_cohort(days: int = 30, months: int = 6, admin=Depends(require_senior)):
+def api_reseller_cohort(days: int = 30, months: int = 6, admin=Depends(require_permission("resellers"))):
     """تحلیل کوهورت (نگهداشت ماهانه) و ریزش (churn) نمایندگی‌ها."""
     days = max(1, min(days, 365))
     months = max(1, min(months, 12))
@@ -800,7 +801,7 @@ def api_reseller_cohort(days: int = 30, months: int = 6, admin=Depends(require_s
 
 
 @app.get("/api/reseller-requests")
-def api_reseller_requests(status: Optional[str] = None, admin=Depends(require_senior)):
+def api_reseller_requests(status: Optional[str] = None, admin=Depends(require_permission("resellers"))):
     return rows_to_list(db.list_reseller_requests(status))
 
 
@@ -817,7 +818,7 @@ class PanelServerBody(BaseModel):
 
 
 @app.get("/api/panel-servers")
-def api_panel_servers(admin=Depends(require_senior)):
+def api_panel_servers(admin=Depends(require_permission("panels"))):
     servers = rows_to_list(db.get_panel_servers())
     for s in servers:
         s["type_label"] = PANEL_TYPE_LABELS.get(s["panel_type"], s["panel_type"])
@@ -825,20 +826,20 @@ def api_panel_servers(admin=Depends(require_senior)):
 
 
 @app.post("/api/panel-servers")
-def api_add_panel_server(body: PanelServerBody, admin=Depends(require_senior)):
+def api_add_panel_server(body: PanelServerBody, admin=Depends(require_permission("panels"))):
     sid = db.add_panel_server(body.name, body.panel_type, body.api_url, body.api_username, body.api_password, body.default_group)
     db.log_admin_action(admin["id"], "panel_add", body.name)
     return {"id": sid}
 
 
 @app.delete("/api/panel-servers/{server_id}")
-def api_delete_panel_server(server_id: int, admin=Depends(require_senior)):
+def api_delete_panel_server(server_id: int, admin=Depends(require_permission("panels"))):
     db.delete_panel_server(server_id)
     return {"ok": True}
 
 
 @app.post("/api/panel-servers/{server_id}/test")
-async def api_test_panel_server(server_id: int, admin=Depends(require_senior)):
+async def api_test_panel_server(server_id: int, admin=Depends(require_permission("panels"))):
     server = db.get_panel_server(server_id)
     if not server:
         raise HTTPException(404, "یافت نشد.")
@@ -874,7 +875,7 @@ def _manual_fallback_rate() -> Optional[float]:
 
 
 @app.get("/api/exchange-rate")
-async def api_exchange_rate(admin=Depends(require_senior)):
+async def api_exchange_rate(admin=Depends(require_permission("panels"))):
     """نرخ فعلی دلار به تومان (از کش یا در صورت انقضا، از منابع خارجی) + نام منبع."""
     try:
         await exchange_rate.get_usd_to_toman_rate(manual_fallback=_manual_fallback_rate())
@@ -885,7 +886,7 @@ async def api_exchange_rate(admin=Depends(require_senior)):
 
 
 @app.post("/api/exchange-rate/refresh")
-async def api_exchange_rate_refresh(admin=Depends(require_senior)):
+async def api_exchange_rate_refresh(admin=Depends(require_permission("panels"))):
     """کش نرخ را باطل و دوباره از منابع خارجی (tgju/نوبیتکس/والکس/coingecko) دریافت می‌کند."""
     try:
         status = await exchange_rate.refresh_rate(manual_fallback=_manual_fallback_rate())
@@ -902,7 +903,7 @@ async def api_exchange_rate_refresh(admin=Depends(require_senior)):
 
 
 @app.get("/api/settings")
-def api_settings(admin=Depends(require_senior)):
+def api_settings(admin=Depends(require_permission("settings"))):
     return db.get_all_settings()
 
 
@@ -912,7 +913,7 @@ class SettingBody(BaseModel):
 
 
 @app.post("/api/settings")
-def api_set_setting(body: SettingBody, admin=Depends(require_senior)):
+def api_set_setting(body: SettingBody, admin=Depends(require_permission("settings"))):
     db.set_setting(body.key, body.value)
     db.log_admin_action(admin["id"], "setting_change", f"{body.key}={body.value} (پنل وب - {admin['username']})")
     return {"ok": True}
@@ -922,7 +923,7 @@ def api_set_setting(body: SettingBody, admin=Depends(require_senior)):
 
 
 @app.get("/api/admin-logs")
-def api_admin_logs(page: int = 1, admin=Depends(require_senior)):
+def api_admin_logs(page: int = 1, admin=Depends(require_permission("system"))):
     limit = 40
     rows, total = db.get_admin_logs(limit=limit, offset=(page - 1) * limit)
     return {"items": rows_to_list(rows), "total": total, "page": page, "limit": limit}
@@ -935,11 +936,20 @@ class WebAdminCreateBody(BaseModel):
     username: str
     password: str
     role: str = "admin"
+    permissions: Optional[list] = None
 
 
 @app.get("/api/web-admins")
 def api_web_admins(admin=Depends(require_owner)):
-    return rows_to_list(db.list_web_admins())
+    rows = rows_to_list(db.list_web_admins())
+    for r in rows:
+        r["permissions"] = db.get_web_admin_permissions(r)
+    return rows
+
+
+@app.get("/api/web-admins/permissions")
+def api_web_admin_permission_keys(admin=Depends(require_owner)):
+    return {"permissions": list(WEB_ADMIN_PERMISSIONS)}
 
 
 @app.post("/api/web-admins")
@@ -948,7 +958,7 @@ def api_create_web_admin(body: WebAdminCreateBody, admin=Depends(require_owner))
         raise HTTPException(400, "این یوزرنیم قبلاً استفاده شده.")
     if len(body.password) < 8:
         raise HTTPException(400, "پسورد باید حداقل ۸ کاراکتر باشد.")
-    new_id = db.create_web_admin(body.username, hash_password(body.password), body.role)
+    new_id = db.create_web_admin(body.username, hash_password(body.password), body.role, body.permissions)
     db.log_admin_action(admin["id"], "web_admin_add", f"{body.username} ({body.role})")
     return {"id": new_id}
 
@@ -961,6 +971,18 @@ class WebAdminRoleBody(BaseModel):
 def api_set_web_admin_role(admin_id: int, body: WebAdminRoleBody, admin=Depends(require_owner)):
     if not db.set_web_admin_role(admin_id, body.role):
         raise HTTPException(400, "امکان تغییر نقش این حساب نیست.")
+    return {"ok": True}
+
+
+class WebAdminPermissionsBody(BaseModel):
+    permissions: list
+
+
+@app.post("/api/web-admins/{admin_id}/permissions")
+def api_set_web_admin_permissions(admin_id: int, body: WebAdminPermissionsBody, admin=Depends(require_owner)):
+    if not db.set_web_admin_permissions(admin_id, body.permissions):
+        raise HTTPException(400, "امکان تغییر مجوزهای این حساب نیست.")
+    db.log_admin_action(admin["id"], "web_admin_permissions", f"admin#{admin_id} -> {body.permissions}")
     return {"ok": True}
 
 
