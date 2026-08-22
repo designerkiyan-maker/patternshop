@@ -183,8 +183,16 @@ async function api(path, opts = {}) {
   });
   if (res.status === 401) { showLogin(); throw new Error('unauthorized'); }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || 'خطای ناشناخته');
+  if (!res.ok) throw new Error(formatApiError(data.detail));
   return data;
+}
+function formatApiError(detail) {
+  if (!detail) return 'خطای ناشناخته';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(d => (d && (d.msg || d.detail)) || JSON.stringify(d)).join('، ') || 'خطای ناشناخته';
+  }
+  return typeof detail === 'object' ? JSON.stringify(detail) : String(detail);
 }
 const apiGet = p => api(p);
 const apiPost = (p, body) => api(p, { method: 'POST', body: body || {} });
@@ -278,6 +286,7 @@ function renderNav() {
 function goTo(tab) {
   stopSupportPoll();
   CURRENT_TAB = tab;
+  try { localStorage.setItem('admin_current_tab', tab); } catch (e) {}
   renderNav();
   $('#page-title').textContent = NAV.find(n => n.key === tab)?.label || '';
   renderPage(tab);
@@ -314,7 +323,10 @@ function showApp() {
   $('#me-avatar').textContent = ME.username.slice(0, 2).toUpperCase();
   tickClock();
   setInterval(tickClock, 1000);
-  goTo('dashboard');
+  let saved = null;
+  try { saved = localStorage.getItem('admin_current_tab'); } catch (e) {}
+  const savedValid = saved && NAV.find(n => n.key === saved && canSee(n.role));
+  goTo(savedValid ? saved : 'dashboard');
 }
 
 /* ===================================================== sidebar (mobile) === */
@@ -1423,7 +1435,7 @@ function bindSettingsGroupEvents(root) {
 
 async function collectAndSaveSettings(root, btn) {
   const items = [];
-  $$('[data-key][data-type]', root).forEach(el => items.push({ key: el.dataset.key, value: el.value }));
+  $$('[data-key][data-type]:not(.switch)', root).forEach(el => items.push({ key: el.dataset.key, value: el.value }));
   $$('.switch[data-key]', root).forEach(sw => items.push({ key: sw.dataset.key, value: sw.dataset.on === '1' ? '1' : '0' }));
   btn.disabled = true;
   const prevTxt = btn.textContent; btn.textContent = 'در حال ذخیره...';
