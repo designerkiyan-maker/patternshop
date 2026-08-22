@@ -1261,12 +1261,11 @@ const SETTINGS_GROUPS = [
     { key: 'btn_wheel', label: 'متن دکمه گردونه شانس', type: 'text' },
     { key: 'wheel_enabled', label: 'نمایش دکمه گردونه شانس', type: 'bool' },
     { key: 'btn_contact', label: 'متن دکمه ارتباط با پشتیبانی', type: 'text' },
+    { key: 'btn_reseller_panel', label: 'متن دکمه پنل نمایندگی (فقط برای نماینده‌ها)', type: 'text' },
+    { key: 'btn_reseller_request', label: 'متن دکمه درخواست نمایندگی سطح ۲', type: 'text' },
     { key: 'btn_admin_panel', label: 'متن دکمه پنل مدیریت (فقط برای ادمین‌ها)', type: 'text' },
   ]},
-  { tab: 'content', title: 'برندینگ و Mini App', fields: [
-    { key: 'miniapp_banner_text', label: 'متن بنر Mini App', type: 'text' },
-    { key: 'header_image_data', label: 'تصویر هدر / لوگو', type: 'image' },
-  ]},
+
 
   // ------------------------------------------------------------ پرداخت و مالی
   { tab: 'payment', title: 'کارت بانکی', fields: [
