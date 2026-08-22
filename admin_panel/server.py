@@ -518,6 +518,39 @@ def api_ticket_close(ticket_id: int, admin=Depends(require_full)):
     return {"ok": True}
 
 
+# -------------------------------------------------------------- broadcast --
+
+
+class BroadcastBody(BaseModel):
+    message: str
+
+
+@app.post("/api/broadcast")
+async def api_broadcast(body: BroadcastBody, admin=Depends(require_full)):
+    text = (body.message or "").strip()
+    if not text:
+        raise HTTPException(400, "متن پیام نمی‌تواند خالی باشد.")
+    if len(text) > 4000:
+        raise HTTPException(400, "متن پیام بیش از حد طولانی است.")
+
+    user_ids = db.get_all_user_ids()
+    sem = asyncio.Semaphore(20)
+    counters = {"success": 0, "failed": 0}
+
+    async def _send(uid):
+        async with sem:
+            ok = await tg_send(BOT_TOKEN, uid, text)
+            counters["success" if ok else "failed"] += 1
+
+    await asyncio.gather(*[_send(uid) for uid in user_ids])
+    db.log_admin_action(
+        admin["id"], "broadcast",
+        f"ارسال به {len(user_ids)} کاربر | موفق: {counters['success']} | ناموفق: {counters['failed']} "
+        f"(پنل وب - {admin['username']})",
+    )
+    return {"total": len(user_ids), "success": counters["success"], "failed": counters["failed"]}
+
+
 # -------------------------------------------------------------- resellers --
 
 
