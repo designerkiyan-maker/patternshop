@@ -24,6 +24,7 @@ from admin_panel.telegram_notify import send_message as tg_send
 from reseller_auto_provision import provision_auto_config, ProvisionError
 from stock_alerts import check_and_notify_low_stock
 from panel_providers import get_provider, PanelError, PANEL_TYPE_LABELS
+from renewal_reminders import STATUS_KEY_LAST_RUN, STATUS_KEY_LAST_DATE_SENT, STATUS_KEY_LAST_VOLUME_SENT
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 COOKIE_NAME = "panel_session"
@@ -154,6 +155,20 @@ def api_system_stats(admin=Depends(get_current_admin)):
             "used_gb": round(disk.used / (1024 ** 3), 1),
             "total_gb": round(disk.total / (1024 ** 3), 1),
         },
+    }
+
+
+@app.get("/api/system/jobs")
+def api_system_jobs(admin=Depends(require_senior)):
+    """وضعیت فقط‌خواندنیِ آخرین اجرای یادآوری‌های تمدید/حجم + وضعیت لحظه‌ای موجودی محصولات.
+    زمان‌بندی این‌ها هاردکد است (renewal_reminder_loop در پردازش بات) و از اینجا قابل تغییر نیست."""
+    return {
+        "renewal": {
+            "last_run": db.get_setting(STATUS_KEY_LAST_RUN, "") or None,
+            "last_date_sent": int(db.get_setting(STATUS_KEY_LAST_DATE_SENT, "0") or 0),
+            "last_volume_sent": int(db.get_setting(STATUS_KEY_LAST_VOLUME_SENT, "0") or 0),
+        },
+        "stock": db.get_low_stock_overview(),
     }
 
 
