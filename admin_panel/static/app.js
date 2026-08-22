@@ -1264,18 +1264,35 @@ const SETTINGS_GROUPS = [
   ]},
   { tab: 'content', title: 'دکمه‌های منوی ربات', fields: [
     { key: 'btn_buy', label: 'متن دکمه خرید کانفیگ', type: 'text' },
+    { key: 'btn_buy_style', label: 'رنگ دکمه خرید کانفیگ', type: 'color' },
     { key: 'btn_test', label: 'متن دکمه کانفیگ تست', type: 'text' },
+    { key: 'btn_test_style', label: 'رنگ دکمه کانفیگ تست', type: 'color' },
     { key: 'test_enabled', label: 'نمایش دکمه کانفیگ تست', type: 'bool' },
     { key: 'btn_my_orders', label: 'متن دکمه سفارش‌های من', type: 'text' },
+    { key: 'btn_my_orders_style', label: 'رنگ دکمه سفارش‌های من', type: 'color' },
     { key: 'btn_wallet', label: 'متن دکمه کیف پول', type: 'text' },
+    { key: 'btn_wallet_style', label: 'رنگ دکمه کیف پول', type: 'color' },
     { key: 'btn_referral', label: 'متن دکمه زیرمجموعه‌گیری', type: 'text' },
+    { key: 'btn_referral_style', label: 'رنگ دکمه زیرمجموعه‌گیری', type: 'color' },
     { key: 'referral_enabled', label: 'نمایش دکمه زیرمجموعه‌گیری', type: 'bool' },
     { key: 'btn_wheel', label: 'متن دکمه گردونه شانس', type: 'text' },
+    { key: 'btn_wheel_style', label: 'رنگ دکمه گردونه شانس', type: 'color' },
     { key: 'wheel_enabled', label: 'نمایش دکمه گردونه شانس', type: 'bool' },
     { key: 'btn_contact', label: 'متن دکمه ارتباط با پشتیبانی', type: 'text' },
+    { key: 'btn_contact_style', label: 'رنگ دکمه ارتباط با پشتیبانی', type: 'color' },
     { key: 'btn_reseller_panel', label: 'متن دکمه پنل نمایندگی (فقط برای نماینده‌ها)', type: 'text' },
+    { key: 'btn_reseller_panel_style', label: 'رنگ دکمه پنل نمایندگی', type: 'color' },
     { key: 'btn_reseller_request', label: 'متن دکمه درخواست نمایندگی سطح ۲', type: 'text' },
+    { key: 'btn_reseller_request_style', label: 'رنگ دکمه درخواست نمایندگی سطح ۲', type: 'color' },
     { key: 'btn_admin_panel', label: 'متن دکمه پنل مدیریت (فقط برای ادمین‌ها)', type: 'text' },
+    { key: 'btn_admin_panel_style', label: 'رنگ دکمه پنل مدیریت', type: 'color' },
+  ]},
+  { tab: 'content', title: '🎨 رنگ دکمه‌های مسیر خرید', fields: [
+    { key: 'btn_cat_select_style', label: 'رنگ دکمه‌های انتخاب دسته‌بندی', type: 'color' },
+    { key: 'btn_product_select_style', label: 'رنگ دکمه‌های انتخاب محصول', type: 'color' },
+    { key: 'btn_buy_continue_style', label: 'رنگ دکمه «ادامه و ارسال رسید»', type: 'color' },
+    { key: 'btn_enter_code_style', label: 'رنگ دکمه «وارد کردن کد تخفیف»', type: 'color' },
+    { key: 'btn_buy_back_style', label: 'رنگ دکمه‌های بازگشت در مسیر خرید', type: 'color' },
   ]},
 
 
@@ -1356,6 +1373,14 @@ function settingsFieldHtml(f, settings) {
         ${f.options.map(([v, l]) => `<option value="${v}" ${val === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
       </select></label>`;
   }
+  if (f.type === 'color') {
+    const cur = ['primary', 'success', 'danger'].includes(val) ? val : '';
+    const swatches = [['', 'swatch-default', 'پیش‌فرض (خاکستری)'], ['primary', 'swatch-primary', 'آبی'], ['success', 'swatch-success', 'سبز'], ['danger', 'swatch-danger', 'قرمز']];
+    return `<label class="field"><span>${esc(f.label)}</span>
+      <div class="color-pick" data-key="${f.key}" data-color="${cur}">
+        ${swatches.map(([v, cls, title]) => `<button type="button" class="color-swatch ${cls} ${cur === v ? 'active' : ''}" data-value="${v}" title="${esc(title)}"></button>`).join('')}
+      </div></label>`;
+  }
   if (f.type === 'image') {
     return `
       <label class="field">
@@ -1417,6 +1442,12 @@ function bindSettingsGroupEvents(root) {
     const on = sw.dataset.on !== '1';
     sw.dataset.on = on ? '1' : '0';
   }));
+  $$('.color-pick', root).forEach(box => {
+    $$('.color-swatch', box).forEach(btn => btn.addEventListener('click', () => {
+      box.dataset.color = btn.dataset.value;
+      $$('.color-swatch', box).forEach(b => b.classList.toggle('active', b === btn));
+    }));
+  });
   $$('.image-field', root).forEach(box => {
     const fileInput = $('.image-field-input', box);
     const hidden = $('input[type=hidden]', box);
@@ -1437,6 +1468,7 @@ async function collectAndSaveSettings(root, btn) {
   const items = [];
   $$('[data-key][data-type]:not(.switch)', root).forEach(el => items.push({ key: el.dataset.key, value: el.value }));
   $$('.switch[data-key]', root).forEach(sw => items.push({ key: sw.dataset.key, value: sw.dataset.on === '1' ? '1' : '0' }));
+  $$('.color-pick[data-key]', root).forEach(box => items.push({ key: box.dataset.key, value: box.dataset.color || '' }));
   btn.disabled = true;
   const prevTxt = btn.textContent; btn.textContent = 'در حال ذخیره...';
   try {

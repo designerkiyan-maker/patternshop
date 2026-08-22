@@ -823,6 +823,23 @@ html[data-style="6"] .res-ring::before{ box-shadow:var(--neu-in); }
 .image-field-preview{ max-width:220px; max-height:100px; border-radius:12px; border:1px solid var(--border); object-fit:contain; background:var(--surface); }
 .image-field-actions{ display:flex; gap:8px; }
 
+.color-pick{ display:flex; align-items:center; gap:10px; }
+.color-swatch{
+  width:30px; height:30px; border-radius:50%; cursor:pointer; flex-shrink:0;
+  border:2px solid var(--border); box-shadow:var(--neu-in); position:relative;
+  transition:.15s ease;
+}
+.color-swatch:hover{ transform:scale(1.08); }
+.color-swatch.active{ border-color:var(--text); box-shadow:0 0 0 2px var(--bg-elevated,#0000), 0 0 0 4px var(--text); }
+.color-swatch.active::after{
+  content:"✓"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-size:14px; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.5);
+}
+.swatch-default{ background:#8a8a9a; }
+.swatch-primary{ background:#3d8bfd; }
+.swatch-success{ background:#2fbf6f; }
+.swatch-danger{ background:#ff4d4d; }
+
 .settings-save-bar{ position:sticky; bottom:12px; margin-top:4px; }
 
 .menu-order-row{
