@@ -532,3 +532,62 @@ html[data-style="5"] .value.mono{ text-shadow:0 0 18px rgba(0,229,255,.25); }
 .res-ring span{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-family:var(--font-mono); font-weight:700; font-size:13px; }
 .res-info strong{ display:block; font-size:13.5px; margin-bottom:3px; }
 .res-info span{ font-size:11.5px; color:var(--text-muted); }
+
+/* ===================================================================
+   ریسپانسیو موبایل — سایدبار به‌صورت کشو، گرید‌ها تک‌ستونه،
+   فاصله‌ها و فونت‌ها جمع‌تر
+=================================================================== */
+.hamburger{ display:none; flex-direction:column; justify-content:center; gap:4px; width:34px; height:34px;
+  border:1px solid var(--border); border-radius:9px; background:var(--surface); cursor:pointer; flex-shrink:0; }
+.hamburger span{ width:16px; height:2px; background:var(--text-muted); border-radius:2px; margin:0 auto; }
+.topbar-right{ display:flex; align-items:center; gap:12px; min-width:0; }
+.topbar-right h2{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sidebar-overlay{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:19; }
+.sidebar-overlay.show{ display:block; }
+
+@media (max-width:960px){
+  .hamburger{ display:flex; }
+  .app{ display:block; }
+  .sidebar{
+    position:fixed; top:0; bottom:0; inset-inline-end:0; z-index:20; height:100vh;
+    width:78vw; max-width:300px; transform:translateX(100%); transition:transform .25s ease; box-shadow:var(--neu-out);
+  }
+  html[dir="rtl"] .sidebar{ transform:translateX(-100%); }
+  .sidebar.open{ transform:translateX(0); }
+  .main{ width:100%; }
+  .topbar{ padding:14px 16px; }
+  .topbar h2{ font-size:15.5px; }
+  .topbar-actions{ gap:8px; font-size:11.5px; }
+  .topbar-clock{ padding:5px 10px; font-size:11px; }
+  .content{ padding:14px 14px 50px; }
+
+  .hero{ padding:20px 18px; border-radius:20px; gap:14px; }
+  .hero-text h2{ font-size:18px; }
+  .hero-text p{ font-size:12.5px; }
+  .hero-orbit{ display:none; }
+
+  .grid{ gap:12px; }
+  .grid-4, .grid-3, .grid-2{ grid-template-columns:1fr !important; }
+  .res-grid{ grid-template-columns:1fr !important; }
+  .theme-grid{ grid-template-columns:repeat(2,1fr) !important; gap:10px; }
+
+  .card{ padding:16px; border-radius:16px; }
+  .stat-card .value{ font-size:21px; }
+
+  table{ font-size:12px; }
+  thead th, tbody td{ padding:9px 8px; }
+  .toolbar{ gap:8px; }
+  .tabs{ gap:6px; }
+  .tab-btn{ padding:7px 12px; font-size:12px; }
+
+  .modal{ padding:20px; max-width:94vw; }
+  .form-row{ flex-direction:column; }
+
+  .login-card{ padding:28px 22px; }
+}
+
+@media (max-width:420px){
+  .grid-4, .grid-3, .grid-2, .res-grid, .theme-grid{ grid-template-columns:1fr !important; }
+  .stat-top{ flex-wrap:wrap; gap:8px; }
+  .topbar-clock{ display:none; }
+}

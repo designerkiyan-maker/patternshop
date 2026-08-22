@@ -155,7 +155,7 @@ function renderNav() {
     <div class="nav-item ${CYCLE[i % 4]} ${n.key === CURRENT_TAB ? 'active' : ''}" data-tab="${n.key}">
       <span class="nav-icon">${svg(n.icon)}</span><span>${n.label}</span>
     </div>`).join('');
-  $$('.nav-item', el).forEach(item => item.addEventListener('click', () => goTo(item.dataset.tab)));
+  $$('.nav-item', el).forEach(item => item.addEventListener('click', () => { goTo(item.dataset.tab); closeSidebar(); }));
 }
 
 function goTo(tab) {
@@ -190,6 +190,20 @@ function showApp() {
   setInterval(tickClock, 1000);
   goTo('dashboard');
 }
+
+/* ===================================================== sidebar (mobile) === */
+function closeSidebar() {
+  $('.sidebar')?.classList.remove('open');
+  $('#sidebar-overlay')?.classList.remove('show');
+}
+function openSidebar() {
+  $('.sidebar')?.classList.add('open');
+  $('#sidebar-overlay')?.classList.add('show');
+}
+$('#hamburger-btn')?.addEventListener('click', () => {
+  $('.sidebar')?.classList.contains('open') ? closeSidebar() : openSidebar();
+});
+$('#sidebar-overlay')?.addEventListener('click', closeSidebar);
 
 function tickClock() {
   $('#topbar-clock').textContent = new Date().toLocaleString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });

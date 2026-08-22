@@ -81,7 +81,12 @@
 
   <div class="main">
     <header class="topbar">
-      <h2 id="page-title">داشبورد</h2>
+      <div class="topbar-right">
+        <button class="hamburger" id="hamburger-btn" aria-label="باز کردن منو">
+          <span></span><span></span><span></span>
+        </button>
+        <h2 id="page-title">داشبورد</h2>
+      </div>
       <div class="topbar-actions">
         <span class="live-dot" title="اتصال زنده"></span>
         <span class="topbar-clock" id="topbar-clock"></span>
@@ -93,6 +98,8 @@
     </main>
   </div>
 </div>
+
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
 
 <div id="toast-root" class="toast-root"></div>
 
