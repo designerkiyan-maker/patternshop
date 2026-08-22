@@ -1012,9 +1012,16 @@ async function renderBroadcast() {
 
 /* =========================================================== resellers === */
 async function renderResellers() {
-  const resellers = await apiGet('/resellers');
+  const [resellers, cohort] = await Promise.all([
+    apiGet('/resellers'),
+    apiGet('/resellers/analytics/cohort').catch(() => null),
+  ]);
+
+  const cohortHtml = cohort ? renderResellerCohortBlock(cohort) : '';
+
   setContent(`
-    <div class="card"><div class="table-wrap"><table>
+    ${cohortHtml}
+    <div class="card"><div class="card-head"><h3>لیست نمایندگی‌ها</h3></div><div class="table-wrap"><table>
       <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>اعتبار (گیگ)</th><th>وضعیت</th><th>عملیات</th></tr></thead>
       <tbody>${resellers.map(r => `<tr>
         <td class="mono">${r.telegram_id}</td><td>${esc(r.username || '—')}</td>
@@ -1039,6 +1046,86 @@ async function renderResellers() {
       } catch (e) { handleErr(e); }
     });
   })));
+
+  if (cohort) {
+    activateRings(content());
+    $$('[data-toggle-churn]', content()).forEach(el => el.addEventListener('click', () => {
+      const box = $('#churn-list-box', content());
+      box.style.display = box.style.display === 'none' ? '' : 'none';
+    }));
+  }
+}
+
+function renderResellerCohortBlock(data) {
+  const c = data.churn;
+  const months = data.cohorts;
+  const allMonths = months.length ? months[months.length - 1].retention.map(r => r.month) : [];
+
+  const heatRows = months.map(co => {
+    const cells = co.retention.map(r => {
+      const pct = r.pct;
+      const alpha = Math.max(0.08, Math.min(1, pct / 100));
+      return `<td class="mono" style="text-align:center;background:rgba(139,92,246,${alpha.toFixed(2)});border-radius:6px">
+        ${co.size ? `${pct}٪<div style="font-size:10px;opacity:.75">${fmt(r.active)}</div>` : '—'}
+      </td>`;
+    }).join('');
+    const pad = allMonths.length - co.retention.length;
+    return `<tr><td class="mono">${co.cohort_month}</td><td class="mono">${fmt(co.size)}</td>${cells}${'<td></td>'.repeat(Math.max(0, pad))}</tr>`;
+  }).join('');
+
+  const churnRows = c.list.slice(0, 30).map(u => `
+    <tr>
+      <td class="mono">${u.telegram_id}</td><td>${esc(u.username || '—')}</td>
+      <td class="mono">${fmt(u.credit_gb)}</td>
+      <td class="mono">${u.last_activity ? fmtDate(u.last_activity) : 'هیچ‌وقت'}</td>
+      <td class="mono">${fmt(u.days_inactive)} روز</td>
+    </tr>`).join('') || '<tr><td colspan="5" class="empty-state">نماینده‌ی ریزش‌کرده‌ای نیست 🎉</td></tr>';
+
+  return `
+    <div class="grid grid-4">
+      <div class="card stat-card">
+        <div class="stat-top"><span class="stat-icon stat-icon-1">${svg('resellers')}</span></div>
+        <span class="value mono">${fmt(c.total)}</span>
+        <span class="label">کل نمایندگان فعلی</span>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-top"><span class="stat-icon stat-icon-2">${svg('check')}</span></div>
+        <span class="value mono">${fmt(c.active)}</span>
+        <span class="label">فعال (${fmt(c.inactivity_days)} روز اخیر)</span>
+      </div>
+      <div class="card stat-card" data-toggle-churn style="cursor:pointer">
+        <div class="stat-top">
+          <span class="stat-icon stat-icon-4">${svg('tickets')}</span>
+          <div class="ring" style="--ring-a:var(--rose)" data-pct="${c.churn_rate}"><span>${c.churn_rate}٪</span></div>
+        </div>
+        <span class="value mono">${fmt(c.churned)}</span>
+        <span class="label">ریزش‌کرده (churn) — برای لیست کلیک کنید</span>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-top"><span class="stat-icon stat-icon-3">${svg('users')}</span></div>
+        <span class="value mono">${fmt(months.reduce((a, m) => a + m.size, 0))}</span>
+        <span class="label">مجموع نماینده‌های ${fmt(months.length)} ماه اخیر</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>کوهورت نگهداشت ماهانه نمایندگان</h3>
+        <span class="card-sub">هر ردیف یک کوهورت (ماه فعال‌سازی) — درصد نماینده‌های همان کوهورت که در هر ماه بعد هم فعالیت (شارژ/مصرف) داشته‌اند.</span>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>ماه کوهورت</th><th>تعداد</th>${allMonths.map((m, i) => `<th class="mono">M${i}</th>`).join('')}</tr></thead>
+        <tbody>${heatRows || '<tr><td colspan="2" class="empty-state">داده‌ای نیست</td></tr>'}</tbody>
+      </table></div>
+    </div>
+
+    <div class="card" id="churn-list-box" style="display:none">
+      <div class="card-head"><h3>نماینده‌های در آستانه‌ی ریزش / ریزش‌کرده</h3></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>اعتبار (گیگ)</th><th>آخرین فعالیت</th><th>مدت بی‌فعالیتی</th></tr></thead>
+        <tbody>${churnRows}</tbody>
+      </table></div>
+    </div>
+  `;
 }
 
 /* ============================================================== panels === */
