@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET
-from database import Database, WEB_ADMIN_PERMISSIONS
+from database import Database, WEB_ADMIN_PERMISSIONS, MENU_BUTTON_META
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
 from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document
 from reseller_auto_provision import provision_auto_config, ProvisionError
@@ -930,6 +930,36 @@ class SettingBody(BaseModel):
 def api_set_setting(body: SettingBody, admin=Depends(require_permission("settings"))):
     db.set_setting(body.key, body.value)
     db.log_admin_action(admin["id"], "setting_change", f"{body.key}={body.value} (پنل وب - {admin['username']})", "setting", body.key)
+    return {"ok": True}
+
+
+# ------------------------------------------------------------- menu order --
+
+
+@app.get("/api/settings/menu-order")
+def api_menu_order_get(admin=Depends(require_permission("settings"))):
+    settings = db.get_all_settings()
+    order = db.get_menu_order()
+    result = []
+    for key in order:
+        meta = MENU_BUTTON_META.get(key)
+        if not meta:
+            continue
+        item = {"key": key, "label": meta["label"], "admin_only": meta["admin_only"]}
+        if meta["toggle_key"]:
+            item["enabled"] = settings.get(meta["toggle_key"], "1") == "1"
+        result.append(item)
+    return result
+
+
+class MenuOrderBody(BaseModel):
+    order: list[str]
+
+
+@app.post("/api/settings/menu-order")
+def api_menu_order_set(body: MenuOrderBody, admin=Depends(require_permission("settings"))):
+    db.set_menu_order(body.order)
+    db.log_admin_action(admin["id"], "menu_order_change", f"ترتیب منوی ربات تغییر کرد (پنل وب - {admin['username']})", "setting", "menu_order")
     return {"ok": True}
 
 
