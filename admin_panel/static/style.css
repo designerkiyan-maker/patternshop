@@ -182,8 +182,11 @@ button, input, select, textarea{ font-family:inherit; }
   margin-inline-start:auto; background:rgba(251,113,133,.16); color:var(--rose); font-size:10.5px;
   font-weight:700; padding:1px 7px; border-radius:20px; font-family:var(--font-mono);
 }
-.nav-section{ font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.08em;
-  margin:18px 12px 7px; font-weight:700; }
+.nav-section{
+  font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.08em;
+  margin:20px 11px 8px; font-weight:700; padding-top:16px; border-top:1px dashed var(--border-soft);
+}
+.nav-section:first-child{ margin-top:2px; padding-top:0; border-top:none; }
 
 .sidebar-footer{ border-top:1px solid var(--border-soft); padding-top:16px; margin-top:10px; }
 .me-card{ display:flex; align-items:center; gap:10px; padding:6px 8px 14px; }

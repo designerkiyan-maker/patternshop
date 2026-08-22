@@ -44,6 +44,7 @@ const ICONS = {
   panels: '<rect x="2" y="3" width="20" height="7" rx="2"></rect><rect x="2" y="14" width="20" height="7" rx="2"></rect><line x1="6" y1="6.5" x2="6.01" y2="6.5"></line><line x1="6" y1="17.5" x2="6.01" y2="17.5"></line>',
   settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"></path>',
   logs: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line>',
+  system: '<ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>',
   webadmins: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path>',
   account: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line>',
@@ -214,22 +215,35 @@ function openModal(title, bodyHtml, onMount) {
 
 /* ============================================================== nav === */
 const NAV = [
-  { key: 'dashboard', label: 'داشبورد', icon: 'dashboard', role: 'any' },
-  { key: 'orders', label: 'سفارش‌ها', icon: 'orders', role: 'any' },
-  { key: 'topups', label: 'شارژ کیف پول', icon: 'topups', role: 'any' },
-  { key: 'users', label: 'کاربران', icon: 'users', role: 'any' },
-  { key: 'catalog', label: 'محصولات و بانک کانفیگ', icon: 'catalog', role: 'catalog' },
-  { key: 'discounts', label: 'کدهای تخفیف', icon: 'discounts', role: 'discounts' },
-  { key: 'tickets', label: 'تیکت‌ها', icon: 'tickets', role: 'any' },
-  { key: 'support', label: 'چت زنده', icon: 'support', role: 'any' },
-  { key: 'broadcast', label: 'پیام همگانی', icon: 'broadcast', role: 'broadcast' },
-  { key: 'resellers', label: 'نمایندگی‌ها', icon: 'resellers', role: 'resellers' },
-  { key: 'panels', label: 'پنل‌های VPN', icon: 'panels', role: 'panels' },
-  { key: 'system', label: 'سیستم و نگهداری', icon: 'logs', role: 'system' },
-  { key: 'settings', label: 'تنظیمات و برندینگ', icon: 'settings', role: 'settings' },
-  { key: 'logs', label: 'لاگ فعالیت ادمین‌ها', icon: 'logs', role: 'system' },
-  { key: 'webadmins', label: 'کاربران پنل', icon: 'webadmins', role: 'owner' },
-  { key: 'account', label: 'حساب من', icon: 'account', role: 'any' },
+  // نمای کلی
+  { key: 'dashboard', label: 'داشبورد', icon: 'dashboard', role: 'any', section: null },
+
+  // عملیات مالی
+  { key: 'orders', label: 'سفارش‌ها', icon: 'orders', role: 'any', section: 'عملیات مالی' },
+  { key: 'topups', label: 'شارژ کیف پول', icon: 'topups', role: 'any', section: 'عملیات مالی' },
+
+  // کاربران و پشتیبانی
+  { key: 'users', label: 'کاربران', icon: 'users', role: 'any', section: 'کاربران و پشتیبانی' },
+  { key: 'tickets', label: 'تیکت‌ها', icon: 'tickets', role: 'any', section: 'کاربران و پشتیبانی' },
+  { key: 'support', label: 'چت زنده', icon: 'support', role: 'any', section: 'کاربران و پشتیبانی' },
+
+  // محصولات و بازاریابی
+  { key: 'catalog', label: 'محصولات و بانک کانفیگ', icon: 'catalog', role: 'catalog', section: 'محصولات و بازاریابی' },
+  { key: 'discounts', label: 'کدهای تخفیف', icon: 'discounts', role: 'discounts', section: 'محصولات و بازاریابی' },
+  { key: 'broadcast', label: 'پیام همگانی', icon: 'broadcast', role: 'broadcast', section: 'محصولات و بازاریابی' },
+
+  // شبکه و همکاران
+  { key: 'resellers', label: 'نمایندگی‌ها', icon: 'resellers', role: 'resellers', section: 'شبکه و همکاران' },
+  { key: 'panels', label: 'پنل‌های VPN', icon: 'panels', role: 'panels', section: 'شبکه و همکاران' },
+
+  // تنظیمات و سیستم — همه‌ی موارد مرتبط با تنظیمات و نگهداری یک‌جا
+  { key: 'settings', label: 'تنظیمات و برندینگ', icon: 'settings', role: 'settings', section: 'تنظیمات و سیستم' },
+  { key: 'system', label: 'سیستم و نگهداری', icon: 'system', role: 'system', section: 'تنظیمات و سیستم' },
+  { key: 'logs', label: 'لاگ فعالیت ادمین‌ها', icon: 'logs', role: 'system', section: 'تنظیمات و سیستم' },
+  { key: 'webadmins', label: 'کاربران پنل', icon: 'webadmins', role: 'owner', section: 'تنظیمات و سیستم' },
+
+  // حساب کاربری
+  { key: 'account', label: 'حساب من', icon: 'account', role: 'any', section: 'حساب کاربری' },
 ];
 function hasPerm(perm) {
   return ME.role === 'owner' || (ME.permissions || []).includes(perm);
@@ -244,10 +258,20 @@ const ROLE_LABEL = { owner: 'مالک', admin: 'مدیر کامل', mid: 'ادم
 function renderNav() {
   const el = $('#nav-tunnel');
   const CYCLE = ['nav-c1', 'nav-c2', 'nav-c3', 'nav-c4'];
-  el.innerHTML = NAV.filter(n => canSee(n.role)).map((n, i) => `
+  const visible = NAV.filter(n => canSee(n.role));
+  let html = '';
+  let lastSection = undefined;
+  visible.forEach((n, i) => {
+    if (n.section !== lastSection) {
+      if (n.section) html += `<div class="nav-section">${n.section}</div>`;
+      lastSection = n.section;
+    }
+    html += `
     <div class="nav-item ${CYCLE[i % 4]} ${n.key === CURRENT_TAB ? 'active' : ''}" data-tab="${n.key}">
       <span class="nav-icon">${svg(n.icon)}</span><span>${n.label}</span>
-    </div>`).join('');
+    </div>`;
+  });
+  el.innerHTML = html;
   $$('.nav-item', el).forEach(item => item.addEventListener('click', () => { goTo(item.dataset.tab); closeSidebar(); }));
 }
 
