@@ -10,6 +10,7 @@ const THEMES = [
   { id: '2', name: 'نئون گلس', desc: 'همان طرح پیش‌فرض ShopVPN', colors: ['#8B5CF6', '#EC4899', '#22D3EE'] },
   { id: '3', name: 'ترمینال عملیاتی', desc: 'مونوسپیس، حس اتاق سرور', colors: ['#3ddc84', '#ff6b52', '#e0b23c'] },
   { id: '4', name: 'بنتوی نرم', desc: 'گرم، گرد، صمیمی', colors: ['#d97757', '#5b8a72', '#c99a3a'] },
+  { id: '5', name: 'پالس شبکه', desc: 'HUD تیره، درخشش نئونی، حس اتاق کنترل', colors: ['#00e5ff', '#7c5cff', '#ff4fd8'] },
 ];
 function loadTheme() {
   try { return JSON.parse(localStorage.getItem('sv-theme')) || { style: '2', mode: 'dark' }; }

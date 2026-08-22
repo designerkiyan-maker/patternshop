@@ -446,7 +446,64 @@ html[data-style="4"][data-mode="dark"]{
   --neu-in:inset 4px 4px 10px var(--shadow-dark), inset -3px -3px 7px var(--shadow-light);
 }
 
-/* ---- appearance picker (صفحه‌ی تنظیمات) ---------------------------- */
+/* ---- style 5 · پالس شبکه (HUD) -------------------------------------- */
+html[data-style="5"]{
+  --font-body:"Vazirmatn",-apple-system,Tahoma,sans-serif; --radius:16px; --radius-sm:12px; --radius-xs:9px;
+}
+html[data-style="5"] .bg-blobs{ display:none; }
+html[data-style="5"][data-mode="dark"]{
+  --bg:#050810; --bg-2:#040609; --surface:#0a1018; --surface-2:#0d151f; --surface-hi:rgba(0,229,255,.05);
+  --border:rgba(0,229,255,.16); --border-soft:rgba(0,229,255,.09);
+  --text:#e7fbff; --text-muted:#6f8ea3; --text-dim:#3a4f5e;
+  --violet:#7c5cff; --fuchsia:#ff4fd8; --cyan:#00e5ff; --amber:#ffb020; --emerald:#00e5a8; --rose:#ff5470;
+  --neu-out:0 0 0 1px rgba(0,229,255,.12), 0 0 26px rgba(0,229,255,.05);
+  --neu-out-sm:0 0 0 1px rgba(0,229,255,.1), 0 0 14px rgba(0,229,255,.05);
+  --neu-in:inset 0 0 0 1px rgba(0,229,255,.18), inset 0 0 12px rgba(0,229,255,.05);
+}
+html[data-style="5"][data-mode="light"]{
+  --bg:#eef4f7; --bg-2:#e6eef3; --surface:#ffffff; --surface-2:#f2f7fa; --surface-hi:rgba(0,140,190,.05);
+  --border:rgba(0,120,170,.18); --border-soft:rgba(0,120,170,.1);
+  --text:#0b1d29; --text-muted:#4b6a7d; --text-dim:#9db3c0;
+  --violet:#6b4fe0; --fuchsia:#d63cb8; --cyan:#0091b8; --amber:#c07d0e; --emerald:#0b9e82; --rose:#d43e5c;
+  --neu-out:0 0 0 1px rgba(0,120,170,.12), 0 6px 20px rgba(0,120,170,.08);
+  --neu-out-sm:0 0 0 1px rgba(0,120,170,.1), 0 3px 10px rgba(0,120,170,.07);
+  --neu-in:inset 0 0 0 1px rgba(0,120,170,.14);
+}
+/* پس‌زمینه‌ی هاله‌ای + خطوط شبکه‌ی ظریف، حس اتاق کنترل */
+html[data-style="5"] body{
+  background-image:
+    radial-gradient(circle at 88% 8%, rgba(124,92,255,.16), transparent 42%),
+    radial-gradient(circle at 6% 92%, rgba(0,229,255,.10), transparent 40%),
+    linear-gradient(var(--border-soft) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-soft) 1px, transparent 1px);
+  background-size:auto, auto, 44px 44px, 44px 44px;
+  background-color:var(--bg);
+}
+html[data-style="5"] .card, html[data-style="5"] .sidebar, html[data-style="5"] .topbar, html[data-style="5"] .modal, html[data-style="5"] .login-card{
+  position:relative;
+}
+html[data-style="5"] .card::before{
+  content:""; position:absolute; inset:0; border-radius:inherit; padding:1px; pointer-events:none;
+  background:linear-gradient(135deg, rgba(0,229,255,.35), transparent 30%, transparent 70%, rgba(124,92,255,.3));
+  -webkit-mask:linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor; mask-composite:exclude;
+}
+html[data-style="5"] .stat-icon, html[data-style="5"] .nav-icon, html[data-style="5"] .brand-mark, html[data-style="5"] .me-avatar{
+  box-shadow:0 0 16px -2px currentColor, var(--neu-out-sm);
+}
+html[data-style="5"] .live-dot{ box-shadow:0 0 10px 2px var(--emerald); }
+html[data-style="5"] .topbar-clock{ font-family:var(--font-mono); letter-spacing:.05em; }
+html[data-style="5"] .nav-item.active{ box-shadow:inset 3px 0 0 var(--cyan); }
+html[data-style="5"] .value.mono{ text-shadow:0 0 18px rgba(0,229,255,.25); }
+
+/* پیل‌های ترافیک زنده (KB/s آپلود/دانلود) برای امضای بصری این تم */
+.pulse-ticker{ display:flex; gap:10px; flex-wrap:wrap; margin:-6px 0 18px; }
+.pulse-pill{
+  display:flex; align-items:center; gap:8px; background:var(--surface); border:1px solid var(--border);
+  border-radius:20px; padding:8px 14px; font-size:12px; color:var(--text-muted); box-shadow:var(--neu-out-sm);
+}
+.pulse-pill b{ color:var(--text); font-family:var(--font-mono); font-weight:700; }
+.pulse-pill .dir-up{ color:var(--emerald); } .pulse-pill .dir-down{ color:var(--cyan); }
 .theme-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:18px; }
 @media (max-width:900px){ .theme-grid{ grid-template-columns:repeat(2,1fr); } }
 .theme-opt{
