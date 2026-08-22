@@ -18,6 +18,31 @@ import json
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 
+# مجوزهای granular پنل وب مدیریت. هر ادمین (به‌جز owner که همیشه دسترسی کامل
+# دارد) یک زیرمجموعه دلخواه از این کلیدها را می‌تواند داشته باشد.
+WEB_ADMIN_PERMISSIONS = (
+    "orders",      # تأیید/رد سفارش و شارژ کیف پول
+    "users",       # بلاک/آنبلاک کاربر، تنظیم دستی موجودی کیف پول
+    "catalog",     # دسته‌بندی‌ها، محصولات، بانک کانفیگ
+    "discounts",   # کدهای تخفیف
+    "tickets",     # پاسخ/بستن تیکت و چت زنده پشتیبانی
+    "broadcast",   # ارسال پیام همگانی
+    "resellers",   # مدیریت نمایندگی‌ها
+    "panels",      # پنل‌های VPN و نرخ ارز
+    "system",      # وضعیت جاب‌های سیستمی، وضعیت بکاپ، لاگ فعالیت ادمین‌ها
+    "settings",    # تنظیمات و برندینگ
+    "backup",      # ساخت بکاپ فوری دیتابیس (بازیابی همیشه فقط برای owner است)
+)
+
+# نگاشت نقش‌های ثابت قدیمی به مجوزهای معادل، فقط برای مهاجرت داده‌های قبلی.
+ROLE_PERMISSION_PRESETS = {
+    "owner": list(WEB_ADMIN_PERMISSIONS),
+    "admin": ["orders", "users", "catalog", "discounts", "tickets", "broadcast",
+              "resellers", "panels", "system", "settings"],
+    "mid": ["orders", "users", "tickets", "broadcast"],
+    "support": [],
+}
+
 
 # بنرهای پیش‌فرض کاروسل بالای صفحه‌ی خانه‌ی مینی‌اپ (قابل مدیریت از پنل ادمین
 # > ظاهر > بنرها). ساختار هر بنر: آیکون (اموجی)، عنوان، توضیح کوتاه، متن دکمه،
@@ -649,10 +674,25 @@ class Database:
             ("reseller_requests", "reviewed_by", "INTEGER"),
             ("reseller_requests", "created_at", "TEXT"),
             ("reseller_requests", "updated_at", "TEXT"),
+            ("web_admins", "permissions", "TEXT"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+
+        # مهاجرت نقش‌های ثابت قدیمی (owner/admin/mid/support) به مجموعه
+        # مجوزهای granular. فقط رکوردهایی که هنوز permissions ندارند پر می‌شوند
+        # تا override دستی مالک روی حساب‌های موجود دست‌نخورده بماند.
+        if self._column_exists(conn, "web_admins", "permissions"):
+            legacy_rows = conn.execute(
+                "SELECT id, role FROM web_admins WHERE permissions IS NULL"
+            ).fetchall()
+            for row in legacy_rows:
+                perms = ROLE_PERMISSION_PRESETS.get(row["role"], ROLE_PERMISSION_PRESETS["support"])
+                conn.execute(
+                    "UPDATE web_admins SET permissions=? WHERE id=?",
+                    (json.dumps(perms), row["id"]),
+                )
 
         # مهاجرت وضعیت درخواست‌های نمایندگی از نسخه‌های قدیمی.
         # در نسخه‌های قدیمی ممکن است درخواست جدید با status='pending' ذخیره شده
@@ -1035,13 +1075,18 @@ class Database:
     # پنل مدیریت وب مستقل (کاربران وب، جدا از ادمین‌های تلگرام)
     # -----------------------------------------------------------------------
 
-    def create_web_admin(self, username: str, password_hash: str, role: str = "admin") -> int:
+    def create_web_admin(self, username: str, password_hash: str, role: str = "admin",
+                          permissions=None) -> int:
         if role not in ("owner", "admin", "mid", "support"):
             role = "admin"
+        if permissions is None:
+            perms = ROLE_PERMISSION_PRESETS.get(role, [])
+        else:
+            perms = [p for p in permissions if p in WEB_ADMIN_PERMISSIONS]
         with self._get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO web_admins (username, password_hash, role) VALUES (?, ?, ?)",
-                (username.strip().lower(), password_hash, role),
+                "INSERT INTO web_admins (username, password_hash, role, permissions) VALUES (?, ?, ?, ?)",
+                (username.strip().lower(), password_hash, role, json.dumps(perms)),
             )
             return cur.lastrowid
 
@@ -1077,8 +1122,36 @@ class Database:
             row = conn.execute("SELECT role FROM web_admins WHERE id=?", (admin_id,)).fetchone()
             if not row or row["role"] == "owner":
                 return False
-            conn.execute("UPDATE web_admins SET role=? WHERE id=?", (role, admin_id))
+            conn.execute(
+                "UPDATE web_admins SET role=?, permissions=? WHERE id=?",
+                (role, json.dumps(ROLE_PERMISSION_PRESETS.get(role, [])), admin_id),
+            )
             return True
+
+    def set_web_admin_permissions(self, admin_id: int, permissions) -> bool:
+        perms = [p for p in permissions if p in WEB_ADMIN_PERMISSIONS]
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT role FROM web_admins WHERE id=?", (admin_id,)).fetchone()
+            if not row or row["role"] == "owner":
+                return False
+            conn.execute(
+                "UPDATE web_admins SET permissions=? WHERE id=?", (json.dumps(perms), admin_id)
+            )
+            return True
+
+    def get_web_admin_permissions(self, admin_row) -> list:
+        if admin_row["role"] == "owner":
+            return list(WEB_ADMIN_PERMISSIONS)
+        try:
+            perms = json.loads(admin_row["permissions"] or "[]")
+        except (ValueError, TypeError):
+            perms = []
+        return [p for p in perms if p in WEB_ADMIN_PERMISSIONS]
+
+    def has_web_admin_permission(self, admin_row, permission: str) -> bool:
+        if admin_row["role"] == "owner":
+            return True
+        return permission in self.get_web_admin_permissions(admin_row)
 
     def set_web_admin_active(self, admin_id: int, active: bool) -> bool:
         with self._get_conn() as conn:
