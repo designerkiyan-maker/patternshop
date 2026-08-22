@@ -1,1762 +1,4530 @@
-'use strict';
+const tg = window.Telegram.WebApp;
+tg.ready();
+tg.expand();
+try { tg.setHeaderColor("#0a0e17"); tg.setBackgroundColor("#0a0e17"); } catch (e) {}
 
-/* ============================================================ state === */
-let ME = null;
-let CURRENT_TAB = 'dashboard';
-let SUPPORT_POLL_TIMER = null;
-function stopSupportPoll() { if (SUPPORT_POLL_TIMER) { clearInterval(SUPPORT_POLL_TIMER); SUPPORT_POLL_TIMER = null; } }
+const initData = tg.initData; // برای هدر X-Init-Data به بک‌اند فرستاده می‌شود
+const content = document.getElementById("content");
 
-/* ============================================================= theme === */
-const THEMES = [
-  { id: '6', name: 'سایبرپانک // NEXUS', desc: 'پیش‌فرض جدید — رادار زنده، گلیچ، شبکه‌ی نئونی', colors: ['#ff2e88', '#21e6c1', '#ffb020'] },
-  { id: '1', name: 'فلت کورپوریت', desc: 'ساده، تمیز، اداری', colors: ['#0f6e5f', '#1f7ae0', '#c78a10'] },
-  { id: '2', name: 'نئون گلس', desc: 'طرح کلاسیک ShopVPN', colors: ['#8B5CF6', '#EC4899', '#22D3EE'] },
-  { id: '3', name: 'ترمینال عملیاتی', desc: 'مونوسپیس، حس اتاق سرور', colors: ['#3ddc84', '#ff6b52', '#e0b23c'] },
-  { id: '4', name: 'بنتوی نرم', desc: 'گرم، گرد، صمیمی', colors: ['#d97757', '#5b8a72', '#c99a3a'] },
-  { id: '5', name: 'پالس شبکه', desc: 'HUD تیره، درخشش نئونی، حس اتاق کنترل', colors: ['#00e5ff', '#7c5cff', '#ff4fd8'] },
-];
-function loadTheme() {
-  try { return JSON.parse(localStorage.getItem('sv-theme')) || { style: '6', mode: 'dark' }; }
-  catch (e) { return { style: '6', mode: 'dark' }; }
+// شناسه‌ی نماینده (اگر مینی‌اپ از یک بات نمایندگی باز شده باشد) - از URL خوانده می‌شود
+// و به تمام درخواست‌های API اضافه می‌شود تا سرور دیتابیس/توکن درست را انتخاب کند.
+const TENANT_ID = new URLSearchParams(window.location.search).get("b") || "";
+
+function withTenant(path) {
+  if (!TENANT_ID) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}b=${encodeURIComponent(TENANT_ID)}`;
 }
-function applyTheme(style, mode) {
-  document.documentElement.setAttribute('data-style', style);
-  document.documentElement.setAttribute('data-mode', mode);
-  localStorage.setItem('sv-theme', JSON.stringify({ style, mode }));
-}
-applyTheme(loadTheme().style, loadTheme().mode);
 
-const $ = (sel, root = document) => root.querySelector(sel);
-const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+// ---------------------------------------------------------------------------
+// تبدیل میلادی به شمسی (فقط برای نمایش؛ منطق داخلی همچنان میلادی/ISO است)
+// ---------------------------------------------------------------------------
+function gregorianToJalali(gy, gm, gd) {
+  const g_d_m = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const j_d_m = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 29];
+  const div = (a, b) => Math.floor(a / b);
 
-/* ============================================================= icons === */
-const ICONS = {
-  dashboard: '<rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect>',
-  orders: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path>',
-  topups: '<rect x="1" y="4" width="22" height="16" rx="2.5"></rect><line x1="1" y1="10" x2="23" y2="10"></line>',
-  users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>',
-  catalog: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line>',
-  discounts: '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z"></path><circle cx="7" cy="7" r="1.4"></circle>',
-  tickets: '<path d="M21 11.5a8.38 8.38 0 0 1-4.5 7.4 8.5 8.5 0 0 1-7.6-.1L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 8-8.5h.5a8.48 8.48 0 0 1 8 8v.5Z"></path>',
-  broadcast: '<path d="m3 11 18-5v12L3 14v-3z"></path><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"></path>',
-  support: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>',
-  resellers: '<rect x="2" y="7" width="20" height="14" rx="2.5"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>',
-  panels: '<rect x="2" y="3" width="20" height="7" rx="2"></rect><rect x="2" y="14" width="20" height="7" rx="2"></rect><line x1="6" y1="6.5" x2="6.01" y2="6.5"></line><line x1="6" y1="17.5" x2="6.01" y2="17.5"></line>',
-  settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"></path>',
-  logs: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line>',
-  webadmins: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path>',
-  account: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle>',
-  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line>',
-  revenue: '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline>',
-  check: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>',
-  empty: '<path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z"></path>',
-};
-const svg = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
-const fmt = n => (n === null || n === undefined) ? '—' : Number(n).toLocaleString('fa-IR');
-const fmtDate = iso => iso ? new Date(iso.replace(' ', 'T') + (iso.includes('Z') ? '' : 'Z')).toLocaleString('fa-IR') : '—';
-const esc = s => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const gy2 = gy - 1600, gm2 = gm - 1, gd2 = gd - 1;
+  let g_day_no = 365 * gy2 + div(gy2 + 3, 4) - div(gy2 + 99, 100) + div(gy2 + 399, 400);
+  for (let i = 0; i < gm2; i++) g_day_no += g_d_m[i];
+  if (gm2 > 1 && ((gy % 4 === 0 && gy % 100 !== 0) || gy % 400 === 0)) g_day_no += 1;
+  g_day_no += gd2;
 
-/* ==================================================== micro-animation === */
-// شمارش انیمیشنی اعداد هنگام بارگذاری کارت‌ها
-function animateCount(el, target, duration = 900) {
-  if (!el) return;
-  const start = 0;
-  const t0 = performance.now();
-  function tick(now) {
-    const p = Math.min((now - t0) / duration, 1);
-    const eased = 1 - Math.pow(1 - p, 3);
-    el.textContent = fmt(Math.round(start + (target - start) * eased));
-    if (p < 1) requestAnimationFrame(tick);
+  let j_day_no = g_day_no - 79;
+  const j_np = div(j_day_no, 12053);
+  j_day_no %= 12053;
+
+  let jy = 979 + 33 * j_np + 4 * div(j_day_no, 1461);
+  j_day_no %= 1461;
+
+  if (j_day_no >= 366) {
+    jy += div(j_day_no - 1, 365);
+    j_day_no = (j_day_no - 1) % 365;
   }
-  requestAnimationFrame(tick);
-}
-// پر شدن حلقه‌های سیگنال بعد از mount (برای انیمیشن conic-gradient)
-function activateRings(root) {
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      $$('.ring[data-pct], .res-ring[data-pct]', root).forEach(r => { r.style.setProperty('--pct', r.dataset.pct); });
-    }, 60);
-  });
-}
-// رشد میله‌های نمودار بعد از mount
-function activateBars(root) {
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      $$('.spark i[data-h]', root).forEach(b => { b.style.height = b.dataset.h + '%'; });
-    }, 60);
-  });
-}
-// پر شدن نوار‌های افقی (تفکیک درآمد / پرفروش‌ترین‌ها)
-function activateBarFills(root) {
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      $$('.bar-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
-    }, 60);
-  });
-}
-// انیمیشن گیج SVG (سلامت سیستم)
-function activateGauge(root, pct) {
-  const ring = $('#gaugeRing', root);
-  if (!ring) return;
-  const c = 2 * Math.PI * 64;
-  ring.style.strokeDasharray = c;
-  ring.style.strokeDashoffset = c;
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      ring.style.transition = 'stroke-dashoffset 1.3s cubic-bezier(.16,1,.3,1)';
-      ring.style.strokeDashoffset = c - Math.max(0, Math.min(100, pct)) / 100 * c;
-    }, 60);
-  });
-}
-// رسم رادار عملکرد از مقادیر ۰..۱
-function drawRadar(root, axes, values, color = '#8B5CF6') {
-  const svgEl = $('#radarChart', root);
-  if (!svgEl) return;
-  const cx = 110, cy = 95, r = 62, n = axes.length;
-  const pt = (i, scale) => {
-    const ang = -Math.PI / 2 + i * (Math.PI * 2 / n);
-    return [cx + Math.cos(ang) * r * scale, cy + Math.sin(ang) * r * scale];
-  };
-  let out = '';
-  [0.33, 0.66, 1].forEach(scale => {
-    out += `<polygon points="${axes.map((_, i) => pt(i, scale).join(',')).join(' ')}" fill="none" stroke="var(--border)" stroke-width="1"/>`;
-  });
-  axes.forEach((label, i) => {
-    const [x, y] = pt(i, 1.18), [x2, y2] = pt(i, 1);
-    out += `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="var(--border)" stroke-width="1"/>`;
-    out += `<text x="${x}" y="${y}" font-size="9.5" fill="var(--text-muted)" text-anchor="middle" font-family="Vazirmatn">${esc(label)}</text>`;
-  });
-  const vp = axes.map((_, i) => pt(i, values[i]).join(',')).join(' ');
-  out += `<polygon points="${vp}" fill="${color}33" stroke="${color}" stroke-width="1.6"/>`;
-  axes.forEach((_, i) => { const [x, y] = pt(i, values[i]); out += `<circle cx="${x}" cy="${y}" r="2.6" fill="${color}"/>`; });
-  svgEl.innerHTML = out;
-}
-// بوم امبیانت شبکه‌ی سیگنال در کارت خوش‌آمدگویی (هاب اتصال VPN)
-function drawHeroNet(canvas) {
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const w = canvas.clientWidth || 150, h = canvas.clientHeight || 150;
-  canvas.width = w * dpr; canvas.height = h * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const colors = ['#22D3EE', '#EC4899', '#8B5CF6'];
-  const N = 6;
-  const nodes = Array.from({ length: N }, (_, i) => ({
-    ang: (i / N) * Math.PI * 2, radius: 0.62 + (i % 2) * 0.16, speed: 0.15 + Math.random() * 0.08,
-  }));
-  const packets = nodes.map(() => ({ t: Math.random(), speed: 0.006 + Math.random() * 0.006 }));
-  let t = 0;
-  const cx = w / 2, cy = h / 2;
-  function pos(n) { const a = n.ang + t * n.speed * 0.2; return [cx + Math.cos(a) * w * 0.36 * n.radius, cy + Math.sin(a) * h * 0.36 * n.radius]; }
-  function frame() {
-    if (!canvas.isConnected) return;
-    t += 0.016;
-    ctx.clearRect(0, 0, w, h);
-    nodes.forEach((n, i) => {
-      const [x, y] = pos(n);
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y);
-      ctx.strokeStyle = 'rgba(139,92,246,0.18)'; ctx.lineWidth = 1; ctx.stroke();
-      const p = packets[i]; p.t += p.speed; if (p.t > 1) p.t = 0;
-      const px = cx + (x - cx) * p.t, py = cy + (y - cy) * p.t;
-      ctx.beginPath(); ctx.arc(px, py, 2.2, 0, Math.PI * 2);
-      ctx.fillStyle = colors[i % 3]; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 8; ctx.fill(); ctx.shadowBlur = 0;
-      ctx.beginPath(); ctx.arc(x, y, 3.2, 0, Math.PI * 2); ctx.fillStyle = 'rgba(245,242,255,0.75)'; ctx.fill();
-    });
-    const pulse = (Math.sin(t * 1.6) + 1) / 2;
-    const grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, 26 + pulse * 8);
-    grad.addColorStop(0, 'rgba(236,72,153,0.9)'); grad.addColorStop(1, 'rgba(139,92,246,0)');
-    ctx.beginPath(); ctx.arc(cx, cy, 14 + pulse * 6, 0, Math.PI * 2); ctx.fillStyle = grad; ctx.fill();
-    ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2); ctx.fillStyle = '#F5F2FF'; ctx.fill();
-    requestAnimationFrame(frame);
+
+  let jm = 12, jd = j_day_no + 1;
+  for (let i = 0; i < 11; i++) {
+    if (j_day_no < j_d_m[i]) { jm = i + 1; jd = j_day_no + 1; break; }
+    j_day_no -= j_d_m[i];
   }
-  frame();
+  return [jy, jm, jd];
 }
 
-/* ============================================================== api === */
-async function api(path, opts = {}) {
-  const res = await fetch('/api' + path, {
-    method: opts.method || 'GET',
-    credentials: 'include',
-    headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  if (res.status === 401) { showLogin(); throw new Error('unauthorized'); }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || 'خطای ناشناخته');
-  return data;
-}
-const apiGet = p => api(p);
-const apiPost = (p, body) => api(p, { method: 'POST', body: body || {} });
-const apiPut = (p, body) => api(p, { method: 'PUT', body: body || {} });
-const apiDelete = p => api(p, { method: 'DELETE' });
-
-/* ============================================================ toast === */
-function toast(msg, isError = false) {
-  const root = $('#toast-root');
-  const el = document.createElement('div');
-  el.className = 'toast' + (isError ? ' error' : '');
-  el.textContent = msg;
-  root.appendChild(el);
-  setTimeout(() => el.remove(), 3800);
-}
-function handleErr(e) { if (e.message !== 'unauthorized') toast(e.message, true); }
-
-/* ============================================================ modal === */
-function openModal(title, bodyHtml, onMount) {
-  const backdrop = document.createElement('div');
-  backdrop.className = 'modal-backdrop';
-  backdrop.innerHTML = `<div class="modal"><h3>${title}</h3><div class="modal-body">${bodyHtml}</div></div>`;
-  backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.remove(); });
-  document.body.appendChild(backdrop);
-  if (onMount) onMount(backdrop.querySelector('.modal-body'), () => backdrop.remove());
-  return backdrop;
+function toJalaliStr(value, withTime = false) {
+  if (!value) return "-";
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d.getTime())) return String(value);
+  const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  const pad = (n) => String(n).padStart(2, "0");
+  let out = `${jy}/${pad(jm)}/${pad(jd)}`;
+  if (withTime) out += ` - ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return out;
 }
 
-/* ============================================================== nav === */
-const NAV = [
-  { key: 'dashboard', label: 'داشبورد', icon: 'dashboard', role: 'any' },
-  { key: 'orders', label: 'سفارش‌ها', icon: 'orders', role: 'any' },
-  { key: 'topups', label: 'شارژ کیف پول', icon: 'topups', role: 'any' },
-  { key: 'users', label: 'کاربران', icon: 'users', role: 'any' },
-  { key: 'catalog', label: 'محصولات و بانک کانفیگ', icon: 'catalog', role: 'catalog' },
-  { key: 'discounts', label: 'کدهای تخفیف', icon: 'discounts', role: 'discounts' },
-  { key: 'tickets', label: 'تیکت‌ها', icon: 'tickets', role: 'any' },
-  { key: 'support', label: 'چت زنده', icon: 'support', role: 'any' },
-  { key: 'broadcast', label: 'پیام همگانی', icon: 'broadcast', role: 'broadcast' },
-  { key: 'resellers', label: 'نمایندگی‌ها', icon: 'resellers', role: 'resellers' },
-  { key: 'panels', label: 'پنل‌های VPN', icon: 'panels', role: 'panels' },
-  { key: 'system', label: 'سیستم و نگهداری', icon: 'logs', role: 'system' },
-  { key: 'settings', label: 'تنظیمات و برندینگ', icon: 'settings', role: 'settings' },
-  { key: 'logs', label: 'لاگ فعالیت ادمین‌ها', icon: 'logs', role: 'system' },
-  { key: 'webadmins', label: 'کاربران پنل', icon: 'webadmins', role: 'owner' },
-  { key: 'account', label: 'حساب من', icon: 'account', role: 'any' },
-];
-function hasPerm(perm) {
-  return ME.role === 'owner' || (ME.permissions || []).includes(perm);
-}
-function canSee(navRole) {
-  if (navRole === 'any') return true;
-  if (navRole === 'owner') return ME.role === 'owner';
-  return hasPerm(navRole);
-}
-const ROLE_LABEL = { owner: 'مالک', admin: 'مدیر کامل', mid: 'ادمین میانی', support: 'پشتیبان' };
-
-function renderNav() {
-  const el = $('#nav-tunnel');
-  const CYCLE = ['nav-c1', 'nav-c2', 'nav-c3', 'nav-c4'];
-  el.innerHTML = NAV.filter(n => canSee(n.role)).map((n, i) => `
-    <div class="nav-item ${CYCLE[i % 4]} ${n.key === CURRENT_TAB ? 'active' : ''}" data-tab="${n.key}">
-      <span class="nav-icon">${svg(n.icon)}</span><span>${n.label}</span>
-    </div>`).join('');
-  $$('.nav-item', el).forEach(item => item.addEventListener('click', () => { goTo(item.dataset.tab); closeSidebar(); }));
+function toJalaliMonthDay(value) {
+  if (!value) return "-";
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d.getTime())) return String(value);
+  const [, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(jm)}/${pad(jd)}`;
 }
 
-function goTo(tab) {
-  stopSupportPoll();
-  CURRENT_TAB = tab;
-  renderNav();
-  $('#page-title').textContent = NAV.find(n => n.key === tab)?.label || '';
-  renderPage(tab);
-}
+function jalaliToGregorian(jy, jm, jd) {
+  const j_d_m = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 29];
+  const g_d_m = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const div = (a, b) => Math.floor(a / b);
 
-document.addEventListener('click', e => {
-  const btn = e.target.closest('[data-history]');
-  if (!btn) return;
-  const [recordType, recordId] = btn.dataset.history.split(':');
-  $$('.modal-backdrop').forEach(m => m.remove());
-  goToLogsFor(recordType, recordId);
-});
+  const jy2 = jy - 979, jm2 = jm - 1, jd2 = jd - 1;
+  let j_day_no = 365 * jy2 + div(jy2, 33) * 8 + div((jy2 % 33) + 3, 4);
+  for (let i = 0; i < jm2; i++) j_day_no += j_d_m[i];
+  j_day_no += jd2;
 
-/* ============================================================= boot === */
-async function boot() {
-  try {
-    ME = await apiGet('/me');
-    showApp();
-  } catch (e) {
-    showLogin();
+  let g_day_no = j_day_no + 79;
+
+  let gy = 1600 + 400 * div(g_day_no, 146097);
+  g_day_no %= 146097;
+
+  if (g_day_no >= 36525) {
+    g_day_no -= 1;
+    gy += 100 * div(g_day_no, 36524);
+    g_day_no %= 36524;
+    if (g_day_no >= 365) g_day_no += 1;
   }
-}
 
-function showLogin() {
-  $('#app').hidden = true;
-  $('#login-screen').hidden = false;
-}
+  gy += 4 * div(g_day_no, 1461);
+  g_day_no %= 1461;
 
-function showApp() {
-  $('#login-screen').hidden = true;
-  $('#app').hidden = false;
-  $('#me-username').textContent = ME.username;
-  $('#me-role').textContent = ROLE_LABEL[ME.role] || ME.role;
-  $('#me-avatar').textContent = ME.username.slice(0, 2).toUpperCase();
-  tickClock();
-  setInterval(tickClock, 1000);
-  goTo('dashboard');
-}
-
-/* ===================================================== sidebar (mobile) === */
-function closeSidebar() {
-  $('.sidebar')?.classList.remove('open');
-  $('#sidebar-overlay')?.classList.remove('show');
-}
-function openSidebar() {
-  $('.sidebar')?.classList.add('open');
-  $('#sidebar-overlay')?.classList.add('show');
-}
-$('#hamburger-btn')?.addEventListener('click', () => {
-  $('.sidebar')?.classList.contains('open') ? closeSidebar() : openSidebar();
-});
-$('#sidebar-overlay')?.addEventListener('click', closeSidebar);
-
-function tickClock() {
-  $('#topbar-clock').textContent = new Date().toLocaleString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-$('#login-form').addEventListener('submit', async e => {
-  e.preventDefault();
-  const btn = $('#login-submit');
-  const errBox = $('#login-error');
-  errBox.hidden = true;
-  btn.disabled = true; btn.textContent = 'در حال ورود...';
-  try {
-    ME = await apiPost('/login', {
-      username: $('#login-username').value.trim(),
-      password: $('#login-password').value,
-    });
-    showApp();
-  } catch (e) {
-    errBox.textContent = e.message;
-    errBox.hidden = false;
-  } finally {
-    btn.disabled = false; btn.textContent = 'ورود';
+  if (g_day_no >= 366) {
+    g_day_no -= 1;
+    gy += div(g_day_no, 365);
+    g_day_no %= 365;
   }
-});
 
-$('#logout-btn').addEventListener('click', async () => {
-  await apiPost('/logout');
-  ME = null;
-  showLogin();
-});
-
-/* ============================================================== page === */
-function content() { return $('#content'); }
-function setContent(html) { content().innerHTML = html; }
-
-async function renderPage(tab) {
-  setContent('<div class="loading">در حال بارگذاری...</div>');
-  try {
-    switch (tab) {
-      case 'dashboard': return renderDashboard();
-      case 'orders': return renderOrders();
-      case 'topups': return renderTopups();
-      case 'users': return renderUsers();
-      case 'catalog': return renderCatalog();
-      case 'discounts': return renderDiscounts();
-      case 'tickets': return renderTickets();
-      case 'support': return renderSupport();
-      case 'broadcast': return renderBroadcast();
-      case 'resellers': return renderResellers();
-      case 'panels': return renderPanels();
-      case 'system': return renderSystem();
-      case 'settings': return renderSettings();
-      case 'logs': return renderLogs();
-      case 'webadmins': return renderWebAdmins();
-      case 'account': return renderAccount();
-    }
-  } catch (e) { handleErr(e); setContent(`<div class="empty-state">${esc(e.message)}</div>`); }
+  let gm = 1, gd = g_day_no + 1;
+  let days = g_day_no;
+  for (let i = 0; i < 12; i++) {
+    const dim = g_d_m[i] + (i === 1 && ((gy % 4 === 0 && gy % 100 !== 0) || gy % 400 === 0) ? 1 : 0);
+    if (days < dim) { gm = i + 1; gd = days + 1; break; }
+    days -= dim;
+  }
+  return [gy, gm, gd];
 }
 
-/* ========================================================= dashboard === */
-function greetingByHour() {
-  const h = new Date().getHours();
-  if (h < 12) return 'صبح بخیر';
-  if (h < 18) return 'ظهر بخیر';
-  return 'شب بخیر';
+function jalaliToISO(jy, jm, jd) {
+  const [gy, gm, gd] = jalaliToGregorian(jy, jm, jd);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${gy}-${pad(gm)}-${pad(gd)}`;
 }
 
-function resRingHtml(pct, colorVar, title, sub) {
-  const p = Math.max(0, Math.min(100, Math.round(pct)));
+function isoToJalaliYMD(iso) {
+  const d = new Date(iso);
+  return gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate());
+}
+
+function jalaliDateSelectHtml(idPrefix, jy, jm, jd) {
+  const dayOptions = Array.from({ length: 31 }, (_, i) => i + 1)
+    .map((d) => `<option value="${d}" ${d === jd ? "selected" : ""}>${d}</option>`).join("");
+  const monthOptions = JALALI_MONTH_NAMES
+    .map((name, i) => `<option value="${i + 1}" ${i + 1 === jm ? "selected" : ""}>${name}</option>`).join("");
+  const yearOptions = Array.from({ length: 6 }, (_, i) => jy - 4 + i)
+    .map((y) => `<option value="${y}" ${y === jy ? "selected" : ""}>${y}</option>`).join("");
   return `
-    <div class="card res-card">
-      <div class="res-ring" style="--ring-a:${colorVar}" data-pct="${p}"><span>${p}٪</span></div>
-      <div class="res-info"><strong>${title}</strong><span>${sub}</span></div>
-    </div>`;
+    <select class="input" id="${idPrefix}-d" style="flex:0 0 25%;padding:8px 4px">${dayOptions}</select>
+    <select class="input" id="${idPrefix}-m" style="flex:0 0 38%;padding:8px 4px">${monthOptions}</select>
+    <select class="input" id="${idPrefix}-y" style="flex:0 0 30%;padding:8px 4px">${yearOptions}</select>
+  `;
 }
 
-async function renderDashboard() {
-  const s = await apiGet('/dashboard');
-  let sys = null;
-  try { sys = await apiGet('/system/stats'); } catch (e) { /* psutil ممکن است نصب نباشد */ }
-  const maxRev = Math.max(...s.daily_series.map(d => d.revenue), 1);
-  const spark = s.daily_series.map(d => `<i data-h="${Math.max((d.revenue / maxRev) * 100, 3)}" title="${d.date}: ${fmt(d.revenue)} تومان"></i>`).join('');
-  const deltaCls = (s.revenue_change_pct ?? 0) >= 0 ? 'up' : 'down';
-  const deltaSign = (s.revenue_change_pct ?? 0) >= 0 ? '▲' : '▼';
-  const ticketRatio = s.active_configs ? Math.min(Math.round((s.open_tickets / s.active_configs) * 100), 100) : 0;
+const JALALI_MONTH_NAMES = [
+  "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
+  "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند",
+];
 
-  const resHtml = sys ? `
-    <div class="res-grid">
-      ${resRingHtml(sys.cpu.percent, 'var(--violet)', 'پردازنده (CPU)', `${sys.cpu.cores} هسته`)}
-      ${resRingHtml(sys.ram.percent, 'var(--amber)', 'حافظه رم (RAM)', `${sys.ram.used_gb} از ${sys.ram.total_gb} گیگابایت`)}
-      ${resRingHtml(sys.disk.percent, 'var(--cyan)', 'فضای دیسک', `${sys.disk.used_gb} از ${sys.disk.total_gb} گیگابایت`)}
-    </div>` : '';
-
-  // امتیاز سلامت سیستم = میانگین معکوس مصرف CPU/RAM/دیسک
-  const healthPct = sys ? Math.round(100 - (sys.cpu.percent + sys.ram.percent + sys.disk.percent) / 3) : null;
-  const healthLabel = healthPct === null ? '—' : healthPct >= 80 ? 'سالم' : healthPct >= 50 ? 'قابل‌قبول' : 'نیازمند بررسی';
-  const healthColor = healthPct === null ? 'var(--text-muted)' : healthPct >= 80 ? 'var(--emerald)' : healthPct >= 50 ? 'var(--amber)' : 'var(--rose)';
-
-  // نوارهای تفکیک درآمد (از category_breakdown واقعی)
-  const maxCatRev = Math.max(...s.category_breakdown.map(c => c.revenue), 1);
-  const catColors = ['var(--violet)', 'var(--cyan)', 'var(--emerald)', 'var(--amber)', 'var(--rose)', 'var(--fuchsia)'];
-  const catBars = s.category_breakdown.map((c, i) => `
-    <div class="bar-row">
-      <span class="bar-name">${esc(c.name)}</span>
-      <span class="bar-track"><span class="bar-fill" data-w="${(c.revenue / maxCatRev) * 100}" style="background:${catColors[i % catColors.length]}"></span></span>
-      <span class="bar-val">${fmt(c.revenue)} (${fmt(c.orders)})</span>
-    </div>`).join('') || '<span class="card-sub">داده‌ای برای این بازه نیست</span>';
-
-  // لیدربورد پرفروش‌ترین محصولات (از top_products واقعی)
-  const maxProdRev = Math.max(...s.top_products.map(p => p.revenue), 1);
-  const prodBars = s.top_products.map((p, i) => `
-    <div class="bar-row">
-      <span class="bar-name">${esc(p.name)}</span>
-      <span class="bar-track"><span class="bar-fill" data-w="${(p.revenue / maxProdRev) * 100}" style="background:${catColors[i % catColors.length]}"></span></span>
-      <span class="bar-val">${fmt(p.orders)} فروش</span>
-    </div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
-
-  // مقادیر رادار (۰..۱) از شاخص‌های واقعی داشبورد و سرور
-  const radarAxes = ['فروش', 'رضایت مشتری', 'سلامت سرور', 'ظرفیت', 'رشد'];
-  const radarValues = [
-    Math.max(0, Math.min(s.conversion_rate / 100, 1)),
-    1 - Math.min(s.open_tickets / Math.max(s.active_configs, 1), 1),
-    sys ? Math.max(0, Math.min(1 - (sys.cpu.percent + sys.ram.percent + sys.disk.percent) / 300, 1)) : 0.8,
-    Math.max(0, Math.min(s.active_configs / Math.max(s.total_users, 1), 1)),
-    Math.max(0, Math.min((s.revenue_change_pct ?? 0) / 100 + 0.5, 1)),
-  ];
-
-  setContent(`
-    ${resHtml}
-    <div class="hero">
-      <div class="hero-text">
-        <h2>${greetingByHour()}، ${esc(ME.username)} 👋</h2>
-        <p>وضعیت فروشگاه در ${s.start_date} تا ${s.end_date} — همه چیز آنلاین و در حال گزارش‌دهی زنده است.</p>
-      </div>
-      <div class="hero-net"><canvas id="hero-net-canvas"></canvas></div>
-    </div>
-
-    <div class="grid grid-4">
-      <div class="card stat-card">
-        <div class="stat-top">
-          <span class="stat-icon stat-icon-1">${svg('revenue')}</span>
-          <span class="delta ${deltaCls} mono">${deltaSign} ${Math.abs(s.revenue_change_pct ?? 0)}%</span>
-        </div>
-        <span class="value mono" data-count="${s.revenue}">۰</span>
-        <span class="label">درآمد (۱۴ روز اخیر)</span>
-      </div>
-      <div class="card stat-card">
-        <div class="stat-top">
-          <span class="stat-icon stat-icon-2">${svg('check')}</span>
-          <div class="ring" style="--ring-a:var(--cyan)" data-pct="${s.conversion_rate}"><span>${s.conversion_rate}٪</span></div>
-        </div>
-        <span class="value mono" data-count="${s.approved}">۰</span>
-        <span class="label">سفارش‌های تایید شده · نرخ تبدیل</span>
-      </div>
-      <div class="card stat-card">
-        <div class="stat-top"><span class="stat-icon stat-icon-3">${svg('users')}</span></div>
-        <span class="value mono" data-count="${s.total_users}">۰</span>
-        <span class="label">کاربران کل</span>
-        <span class="card-sub">${fmt(s.new_users)} کاربر جدید در این بازه</span>
-      </div>
-      <div class="card stat-card">
-        <div class="stat-top">
-          <span class="stat-icon stat-icon-4">${svg('tickets')}</span>
-          <div class="ring" style="--ring-a:var(--rose)" data-pct="${ticketRatio}"><span>${fmt(s.open_tickets)}</span></div>
-        </div>
-        <span class="value mono" data-count="${s.active_configs}">۰</span>
-        <span class="label">کانفیگ فعال · تیکت باز</span>
-      </div>
-    </div>
-
-    <div class="bento" style="margin-top:18px">
-      <div class="card span-4 rows-2">
-        <div class="card-head"><h3>روند فروش روزانه</h3><span class="card-sub">${s.start_date} تا ${s.end_date}</span></div>
-        <div class="spark" style="flex:1">${spark}</div>
-      </div>
-
-      ${sys ? `
-      <div class="card span-2 rows-2">
-        <div class="card-head"><h3>امتیاز سلامت سیستم</h3></div>
-        <div class="gauge-wrap">
-          <svg viewBox="0 0 150 150">
-            <circle cx="75" cy="75" r="64" fill="none" stroke="var(--border)" stroke-width="11"/>
-            <circle id="gaugeRing" cx="75" cy="75" r="64" fill="none" stroke="${healthColor}" stroke-width="11" stroke-linecap="round"/>
-          </svg>
-          <div class="gauge-center"><div class="v mono">${healthPct}٪</div><div class="l">${healthLabel}</div></div>
-        </div>
-      </div>` : `
-      <div class="card span-2 rows-2">
-        <div class="card-head"><h3>رادار عملکرد</h3></div>
-        <div class="radar-wrap"><svg id="radarChart" viewBox="0 0 220 190"></svg></div>
-      </div>`}
-
-      <div class="card ${sys ? 'span-3' : 'span-4'}">
-        <div class="card-head"><h3>تفکیک درآمد</h3></div>
-        <div class="chip-row" style="margin-bottom:10px"><span class="chip">مستقیم: ${fmt(s.direct_revenue)}</span><span class="chip">رفرال: ${fmt(s.referral_revenue)}</span></div>
-        ${catBars}
-      </div>
-
-      ${sys ? `
-      <div class="card span-3">
-        <div class="card-head"><h3>رادار عملکرد</h3></div>
-        <div class="radar-wrap"><svg id="radarChart" viewBox="0 0 220 190"></svg></div>
-      </div>` : ''}
-
-      <div class="card span-3">
-        <div class="card-head"><h3>پرفروش‌ترین محصولات</h3></div>
-        ${prodBars}
-      </div>
-    </div>
-  `);
-
-  const root = content();
-  $$('.value[data-count]', root).forEach(el => animateCount(el, Number(el.dataset.count)));
-  activateRings(root);
-  activateBars(root);
-  activateBarFills(root);
-  drawRadar(root, radarAxes, radarValues, '#8B5CF6');
-  if (sys) activateGauge(root, healthPct);
-  drawHeroNet($('#hero-net-canvas', root));
+function notify(message) {
+  if (tg.showAlert) tg.showAlert(message);
+  else alert(message);
 }
 
-/* ============================================================ orders === */
-let ordersStatus = 'pending';
-async function renderOrders() {
-  const canAct = hasPerm('orders');
-  const orders = await apiGet(`/orders?status=${ordersStatus}`);
-  setContent(`
-    <div class="tabs">
-      ${['pending', 'approved', 'rejected'].map(s => `<button class="tab-btn ${s === ordersStatus ? 'active' : ''}" data-status="${s}">${{ pending: 'در انتظار', approved: 'تایید شده', rejected: 'رد شده' }[s]}</button>`).join('')}
-    </div>
-    <div class="card">
-      <div class="table-wrap"><table>
-        <thead><tr><th>#</th><th>کاربر</th><th>محصول</th><th>تعداد</th><th>مبلغ</th><th>تاریخ</th>${canAct && ordersStatus === 'pending' ? '<th>عملیات</th>' : ''}</tr></thead>
-        <tbody>
-          ${orders.map(o => `<tr>
-            <td class="mono">#${o.id} ${historyBtn('order', o.id)}</td>
-            <td>${esc(o.username || o.user_id)}</td>
-            <td>${esc(o.product_name)}</td>
-            <td class="mono">${fmt(o.quantity || 1)}</td>
-            <td class="mono">${fmt(o.final_price ?? o.base_price)}</td>
-            <td class="mono">${fmtDate(o.created_at)}</td>
-            ${canAct && ordersStatus === 'pending' ? `<td>
-              <button class="btn btn-primary btn-sm" data-approve="${o.id}">تایید</button>
-              <button class="btn btn-danger btn-sm" data-reject="${o.id}">رد</button>
-            </td>` : ''}
-          </tr>`).join('') || `<tr><td colspan="7" class="empty-state"><div class="icon">${svg('empty')}</div>سفارشی در این وضعیت نیست</td></tr>`}
-        </tbody>
-      </table></div>
-    </div>
-  `);
-  $$('.tab-btn', content()).forEach(b => b.addEventListener('click', () => { ordersStatus = b.dataset.status; renderOrders(); }));
-  $$('[data-approve]', content()).forEach(b => b.addEventListener('click', async () => {
-    b.disabled = true;
-    try { await apiPost(`/orders/${b.dataset.approve}/approve`); toast('سفارش تایید شد.'); renderOrders(); }
-    catch (e) { handleErr(e); b.disabled = false; }
-  }));
-  $$('[data-reject]', content()).forEach(b => b.addEventListener('click', async () => {
-    if (!confirm('سفارش رد شود؟')) return;
-    try { await apiPost(`/orders/${b.dataset.reject}/reject`); toast('سفارش رد شد.'); renderOrders(); }
-    catch (e) { handleErr(e); }
-  }));
-}
-
-/* ============================================================ topups === */
-let topupsStatus = 'pending';
-async function renderTopups() {
-  const canAct = hasPerm('orders');
-  const topups = await apiGet(`/topups?status=${topupsStatus}`);
-  setContent(`
-    <div class="tabs">
-      ${['pending', 'approved', 'rejected'].map(s => `<button class="tab-btn ${s === topupsStatus ? 'active' : ''}" data-status="${s}">${{ pending: 'در انتظار', approved: 'تایید شده', rejected: 'رد شده' }[s]}</button>`).join('')}
-    </div>
-    <div class="card">
-      <div class="table-wrap"><table>
-        <thead><tr><th>#</th><th>کاربر</th><th>مبلغ</th><th>تاریخ</th>${canAct && topupsStatus === 'pending' ? '<th>عملیات</th>' : ''}</tr></thead>
-        <tbody>${topups.map(t => `<tr>
-          <td class="mono">#${t.id}</td><td>${esc(t.username || t.user_id)}</td>
-          <td class="mono">${fmt(t.amount)}</td><td class="mono">${fmtDate(t.created_at)}</td>
-          ${canAct && topupsStatus === 'pending' ? `<td>
-            <button class="btn btn-primary btn-sm" data-approve="${t.id}">تایید</button>
-            <button class="btn btn-danger btn-sm" data-reject="${t.id}">رد</button>
-          </td>` : ''}
-        </tr>`).join('') || `<tr><td colspan="5" class="empty-state"><div class="icon">${svg('empty')}</div>درخواستی در این وضعیت نیست</td></tr>`}</tbody>
-      </table></div>
-    </div>
-  `);
-  $$('.tab-btn', content()).forEach(b => b.addEventListener('click', () => { topupsStatus = b.dataset.status; renderTopups(); }));
-  $$('[data-approve]', content()).forEach(b => b.addEventListener('click', async () => {
-    try { await apiPost(`/topups/${b.dataset.approve}/approve`); toast('شارژ تایید شد.'); renderTopups(); } catch (e) { handleErr(e); }
-  }));
-  $$('[data-reject]', content()).forEach(b => b.addEventListener('click', async () => {
-    if (!confirm('این شارژ رد شود؟')) return;
-    try { await apiPost(`/topups/${b.dataset.reject}/reject`); toast('رد شد.'); renderTopups(); } catch (e) { handleErr(e); }
-  }));
-}
-
-/* ============================================================= users === */
-let usersState = { q: '', status: 'all', page: 1 };
-async function renderUsers() {
-  const res = await apiGet(`/users?q=${encodeURIComponent(usersState.q)}&status=${usersState.status}&page=${usersState.page}`);
-  const pages = Math.max(Math.ceil(res.total / res.limit), 1);
-  setContent(`
-    <div class="toolbar">
-      <input class="input" id="user-search" placeholder="جستجو (آیدی، یوزرنیم، نام)..." value="${esc(usersState.q)}">
-      <select class="input" id="user-status">
-        ${[['all', 'همه'], ['active', 'فعال'], ['expired', 'منقضی'], ['blocked', 'مسدود']].map(([v, l]) => `<option value="${v}" ${v === usersState.status ? 'selected' : ''}>${l}</option>`).join('')}
-      </select>
-    </div>
-    <div class="card">
-      <div class="table-wrap"><table>
-        <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>نام</th><th>وضعیت</th><th>عضویت</th><th>عملیات</th></tr></thead>
-        <tbody>${res.items.map(u => `<tr>
-          <td class="mono">${u.telegram_id}</td><td>${esc(u.username || '—')}</td><td>${esc(u.first_name || '—')}</td>
-          <td>${u.is_blocked ? '<span class="badge badge-rejected">مسدود</span>' : '<span class="badge badge-approved">فعال</span>'}</td>
-          <td class="mono">${fmtDate(u.joined_at)}</td>
-          <td>
-            <button class="btn btn-ghost btn-sm" data-detail="${u.telegram_id}">جزئیات</button>
-            ${hasPerm('users') ? (u.is_blocked
-              ? `<button class="btn btn-sm" data-unblock="${u.telegram_id}">رفع مسدودی</button>`
-              : `<button class="btn btn-danger btn-sm" data-block="${u.telegram_id}">مسدودسازی</button>`) : ''}
-          </td>
-        </tr>`).join('') || `<tr><td colspan="6" class="empty-state"><div class="icon">${svg('empty')}</div>کاربری یافت نشد</td></tr>`}</tbody>
-      </table></div>
-      <div class="pager">${Array.from({ length: pages }, (_, i) => i + 1).map(p => `<button class="btn btn-sm ${p === usersState.page ? 'btn-primary' : ''}" data-page="${p}">${p}</button>`).join('')}</div>
-    </div>
-  `);
-  $('#user-search').addEventListener('keydown', e => { if (e.key === 'Enter') { usersState.q = e.target.value; usersState.page = 1; renderUsers(); } });
-  $('#user-status').addEventListener('change', e => { usersState.status = e.target.value; usersState.page = 1; renderUsers(); });
-  $$('[data-page]', content()).forEach(b => b.addEventListener('click', () => { usersState.page = Number(b.dataset.page); renderUsers(); }));
-  $$('[data-block]', content()).forEach(b => b.addEventListener('click', async () => {
-    try { await apiPost(`/users/${b.dataset.block}/block`); toast('کاربر مسدود شد.'); renderUsers(); } catch (e) { handleErr(e); }
-  }));
-  $$('[data-unblock]', content()).forEach(b => b.addEventListener('click', async () => {
-    try { await apiPost(`/users/${b.dataset.unblock}/unblock`); toast('رفع مسدودیت شد.'); renderUsers(); } catch (e) { handleErr(e); }
-  }));
-  $$('[data-detail]', content()).forEach(b => b.addEventListener('click', () => showUserDetail(Number(b.dataset.detail))));
-}
-
-async function showUserDetail(tgId) {
-  const d = await apiGet(`/users/${tgId}`);
-  const isSenior = hasPerm('users');
-  openModal(`کاربر ${esc(d.user.username || tgId)}`, `
-    <div class="chip-row" style="margin-bottom:14px">
-      <span class="chip">کیف پول: ${fmt(d.user.referral_credit)} تومان</span>
-      <span class="chip">زیرمجموعه‌ها: ${fmt(d.referral.count)}</span>
-      ${d.is_reseller ? `<span class="chip">اعتبار نمایندگی: ${fmt(d.reseller_credit)} گیگ</span>` : ''}
-      ${historyBtn('user', tgId)}
-    </div>
-    ${isSenior ? `<div class="form-row" style="margin-bottom:14px">
-      <input class="input" id="wallet-delta" type="number" placeholder="مبلغ (مثبت=افزایش، منفی=کاهش)">
-      <button class="btn btn-primary" id="wallet-submit">اعمال</button>
-    </div>` : ''}
-    <h4 style="font-size:13px;margin:10px 0">سفارش‌های اخیر</h4>
-    <div class="table-wrap"><table><thead><tr><th>#</th><th>محصول</th><th>مبلغ</th><th>وضعیت</th></tr></thead>
-    <tbody>${d.orders.slice(0, 10).map(o => `<tr><td class="mono">#${o.id}</td><td>${esc(o.product_name || '-')}</td><td class="mono">${fmt(o.final_price)}</td><td>${o.status}</td></tr>`).join('') || '<tr><td colspan="4" class="empty-state">سفارشی نیست</td></tr>'}</tbody></table></div>
-  `, (body, close) => {
-    const submitBtn = $('#wallet-submit', body);
-    if (submitBtn) submitBtn.addEventListener('click', async () => {
-      const delta = Number($('#wallet-delta', body).value);
-      if (!delta) return;
-      try { await apiPost(`/users/${tgId}/wallet`, { delta }); toast('کیف پول به‌روزرسانی شد.'); close(); }
-      catch (e) { handleErr(e); }
-    });
+async function api(path, options = {}) {
+  const res = await fetch(withTenant(path), {
+    ...options,
+    headers: { "Content-Type": "application/json", "X-Init-Data": initData, ...(options.headers || {}) },
   });
-}
-
-/* ============================================================ catalog === */
-let catalogTab = 'products';
-async function renderCatalog() {
-  const [categories, products] = await Promise.all([apiGet('/categories'), apiGet('/products')]);
-  setContent(`
-    <div class="tabs">
-      <button class="tab-btn ${catalogTab === 'products' ? 'active' : ''}" data-t="products">محصولات</button>
-      <button class="tab-btn ${catalogTab === 'categories' ? 'active' : ''}" data-t="categories">دسته‌بندی‌ها</button>
-    </div>
-    <div id="catalog-body"></div>
-  `);
-  $$('.tab-btn', content()).forEach(b => b.addEventListener('click', () => { catalogTab = b.dataset.t; renderCatalog(); }));
-
-  const body = $('#catalog-body');
-  if (catalogTab === 'categories') {
-    body.innerHTML = `
-      <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-cat">+ دسته‌بندی جدید</button></div>
-      <div class="card"><div class="table-wrap"><table><thead><tr><th>نام</th><th>وضعیت</th><th>عملیات</th></tr></thead>
-      <tbody>${categories.map(c => `<tr>
-        <td>${esc(c.name)}</td>
-        <td>${c.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
-        <td><button class="btn btn-sm" data-toggle-cat="${c.id}">${c.is_active ? 'غیرفعال کن' : 'فعال کن'}</button>
-        <button class="btn btn-danger btn-sm" data-del-cat="${c.id}">حذف</button></td>
-      </tr>`).join('') || '<tr><td colspan="3" class="empty-state">دسته‌بندی‌ای نیست</td></tr>'}</tbody></table></div></div>`;
-    $('#add-cat').addEventListener('click', () => openModal('دسته‌بندی جدید', `
-      <div class="form-grid"><input class="input" id="cat-name" placeholder="نام دسته‌بندی">
-      <button class="btn btn-primary" id="cat-save">ثبت</button></div>`, (b, close) => {
-      $('#cat-save', b).addEventListener('click', async () => {
-        const name = $('#cat-name', b).value.trim(); if (!name) return;
-        try { await apiPost('/categories', { name }); toast('اضافه شد.'); close(); renderCatalog(); } catch (e) { handleErr(e); }
-      });
-    }));
-    $$('[data-toggle-cat]', body).forEach(b => b.addEventListener('click', async () => {
-      try { await apiPost(`/categories/${b.dataset.toggleCat}/toggle`); renderCatalog(); } catch (e) { handleErr(e); }
-    }));
-    $$('[data-del-cat]', body).forEach(b => b.addEventListener('click', async () => {
-      if (!confirm('حذف شود؟ (محصولات این دسته هم حذف می‌شوند)')) return;
-      try { await apiDelete(`/categories/${b.dataset.delCat}`); toast('حذف شد.'); renderCatalog(); } catch (e) { handleErr(e); }
-    }));
-    return;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "خطا" }));
+    throw new Error(err.detail || "خطای ناشناخته");
   }
-
-  body.innerHTML = `
-    <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-prod">+ محصول جدید</button></div>
-    <div class="card"><div class="table-wrap"><table><thead><tr><th>نام</th><th>دسته</th><th>قیمت</th><th>موجودی</th><th>وضعیت</th><th>عملیات</th></tr></thead>
-    <tbody>${products.map(p => `<tr>
-      <td>${esc(p.name)}</td><td>${esc(p.category_name)}</td><td class="mono">${fmt(p.price)}</td>
-      <td class="mono">${p.is_auto_provision ? '<span class="chip">خودکار</span>' : fmt(p.stock)}</td>
-      <td>${p.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
-      <td>
-        ${!p.is_auto_provision ? `<button class="btn btn-sm" data-configs="${p.id}">بانک کانفیگ</button>` : ''}
-        <button class="btn btn-sm" data-toggle-prod="${p.id}">${p.is_active ? 'غیرفعال' : 'فعال'}</button>
-        <button class="btn btn-danger btn-sm" data-del-prod="${p.id}">حذف</button>
-      </td>
-    </tr>`).join('') || '<tr><td colspan="6" class="empty-state">محصولی نیست</td></tr>'}</tbody></table></div></div>`;
-
-  $('#add-prod').addEventListener('click', () => openModal('محصول جدید', `
-    <div class="form-grid">
-      <select class="input" id="prod-cat">${categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
-      <input class="input" id="prod-name" placeholder="نام محصول">
-      <div class="form-row"><input class="input" id="prod-price" type="number" placeholder="قیمت (تومان)">
-      <input class="input" id="prod-duration" type="number" placeholder="مدت (روز)" value="30"></div>
-      <textarea class="input" id="prod-desc" placeholder="توضیحات (اختیاری)" rows="2"></textarea>
-      <button class="btn btn-primary" id="prod-save">ثبت</button>
-    </div>`, (b, close) => {
-    $('#prod-save', b).addEventListener('click', async () => {
-      const name = $('#prod-name', b).value.trim();
-      const price = Number($('#prod-price', b).value);
-      if (!name || !price) return toast('نام و قیمت الزامی است.', true);
-      try {
-        await apiPost('/products', {
-          category_id: Number($('#prod-cat', b).value), name, price,
-          description: $('#prod-desc', b).value, duration_days: Number($('#prod-duration', b).value) || 30,
-        });
-        toast('محصول اضافه شد.'); close(); renderCatalog();
-      } catch (e) { handleErr(e); }
-    });
-  }));
-  $$('[data-toggle-prod]', body).forEach(b => b.addEventListener('click', async () => {
-    try { await apiPost(`/products/${b.dataset.toggleProd}/toggle`); renderCatalog(); } catch (e) { handleErr(e); }
-  }));
-  $$('[data-del-prod]', body).forEach(b => b.addEventListener('click', async () => {
-    if (!confirm('این محصول حذف شود؟')) return;
-    try { await apiDelete(`/products/${b.dataset.delProd}`); toast('حذف شد.'); renderCatalog(); } catch (e) { handleErr(e); }
-  }));
-  $$('[data-configs]', body).forEach(b => b.addEventListener('click', () => showConfigBank(Number(b.dataset.configs))));
+  return res.json();
 }
 
-async function showConfigBank(productId) {
-  const configs = await apiGet(`/products/${productId}/configs`);
-  openModal('بانک کانفیگ', `
-    <textarea class="input" id="new-links" rows="4" placeholder="هر خط یک لینک کانفیگ..."></textarea>
-    <button class="btn btn-primary btn-block" id="add-links" style="margin-top:10px">افزودن لینک‌ها</button>
-    <h4 style="font-size:13px;margin:16px 0 8px">لینک‌های آزاد (${configs.length})</h4>
-    <div class="table-wrap" style="max-height:220px;overflow-y:auto">
-      <table><tbody>${configs.map(c => `<tr><td style="font-size:11px;word-break:break-all">${esc(c.link)}</td><td><button class="btn btn-danger btn-sm" data-del-cfg="${c.id}">حذف</button></td></tr>`).join('') || '<tr><td class="empty-state">خالی است</td></tr>'}</tbody></table>
-    </div>
-  `, (body, close) => {
-    $('#add-links', body).addEventListener('click', async () => {
-      const links = $('#new-links', body).value;
-      if (!links.trim()) return;
-      try {
-        const r = await apiPost(`/products/${productId}/configs`, { links });
-        toast(`${r.added} لینک اضافه شد${r.duplicates ? ` (${r.duplicates} تکراری نادیده گرفته شد)` : ''}.`);
-        close(); showConfigBank(productId);
-      } catch (e) { handleErr(e); }
-    });
-    $$('[data-del-cfg]', body).forEach(b => b.addEventListener('click', async () => {
-      try { await apiDelete(`/configs/${b.dataset.delCfg}`); close(); showConfigBank(productId); } catch (e) { handleErr(e); }
-    }));
+// آپلود فایل (مولتی‌پارت) - بدون Content-Type دستی تا مرورگر boundary را ست کند
+async function apiUpload(path, formData) {
+  const res = await fetch(withTenant(path), {
+    method: "POST",
+    headers: { "X-Init-Data": initData },
+    body: formData,
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "خطا" }));
+    throw new Error(err.detail || "خطای ناشناخته");
+  }
+  return res.json();
 }
 
-/* ========================================================== discounts === */
-async function renderDiscounts() {
-  const codes = await apiGet('/discounts');
-  setContent(`
-    <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-code">+ کد تخفیف جدید</button></div>
-    <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>کد</th><th>تخفیف</th><th>سقف استفاده</th><th>مصرف‌شده</th><th>وضعیت</th><th>عملیات</th></tr></thead>
-      <tbody>${codes.map(c => `<tr>
-        <td class="mono">${esc(c.code)}</td>
-        <td>${c.percent ? c.percent + '%' : fmt(c.fixed_amount) + ' تومان'}</td>
-        <td class="mono">${c.max_uses ? fmt(c.max_uses) : 'نامحدود'}</td>
-        <td class="mono">${fmt(c.used_count)}</td>
-        <td>${c.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
-        <td><button class="btn btn-sm" data-toggle="${c.id}">${c.is_active ? 'غیرفعال' : 'فعال'}</button>
-        <button class="btn btn-danger btn-sm" data-del="${c.id}">حذف</button></td>
-      </tr>`).join('') || '<tr><td colspan="6" class="empty-state">کدی ثبت نشده</td></tr>'}</tbody>
-    </table></div></div>
-  `);
-  $('#add-code').addEventListener('click', () => openModal('کد تخفیف جدید', `
-    <div class="form-grid">
-      <input class="input" id="code-value" placeholder="کد (مثلا SUMMER20)">
-      <div class="form-row">
-        <input class="input" id="code-percent" type="number" placeholder="درصد تخفیف">
-        <input class="input" id="code-fixed" type="number" placeholder="یا مبلغ ثابت">
+function fmt(n) {
+  return Number(n).toLocaleString("fa-IR");
+}
+
+function formatCardNumber(raw) {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (digits.length < 8) return raw || "----";
+  return digits.replace(/(.{4})/g, "$1 ").trim();
+}
+
+function skeleton(rows = 3) {
+  return `<div class="skeleton-block">${'<div class="skel"></div>'.repeat(rows)}</div>`;
+}
+
+function errorState(message) {
+  return `<div class="state-msg error"><span class="ic">⚠</span>${message}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// تب کانفیگ تست
+// ---------------------------------------------------------------------------
+
+async function renderTestConfig() {
+  content.innerHTML = skeleton(1);
+  try {
+    const status = await api("/api/test-config");
+    content.innerHTML = `
+      <div class="eyebrow">کانفیگ تست</div>
+      <div class="card" id="test-config-card">
+        <h3><span class="ic">🧪</span>کانفیگ تست رایگان</h3>
+        <p class="hint-text">یک کانفیگ محدود و رایگان برای امتحان کیفیت سرویس، فقط یک‌بار برای هر کاربر.</p>
+        ${testConfigBody(status)}
       </div>
-      <input class="input" id="code-maxuses" type="number" placeholder="سقف تعداد استفاده (۰=نامحدود)" value="0">
-      <button class="btn btn-primary" id="code-save">ثبت</button>
-    </div>`, (b, close) => {
-    $('#code-save', b).addEventListener('click', async () => {
-      const code = $('#code-value', b).value.trim();
-      if (!code) return toast('کد را وارد کن.', true);
-      try {
-        await apiPost('/discounts', {
-          code,
-          percent: Number($('#code-percent', b).value) || null,
-          fixed_amount: Number($('#code-fixed', b).value) || null,
-          max_uses: Number($('#code-maxuses', b).value) || 0,
-        });
-        toast('کد اضافه شد.'); close(); renderDiscounts();
-      } catch (e) { handleErr(e); }
-    });
-  }));
-  $$('[data-toggle]', content()).forEach(b => b.addEventListener('click', async () => {
-    try { await apiPost(`/discounts/${b.dataset.toggle}/toggle`); renderDiscounts(); } catch (e) { handleErr(e); }
-  }));
-  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
-    if (!confirm('حذف شود؟')) return;
-    try { await apiDelete(`/discounts/${b.dataset.del}`); toast('حذف شد.'); renderDiscounts(); } catch (e) { handleErr(e); }
-  }));
+    `;
+    const btn = document.getElementById("test-config-btn");
+    if (btn) btn.onclick = () => claimTestConfig(btn);
+  } catch (e) {
+    content.innerHTML = errorState(e.message);
+  }
 }
 
-/* ============================================================= support === */
-async function renderSupport() {
-  stopSupportPoll();
-  const convs = await apiGet('/support/conversations');
-  setContent(`
-    <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>کاربر</th><th>آخرین پیام</th><th>زمان</th><th></th></tr></thead>
-      <tbody>${convs.map(c => `<tr>
-        <td>${esc(c.user_name || c.user_username || ('#' + c.user_id))}${c.unread ? ` <span class="badge badge-pending">${c.unread}</span>` : ''}${c.locked_for_me ? ` <span class="badge badge-rejected" title="${esc(c.locked_by || '')}">🔒</span>` : ''}</td>
-        <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.last_sender === 'admin' ? '↩ ' : ''}${esc(c.last_message || '')}</td>
-        <td class="mono">${fmtDate(c.last_at)}</td>
-        <td><button class="btn btn-sm" data-open="${c.user_id}">مشاهده</button></td>
-      </tr>`).join('') || '<tr><td colspan="4" class="empty-state">گفتگویی نیست</td></tr>'}</tbody>
-    </table></div></div>
-  `);
-  $$('[data-open]', content()).forEach(b => b.addEventListener('click', () => showSupportChat(Number(b.dataset.open))));
-  SUPPORT_POLL_TIMER = setInterval(async () => {
-    if (CURRENT_TAB !== 'support') return stopSupportPoll();
-    try { const fresh = await apiGet('/support/conversations'); renderSupportRows(fresh); } catch (e) { /* silent */ }
-  }, 5000);
+function testConfigBody(status) {
+  if (!status.enabled) return `<div class="state-msg"><span class="ic">◌</span>در حال حاضر کانفیگ تست غیرفعال است.</div>`;
+  if (status.used) {
+    if (!status.link) return `<div class="state-msg"><span class="ic">✅</span>شما کانفیگ تست خود را قبلاً دریافت کرده‌اید.</div>`;
+    return `
+      <div class="state-msg" style="padding:0 0 10px"><span class="ic">✅</span>کانفیگ تست شما</div>
+      <div class="link-box">${status.link}</div>
+      <div class="qr-row">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(status.link)}" width="96" height="96" alt="QR" />
+        <button class="btn small outline" onclick="navigator.clipboard.writeText('${status.link}');tg.HapticFeedback.notificationOccurred('success')">📋 کپی لینک</button>
+      </div>
+    `;
+  }
+  if (status.available <= 0) return `<div class="state-msg"><span class="ic">◌</span>موجودی کانفیگ تست تمام شده است.</div>`;
+  return `<button class="btn" id="test-config-btn">دریافت کانفیگ تست رایگان</button>`;
 }
 
-function renderSupportRows(convs) {
-  const tbody = $('table tbody', content());
-  if (!tbody) return;
-  tbody.innerHTML = convs.map(c => `<tr>
-    <td>${esc(c.user_name || c.user_username || ('#' + c.user_id))}${c.unread ? ` <span class="badge badge-pending">${c.unread}</span>` : ''}${c.locked_for_me ? ` <span class="badge badge-rejected" title="${esc(c.locked_by || '')}">🔒</span>` : ''}</td>
-    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.last_sender === 'admin' ? '↩ ' : ''}${esc(c.last_message || '')}</td>
-    <td class="mono">${fmtDate(c.last_at)}</td>
-    <td><button class="btn btn-sm" data-open="${c.user_id}">مشاهده</button></td>
-  </tr>`).join('') || '<tr><td colspan="4" class="empty-state">گفتگویی نیست</td></tr>';
-  $$('[data-open]', tbody).forEach(b => b.addEventListener('click', () => showSupportChat(Number(b.dataset.open))));
+async function claimTestConfig(btn) {
+  btn.disabled = true;
+  btn.textContent = "در حال دریافت...";
+  try {
+    const r = await api("/api/test-config/claim", { method: "POST" });
+    const card = document.getElementById("test-config-card");
+    card.innerHTML = `
+      <h3><span class="ic">🧪</span>کانفیگ تست رایگان</h3>
+      <div class="link-box">${r.link}</div>
+      <div class="qr-row">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(r.link)}" width="96" height="96" alt="QR" />
+        <button class="btn small outline" onclick="navigator.clipboard.writeText('${r.link}');tg.HapticFeedback.notificationOccurred('success')">📋 کپی لینک</button>
+      </div>
+    `;
+    tg.HapticFeedback.notificationOccurred("success");
+  } catch (e) {
+    notify("خطا: " + e.message);
+    btn.disabled = false;
+    btn.textContent = "دریافت کانفیگ تست رایگان";
+  }
 }
 
-async function showSupportChat(userId) {
-  let lastId = 0;
-  const d = await apiGet(`/support/${userId}/messages`);
-  lastId = d.messages.length ? d.messages[d.messages.length - 1].id : 0;
-  const title = d.user.user_name || d.user.user_username || `#${userId}`;
-  const locked = d.user.locked_for_me;
-  let pollTimer = null;
-  const bubble = m => `<div style="align-self:${m.sender === 'admin' ? 'flex-end' : 'flex-start'};max-width:80%;background:${m.sender === 'admin' ? 'var(--signal-dim)' : 'var(--panel-2)'};padding:8px 12px;border-radius:9px;font-size:13px">
-        ${esc(m.message)}<div class="card-sub" style="font-size:10px;margin-top:3px">${fmtDate(m.created_at)}</div>
-      </div>`;
-  const modal = openModal(`چت با ${esc(title)}`, `
-    <div id="sc-log" style="display:flex;flex-direction:column;gap:8px;max-height:320px;overflow-y:auto;margin-bottom:12px">
-      ${d.messages.map(bubble).join('') || '<span class="card-sub">پیامی نیست</span>'}
+// ---------------------------------------------------------------------------
+// تب زیرمجموعه‌گیری
+// ---------------------------------------------------------------------------
+
+async function renderReferral() {
+  content.innerHTML = skeleton(1);
+  try {
+    const r = await api("/api/referral");
+    if (!r.enabled) {
+      content.innerHTML = `<div class="state-msg"><span class="ic">◌</span>زیرمجموعه‌گیری در حال حاضر غیرفعال است.</div>`;
+      return;
+    }
+    content.innerHTML = `
+      <div class="eyebrow">زیرمجموعه‌گیری</div>
+      <div class="card">
+        <h3><span class="ic">🤝</span>دعوت از دوستان</h3>
+        <p class="hint-text">دوستانتان را با لینک زیر دعوت کنید و از اولین خریدشان پورسانت بگیرید.</p>
+        <div class="stat-row"><span>پورسانت شما</span><b>${r.percent}٪ از اولین خرید</b></div>
+        <div class="stat-row"><span>تعداد زیرمجموعه‌ها</span><b>${fmt(r.count)}</b></div>
+        <div class="stat-row"><span>اعتبار کسب‌شده</span><b>${fmt(r.credit)} تومان</b></div>
+        ${r.link ? `
+        <div class="link-box" style="margin-top:8px">${r.link}</div>
+        <button class="btn small outline" id="copy-referral-btn" style="width:100%;margin-top:8px">📋 کپی لینک دعوت</button>
+        ` : ""}
+      </div>
+    `;
+    const copyBtn = document.getElementById("copy-referral-btn");
+    if (copyBtn) copyBtn.onclick = () => {
+      navigator.clipboard.writeText(r.link);
+      tg.HapticFeedback.notificationOccurred("success");
+      notify("لینک دعوت کپی شد.");
+    };
+  } catch (e) {
+    content.innerHTML = errorState(e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب پشتیبانی (چت)
+// ---------------------------------------------------------------------------
+
+let supportPollTimer = null;
+let supportLastId = 0;
+let supportSection = "chat"; // chat | tickets
+let ticketView = { level: "list" }; // list | thread
+
+function renderSupport() {
+  content.innerHTML = `
+    <div class="segmented" id="support-section-tabs">
+      <button class="seg-btn ${supportSection === "chat" ? "active" : ""}" data-section="chat">گفتگوی زنده</button>
+      <button class="seg-btn ${supportSection === "tickets" ? "active" : ""}" data-section="tickets">تیکت‌ها</button>
     </div>
-    ${locked ? `<div class="card-sub" style="color:var(--danger,#ff6b52);margin-bottom:8px">🔒 این گفتگو در حال حاضر توسط ${esc(d.user.locked_by || 'ادمین دیگری')} پاسخ داده می‌شود.</div>` : ''}
-    <div style="display:flex;gap:8px">
-      <input class="input" id="sc-input" placeholder="پاسخ..." style="flex:1" ${locked ? 'disabled' : ''}>
-      <button class="btn btn-primary" id="sc-send" ${locked ? 'disabled' : ''}>ارسال</button>
+    <div id="support-section-body"></div>
+  `;
+  document.querySelectorAll("#support-section-tabs .seg-btn").forEach((b) => {
+    b.onclick = () => {
+      clearInterval(supportPollTimer);
+      supportSection = b.dataset.section;
+      if (supportSection === "tickets") ticketView = { level: "list" };
+      renderSupport();
+    };
+  });
+  if (supportSection === "chat") renderSupportChat();
+  else renderTicketsSection();
+}
+
+function renderSupportChat() {
+  const body = document.getElementById("support-section-body");
+  body.innerHTML = `
+    <div class="chat-wrap">
+      <div class="chat-messages" id="chat-messages">${skeleton(2)}</div>
+      <form class="chat-input-row" id="chat-form">
+        <input type="text" id="chat-input" placeholder="پیام خود را بنویسید..." autocomplete="off" />
+        <button type="submit" class="chat-send-btn" aria-label="ارسال">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 12 20 4l-6 16-3-7-7-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        </button>
+      </form>
     </div>
-  `, (body, close) => {
-    const log = $('#sc-log', body);
-    const input = $('#sc-input', body);
-    log.scrollTop = log.scrollHeight;
-    const send = async () => {
+  `;
+
+  const form = document.getElementById("chat-form");
+  const input = document.getElementById("chat-input");
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    appendChatMessage({ sender: "user", message: text, created_at: new Date().toISOString() }, true);
+    try {
+      await api("/api/support/messages", { method: "POST", body: JSON.stringify({ message: text }) });
+    } catch (e2) {
+      notify("خطا: " + e2.message);
+    }
+  };
+
+  supportLastId = 0;
+  document.getElementById("chat-messages").innerHTML = "";
+  loadSupportMessages(true);
+  clearInterval(supportPollTimer);
+  supportPollTimer = setInterval(() => loadSupportMessages(false), 4000);
+}
+
+async function loadSupportMessages(initial) {
+  try {
+    const msgs = await api(`/api/support/messages?since_id=${supportLastId}`);
+    if (initial && msgs.length === 0) {
+      document.getElementById("chat-messages").innerHTML =
+        `<div class="state-msg"><span class="ic">💬</span>سوالی دارید؟ همینجا بنویسید تا پشتیبانی پاسخ دهد.</div>`;
+    }
+    msgs.forEach((m) => appendChatMessage(m, false));
+  } catch (e) {
+    // در پس‌زمینه صامت (ارور نمایش داده نمی‌شود تا مزاحم تایپ کاربر نشود)
+  }
+}
+
+function appendChatMessage(m, isOptimistic) {
+  const box = document.getElementById("chat-messages");
+  if (!box) return;
+  if (box.querySelector(".state-msg")) box.innerHTML = "";
+  if (m.id) supportLastId = Math.max(supportLastId, m.id);
+  const time = new Date(m.created_at).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+  const bubble = document.createElement("div");
+  bubble.className = `chat-bubble ${m.sender === "user" ? "mine" : "admin"}`;
+  bubble.innerHTML = `<div class="chat-text"></div><div class="chat-time">${time}</div>`;
+  bubble.querySelector(".chat-text").textContent = m.message;
+  box.appendChild(bubble);
+  box.scrollTop = box.scrollHeight;
+}
+
+// ---------------------------------------------------------------------------
+// تیکت‌ها (بخش دوم تب پشتیبانی)
+// ---------------------------------------------------------------------------
+
+const TICKET_STATUS_LABEL = { open: "🟡 در انتظار پاسخ", answered: "🟢 پاسخ داده‌شده", closed: "⚪️ بسته‌شده" };
+
+async function renderTicketsSection() {
+  const body = document.getElementById("support-section-body");
+  body.innerHTML = skeleton(2);
+  try {
+    if (ticketView.level === "list") await renderTicketsList(body);
+    else await renderTicketThread(body);
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+async function renderTicketsList(body) {
+  const tickets = await api("/api/tickets");
+  body.innerHTML = `
+    <div class="card">
+      ${tickets.length === 0 ? `<div class="hint-text" style="margin:0">هنوز تیکتی ثبت نکرده‌ای.</div>` : tickets.map((t) => `
+        <div class="admin-list-row" data-open-ticket="${t.id}" style="cursor:pointer">
+          <div class="admin-list-row-main">
+            <span>${t.subject}</span>
+            <span class="hint-text" style="margin:0">${TICKET_STATUS_LABEL[t.status] || t.status}</span>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+    <button class="btn" id="new-ticket-btn">🎫 ثبت تیکت جدید</button>
+    <div class="card" id="new-ticket-form" style="display:none;margin-top:12px">
+      <input class="input" id="new-ticket-subject" type="text" placeholder="موضوع تیکت" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:8px" />
+      <textarea class="input" id="new-ticket-message" rows="4" placeholder="توضیح مشکل یا سوال خود را بنویس..." style="direction:rtl;text-align:right;font-family:var(--font-body)"></textarea>
+      <button class="btn" id="new-ticket-submit" style="margin-top:8px">ارسال تیکت</button>
+    </div>
+  `;
+  body.querySelectorAll("[data-open-ticket]").forEach((el) => {
+    el.onclick = () => {
+      ticketView = { level: "thread", ticketId: Number(el.dataset.openTicket) };
+      renderTicketsSection();
+    };
+  });
+  document.getElementById("new-ticket-btn").onclick = () => {
+    document.getElementById("new-ticket-form").style.display = "";
+  };
+  document.getElementById("new-ticket-submit").onclick = async () => {
+    const subject = document.getElementById("new-ticket-subject").value.trim();
+    const message = document.getElementById("new-ticket-message").value.trim();
+    if (!subject || !message) { notify("موضوع و متن پیام الزامی است."); return; }
+    try {
+      const t = await api("/api/tickets", { method: "POST", body: JSON.stringify({ subject, message }) });
+      tg.HapticFeedback.notificationOccurred("success");
+      ticketView = { level: "thread", ticketId: t.id };
+      renderTicketsSection();
+    } catch (e) { notify(e.message); }
+  };
+}
+
+let ticketThreadLastId = 0;
+
+async function renderTicketThread(body) {
+  const { ticketId } = ticketView;
+  const data = await api(`/api/tickets/${ticketId}/messages`);
+  const { ticket, messages } = data;
+  ticketThreadLastId = messages.length ? messages[messages.length - 1].id : 0;
+  const closed = ticket.status === "closed";
+  body.innerHTML = `
+    <button class="btn outline small" id="back-to-tickets" style="width:auto;margin-bottom:12px">→ بازگشت به لیست تیکت‌ها</button>
+    <div class="eyebrow" style="margin-top:0">${ticket.subject} <span class="hint-text" style="margin-right:6px">${TICKET_STATUS_LABEL[ticket.status] || ""}</span></div>
+    <div class="chat-wrap">
+      <div class="chat-messages" id="ticket-messages"></div>
+      ${closed
+        ? `<p class="hint-text" style="text-align:center">این تیکت بسته شده است.</p>`
+        : `<form class="chat-input-row" id="ticket-form">
+            <input type="text" id="ticket-input" placeholder="پاسخ خود را بنویسید..." autocomplete="off" />
+            <button type="submit" class="chat-send-btn" aria-label="ارسال">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 12 20 4l-6 16-3-7-7-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+            </button>
+          </form>
+          <button class="btn outline small" id="close-ticket-btn" style="width:auto;margin-top:8px">بستن این تیکت</button>`}
+    </div>
+  `;
+  document.getElementById("back-to-tickets").onclick = () => {
+    ticketView = { level: "list" };
+    renderTicketsSection();
+  };
+  const box = document.getElementById("ticket-messages");
+  if (messages.length === 0) {
+    box.innerHTML = `<div class="state-msg"><span class="ic">🎫</span>پیامی هنوز ثبت نشده.</div>`;
+  }
+  messages.forEach((m) => {
+    if (box.querySelector(".state-msg")) box.innerHTML = "";
+    const time = new Date(m.created_at).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+    const bubble = document.createElement("div");
+    bubble.className = `chat-bubble ${m.sender === "user" ? "mine" : "admin"}`;
+    bubble.innerHTML = `<div class="chat-text"></div><div class="chat-time">${time}</div>`;
+    bubble.querySelector(".chat-text").textContent = m.message;
+    box.appendChild(bubble);
+  });
+  box.scrollTop = box.scrollHeight;
+
+  if (!closed) {
+    const form = document.getElementById("ticket-form");
+    const input = document.getElementById("ticket-input");
+    form.onsubmit = async (e) => {
+      e.preventDefault();
       const text = input.value.trim();
       if (!text) return;
-      input.value = '';
+      input.value = "";
+      const time = new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+      const bubble = document.createElement("div");
+      bubble.className = "chat-bubble mine";
+      bubble.innerHTML = `<div class="chat-text"></div><div class="chat-time">${time}</div>`;
+      bubble.querySelector(".chat-text").textContent = text;
+      box.appendChild(bubble);
+      box.scrollTop = box.scrollHeight;
       try {
-        await apiPost(`/support/${userId}/messages`, { message: text });
-        log.insertAdjacentHTML('beforeend', bubble({ sender: 'admin', message: text, created_at: new Date().toISOString() }));
-        log.scrollTop = log.scrollHeight;
-      } catch (e) { handleErr(e); }
+        await api(`/api/tickets/${ticketId}/messages`, { method: "POST", body: JSON.stringify({ message: text }) });
+      } catch (e2) {
+        notify("خطا: " + e2.message);
+      }
     };
-    $('#sc-send', body).addEventListener('click', send);
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
-
-    pollTimer = setInterval(async () => {
+    document.getElementById("close-ticket-btn").onclick = async () => {
+      if (!confirm("این تیکت بسته شود؟")) return;
       try {
-        const fresh = await apiGet(`/support/${userId}/messages?since_id=${lastId}`);
-        fresh.messages.forEach(m => {
-          log.insertAdjacentHTML('beforeend', bubble(m));
-          lastId = m.id;
-        });
-        if (fresh.messages.length) log.scrollTop = log.scrollHeight;
-      } catch (e) { /* silent */ }
-    }, 4000);
-  });
-  modal.addEventListener('click', e => { if (e.target === modal) { clearInterval(pollTimer); renderSupport(); } });
-}
-
-/* ============================================================= tickets === */
-let ticketsStatusFilter = '';
-async function renderTickets() {
-  const tickets = await apiGet(`/tickets${ticketsStatusFilter ? '?status=' + ticketsStatusFilter : ''}`);
-  setContent(`
-    <div class="tabs">
-      ${[['', 'همه'], ['open', 'باز'], ['answered', 'پاسخ‌داده‌شده'], ['closed', 'بسته']].map(([v, l]) => `<button class="tab-btn ${v === ticketsStatusFilter ? 'active' : ''}" data-s="${v}">${l}</button>`).join('')}
-    </div>
-    <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>#</th><th>کاربر</th><th>موضوع</th><th>وضعیت</th><th>آخرین بروزرسانی</th><th></th></tr></thead>
-      <tbody>${tickets.map(t => `<tr>
-        <td class="mono">#${t.id}</td><td>${esc(t.username || t.user_id)}</td><td>${esc(t.subject)}</td>
-        <td>${{ open: '<span class="badge badge-pending">باز</span>', answered: '<span class="badge badge-approved">پاسخ‌داده‌شده</span>', closed: '<span class="badge badge-rejected">بسته</span>' }[t.status] || t.status}</td>
-        <td class="mono">${fmtDate(t.updated_at)}</td>
-        <td><button class="btn btn-sm" data-open="${t.id}">مشاهده</button></td>
-      </tr>`).join('') || '<tr><td colspan="6" class="empty-state">تیکتی نیست</td></tr>'}</tbody>
-    </table></div></div>
-  `);
-  $$('.tab-btn', content()).forEach(b => b.addEventListener('click', () => { ticketsStatusFilter = b.dataset.s; renderTickets(); }));
-  $$('[data-open]', content()).forEach(b => b.addEventListener('click', () => showTicket(Number(b.dataset.open))));
-}
-
-async function showTicket(ticketId) {
-  const d = await apiGet(`/tickets/${ticketId}/messages`);
-  const canAct = hasPerm('tickets');
-  openModal(`تیکت: ${esc(d.ticket.subject)}`, `
-    <div style="display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;margin-bottom:12px">
-      ${d.messages.map(m => `<div style="background:${m.sender === 'admin' ? 'var(--signal-dim)' : 'var(--panel-2)'};padding:8px 12px;border-radius:9px;font-size:13px">
-        <strong style="font-size:11px;color:var(--text-muted)">${m.sender === 'admin' ? 'ادمین' : 'کاربر'}</strong><br>${esc(m.message)}
-      </div>`).join('') || '<span class="card-sub">پیامی نیست</span>'}
-    </div>
-    ${canAct && d.ticket.status !== 'closed' ? `
-      <textarea class="input" id="ticket-reply" rows="2" placeholder="پاسخ..."></textarea>
-      <div class="modal-actions">
-        <button class="btn btn-primary" id="ticket-send">ارسال پاسخ</button>
-        <button class="btn btn-danger" id="ticket-close-btn">بستن تیکت</button>
-      </div>` : ''}
-  `, (body, close) => {
-    const send = $('#ticket-send', body);
-    if (send) send.addEventListener('click', async () => {
-      const message = $('#ticket-reply', body).value.trim();
-      if (!message) return;
-      try { await apiPost(`/tickets/${ticketId}/reply`, { message }); toast('پاسخ ارسال شد.'); close(); renderTickets(); } catch (e) { handleErr(e); }
-    });
-    const closeBtn = $('#ticket-close-btn', body);
-    if (closeBtn) closeBtn.addEventListener('click', async () => {
-      try { await apiPost(`/tickets/${ticketId}/close`); toast('تیکت بسته شد.'); close(); renderTickets(); } catch (e) { handleErr(e); }
-    });
-  });
-}
-
-/* =========================================================== broadcast === */
-async function renderBroadcast() {
-  setContent(`
-    <div class="card" style="max-width:640px">
-      <h3 style="margin:0 0 4px">ارسال پیام همگانی</h3>
-      <p class="card-sub" style="margin:0 0 14px">این پیام برای همه‌ی کاربران ربات (غیرمسدود) به‌صورت متنی ارسال می‌شود.</p>
-      <textarea class="input" id="bc-text" rows="6" maxlength="4000" placeholder="متن پیام را بنویس..."></textarea>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
-        <span class="card-sub" id="bc-count">۰ / ۴۰۰۰</span>
-        <button class="btn btn-primary" id="bc-send">ارسال به همه</button>
-      </div>
-      <div id="bc-result" style="margin-top:14px"></div>
-    </div>
-  `);
-  const ta = $('#bc-text', content());
-  ta.addEventListener('input', () => { $('#bc-count', content()).textContent = `${ta.value.length} / 4000`; });
-
-  $('#bc-send', content()).addEventListener('click', () => {
-    const text = ta.value.trim();
-    if (!text) return toast('متن پیام خالی است.', true);
-    openModal('تایید ارسال همگانی', `
-      <p style="font-size:13px;line-height:1.9">این پیام برای <strong>همه‌ی کاربران</strong> ربات ارسال می‌شود و قابل بازگشت نیست. مطمئنی؟</p>
-      <div style="background:var(--panel-2);padding:10px 12px;border-radius:9px;font-size:13px;white-space:pre-wrap;max-height:160px;overflow-y:auto">${esc(text)}</div>
-      <div class="modal-actions">
-        <button class="btn btn-primary" id="bc-confirm">بله، ارسال کن</button>
-      </div>
-    `, (body, close) => {
-      $('#bc-confirm', body).addEventListener('click', async () => {
-        const btn = $('#bc-confirm', body);
-        btn.disabled = true; btn.textContent = 'در حال ارسال...';
-        try {
-          const res = await apiPost('/broadcast', { message: text });
-          close();
-          $('#bc-result', content()).innerHTML = `
-            <div class="card" style="background:var(--panel-2)">
-              📢 ارسال تمام شد — کل: <strong>${res.total}</strong> ·
-              موفق: <strong style="color:var(--ok, #3ddc84)">${res.success}</strong> ·
-              ناموفق: <strong style="color:var(--danger, #ff6b52)">${res.failed}</strong>
-            </div>`;
-          ta.value = ''; $('#bc-count', content()).textContent = '۰ / ۴۰۰۰';
-          toast('پیام همگانی ارسال شد.');
-        } catch (e) { close(); handleErr(e); }
-      });
-    });
-  });
-}
-
-/* =========================================================== resellers === */
-async function renderResellers() {
-  const [resellers, cohort] = await Promise.all([
-    apiGet('/resellers'),
-    apiGet('/resellers/analytics/cohort').catch(() => null),
-  ]);
-
-  const cohortHtml = cohort ? renderResellerCohortBlock(cohort) : '';
-
-  setContent(`
-    ${cohortHtml}
-    <div class="card"><div class="card-head"><h3>لیست نمایندگی‌ها</h3></div><div class="table-wrap"><table>
-      <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>اعتبار (گیگ)</th><th>وضعیت</th><th>عملیات</th></tr></thead>
-      <tbody>${resellers.map(r => `<tr>
-        <td class="mono">${r.telegram_id}</td><td>${esc(r.username || '—')}</td>
-        <td class="mono">${fmt(r.reseller_credit_gb)}</td>
-        <td>${r.is_reseller ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
-        <td><button class="btn btn-sm" data-credit="${r.telegram_id}">تنظیم اعتبار</button></td>
-      </tr>`).join('') || '<tr><td colspan="5" class="empty-state">نماینده‌ای ثبت نشده</td></tr>'}</tbody>
-    </table></div></div>
-  `);
-  $$('[data-credit]', content()).forEach(b => b.addEventListener('click', () => openModal('تنظیم اعتبار حجمی', `
-    <div class="form-grid">
-      <input class="input" id="credit-delta" type="number" placeholder="مقدار (گیگ، منفی=کسر)">
-      <input class="input" id="credit-reason" placeholder="دلیل (اختیاری)">
-      <button class="btn btn-primary" id="credit-save">ثبت</button>
-    </div>`, (body, close) => {
-    $('#credit-save', body).addEventListener('click', async () => {
-      const delta_gb = Number($('#credit-delta', body).value);
-      if (!delta_gb) return;
-      try {
-        await apiPost(`/resellers/${b.dataset.credit}/credit`, { delta_gb, reason: $('#credit-reason', body).value });
-        toast('اعتبار به‌روزرسانی شد.'); close(); renderResellers();
-      } catch (e) { handleErr(e); }
-    });
-  })));
-
-  if (cohort) {
-    activateRings(content());
-    $$('[data-toggle-churn]', content()).forEach(el => el.addEventListener('click', () => {
-      const box = $('#churn-list-box', content());
-      box.style.display = box.style.display === 'none' ? '' : 'none';
-    }));
+        await api(`/api/tickets/${ticketId}/close`, { method: "POST" });
+        renderTicketsSection();
+      } catch (e) { notify(e.message); }
+    };
   }
 }
 
-function renderResellerCohortBlock(data) {
-  const c = data.churn;
-  const months = data.cohorts;
-  const allMonths = months.length ? months[months.length - 1].retention.map(r => r.month) : [];
+// ---------------------------------------------------------------------------
+// تب خانه
+// ---------------------------------------------------------------------------
+// آیکون‌های خطی (outline) برای گرید دسترسی سریع — هم‌راستا با آیکون‌های نوار پایین
+const ICON_STORE = `<svg viewBox="0 0 24 24" fill="none"><path d="M4 8h16l-1.2 10.2a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 8V6a4 4 0 0 1 8 0v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+const ICON_SHIELD = `<svg viewBox="0 0 24 24" fill="none"><path d="M12 2 4 6v6c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V6l-8-4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 12.2 11.3 14l3.2-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICON_WALLET = `<svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="6" width="17" height="12.5" rx="2.2" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 10h17" stroke="currentColor" stroke-width="1.8"/><circle cx="16.5" cy="14.2" r="1.3" fill="currentColor"/></svg>`;
+const ICON_PROFILE = `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.4" stroke="currentColor" stroke-width="1.8"/><path d="M5 19.5c0-3.6 3.1-6.2 7-6.2s7 2.6 7 6.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+const ICON_SUPPORT = `<svg viewBox="0 0 24 24" fill="none"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7A2.5 2.5 0 0 1 17.5 16H10l-4 3.5V16H6.5A2.5 2.5 0 0 1 4 13.5v-7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
+const ICON_REFERRAL = `<svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8.5" r="2.7" stroke="currentColor" stroke-width="1.8"/><path d="M4 19c0-3 2.3-5 5-5s5 2 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="17" cy="7.5" r="2.1" stroke="currentColor" stroke-width="1.8"/><path d="M15.5 13c2.2.3 3.8 2 3.8 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+const ICON_TEST = `<svg viewBox="0 0 24 24" fill="none"><path d="M9 3h6M10 3v6.5L5.5 18a2 2 0 0 0 1.8 3h9.4a2 2 0 0 0 1.8-3L14 9.5V3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 15h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
 
-  const heatRows = months.map(co => {
-    const cells = co.retention.map(r => {
-      const pct = r.pct;
-      const alpha = Math.max(0.08, Math.min(1, pct / 100));
-      return `<td class="mono" style="text-align:center;background:rgba(139,92,246,${alpha.toFixed(2)});border-radius:6px">
-        ${co.size ? `${pct}٪<div style="font-size:10px;opacity:.75">${fmt(r.active)}</div>` : '—'}
-      </td>`;
-    }).join('');
-    const pad = allMonths.length - co.retention.length;
-    return `<tr><td class="mono">${co.cohort_month}</td><td class="mono">${fmt(co.size)}</td>${cells}${'<td></td>'.repeat(Math.max(0, pad))}</tr>`;
-  }).join('');
+function setHeaderWallet(amount) {
+  const el = document.getElementById("header-wallet-amount");
+  if (el) el.textContent = `${fmt(amount)} تومان`;
+}
 
-  const churnRows = c.list.slice(0, 30).map(u => `
-    <tr>
-      <td class="mono">${u.telegram_id}</td><td>${esc(u.username || '—')}</td>
-      <td class="mono">${fmt(u.credit_gb)}</td>
-      <td class="mono">${u.last_activity ? fmtDate(u.last_activity) : 'هیچ‌وقت'}</td>
-      <td class="mono">${fmt(u.days_inactive)} روز</td>
-    </tr>`).join('') || '<tr><td colspan="5" class="empty-state">نماینده‌ی ریزش‌کرده‌ای نیست 🎉</td></tr>';
+function promoSlides({ me, expiring, referralLink, customBanners }) {
+  // بنرهای اول کاروسل، از پنل ادمین > ظاهر > بنرها قابل مدیریت هستند (متن،
+  // آیکون، رنگ و مقصد هر بنر). دو بنرِ زیر که به‌صورت خودکار و پویا اضافه
+  // می‌شوند (انقضای سرویس / دعوت دوستان) شخصی‌سازی‌شده‌اند و از تنظیمات
+  // بنرها مستقل‌اند.
+  const slides = [];
+  if (expiring && expiring.length > 0) {
+    slides.push({
+      bg: "linear-gradient(120deg, #2b1608, #4d2510 55%, #7a3a14)",
+      icon: "⏰",
+      title: "سرویس شما رو به اتمام است",
+      sub: `${expiring.length} سرویس نزدیک به تاریخ انقضا. برای تمدید ضربه بزن.`,
+      cta: "تمدید سرویس",
+      nav: "services",
+    });
+  }
+  (customBanners || []).forEach((b) => slides.push(b));
+  if (referralLink) {
+    slides.push({
+      bg: "linear-gradient(120deg, #0d1420, #142845 55%, #1c3f6e)",
+      icon: "🤝",
+      title: "دوستاتو دعوت کن",
+      sub: "با دعوت از دوستان، اعتبار رایگان به کیف پولت اضافه کن.",
+      cta: "مشاهده لینک دعوت",
+      nav: "referral",
+    });
+  }
+  if (slides.length === 0) {
+    slides.push({
+      bg: "linear-gradient(120deg, #0d1a12, #123a20 55%, #17532c)",
+      icon: "🛒",
+      title: "خرید سرویس جدید!",
+      sub: "سرویس مورد نظرتو انتخاب کن و در چند ثانیه فعالش کن!",
+      cta: "شروع خرید",
+      nav: "store",
+    });
+  }
+  return slides;
+}
 
+function renderPromoCarousel(slides) {
   return `
-    <div class="grid grid-4">
-      <div class="card stat-card">
-        <div class="stat-top"><span class="stat-icon stat-icon-1">${svg('resellers')}</span></div>
-        <span class="value mono">${fmt(c.total)}</span>
-        <span class="label">کل نمایندگان فعلی</span>
+    <div class="promo-carousel">
+      <div class="promo-track" id="promo-track">
+        ${slides.map((s) => {
+          const bgStyle = s.image ? `url('${s.image}') center/cover no-repeat` : s.bg;
+          return `
+          <div class="promo-slide ${s.image && s.image_only ? "promo-slide-image-only" : ""}" data-nav="${s.nav}" style="--promo-bg:${bgStyle}">
+            ${s.image && s.image_only ? "" : `
+            <div class="promo-slide-body">
+              <div class="promo-slide-title">${s.title}</div>
+              <div class="promo-slide-sub">${s.sub}</div>
+              <div class="promo-slide-cta">‹ ${s.cta}</div>
+            </div>
+            <div class="promo-slide-icon">${s.icon}</div>
+            `}
+          </div>
+        `;
+        }).join("")}
       </div>
-      <div class="card stat-card">
-        <div class="stat-top"><span class="stat-icon stat-icon-2">${svg('check')}</span></div>
-        <span class="value mono">${fmt(c.active)}</span>
-        <span class="label">فعال (${fmt(c.inactivity_days)} روز اخیر)</span>
-      </div>
-      <div class="card stat-card" data-toggle-churn style="cursor:pointer">
-        <div class="stat-top">
-          <span class="stat-icon stat-icon-4">${svg('tickets')}</span>
-          <div class="ring" style="--ring-a:var(--rose)" data-pct="${c.churn_rate}"><span>${c.churn_rate}٪</span></div>
-        </div>
-        <span class="value mono">${fmt(c.churned)}</span>
-        <span class="label">ریزش‌کرده (churn) — برای لیست کلیک کنید</span>
-      </div>
-      <div class="card stat-card">
-        <div class="stat-top"><span class="stat-icon stat-icon-3">${svg('users')}</span></div>
-        <span class="value mono">${fmt(months.reduce((a, m) => a + m.size, 0))}</span>
-        <span class="label">مجموع نماینده‌های ${fmt(months.length)} ماه اخیر</span>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head"><h3>کوهورت نگهداشت ماهانه نمایندگان</h3>
-        <span class="card-sub">هر ردیف یک کوهورت (ماه فعال‌سازی) — درصد نماینده‌های همان کوهورت که در هر ماه بعد هم فعالیت (شارژ/مصرف) داشته‌اند.</span>
-      </div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>ماه کوهورت</th><th>تعداد</th>${allMonths.map((m, i) => `<th class="mono">M${i}</th>`).join('')}</tr></thead>
-        <tbody>${heatRows || '<tr><td colspan="2" class="empty-state">داده‌ای نیست</td></tr>'}</tbody>
-      </table></div>
-    </div>
-
-    <div class="card" id="churn-list-box" style="display:none">
-      <div class="card-head"><h3>نماینده‌های در آستانه‌ی ریزش / ریزش‌کرده</h3></div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>اعتبار (گیگ)</th><th>آخرین فعالیت</th><th>مدت بی‌فعالیتی</th></tr></thead>
-        <tbody>${churnRows}</tbody>
-      </table></div>
+      ${slides.length > 1 ? `<div class="promo-dots">${slides.map((_, i) => `<span class="${i === 0 ? "active" : ""}"></span>`).join("")}</div>` : ""}
     </div>
   `;
 }
 
-/* ============================================================== panels === */
-async function renderPanels() {
-  const servers = await apiGet('/panel-servers');
-  setContent(`
-    <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-panel">+ پنل جدید</button></div>
-    <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>نام</th><th>نوع</th><th>آدرس</th><th>وضعیت</th><th>عملیات</th></tr></thead>
-      <tbody>${servers.map(s => `<tr>
-        <td>${esc(s.name)}</td><td>${esc(s.type_label)}</td><td class="mono" style="direction:ltr;text-align:right">${esc(s.api_url)}</td>
-        <td>${s.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
-        <td><button class="btn btn-sm" data-test="${s.id}">تست اتصال</button>
-        <button class="btn btn-danger btn-sm" data-del="${s.id}">حذف</button></td>
-      </tr>`).join('') || '<tr><td colspan="5" class="empty-state">پنلی ثبت نشده</td></tr>'}</tbody>
-    </table></div></div>
-  `);
-  $('#add-panel').addEventListener('click', () => openModal('پنل جدید', `
-    <div class="form-grid">
-      <input class="input" id="p-name" placeholder="نام (مثلا سرور آلمان)">
-      <select class="input" id="p-type"><option value="pasarguard">PasarGuard</option><option value="3xui">3X-UI</option></select>
-      <input class="input" id="p-url" placeholder="آدرس پنل (https://...)">
-      <div class="form-row"><input class="input" id="p-user" placeholder="یوزرنیم"><input class="input" id="p-pass" type="password" placeholder="پسورد"></div>
-      <button class="btn btn-primary" id="p-save">ثبت</button>
-    </div>`, (body, close) => {
-    $('#p-save', body).addEventListener('click', async () => {
-      const name = $('#p-name', body).value.trim(), api_url = $('#p-url', body).value.trim();
-      if (!name || !api_url) return toast('نام و آدرس الزامی است.', true);
-      try {
-        await apiPost('/panel-servers', {
-          name, panel_type: $('#p-type', body).value, api_url,
-          api_username: $('#p-user', body).value, api_password: $('#p-pass', body).value,
-        });
-        toast('پنل اضافه شد.'); close(); renderPanels();
-      } catch (e) { handleErr(e); }
-    });
-  }));
-  $$('[data-test]', content()).forEach(b => b.addEventListener('click', async () => {
-    b.textContent = 'در حال تست...'; b.disabled = true;
-    try {
-      const r = await apiPost(`/panel-servers/${b.dataset.test}/test`);
-      toast(r.ok ? 'اتصال موفق بود.' : (r.error || 'اتصال ناموفق بود.'), !r.ok);
-    } catch (e) { handleErr(e); }
-    finally { b.textContent = 'تست اتصال'; b.disabled = false; }
-  }));
-  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
-    if (!confirm('حذف شود؟')) return;
-    try { await apiDelete(`/panel-servers/${b.dataset.del}`); toast('حذف شد.'); renderPanels(); } catch (e) { handleErr(e); }
-  }));
-}
-
-/* ============================================================ settings === */
-const RATE_SOURCE_LABEL = { tgju: 'tgju.org', nobitex: 'نوبیتکس', wallex: 'والکس', coingecko: 'CoinGecko (جهانی)', manual: 'دستی (تنظیم‌شده در پنل)' };
-
-function rateCardHtml(r) {
-  const rateTxt = r.rate ? `${fmt(r.rate)} تومان` : '—';
-  const sourceTxt = r.source ? (RATE_SOURCE_LABEL[r.source] || r.source) : '—';
-  const errTxt = !r.ok
-    ? `<span class="card-sub" style="color:var(--rose)">دریافت زنده ناموفق بود؛ ${r.rate ? 'مقدار کش قدیمی نمایش داده شده.' : 'مقداری در کش نیست.'} (${esc(r.error || '')})</span>`
-    : (r.source === 'manual'
-        ? `<span class="card-sub" style="color:var(--amber, #f5a623)">⚠️ همه‌ی منابع زنده شکست خوردند؛ نرخ دستی تنظیم‌شده در پایین همین صفحه موقتاً استفاده شد.</span>`
-        : '');
-  return `
-    <div class="card" style="margin-bottom:18px" id="rate-card">
-      <div class="card-head">
-        <h3>نرخ ارز (دلار به تومان)</h3>
-        <button class="btn btn-sm" id="rate-refresh">🔄 رفرش کش</button>
-      </div>
-      <div class="chip-row">
-        <span class="chip mono">نرخ فعلی: ${rateTxt}</span>
-        <span class="chip">منبع: ${sourceTxt}</span>
-        <span class="chip mono">آخرین بروزرسانی: ${fmtDate(r.updated_at)}</span>
-      </div>
-      ${errTxt}
-    </div>`;
-}
-
-const SETTINGS_GROUPS = [
-  { title: 'متن‌های پایه', fields: [
-    { key: 'store_name', label: 'نام فروشگاه', type: 'text' },
-    { key: 'welcome_text', label: 'متن خوش‌آمدگویی (شروع ربات)', type: 'textarea' },
-    { key: 'contact_text', label: 'متن ابتدای بخش ارتباط با پشتیبانی', type: 'textarea' },
-    { key: 'after_buy_text', label: 'متن راهنمای پرداخت (بعد از انتخاب محصول)', type: 'textarea' },
-  ]},
-  { title: 'دکمه‌های منوی ربات', fields: [
-    { key: 'btn_buy', label: 'متن دکمه خرید کانفیگ', type: 'text' },
-    { key: 'btn_test', label: 'متن دکمه کانفیگ تست', type: 'text' },
-    { key: 'test_enabled', label: 'نمایش دکمه کانفیگ تست', type: 'bool' },
-    { key: 'btn_my_orders', label: 'متن دکمه سفارش‌های من', type: 'text' },
-    { key: 'btn_wallet', label: 'متن دکمه کیف پول', type: 'text' },
-    { key: 'btn_referral', label: 'متن دکمه زیرمجموعه‌گیری', type: 'text' },
-    { key: 'btn_wheel', label: 'متن دکمه گردونه شانس', type: 'text' },
-    { key: 'btn_contact', label: 'متن دکمه ارتباط با پشتیبانی', type: 'text' },
-    { key: 'btn_admin_panel', label: 'متن دکمه پنل مدیریت (فقط برای ادمین‌ها)', type: 'text' },
-  ]},
-  { title: 'کارت بانکی', fields: [
-    { key: 'card_number', label: 'شماره کارت', type: 'text' },
-    { key: 'card_holder', label: 'نام صاحب کارت', type: 'text' },
-  ]},
-  { title: 'عضویت اجباری کانال', fields: [
-    { key: 'force_join_enabled', label: 'فعال بودن عضویت اجباری', type: 'bool' },
-    { key: 'force_join_channel', label: 'آیدی کانال (مثلاً ‎@mychannel)', type: 'text' },
-  ]},
-  { title: 'زیرمجموعه‌گیری (رفرال)', fields: [
-    { key: 'referral_enabled', label: 'فعال بودن سیستم رفرال', type: 'bool' },
-    { key: 'referral_percent', label: 'درصد پورسانت رفرال', type: 'number' },
-  ]},
-  { title: 'گردونه شانس', fields: [
-    { key: 'wheel_enabled', label: 'فعال بودن گردونه شانس', type: 'bool' },
-    { key: 'wheel_win_percent', label: 'درصد احتمال برد در هر چرخش', type: 'number' },
-    { key: 'wheel_prizes', label: 'درصدهای تخفیف ممکن (با کاما جدا کنید، مثلاً 10,20,30,50)', type: 'text' },
-    { key: 'wheel_code_expiry_hours', label: 'اعتبار کد جایزه پس از برد (ساعت)', type: 'number' },
-    { key: 'wheel_cooldown_hours', label: 'فاصله مجاز بین دو چرخش هر کاربر (ساعت)', type: 'number' },
-  ]},
-  { title: 'یادآوری تمدید سرویس', fields: [
-    { key: 'renewal_reminder_enabled', label: 'فعال بودن یادآوری', type: 'bool' },
-    { key: 'renewal_reminder_days_before', label: 'چند روز قبل از انقضا یادآوری ارسال شود', type: 'number' },
-    { key: 'renewal_discount_percent', label: 'درصد تخفیف کد تشویقی تمدید', type: 'number' },
-    { key: 'renewal_discount_expiry_hours', label: 'اعتبار کد تشویقی تمدید (ساعت)', type: 'number' },
-  ]},
-  { title: 'یادآوری اتمام حجم', fields: [
-    { key: 'volume_reminder_enabled', label: 'فعال بودن یادآوری', type: 'bool' },
-    { key: 'volume_reminder_mode', label: 'مبنای هشدار', type: 'select', options: [['percent', 'بر اساس درصد مصرف'], ['gb', 'بر اساس حجم باقی‌مانده']] },
-    { key: 'volume_reminder_percent', label: 'درصد مصرف برای هشدار (حالت درصد)', type: 'number' },
-    { key: 'volume_reminder_gb_left', label: 'حجم باقی‌مانده برای هشدار — گیگ (حالت حجم)', type: 'number' },
-    { key: 'volume_discount_percent', label: 'درصد تخفیف کد تشویقی اتمام حجم', type: 'number' },
-    { key: 'volume_discount_expiry_hours', label: 'اعتبار کد تشویقی اتمام حجم (ساعت)', type: 'number' },
-  ]},
-  { title: 'کانفیگ تست رایگان', fields: [
-    { key: 'test_config_panel_volume_gb', label: 'حجم کانفیگ تست (گیگابایت)', type: 'number' },
-    { key: 'test_config_panel_duration_days', label: 'مدت اعتبار کانفیگ تست (روز)', type: 'number' },
-  ]},
-  { title: 'کانفیگ شخصی/سفارشی', fields: [
-    { key: 'custom_config_enabled', label: 'فعال بودن ساخت کانفیگ شخصی', type: 'bool' },
-    { key: 'custom_config_min_gb', label: 'حداقل حجم مجاز (گیگ)', type: 'number' },
-    { key: 'custom_config_max_gb', label: 'حداکثر حجم مجاز (گیگ)', type: 'number' },
-    { key: 'custom_config_duration_days', label: 'مدت اعتبار (روز)', type: 'number' },
-    { key: 'btn_custom_config', label: 'متن دکمه ساخت کانفیگ شخصی', type: 'text' },
-  ]},
-  { title: 'پرداخت کریپتو (Plisio)', fields: [
-    { key: 'crypto_payment_enabled', label: 'فعال بودن پرداخت کریپتو', type: 'bool' },
-    { key: 'plisio_api_key', label: 'کلید API درگاه Plisio', type: 'password' },
-  ]},
-  { title: 'Mini App و برندینگ', fields: [
-    { key: 'miniapp_banner_text', label: 'متن بنر Mini App', type: 'text' },
-    { key: 'header_image_data', label: 'تصویر هدر / لوگو', type: 'image' },
-  ]},
-  { title: 'موجودی و نرخ ارز', fields: [
-    { key: 'low_stock_threshold', label: 'آستانه هشدار موجودی کم', type: 'number' },
-    { key: 'manual_usd_rate_toman', label: 'نرخ دلار دستی (پشتیبان — فقط وقتی همه‌ی منابع زنده شکست بخورند استفاده می‌شود)', type: 'number' },
-  ]},
-];
-
-function settingsFieldHtml(f, settings) {
-  const val = settings[f.key] ?? '';
-  if (f.type === 'bool') {
-    const on = val === '1' || val === 1 || val === true;
-    return `
-      <label class="field field-row">
-        <span>${esc(f.label)}</span>
-        <span class="switch" data-key="${f.key}" data-type="bool" data-on="${on ? '1' : '0'}"><i></i></span>
-      </label>`;
-  }
-  if (f.type === 'textarea') {
-    return `<label class="field"><span>${esc(f.label)}</span>
-      <textarea class="input" rows="3" data-key="${f.key}" data-type="text">${esc(val)}</textarea></label>`;
-  }
-  if (f.type === 'select') {
-    return `<label class="field"><span>${esc(f.label)}</span>
-      <select class="input" data-key="${f.key}" data-type="text">
-        ${f.options.map(([v, l]) => `<option value="${v}" ${val === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
-      </select></label>`;
-  }
-  if (f.type === 'image') {
-    return `
-      <label class="field">
-        <span>${esc(f.label)}</span>
-        <div class="image-field" data-key="${f.key}">
-          ${val ? `<img src="${val}" class="image-field-preview">` : '<span class="card-sub">تصویری تنظیم نشده</span>'}
-          <div class="image-field-actions">
-            <input type="file" accept="image/*" class="image-field-input" hidden>
-            <button type="button" class="btn btn-sm image-field-pick">انتخاب تصویر</button>
-            ${val ? '<button type="button" class="btn btn-sm btn-danger image-field-clear">حذف</button>' : ''}
-          </div>
-          <input type="hidden" data-key="${f.key}" data-type="text" value="${esc(val)}">
-        </div>
-      </label>`;
-  }
-  return `<label class="field"><span>${esc(f.label)}</span>
-    <input class="input" type="${f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}" data-key="${f.key}" data-type="text" value="${esc(val)}"></label>`;
-}
-
-function renderSettingsGroups(settings) {
-  return `<div class="settings-accordion" id="settings-accordion">
-    ${SETTINGS_GROUPS.map((g, i) => `
-      <div class="settings-group ${i === 0 ? 'open' : ''}">
-        <button type="button" class="settings-group-head">
-          <span>${esc(g.title)}</span>
-          <span class="settings-group-arrow">˅</span>
-        </button>
-        <div class="settings-group-body"><div class="form-grid">
-          ${g.fields.map(f => settingsFieldHtml(f, settings)).join('')}
-        </div></div>
-      </div>`).join('')}
-  </div>`;
-}
-
-function bindSettingsGroupEvents(root) {
-  $$('.settings-group-head', root).forEach(btn => btn.addEventListener('click', () => {
-    btn.parentElement.classList.toggle('open');
-  }));
-  $$('.switch', root).forEach(sw => sw.addEventListener('click', () => {
-    const on = sw.dataset.on !== '1';
-    sw.dataset.on = on ? '1' : '0';
-  }));
-  $$('.image-field', root).forEach(box => {
-    const fileInput = $('.image-field-input', box);
-    const hidden = $('input[type=hidden]', box);
-    $('.image-field-pick', box).addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', () => {
-      const file = fileInput.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => { hidden.value = reader.result; toast('تصویر انتخاب شد؛ برای ثبت روی «ذخیره تغییرات» بزن.'); };
-      reader.readAsDataURL(file);
-    });
-    const clearBtn = $('.image-field-clear', box);
-    if (clearBtn) clearBtn.addEventListener('click', () => { hidden.value = ''; box.querySelector('.image-field-preview')?.remove(); toast('تصویر حذف شد؛ برای ثبت روی «ذخیره تغییرات» بزن.'); });
+function wirePromoCarousel(root) {
+  const track = root.querySelector("#promo-track");
+  if (!track) return;
+  track.querySelectorAll(".promo-slide[data-nav]").forEach((el) => {
+    el.onclick = () => switchTab(el.dataset.nav);
   });
+  const dots = root.querySelectorAll(".promo-dots span");
+  if (!dots.length) return;
+  track.addEventListener("scroll", () => {
+    const idx = Math.round(track.scrollLeft / track.clientWidth);
+    dots.forEach((d, i) => d.classList.toggle("active", i === idx));
+  }, { passive: true });
 }
 
-async function collectAndSaveSettings(root, btn) {
-  const items = [];
-  $$('[data-key][data-type]', root).forEach(el => items.push({ key: el.dataset.key, value: el.value }));
-  $$('.switch[data-key]', root).forEach(sw => items.push({ key: sw.dataset.key, value: sw.dataset.on === '1' ? '1' : '0' }));
-  btn.disabled = true;
-  const prevTxt = btn.textContent; btn.textContent = 'در حال ذخیره...';
+async function renderHome() {
+  content.innerHTML = skeleton(3);
   try {
-    for (const item of items) {
-      await apiPost('/settings', item);
-    }
-    toast('تنظیمات ذخیره شد.');
+    const [me, orders, customConfigs, expiring, referral, customBanners] = await Promise.all([
+      api("/api/me"),
+      api("/api/orders"),
+      api("/api/custom-configs").catch(() => []),
+      api("/api/expiring").catch(() => []),
+      api("/api/referral").catch(() => null),
+      api("/api/banners").catch(() => []),
+    ]);
+    setHeaderWallet(me.wallet_credit);
+    const active = orders.filter((o) => o.status === "approved" && !o.is_custom_config);
+    const customCards = customConfigs.map((c) => ({
+      id: `cc-${c.id}`,
+      product_name: `🛠 کانفیگ شخصی «${c.username}» (${c.volume_gb} گیگ / ${c.duration_days} روز)`,
+      quantity: 1,
+      status: "approved",
+      link: c.subscription_url,
+      links: c.subscription_url ? [c.subscription_url] : [],
+      expires_at: c.expires_at || null,
+    }));
+    const allActive = [...active, ...customCards];
+
+    const adminTabBtn = document.getElementById("admin-tab-btn");
+    if (adminTabBtn) adminTabBtn.style.display = me.is_admin ? "" : "none";
+
+    const slides = promoSlides({ me, expiring, referralLink: referral && referral.link, customBanners });
+
+    content.innerHTML = `
+      <div class="home-greet">
+        <h1>👋 سلام ${me.first_name}</h1>
+        <p>خوش آمدی</p>
+      </div>
+
+      ${renderPromoCarousel(slides)}
+
+      <div class="eyebrow">دسترسی سریع</div>
+      <div class="quick-grid">
+        <div class="quick-item" data-nav="store"><span class="q-label">خرید سرویس جدید</span><span class="q-ic">${ICON_STORE}</span></div>
+        <div class="quick-item" data-nav="services"><span class="q-label">سرویس‌های من</span><span class="q-ic">${ICON_SHIELD}</span></div>
+        <div class="quick-item" data-nav="wallet"><span class="q-label">کیف پول</span><span class="q-ic">${ICON_WALLET}</span></div>
+        <div class="quick-item" data-nav="profile"><span class="q-label">حساب کاربری</span><span class="q-ic">${ICON_PROFILE}</span></div>
+        <div class="quick-item full" data-nav="support"><span class="q-label">پشتیبانی</span><span class="q-ic">${ICON_SUPPORT}</span></div>
+      </div>
+
+      <div class="eyebrow">سرویس‌های من</div>
+      <div class="card">
+        ${allActive.length === 0
+          ? `<div class="state-msg"><span class="ic">◌</span>هنوز سرویسی ندارید.<br><span style="font-size:11.5px">از فروشگاه یک سرویس بخرید تا اینجا نمایش داده شود.</span></div>`
+          : allActive.map(orderCard).join("")}
+      </div>
+    `;
+    content.querySelectorAll(".quick-item[data-nav]").forEach((el) => {
+      el.onclick = () => switchTab(el.dataset.nav);
+    });
+    wirePromoCarousel(content);
+    allActive.filter((o) => o.link).forEach((o) => {
+      const links = (o.links && o.links.length) ? o.links : [o.link];
+      links.forEach((link, idx) => loadSubInfo(`${o.id}-${idx}`, link));
+    });
+    wireAddToAppButtons(content);
   } catch (e) {
-    handleErr(e);
-  } finally {
-    btn.disabled = false; btn.textContent = prevTxt;
+    content.innerHTML = errorState(e.message);
   }
 }
 
-async function renderSettings() {
-  const [settings, rate] = await Promise.all([
-    apiGet('/settings'),
-    apiGet('/exchange-rate').catch(e => ({ ok: false, rate: null, source: null, updated_at: null, error: e.message })),
-  ]);
-  const cur = loadTheme();
-  setContent(`
-    ${rateCardHtml(rate)}
-    <div class="card" style="margin-bottom:18px">
-      <div class="card-head">
-        <h3>ظاهر پنل</h3>
-        <div class="mode-toggle" id="mode-toggle">
-          <button data-mode="light" class="${cur.mode === 'light' ? 'active' : ''}">☀️ روشن</button>
-          <button data-mode="dark" class="${cur.mode === 'dark' ? 'active' : ''}">🌙 تیره</button>
+// ---------------------------------------------------------------------------
+// تب پروفایل
+// ---------------------------------------------------------------------------
+async function renderProfile() {
+  content.innerHTML = skeleton(3);
+  try {
+    const [me, orders, customConfigs] = await Promise.all([
+      api("/api/me"),
+      api("/api/orders"),
+      api("/api/custom-configs").catch(() => []),
+    ]);
+    setHeaderWallet(me.wallet_credit);
+    const active = orders.filter((o) => o.status === "approved" && !o.is_custom_config);
+    const activeCustom = customConfigs.filter((c) => !c.expires_at || new Date(c.expires_at) > new Date());
+    const activeCount = active.length + activeCustom.length;
+
+    const tgUser = (tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
+    const username = me.username || tgUser.username || "";
+    const photoUrl = tgUser.photo_url || "";
+    const initial = (me.first_name || "؟").trim().charAt(0).toUpperCase();
+
+    content.innerHTML = `
+      <div class="card profile-hero">
+        <div class="profile-avatar-wrap">
+          <div class="profile-avatar">${photoUrl ? `<img src="${photoUrl}" alt="" />` : initial}</div>
+        </div>
+        <div class="profile-name">${me.first_name || ""}</div>
+        ${username ? `<div class="profile-meta-row" id="copy-username"><span>📋</span>@${username}</div>` : ""}
+        <div class="profile-meta-row" id="copy-userid"><span>📋</span>شناسه: ${me.telegram_id}</div>
+
+        <div class="profile-info-grid">
+          <div class="stat-card"><div class="stat-num">${fmt(activeCount)}</div><div class="stat-label">سرویس فعال</div></div>
+          <div class="stat-card"><div class="stat-num">${fmt(me.wallet_credit)}</div><div class="stat-label">موجودی کیف پول</div></div>
+          <div class="profile-info-row"><span>تاریخ عضویت</span><b>${me.joined_at ? toJalaliStr(me.joined_at) : "-"}</b></div>
         </div>
       </div>
-      <div class="theme-grid" id="theme-grid">
-        ${THEMES.map(t => `
-          <div class="theme-opt ${cur.style === t.id ? 'active' : ''}" data-style="${t.id}">
-            <div class="swatch">${t.colors.map(c => `<i style="background:${c}"></i>`).join('')}</div>
-            <strong>${esc(t.name)}</strong>
-            <span>${esc(t.desc)}</span>
-          </div>`).join('')}
+
+      <div class="card">
+        <div class="list-row" data-nav="wallet">
+          <div class="list-row-main">
+            <div class="list-row-ic line">${ICON_WALLET}</div>
+            <div class="list-row-text"><div class="list-row-title">کیف پول و افزایش موجودی</div></div>
+          </div>
+          <span class="list-row-chev">‹</span>
+        </div>
+        <div class="list-row" data-nav="services">
+          <div class="list-row-main">
+            <div class="list-row-ic line">${ICON_SHIELD}</div>
+            <div class="list-row-text"><div class="list-row-title">سرویس‌های من</div></div>
+          </div>
+          <span class="list-row-chev">‹</span>
+        </div>
+        <div class="list-row" data-nav="referral">
+          <div class="list-row-main">
+            <div class="list-row-ic line">${ICON_REFERRAL}</div>
+            <div class="list-row-text"><div class="list-row-title">زیرمجموعه‌گیری</div></div>
+          </div>
+          <span class="list-row-chev">‹</span>
+        </div>
+        <div class="list-row" data-nav="test">
+          <div class="list-row-main">
+            <div class="list-row-ic line">${ICON_TEST}</div>
+            <div class="list-row-text"><div class="list-row-title">دریافت کانفیگ تست</div></div>
+          </div>
+          <span class="list-row-chev">‹</span>
+        </div>
+        <div class="list-row" data-nav="support">
+          <div class="list-row-main">
+            <div class="list-row-ic line">${ICON_SUPPORT}</div>
+            <div class="list-row-text"><div class="list-row-title">پشتیبانی</div></div>
+          </div>
+          <span class="list-row-chev">‹</span>
+        </div>
       </div>
-      <span class="card-sub">هر وقت خواستی می‌تونی طرح یا حالت روشن/تیره رو عوض کنی؛ فقط برای همین مرورگر ذخیره می‌شود.</span>
+    `;
+    content.querySelectorAll(".list-row[data-nav]").forEach((el) => {
+      el.onclick = () => switchTab(el.dataset.nav);
+    });
+    const cu = document.getElementById("copy-username");
+    if (cu) cu.onclick = (e) => { e.stopPropagation(); navigator.clipboard.writeText("@" + username); tg.HapticFeedback.notificationOccurred("success"); notify("کپی شد."); };
+    const ci = document.getElementById("copy-userid");
+    if (ci) ci.onclick = (e) => { e.stopPropagation(); navigator.clipboard.writeText(String(me.telegram_id)); tg.HapticFeedback.notificationOccurred("success"); notify("کپی شد."); };
+  } catch (e) {
+    content.innerHTML = errorState(e.message);
+  }
+}
+
+function expiringBanner(items) {
+  const rows = items.map((it) => {
+    const d = new Date(it.expires_at);
+    const days = Math.max(0, Math.ceil((d - new Date()) / 86400000));
+    return `<div class="expiring-row">
+      <span>📦 ${it.product_name}</span>
+      <b>${days === 0 ? "امروز منقضی می‌شود" : `${days} روز مانده`}</b>
+    </div>`;
+  }).join("");
+  return `
+    <div class="banner banner-warn">
+      <div class="banner-title"><span class="ic">⏰</span>سرویس‌های نزدیک به انقضا</div>
+      ${rows}
+      <div class="banner-hint">برای تمدید به بخش «فروشگاه» بروید.</div>
     </div>
+  `;
+}
 
-    ${renderSettingsGroups(settings)}
-
-    <div class="settings-save-bar">
-      <button class="btn btn-primary btn-block" id="settings-save">ذخیره تغییرات</button>
+function testConfigCard(status) {
+  if (!status.enabled) return "";
+  let body;
+  if (status.used) {
+    body = `<div class="state-msg"><span class="ic">✅</span>شما کانفیگ تست خود را دریافت کرده‌اید.</div>`;
+  } else if (status.available <= 0) {
+    body = `<div class="state-msg"><span class="ic">◌</span>موجودی کانفیگ تست تمام شده است.</div>`;
+  } else {
+    body = `<button class="btn" id="test-config-btn">دریافت کانفیگ تست رایگان</button>`;
+  }
+  return `
+    <div class="eyebrow">کانفیگ تست</div>
+    <div class="card" id="test-config-card">
+      <h3><span class="ic">🧪</span>کانفیگ تست رایگان</h3>
+      ${body}
     </div>
-  `);
-  $$('.theme-opt', content()).forEach(el => el.addEventListener('click', () => {
-    applyTheme(el.dataset.style, loadTheme().mode);
-    $$('.theme-opt', content()).forEach(o => o.classList.toggle('active', o === el));
-  }));
-  $$('#mode-toggle button', content()).forEach(btn => btn.addEventListener('click', () => {
-    applyTheme(loadTheme().style, btn.dataset.mode);
-    $$('#mode-toggle button', content()).forEach(b => b.classList.toggle('active', b === btn));
-  }));
-  bindSettingsGroupEvents(content());
-  $('#settings-save').addEventListener('click', () => collectAndSaveSettings(content(), $('#settings-save')));
-  $('#rate-refresh').addEventListener('click', async () => {
-    const btn = $('#rate-refresh');
-    btn.disabled = true; btn.textContent = 'در حال دریافت...';
-    try {
-      await apiPost('/exchange-rate/refresh');
-      toast('نرخ بروزرسانی شد.');
-    } catch (e) {
-      handleErr(e);
-    } finally {
-      renderSettings();
-    }
-  });
+  `;
 }
 
-/* ================================================================ logs === */
-let logsPage = 1;
-let logsFilter = { action: '', record_type: '', record_id: '' };
-const RECORD_TYPE_LABEL = {
-  order: 'سفارش', topup: 'شارژ کیف پول', user: 'کاربر', category: 'دسته‌بندی', product: 'محصول',
-  config: 'کانفیگ', discount: 'کد تخفیف', ticket: 'تیکت', reseller: 'نماینده', panel: 'پنل VPN',
-  setting: 'تنظیم', webadmin: 'ادمین پنل',
-};
-function goToLogsFor(recordType, recordId) {
-  logsFilter = { action: '', record_type: recordType, record_id: String(recordId) };
-  logsPage = 1;
-  goTo('logs');
-}
-function historyBtn(recordType, recordId) {
-  return hasPerm('system')
-    ? `<button class="btn btn-ghost btn-sm" data-history="${recordType}:${recordId}" title="تاریخچه">تاریخچه</button>` : '';
-}
-async function renderLogs() {
-  const actionsRes = await apiGet('/admin-logs/actions');
-  const qs = new URLSearchParams({ page: logsPage });
-  if (logsFilter.action) qs.set('action', logsFilter.action);
-  if (logsFilter.record_type) qs.set('record_type', logsFilter.record_type);
-  if (logsFilter.record_id) qs.set('record_id', logsFilter.record_id);
-  const res = await apiGet(`/admin-logs?${qs.toString()}`);
-  const pages = Math.max(Math.ceil(res.total / res.limit), 1);
-  setContent(`
-    <div class="card" style="margin-bottom:14px">
-      <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
-        <select class="input" id="lf-action">
-          <option value="">همه‌ی عملیات</option>
-          ${actionsRes.actions.map(a => `<option value="${a}" ${a === logsFilter.action ? 'selected' : ''}>${esc(a)}</option>`).join('')}
-        </select>
-        <select class="input" id="lf-type">
-          <option value="">همه‌ی رکوردها</option>
-          ${Object.keys(RECORD_TYPE_LABEL).map(t => `<option value="${t}" ${t === logsFilter.record_type ? 'selected' : ''}>${RECORD_TYPE_LABEL[t]}</option>`).join('')}
-        </select>
-        <input class="input" id="lf-id" placeholder="شناسه رکورد (مثلاً آیدی سفارش)" value="${esc(logsFilter.record_id)}">
-        <button class="btn btn-primary btn-sm" id="lf-apply">اعمال فیلتر</button>
-        <button class="btn btn-sm" id="lf-clear">پاک‌کردن</button>
+async function claimTestConfig(btn) {
+  btn.disabled = true;
+  btn.textContent = "در حال دریافت...";
+  try {
+    const r = await api("/api/test-config/claim", { method: "POST" });
+    const card = document.getElementById("test-config-card");
+    card.innerHTML = `
+      <h3><span class="ic">🧪</span>کانفیگ تست رایگان</h3>
+      <div class="link-box">${r.link}</div>
+      <div class="qr-row">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(r.link)}" width="96" height="96" alt="QR" />
+        <button class="btn small outline" onclick="navigator.clipboard.writeText('${r.link}');tg.HapticFeedback.notificationOccurred('success')">📋 کپی لینک</button>
       </div>
+    `;
+    tg.HapticFeedback.notificationOccurred("success");
+  } catch (e) {
+    notify("خطا: " + e.message);
+    btn.disabled = false;
+    btn.textContent = "دریافت کانفیگ تست رایگان";
+  }
+}
+
+function referralCard(r) {
+  return `
+    <div class="eyebrow">زیرمجموعه‌گیری</div>
+    <div class="card">
+      <h3><span class="ic">🤝</span>دعوت از دوستان</h3>
+      <div class="stat-row"><span>پورسانت شما</span><b>${r.percent}٪ از اولین خرید</b></div>
+      <div class="stat-row"><span>تعداد زیرمجموعه‌ها</span><b>${fmt(r.count)}</b></div>
+      <div class="stat-row"><span>اعتبار کسب‌شده</span><b>${fmt(r.credit)} تومان</b></div>
+      ${r.link ? `
+      <div class="link-box" style="margin-top:8px">${r.link}</div>
+      <button class="btn small outline" id="copy-referral-btn" data-link="${r.link}" style="width:100%;margin-top:8px">📋 کپی لینک دعوت</button>
+      ` : ""}
     </div>
-    <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>ادمین</th><th>عملیات</th><th>رکورد</th><th>جزئیات</th><th>تاریخ</th></tr></thead>
-      <tbody>${res.items.map(l => `<tr>
-        <td class="mono">${l.admin_id}</td><td>${esc(l.action)}</td>
-        <td>${l.record_type ? `<span class="chip">${RECORD_TYPE_LABEL[l.record_type] || esc(l.record_type)} #${esc(l.record_id)}</span>` : '—'}</td>
-        <td>${esc(l.details)}</td><td class="mono">${fmtDate(l.created_at)}</td>
-      </tr>`).join('') || '<tr><td colspan="5" class="empty-state">لاگی ثبت نشده</td></tr>'}</tbody>
-    </table></div>
-    <div class="pager">${Array.from({ length: pages }, (_, i) => i + 1).map(p => `<button class="btn btn-sm ${p === logsPage ? 'btn-primary' : ''}" data-page="${p}">${p}</button>`).join('')}</div>
-    </div>
-  `);
-  $$('[data-page]', content()).forEach(b => b.addEventListener('click', () => { logsPage = Number(b.dataset.page); renderLogs(); }));
-  $('#lf-apply').addEventListener('click', () => {
-    logsFilter = { action: $('#lf-action').value, record_type: $('#lf-type').value, record_id: $('#lf-id').value.trim() };
-    logsPage = 1; renderLogs();
-  });
-  $('#lf-clear').addEventListener('click', () => { logsFilter = { action: '', record_type: '', record_id: '' }; logsPage = 1; renderLogs(); });
+  `;
 }
 
-/* ========================================================== webadmins === */
-const PERM_LABEL = {
-  orders: 'سفارش‌ها و شارژ کیف پول', users: 'کاربران (بلاک/کیف پول)', catalog: 'محصولات و بانک کانفیگ',
-  discounts: 'کدهای تخفیف', tickets: 'تیکت‌ها و چت زنده', broadcast: 'پیام همگانی',
-  resellers: 'نمایندگی‌ها', panels: 'پنل‌های VPN و نرخ ارز', system: 'سیستم، بکاپ (وضعیت) و لاگ‌ها',
-  settings: 'تنظیمات و برندینگ', backup: 'ساخت بکاپ فوری',
-};
+// ---------------------------------------------------------------------------
+// تب سرویس‌ها (لیست کامل با جست‌وجو و فیلتر وضعیت)
+// ---------------------------------------------------------------------------
 
-function permChecklistHtml(idPrefix, selected) {
-  return `<div class="chip-row" style="flex-wrap:wrap;gap:6px">${PERM_KEYS.map(p => `
-    <label style="display:flex;align-items:center;gap:4px;font-size:12px;background:var(--panel-2);padding:4px 8px;border-radius:7px">
-      <input type="checkbox" id="${idPrefix}-${p}" data-perm="${p}" ${selected.includes(p) ? 'checked' : ''}>${PERM_LABEL[p] || p}
-    </label>`).join('')}</div>`;
-}
-function readPermChecklist(root, idPrefix) {
-  return PERM_KEYS.filter(p => $(`#${idPrefix}-${p}`, root)?.checked);
+let servicesFilter = "all"; // all | active | expired | inactive
+let servicesQuery = "";
+
+function enterServicesTab() {
+  servicesFilter = "all";
+  servicesQuery = "";
+  renderServices();
 }
 
-let PERM_KEYS = [];
-async function renderWebAdmins() {
-  if (!PERM_KEYS.length) PERM_KEYS = (await apiGet('/web-admins/permissions')).permissions;
-  const admins = await apiGet('/web-admins');
-  setContent(`
-    <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-admin">+ کاربر پنل جدید</button></div>
-    <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>یوزرنیم</th><th>نقش</th><th>مجوزها</th><th>وضعیت</th><th>آخرین ورود</th><th>عملیات</th></tr></thead>
-      <tbody>${admins.map(a => `<tr>
-        <td>${esc(a.username)}</td>
-        <td><span class="badge badge-${a.role}">${ROLE_LABEL[a.role]}</span></td>
-        <td>${a.role === 'owner' ? '<span class="card-sub">همه</span>' : `<span class="card-sub">${a.permissions.length ? a.permissions.map(p => PERM_LABEL[p] || p).join('، ') : 'بدون مجوز (فقط مشاهده)'}</span>`}</td>
-        <td>${a.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
-        <td class="mono">${fmtDate(a.last_login)}</td>
-        <td>${a.role === 'owner' ? '<span class="card-sub">مالک</span>' : `
-          <button class="btn btn-sm" data-edit-perms="${a.id}">ویرایش مجوزها</button>
-          <button class="btn btn-sm" data-toggle-active="${a.id}" data-active="${a.is_active}">${a.is_active ? 'غیرفعال' : 'فعال'}</button>
-          <button class="btn btn-danger btn-sm" data-del="${a.id}">حذف</button>`}</td>
-      </tr>`).join('')}</tbody>
-    </table></div></div>
-  `);
-  $('#add-admin').addEventListener('click', () => openModal('کاربر پنل جدید', `
-    <div class="form-grid">
-      <input class="input" id="na-user" placeholder="یوزرنیم">
-      <input class="input" id="na-pass" type="password" placeholder="پسورد (حداقل ۸ کاراکتر)">
-      <div class="card-sub" style="margin-top:4px">مجوزها:</div>
-      ${permChecklistHtml('na', [])}
-      <button class="btn btn-primary" id="na-save">ثبت</button>
-    </div>`, (body, close) => {
-    $('#na-save', body).addEventListener('click', async () => {
-      try {
-        await apiPost('/web-admins', {
-          username: $('#na-user', body).value.trim(), password: $('#na-pass', body).value,
-          role: 'admin', permissions: readPermChecklist(body, 'na'),
-        });
-        toast('کاربر ساخته شد.'); close(); renderWebAdmins();
-      } catch (e) { handleErr(e); }
+function serviceStatusKey(o) {
+  if (o.status !== "approved") return "inactive";
+  if (o.expires_at) {
+    if (new Date(o.expires_at) < new Date()) return "expired";
+  }
+  return "active";
+}
+
+async function renderServices() {
+  content.innerHTML = skeleton(3);
+  try {
+    const [orders, customConfigs] = await Promise.all([
+      api("/api/orders"),
+      api("/api/custom-configs").catch(() => []),
+    ]);
+    const customCards = customConfigs.map((c) => ({
+      id: `cc-${c.id}`,
+      product_name: `🛠 کانفیگ شخصی «${c.username}» (${c.volume_gb} گیگ / ${c.duration_days} روز)`,
+      quantity: 1,
+      status: "approved",
+      is_custom_config: true,
+      link: c.subscription_url,
+      links: c.subscription_url ? [c.subscription_url] : [],
+      expires_at: c.expires_at || null,
+    }));
+    const all = [...orders, ...customCards];
+
+    const FILTERS = [
+      { key: "all", label: "همه" },
+      { key: "active", label: "فعال" },
+      { key: "expired", label: "منقضی" },
+      { key: "inactive", label: "غیرفعال" },
+    ];
+    const filtered = all.filter((o) => {
+      if (servicesFilter !== "all" && serviceStatusKey(o) !== servicesFilter) return false;
+      if (servicesQuery && !o.product_name.toLowerCase().includes(servicesQuery.toLowerCase())) return false;
+      return true;
     });
-  }));
-  $$('[data-edit-perms]', content()).forEach(b => b.addEventListener('click', () => {
-    const a = admins.find(x => x.id === Number(b.dataset.editPerms));
-    openModal(`مجوزهای ${esc(a.username)}`, `
-      ${permChecklistHtml('ep', a.permissions)}
-      <button class="btn btn-primary" id="ep-save" style="margin-top:14px">ذخیره</button>
-    `, (body, close) => {
-      $('#ep-save', body).addEventListener('click', async () => {
-        try {
-          await apiPost(`/web-admins/${a.id}/permissions`, { permissions: readPermChecklist(body, 'ep') });
-          toast('مجوزها به‌روزرسانی شد.'); close(); renderWebAdmins();
-        } catch (e) { handleErr(e); }
-      });
-    });
-  }));
-  $$('[data-toggle-active]', content()).forEach(b => b.addEventListener('click', async () => {
-    try { await apiPost(`/web-admins/${b.dataset.toggleActive}/active`, { active: b.dataset.active !== 'true' }); renderWebAdmins(); } catch (e) { handleErr(e); }
-  }));
-  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
-    if (!confirm('این حساب حذف شود؟')) return;
-    try { await apiDelete(`/web-admins/${b.dataset.del}`); toast('حذف شد.'); renderWebAdmins(); } catch (e) { handleErr(e); }
-  }));
-}
 
-/* ============================================================= system === */
-async function renderSystem() {
-  const jobs = await apiGet('/system/jobs');
-  const r = jobs.renewal;
-  const stockRows = jobs.stock;
-  const lowCount = stockRows.filter(p => p.low).length;
-  const backupStatus = await apiGet('/system/backup/status');
-  const isOwner = ME.role === 'owner';
-
-  setContent(`
-    <div class="card" style="margin-bottom:18px">
-      <div class="card-head"><h3>یادآوری‌های تمدید/حجم</h3></div>
-      <p class="card-sub" style="margin-bottom:10px">این بخش فقط وضعیت آخرین اجرا را نشان می‌دهد؛ زمان‌بندی اجرا (هر ۱ ساعت) از کد بات کنترل می‌شود و از اینجا قابل تغییر نیست.</p>
+    content.innerHTML = `
+      <input class="input" id="services-search" type="text" placeholder="جست‌وجوی سرویس..."
+        style="direction:rtl;text-align:right;margin-bottom:10px" value="${escHtml(servicesQuery)}" />
       <div class="chip-row">
-        <span class="chip">آخرین اجرا: ${r.last_run ? fmtDate(r.last_run) : 'هنوز اجرا نشده'}</span>
-        <span class="chip">یادآوری تاریخ ارسال‌شده: ${fmt(r.last_date_sent)}</span>
-        <span class="chip">یادآوری حجم ارسال‌شده: ${fmt(r.last_volume_sent)}</span>
+        ${FILTERS.map((f) => `<button class="chip ${servicesFilter === f.key ? "active" : ""}" data-filter="${f.key}">${f.label}</button>`).join("")}
       </div>
-    </div>
-
-    <div class="card" style="margin-bottom:18px">
-      <div class="card-head">
-        <h3>وضعیت لحظه‌ای موجودی محصولات</h3>
-        <span class="card-sub">${lowCount ? `${lowCount} محصول زیر آستانه هشدار` : 'همه محصولات موجودی کافی دارند'}</span>
-      </div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>محصول</th><th>موجودی</th><th>آستانه هشدار</th><th>وضعیت</th></tr></thead>
-        <tbody>${stockRows.map(p => `<tr>
-          <td>${esc(p.name)}</td>
-          <td class="mono">${fmt(p.stock)}</td>
-          <td class="mono">${fmt(p.threshold)}</td>
-          <td>${p.low
-            ? `<span class="badge badge-rejected">کم${p.alerted ? ' · هشدار ارسال شد' : ''}</span>`
-            : '<span class="badge badge-approved">کافی</span>'}</td>
-        </tr>`).join('') || `<tr><td colspan="4" class="empty-state"><div class="icon">${svg('empty')}</div>محصولی برای نمایش نیست</td></tr>`}</tbody>
-      </table></div>
-    </div>
-
-    <div class="card" style="margin-bottom:18px">
-      <div class="card-head"><h3>بکاپ دیتابیس</h3></div>
-      <div class="chip-row" style="margin-bottom:14px">
-        <span class="chip">آخرین بکاپ: ${backupStatus.last_backup_at ? fmtDate(backupStatus.last_backup_at) : 'ثبت نشده'}</span>
-        <span class="chip">حجم آخرین بکاپ: ${backupStatus.last_backup_size_mb ?? '—'} مگابایت</span>
-        <span class="chip">تعداد نسخه‌های نگه‌داشته‌شده: ${fmt(backupStatus.count)}</span>
-      </div>
-      ${isOwner ? `
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px">
-        <button class="btn btn-primary" id="backup-create-btn">📥 گرفتن بکاپ فوری و ارسال به تلگرام</button>
-      </div>
-      <div id="backup-create-status"></div>
-
-      <div class="card-head" style="margin-top:10px"><h3>بازیابی از فایل بکاپ</h3></div>
-      <p class="card-sub" style="margin-bottom:10px">⚠️ با تایید، کل دیتابیس فعلی با فایل آپلودی جایگزین می‌شود. این کار قابل بازگشت نیست مگر با بکاپ دیگر. قبل از جایگزینی، یک نسخه از وضعیت فعلی خودکار ذخیره می‌شود.</p>
-      <input type="file" class="input" id="restore-file" accept=".db,.sqlite,.sqlite3" style="margin-bottom:10px">
-      <div id="restore-area"></div>
-      ` : `<p class="card-sub">گرفتن بکاپ فوری و بازیابی فقط برای مالک در دسترس است.</p>`}
-    </div>
-  `);
-
-  if (!isOwner) return;
-
-  $('#backup-create-btn').addEventListener('click', async () => {
-    const btn = $('#backup-create-btn');
-    const status = $('#backup-create-status', content());
-    btn.disabled = true;
-    status.innerHTML = '<span class="card-sub">⏳ در حال ساخت و ارسال بکاپ...</span>';
-    try {
-      const res = await apiPost('/system/backup/create');
-      status.innerHTML = `<span class="card-sub">✅ بکاپ (${esc(res.filename)}, ${res.size_mb} مگابایت) ساخته شد و به ${res.sent} ادمین ارسال شد${res.failed ? ` (${res.failed} ناموفق)` : ''}.</span>`;
-      toast('بکاپ گرفته شد.');
-    } catch (e) {
-      status.innerHTML = '';
-      handleErr(e);
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  let restorePendingFile = null;
-
-  function renderRestoreArea() {
-    const area = $('#restore-area', content());
-    if (!restorePendingFile) {
-      area.innerHTML = '';
-      return;
-    }
-    const sizeMb = (restorePendingFile.size / (1024 * 1024)).toFixed(1);
-    area.innerHTML = `
-      <div class="card" style="margin-top:0;border-color:var(--rose)">
-        <p class="card-sub" style="margin:0 0 8px">📦 فایل انتخاب‌شده: ${esc(restorePendingFile.name)} (${sizeMb} مگابایت)</p>
-        <p class="card-sub" style="margin:0 0 10px">⚠️ مرحله ۱: این عمل کل دیتابیس فعلی رو با این فایل جایگزین می‌کنه. مطمئنی؟</p>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-danger btn-sm" id="restore-step1-btn">بله، ادامه بده</button>
-          <button class="btn btn-ghost btn-sm" id="restore-cancel-btn">انصراف</button>
-        </div>
+      <div id="services-list">
+        ${filtered.length === 0
+          ? `<div class="state-msg"><span class="ic">◌</span>سرویسی یافت نشد.</div>`
+          : `<div class="card">${filtered.map((o) => serviceStatusKey(o) === "active" ? orderCard(o) : serviceInactiveRow(o)).join("")}</div>`}
       </div>
     `;
-    $('#restore-step1-btn', area).addEventListener('click', () => renderRestoreConfirmStep());
-    $('#restore-cancel-btn', area).addEventListener('click', cancelRestore);
+
+    document.getElementById("services-search").oninput = (e) => {
+      servicesQuery = e.target.value;
+      renderServices();
+    };
+    content.querySelectorAll(".chip[data-filter]").forEach((el) => {
+      el.onclick = () => { servicesFilter = el.dataset.filter; renderServices(); };
+    });
+
+    filtered.filter((o) => serviceStatusKey(o) === "active" && o.link).forEach((o) => {
+      const links = (o.links && o.links.length) ? o.links : [o.link];
+      links.forEach((link, idx) => loadSubInfo(`${o.id}-${idx}`, link));
+    });
+    wireAddToAppButtons(content);
+  } catch (e) {
+    content.innerHTML = errorState(e.message);
   }
+}
 
-  function renderRestoreConfirmStep() {
-    const area = $('#restore-area', content());
-    area.innerHTML = `
-      <div class="card" style="margin-top:0;border-color:var(--rose)">
-        <p class="card-sub" style="margin:0 0 10px">⚠️ مرحله ۲ (نهایی): برای تایید نهایی، عبارت <strong class="mono">RESTORE</strong> رو دقیقاً تایپ کن.</p>
-        <input class="input" id="restore-confirm-input" placeholder="RESTORE" style="margin-bottom:10px">
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-danger btn-sm" id="restore-final-btn">✅ تایید نهایی و جایگزینی</button>
-          <button class="btn btn-ghost btn-sm" id="restore-cancel-btn2">انصراف</button>
-        </div>
-        <div id="restore-final-status" style="margin-top:10px"></div>
+function serviceInactiveRow(o) {
+  const key = serviceStatusKey(o);
+  const badgeClass = key === "expired" ? "pending" : "rejected";
+  const label = key === "expired" ? "منقضی‌شده" : (o.status === "pending" ? "در انتظار تایید" : "رد‌شده");
+  const exp = o.expires_at ? toJalaliStr(o.expires_at) : "";
+  return `
+    <div class="order-block">
+      <div class="stat-row">
+        <span>${o.product_name}${o.quantity > 1 ? ` × ${o.quantity}` : ""}</span>
+        <span class="badge ${badgeClass}">${label}${exp ? ` · ${exp}` : ""}</span>
       </div>
-    `;
-    $('#restore-cancel-btn2', area).addEventListener('click', cancelRestore);
-    $('#restore-final-btn', area).addEventListener('click', async () => {
-      const phrase = $('#restore-confirm-input', area).value.trim();
-      if (phrase.toUpperCase() !== 'RESTORE') {
-        $('#restore-final-status', area).innerHTML = '<span class="card-sub" style="color:var(--rose)">عبارت را دقیقاً RESTORE وارد کن.</span>';
+    </div>
+  `;
+}
+
+function orderCard(o) {
+  const exp = o.expires_at ? toJalaliStr(o.expires_at) : "نامحدود";
+  const links = (o.links && o.links.length) ? o.links : (o.link ? [o.link] : []);
+  return `
+    <div class="order-block">
+      <div class="stat-row"><span>${o.product_name}${o.quantity > 1 ? ` × ${o.quantity}` : ""}</span><span class="badge approved">فعال تا ${exp}</span></div>
+      ${links.map((link, idx) => `
+      ${links.length > 1 ? `<div class="hint-text" style="margin:8px 0 4px">🔢 کانفیگ ${idx + 1} از ${links.length}</div>` : ""}
+      <div class="sub-info" id="sub-info-${o.id}-${idx}"><div class="sub-info-loading">در حال دریافت اطلاعات مصرف...</div></div>
+      <div class="link-box">${link}</div>
+      <div class="qr-row">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(link)}" width="96" height="96" alt="QR" />
+        <button class="btn small outline" onclick="navigator.clipboard.writeText('${link}');tg.HapticFeedback.notificationOccurred('success')">📋 کپی لینک</button>
+      </div>
+      ${renderAddToAppBlock(`${o.id}-${idx}`, link, o.product_name)}
+      `).join("")}
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// افزودن خودکار اشتراک به اپلیکیشن‌های وی‌پی‌ان (iOS / اندروید)
+// ---------------------------------------------------------------------------
+
+const VPN_APPS = {
+  ios: [
+    {
+      key: "shadowrocket", name: "Shadowrocket", icon: "🚀",
+      store: "https://apps.apple.com/app/id932747118",
+      deepLink: (sub, remark) => `shadowrocket://add/sub/${btoa(unescape(encodeURIComponent(sub)))}?remark=${encodeURIComponent(remark)}`,
+    },
+    {
+      key: "streisand", name: "Streisand", icon: "🎗",
+      store: "https://apps.apple.com/app/id6450534064",
+      deepLink: (sub) => `streisand://import/${encodeURIComponent(sub)}`,
+    },
+    {
+      key: "v2box", name: "V2Box", icon: "📦",
+      store: "https://apps.apple.com/app/id6446814690",
+      deepLink: (sub, remark) => `v2box://install-sub?url=${encodeURIComponent(sub)}&name=${encodeURIComponent(remark)}`,
+    },
+  ],
+  android: [
+    {
+      key: "hiddify", name: "Hiddify Next", icon: "🛡",
+      store: "https://play.google.com/store/apps/details?id=app.hiddify.com",
+      androidPackage: "app.hiddify.com",
+      deepLink: (sub, remark) => `hiddify://import/${encodeURIComponent(sub)}#${encodeURIComponent(remark)}`,
+    },
+    {
+      key: "v2raytun", name: "v2RayTun", icon: "⚡",
+      store: "https://play.google.com/store/apps/details?id=com.v2raytun.android",
+      androidPackage: "com.v2raytun.android",
+      deepLink: (sub) => `v2raytun://import/${encodeURIComponent(sub)}`,
+    },
+    {
+      key: "v2box", name: "V2Box", icon: "📦",
+      store: "https://play.google.com/store/apps/details?id=dev.hexasoftware.v2box",
+      androidPackage: "dev.hexasoftware.v2box",
+      deepLink: (sub, remark) => `v2box://install-sub?url=${encodeURIComponent(sub)}&name=${encodeURIComponent(remark)}`,
+    },
+    {
+      key: "v2rayng", name: "v2rayNG", icon: "🔷",
+      store: "https://github.com/2dust/v2rayNG/releases/latest",
+      androidPackage: "com.v2ray.ang",
+      deepLink: (sub, remark) => `v2rayng://install-sub?url=${encodeURIComponent(sub)}&name=${encodeURIComponent(remark)}`,
+    },
+  ],
+};
+
+function renderAddToAppBlock(orderId, link, productName) {
+  return `
+    <div class="add-to-app-wrap" style="margin-top:10px">
+      <button class="btn small outline add-to-app-toggle" data-order-id="${orderId}" style="width:100%">📲 افزودن به برنامه</button>
+      <div class="add-to-app-panel" id="add-to-app-panel-${orderId}" data-link="${escHtml(link)}" data-name="${escHtml(productName || "ShopVPN")}" style="display:none;margin-top:8px"></div>
+    </div>
+  `;
+}
+
+function addToAppPlatformPickerHtml(orderId) {
+  return `
+    <div style="display:flex;gap:8px">
+      <button class="btn small add-to-app-platform" data-order-id="${orderId}" data-platform="ios" style="width:50%">📱 آیفون (iOS)</button>
+      <button class="btn small add-to-app-platform" data-order-id="${orderId}" data-platform="android" style="width:50%">🤖 اندروید</button>
+    </div>
+  `;
+}
+
+function addToAppListHtml(orderId, platform) {
+  const apps = VPN_APPS[platform] || [];
+  return `
+    <p class="hint-text" style="margin:0 0 8px">برنامه‌ات رو انتخاب کن: «دانلود» صفحه‌ی برنامه رو تو مارکت باز می‌کنه، «افزودن» اگه نصب باشه اشتراک رو مستقیم بهش می‌فرسته.</p>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${apps.map((a) => `
+        <div class="add-to-app-row" style="display:flex;align-items:center;gap:6px">
+          <span style="flex:1;text-align:right;font-size:12.5px;color:var(--text-dim,#c9c4e0);padding:0 4px">${a.icon} ${a.name}</span>
+          <button class="btn small outline add-to-app-download" data-platform="${platform}" data-app="${a.key}" style="flex:0 0 auto">⬇️ دانلود</button>
+          <button class="btn small add-to-app-pick" data-order-id="${orderId}" data-platform="${platform}" data-app="${a.key}" style="flex:0 0 auto">📲 افزودن</button>
+        </div>
+      `).join("")}
+    </div>
+    <button class="btn small outline add-to-app-back" data-order-id="${orderId}" style="width:100%;margin-top:8px">⬅️ بازگشت</button>
+  `;
+}
+
+function tryOpenAppOrStore(deepLink, storeUrl, androidPackage = "") {
+  // Telegram Mini Apps cannot use tg.openLink() for arbitrary custom schemes:
+  // Telegram documents that openLink is restricted to allowed URL schemes.
+  // Also, assigning window.location to hiddify:// / v2rayng:// navigates the
+  // Telegram WebView and produces ERR_UNKNOWN_URL_SCHEME.
+  //
+  // So we first ask the OS URL handler through a real anchor click. On
+  // Android, if that is intercepted by the WebView, we make a second attempt
+  // with an Android intent:// URL bound to the app package.
+  let backgrounded = false;
+  let settled = false;
+  let intentTried = false;
+
+  const markBackgrounded = () => { backgrounded = true; };
+  const cleanup = () => {
+    document.removeEventListener("visibilitychange", markBackgrounded);
+    window.removeEventListener("blur", markBackgrounded);
+  };
+  const isAndroid = /Android/i.test(navigator.userAgent || "");
+
+  document.addEventListener("visibilitychange", markBackgrounded);
+  window.addEventListener("blur", markBackgrounded);
+
+  const launch = (url) => {
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    try { a.click(); } catch (e) {}
+    setTimeout(() => { try { a.remove(); } catch (e) {} }, 1000);
+  };
+
+  // First attempt: direct custom-scheme URL.
+  launch(deepLink);
+
+  // Android fallback: intent:// lets Android resolve the package without
+  // navigating the Telegram WebView to the custom scheme itself.
+  const tryIntent = () => {
+    if (settled || backgrounded || !isAndroid || !androidPackage || intentTried) return;
+    intentTried = true;
+    try {
+      const u = new URL(deepLink);
+      let body = `${u.host}${u.pathname}${u.search}`;
+      // The fragment is optional for these import links and conflicts with
+      // Android's #Intent separator, so omit it in the package fallback.
+      const intentUrl = `intent://${body}#Intent;scheme=${u.protocol.slice(0, -1)};package=${androidPackage};end`;
+      launch(intentUrl);
+    } catch (e) {}
+  };
+
+  setTimeout(tryIntent, 350);
+
+  const fallback = () => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    if (!backgrounded) {
+      if (tg && typeof tg.openLink === "function") {
+        tg.openLink(storeUrl);
+      } else {
+        window.open(storeUrl, "_blank", "noopener,noreferrer");
+      }
+    }
+  };
+
+  // Allow enough time for the OS to switch to the installed app.
+  setTimeout(fallback, 2200);
+}
+
+function wireAddToAppButtons(root) {
+  root.querySelectorAll(".add-to-app-toggle").forEach((btn) => {
+    btn.onclick = () => {
+      const orderId = btn.dataset.orderId;
+      const panel = document.getElementById(`add-to-app-panel-${orderId}`);
+      if (!panel) return;
+      const isOpen = panel.style.display !== "none";
+      if (isOpen) {
+        panel.style.display = "none";
         return;
       }
-      const statusEl = $('#restore-final-status', area);
-      statusEl.innerHTML = '<span class="card-sub">⏳ در حال بازیابی...</span>';
-      try {
-        const formData = new FormData();
-        formData.append('file', restorePendingFile);
-        formData.append('confirm_phrase', phrase);
-        const res = await fetch('/api/system/backup/restore', { method: 'POST', credentials: 'include', body: formData });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.detail || 'خطای ناشناخته');
-        statusEl.innerHTML = `<span class="card-sub">✅ دیتابیس بازیابی شد. نسخه‌ی قبلی به‌عنوان «${esc(data.pre_restore_backup)}» ذخیره شد. صفحه را رفرش کن.</span>`;
-        restorePendingFile = null;
-        $('#restore-file').value = '';
-      } catch (e) {
-        statusEl.innerHTML = `<span class="card-sub" style="color:var(--rose)">${esc(e.message)}</span>`;
+      panel.innerHTML = addToAppPlatformPickerHtml(orderId);
+      panel.style.display = "";
+      wireAddToAppButtons(panel);
+    };
+  });
+  root.querySelectorAll(".add-to-app-platform").forEach((btn) => {
+    btn.onclick = () => {
+      const orderId = btn.dataset.orderId;
+      const platform = btn.dataset.platform;
+      const panel = document.getElementById(`add-to-app-panel-${orderId}`);
+      if (!panel) return;
+      panel.innerHTML = addToAppListHtml(orderId, platform);
+      wireAddToAppButtons(panel);
+    };
+  });
+  root.querySelectorAll(".add-to-app-back").forEach((btn) => {
+    btn.onclick = () => {
+      const orderId = btn.dataset.orderId;
+      const panel = document.getElementById(`add-to-app-panel-${orderId}`);
+      if (!panel) return;
+      panel.innerHTML = addToAppPlatformPickerHtml(orderId);
+      wireAddToAppButtons(panel);
+    };
+  });
+  root.querySelectorAll(".add-to-app-download").forEach((btn) => {
+    btn.onclick = () => {
+      const platform = btn.dataset.platform;
+      const appKey = btn.dataset.app;
+      const app = (VPN_APPS[platform] || []).find((a) => a.key === appKey);
+      if (!app) return;
+      tg.HapticFeedback.notificationOccurred("success");
+      if (tg && typeof tg.openLink === "function") {
+        tg.openLink(app.store);
+      } else {
+        window.open(app.store, "_blank", "noopener,noreferrer");
       }
-    });
-  }
+    };
+  });
+  root.querySelectorAll(".add-to-app-pick").forEach((btn) => {
+    btn.onclick = () => {
+      const orderId = btn.dataset.orderId;
+      const platform = btn.dataset.platform;
+      const appKey = btn.dataset.app;
+      const panel = document.getElementById(`add-to-app-panel-${orderId}`);
+      if (!panel) return;
+      const link = panel.dataset.link;
+      const name = panel.dataset.name;
+      const app = (VPN_APPS[platform] || []).find((a) => a.key === appKey);
+      if (!app) return;
+      tg.HapticFeedback.notificationOccurred("success");
+      tryOpenAppOrStore(app.deepLink(link, name), app.store, app.androidPackage);
+    };
+  });
+}
 
-  function cancelRestore() {
-    restorePendingFile = null;
-    $('#restore-file').value = '';
-    renderRestoreArea();
-  }
+function fmtGB(bytes) {
+  return (bytes / (1024 ** 3)).toFixed(2);
+}
 
-  $('#restore-file').addEventListener('change', e => {
-    const file = e.target.files[0];
-    if (!file) { restorePendingFile = null; renderRestoreArea(); return; }
-    if (!/\.(db|sqlite|sqlite3)$/i.test(file.name)) {
-      toast('فایل باید پسوند .db یا .sqlite داشته باشد.', true);
-      e.target.value = '';
+async function loadSubInfo(orderId, link) {
+  const box = document.getElementById(`sub-info-${orderId}`);
+  if (!box) return;
+  try {
+    const info = await api(`/api/sub-info?link=${encodeURIComponent(link)}`);
+    if (!box.isConnected) return;
+    if (!info.ok) {
+      box.innerHTML = `<div class="sub-info-error">⚠️ اطلاعات مصرف در دسترس نیست</div>`;
       return;
     }
-    restorePendingFile = file;
-    renderRestoreArea();
-  });
+    const used = info.upload + info.download;
+    const total = info.total;
+    let usageHtml;
+    if (total > 0) {
+      const percent = Math.min(100, Math.round((used / total) * 100));
+      const remaining = Math.max(0, total - used);
+      usageHtml = `
+        <div class="sub-info-row"><span>مصرف</span><b>${fmtGB(used)} از ${fmtGB(total)} گیگابایت</b></div>
+        <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
+        <div class="sub-info-row"><span>باقی‌مانده</span><b>${fmtGB(remaining)} گیگابایت</b></div>
+      `;
+    } else {
+      usageHtml = `<div class="sub-info-row"><span>مصرف</span><b>${fmtGB(used)} گیگابایت (نامحدود)</b></div>`;
+    }
+    let expiryHtml = `<div class="sub-info-row"><span>انقضا</span><b>نامحدود</b></div>`;
+    if (info.expire) {
+      const expDate = new Date(info.expire * 1000);
+      const daysLeft = Math.max(0, Math.ceil((expDate - new Date()) / 86400000));
+      expiryHtml = `<div class="sub-info-row"><span>انقضا</span><b>${toJalaliStr(expDate)} (${daysLeft} روز مانده)</b></div>`;
+    }
+    box.innerHTML = usageHtml + expiryHtml;
+  } catch (e) {
+    if (box.isConnected) box.innerHTML = `<div class="sub-info-error">⚠️ اطلاعات مصرف در دسترس نیست</div>`;
+  }
 }
 
-/* ============================================================= account === */
-async function renderAccount() {
-  setContent(`
-    <div class="card" style="max-width:420px">
-      <div class="card-head"><h3>تغییر پسورد</h3></div>
-      <div class="form-grid">
-        <input class="input" id="acc-cur" type="password" placeholder="پسورد فعلی">
-        <input class="input" id="acc-new" type="password" placeholder="پسورد جدید (حداقل ۸ کاراکتر)">
-        <button class="btn btn-primary" id="acc-save">تغییر پسورد</button>
+// ---------------------------------------------------------------------------
+// کارت بانکی + آپلود رسید (مشترک بین «شارژ کیف پول» و «پرداخت سفارش»)
+// ---------------------------------------------------------------------------
+function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, successText, cryptoEnabled, createCryptoInvoice }) {
+  box.innerHTML = `
+    <h3><span class="ic">💳</span>واریز و ارسال رسید</h3>
+    <div class="bank-card">
+      <div class="bank-card-top">
+        <div class="bank-card-chip"></div>
+        <div class="bank-card-brand">SHOP PAY</div>
+      </div>
+      <div class="bank-card-number">${formatCardNumber(cardNumber)}</div>
+      <div class="bank-card-bottom">
+        <div>
+          <div class="bank-card-holder-label">به نام</div>
+          <div class="bank-card-holder">${cardHolder || "---"}</div>
+        </div>
+        <div class="bank-card-amount">${fmt(amount)} تومان</div>
       </div>
     </div>
-  `);
-  $('#acc-save').addEventListener('click', async () => {
+    <button class="copy-chip" id="copy-card-btn" style="width:100%;margin-bottom:12px">📋 کپی شماره کارت</button>
+
+    <label class="receipt-upload" id="receipt-drop">
+      <span class="ic">🧾</span>
+      <span id="receipt-label">مبلغ را واریز کن و عکس رسید را همینجا انتخاب کن</span>
+      <input type="file" id="receipt-file" accept="image/*" />
+    </label>
+    <img id="receipt-preview" class="receipt-preview" style="display:none" />
+    <button class="btn" id="send-receipt-btn" disabled>ارسال رسید برای تایید</button>
+
+    ${cryptoEnabled ? `
+      <div style="display:flex;align-items:center;gap:8px;margin:16px 0">
+        <div style="flex:1;height:1px;background:var(--border,rgba(255,255,255,.1))"></div>
+        <span class="hint-text" style="margin:0">یا</span>
+        <div style="flex:1;height:1px;background:var(--border,rgba(255,255,255,.1))"></div>
+      </div>
+      <button class="btn outline" id="pay-crypto-btn" style="width:100%">🪙 پرداخت با ارز دیجیتال (تایید آنی)</button>
+      <div id="crypto-pay-error" class="field-error"></div>
+    ` : ""}
+  `;
+
+  box.querySelector("#copy-card-btn").onclick = () => {
+    navigator.clipboard.writeText(String(cardNumber).replace(/\s/g, ""));
+    tg.HapticFeedback.notificationOccurred("success");
+  };
+
+  const fileInput = box.querySelector("#receipt-file");
+  const preview = box.querySelector("#receipt-preview");
+  const drop = box.querySelector("#receipt-drop");
+  const sendBtn = box.querySelector("#send-receipt-btn");
+
+  fileInput.onchange = () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    drop.classList.add("has-file");
+    box.querySelector("#receipt-label").textContent = "✅ عکس رسید انتخاب شد";
+    preview.src = URL.createObjectURL(file);
+    preview.style.display = "block";
+    sendBtn.disabled = false;
+  };
+
+  sendBtn.onclick = async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    sendBtn.disabled = true;
+    sendBtn.textContent = "در حال ارسال...";
     try {
-      await apiPost('/me/password', { current_password: $('#acc-cur').value, new_password: $('#acc-new').value });
-      toast('پسورد تغییر کرد.');
-      $('#acc-cur').value = ''; $('#acc-new').value = '';
-    } catch (e) { handleErr(e); }
+      await sendReceipt(file);
+      tg.HapticFeedback.notificationOccurred("success");
+      box.innerHTML = `<div class="state-msg"><span class="ic">✅</span>${successText}</div>`;
+    } catch (e) {
+      notify("خطا: " + e.message);
+      sendBtn.disabled = false;
+      sendBtn.textContent = "ارسال رسید برای تایید";
+    }
+  };
+
+  if (cryptoEnabled) {
+    const cryptoBtn = box.querySelector("#pay-crypto-btn");
+    const cryptoErr = box.querySelector("#crypto-pay-error");
+    cryptoBtn.onclick = async () => {
+      cryptoErr.textContent = "";
+      cryptoBtn.disabled = true;
+      cryptoBtn.textContent = "در حال ساخت فاکتور...";
+      try {
+        const res = await createCryptoInvoice();
+        tg.HapticFeedback.notificationOccurred("success");
+        box.innerHTML = `
+          <div class="state-msg">
+            <span class="ic">🪙</span>
+            فاکتور پرداخت ساخته شد. روی دکمه‌ی زیر بزن، ارز و مبلغ رو انتخاب کن و پرداخت رو تکمیل کن.
+            <br/>به‌محض تایید تراکنش روی بلاک‌چین، به‌صورت خودکار سفارش/کیف‌پول شما تسویه می‌شود.
+          </div>
+          <button class="btn" id="open-invoice-btn" style="width:100%;margin-top:12px">🔗 رفتن به صفحه‌ی پرداخت</button>
+        `;
+        box.querySelector("#open-invoice-btn").onclick = () => tg.openLink(res.invoice_url);
+        tg.openLink(res.invoice_url);
+      } catch (e) {
+        cryptoErr.textContent = e.message;
+        cryptoBtn.disabled = false;
+        cryptoBtn.textContent = "🪙 پرداخت با ارز دیجیتال (تایید آنی)";
+      }
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب فروشگاه
+// ---------------------------------------------------------------------------
+let storeCategoryView = null; // null = لیست دسته‌بندی‌ها، وگرنه شناسه دسته‌بندی انتخاب‌شده
+
+async function renderStore() {
+  content.innerHTML = skeleton(4);
+  try {
+    const categories = await api("/api/catalog");
+    if (categories.length === 0) {
+      content.innerHTML = `<div class="state-msg"><span class="ic">◌</span>در حال حاضر محصولی موجود نیست.</div>`;
+      return;
+    }
+    window._storeProducts = {};
+    categories.forEach((c) => c.products.forEach((p) => { window._storeProducts[p.id] = p; }));
+    window._storeCategories = categories;
+
+    if (storeCategoryView == null) {
+      content.innerHTML = `
+        <div class="eyebrow">یک دسته را انتخاب کنید</div>
+        ${categories.map((c) => `
+          <div class="list-row" data-cat="${c.id}">
+            <div class="list-row-main">
+              <div class="list-row-ic">🏬</div>
+              <div class="list-row-text">
+                <span class="list-row-title">${c.name}</span>
+                <span class="list-row-sub">${c.products.length} محصول</span>
+              </div>
+            </div>
+            <span class="list-row-chev">‹</span>
+          </div>
+        `).join("")}
+      `;
+      content.querySelectorAll(".list-row[data-cat]").forEach((el) => {
+        el.onclick = () => { storeCategoryView = parseInt(el.dataset.cat, 10); renderStore(); };
+      });
+      return;
+    }
+
+    const cat = categories.find((c) => c.id === storeCategoryView);
+    if (!cat) { storeCategoryView = null; return renderStore(); }
+    content.innerHTML = `
+      <div class="list-row" id="store-back-row">
+        <div class="list-row-main">
+          <span class="list-row-ic">‹</span>
+          <div class="list-row-text"><span class="list-row-title">بازگشت به دسته‌بندی‌ها</span></div>
+        </div>
+      </div>
+      <div class="eyebrow">${cat.name}</div>
+      <div class="card">
+        <h3><span class="ic">▣</span>${cat.name}</h3>
+        ${cat.products.map((p) => `
+          <div class="product">
+            <div>
+              <div class="product-name">${p.name}</div>
+              <div class="price">${fmt(p.price)} تومان</div>
+            </div>
+            <button class="btn small" ${p.stock <= 0 ? "disabled" : ""}
+              onclick="openProductPurchase(${p.id})">
+              ${p.stock <= 0 ? "ناموجود" : "خرید"}
+            </button>
+          </div>
+        `).join("")}
+      </div>
+    `;
+    document.getElementById("store-back-row").onclick = () => { storeCategoryView = null; renderStore(); };
+  } catch (e) {
+    content.innerHTML = errorState(e.message);
+  }
+}
+
+function enterStoreTab() {
+  storeCategoryView = null;
+  renderStore();
+}
+
+function openProductPurchase(productId) {
+  const p = (window._storeProducts || {})[productId];
+  if (!p) return;
+  renderPurchasePanel(productId, p, 1, null);
+}
+
+function renderPurchasePanel(productId, p, quantity, discountCode) {
+  quantity = Math.max(1, Math.min(quantity, p.stock));
+  const total = p.price * quantity;
+  content.innerHTML = `
+    <button class="btn outline small" id="back-to-store-btn" style="width:auto;margin-bottom:12px">→ بازگشت به فروشگاه</button>
+    <div class="eyebrow">خرید محصول</div>
+    <div class="card">
+      <h3><span class="ic">📦</span>${p.name}</h3>
+      <div class="stat-row"><span>قیمت واحد</span><b>${fmt(p.price)} تومان</b></div>
+      ${p.is_auto_provision
+        ? `<div class="stat-row"><span>تأمین</span><b>⚡️ خودکار و لحظه‌ای</b></div>`
+        : `<div class="stat-row"><span>موجودی</span><b>${p.stock} عدد</b></div>`}
+      <div class="qty-stepper">
+        <button class="btn small outline" id="qty-dec-btn" ${quantity <= 1 ? "disabled" : ""}>➖</button>
+        <span class="qty-value">${quantity}</span>
+        <button class="btn small outline" id="qty-inc-btn" ${quantity >= p.stock ? "disabled" : ""}>➕</button>
+      </div>
+      <input class="input" id="purchase-discount-code" type="text" placeholder="کد تخفیف (اختیاری)"
+        value="${discountCode ? escHtml(discountCode) : ""}" style="direction:ltr;text-align:left;margin-top:10px" />
+      <div class="stat-row" style="margin-top:10px"><span>جمع کل</span><b>${fmt(total)} تومان</b></div>
+      <button class="btn" id="confirm-purchase-btn" style="margin-top:10px">✅ تایید و ادامه</button>
+    </div>
+  `;
+  document.getElementById("back-to-store-btn").onclick = renderStore;
+  document.getElementById("qty-dec-btn").onclick = () => {
+    const code = document.getElementById("purchase-discount-code").value.trim();
+    renderPurchasePanel(productId, p, quantity - 1, code);
+  };
+  document.getElementById("qty-inc-btn").onclick = () => {
+    const code = document.getElementById("purchase-discount-code").value.trim();
+    renderPurchasePanel(productId, p, quantity + 1, code);
+  };
+  document.getElementById("confirm-purchase-btn").onclick = () => {
+    const code = document.getElementById("purchase-discount-code").value.trim();
+    buyProduct(productId, quantity, code || null);
+  };
+}
+
+async function buyProduct(productId, quantity, code) {
+  try {
+    const result = await api("/api/orders", {
+      method: "POST",
+      body: JSON.stringify({ product_id: productId, quantity: quantity || 1, discount_code: code || null }),
+    });
+    if (result.status === "approved") {
+      tg.HapticFeedback.notificationOccurred("success");
+      notify("✅ خرید تایید شد! از تب خانه لینک را ببینید.");
+      switchTab("home");
+    } else {
+      content.innerHTML = `
+        <button class="btn outline small" id="back-to-store-btn" style="width:auto;margin-bottom:12px">→ بازگشت به فروشگاه</button>
+        <div class="eyebrow">پرداخت سفارش</div>
+        <div class="card" id="order-payment-card"></div>
+      `;
+      document.getElementById("back-to-store-btn").onclick = renderStore;
+      renderReceiptCard(document.getElementById("order-payment-card"), {
+        amount: result.final_price,
+        cardNumber: result.card_number,
+        cardHolder: result.card_holder,
+        successText: "رسید ارسال شد. پس از تایید ادمین، کانفیگ از تب خانه در دسترس شما خواهد بود.",
+        sendReceipt: async (file) => {
+          const fd = new FormData();
+          fd.append("photo", file);
+          await apiUpload(`/api/orders/${result.order_id}/receipt`, fd);
+        },
+        cryptoEnabled: result.crypto_enabled,
+        createCryptoInvoice: async () => api(`/api/orders/${result.order_id}/crypto-invoice`, { method: "POST" }),
+      });
+    }
+  } catch (e) {
+    notify("خطا: " + e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب گردونه شانس -> دستگاه جکپات با ۳ رول
+// ---------------------------------------------------------------------------
+const SLOT_SYMBOLS = ["🍒", "🍋", "🔔", "⭐", "💎", "7️⃣"];
+const JACKPOT_SYMBOL = "💎";
+
+async function renderWheel() {
+  content.innerHTML = skeleton(1);
+  try {
+    const status = await api("/api/wheel");
+    if (!status.enabled) {
+      content.innerHTML = `<div class="state-msg"><span class="ic">◌</span>گردونه شانس غیرفعال است.</div>`;
+      return;
+    }
+    content.innerHTML = `
+      <div class="jackpot">
+        <div class="jackpot-title"><span class="bulb"></span>جکپات شانس<span class="bulb"></span></div>
+        <div class="marquee">${'<span class="lamp"></span>'.repeat(10)}</div>
+        <div class="reels">
+          <div class="reel" id="reel-0"><span class="reel-symbol">🍒</span></div>
+          <div class="reel" id="reel-1"><span class="reel-symbol">⭐</span></div>
+          <div class="reel" id="reel-2"><span class="reel-symbol">🔔</span></div>
+        </div>
+        <button class="spin-cta" id="spin-btn" ${status.can_spin ? "" : "disabled"}>
+          ${status.can_spin ? "بکش! 🎰" : `⏳ ${status.remaining_hours} ساعت`}
+        </button>
+        <div id="jackpot-result"></div>
+      </div>
+    `;
+    if (status.can_spin) {
+      document.getElementById("spin-btn").onclick = spinWheel;
+    }
+  } catch (e) {
+    content.innerHTML = errorState(e.message);
+  }
+}
+
+function randomSymbol() {
+  return SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)];
+}
+
+async function spinWheel() {
+  const btn = document.getElementById("spin-btn");
+  const reels = [0, 1, 2].map((i) => document.getElementById(`reel-${i}`));
+  const resultBox = document.getElementById("jackpot-result");
+  btn.disabled = true;
+  resultBox.innerHTML = "";
+  reels.forEach((r) => {
+    r.classList.add("spinning");
+    r.classList.remove("win");
+  });
+
+  const spinIntervals = reels.map((r) =>
+    setInterval(() => { r.querySelector(".reel-symbol").textContent = randomSymbol(); }, 70)
+  );
+
+  let apiResult, apiError;
+  try {
+    apiResult = await api("/api/wheel/spin", { method: "POST" });
+  } catch (e) {
+    apiError = e;
+  }
+
+  // رول‌ها یکی‌یکی با فاصله می‌ایستند، شبیه دستگاه واقعی
+  const stopDelays = [1400, 1900, 2400];
+  reels.forEach((r, i) => {
+    setTimeout(() => {
+      clearInterval(spinIntervals[i]);
+      r.classList.remove("spinning");
+      const finalSymbol = apiResult && apiResult.won ? JACKPOT_SYMBOL : randomSymbol();
+      r.querySelector(".reel-symbol").textContent = finalSymbol;
+      if (i === 2) {
+        if (apiError) {
+          resultBox.innerHTML = `<div class="jackpot-result lose">خطا: ${apiError.message}</div>`;
+          btn.disabled = false;
+          return;
+        }
+        tg.HapticFeedback.notificationOccurred(apiResult.won ? "success" : "error");
+        if (apiResult.won) {
+          reels.forEach((rr) => rr.classList.add("win"));
+          resultBox.innerHTML = `
+            <div class="jackpot-result win">
+              🎉 جکپات بردی! کد تخفیف ${apiResult.percent}٪
+              <div class="code">${apiResult.code}</div>
+            </div>`;
+        } else {
+          resultBox.innerHTML = `<div class="jackpot-result lose">😔 امروز شانس نبود، فردا دوباره امتحان کن!</div>`;
+        }
+        renderWheel_refreshButtonOnly();
+      }
+    }, stopDelays[i]);
   });
 }
 
-boot();
+// بعد از نتیجه، فقط وضعیت دکمه را بدون پاک‌کردن نتیجه به‌روزرسانی می‌کند
+async function renderWheel_refreshButtonOnly() {
+  try {
+    const status = await api("/api/wheel");
+    const btn = document.getElementById("spin-btn");
+    if (!btn) return;
+    btn.disabled = !status.can_spin;
+    btn.textContent = status.can_spin ? "بکش! 🎰" : `⏳ ${status.remaining_hours} ساعت`;
+    if (status.can_spin) btn.onclick = spinWheel;
+  } catch (e) {}
+}
+
+// ---------------------------------------------------------------------------
+// تب کیف پول
+// ---------------------------------------------------------------------------
+async function renderWallet() {
+  content.innerHTML = skeleton(2);
+  try {
+    const me = await api("/api/me");
+    setHeaderWallet(me.wallet_credit);
+    content.innerHTML = `
+      <div class="eyebrow">کیف پول</div>
+      <div class="card">
+        <h3><span class="ic">👛</span>موجودی فعلی</h3>
+        <div class="stat-row"><span>قابل استفاده برای خرید</span><b>${fmt(me.wallet_credit)} تومان</b></div>
+      </div>
+      <div class="eyebrow">شارژ کیف پول</div>
+      <div class="card" id="topup-card">
+        <input id="topup-amount" class="input" type="number" placeholder="مبلغ به تومان" />
+        <button class="btn" id="topup-btn">ثبت درخواست شارژ</button>
+      </div>
+    `;
+    document.getElementById("topup-btn").onclick = async () => {
+      const amount = parseInt(document.getElementById("topup-amount").value, 10);
+      if (!amount || amount < 1000) return notify("حداقل مبلغ ۱۰۰۰ تومان است.");
+      const btn = document.getElementById("topup-btn");
+      btn.disabled = true;
+      try {
+        const r = await api("/api/wallet/topup-request", { method: "POST", body: JSON.stringify({ amount }) });
+        renderTopupPaymentStep(r.topup_id, amount, r.card_number, r.card_holder, r.crypto_enabled);
+      } catch (e) {
+        notify("خطا: " + e.message);
+        btn.disabled = false;
+      }
+    };
+  } catch (e) {
+    content.innerHTML = errorState(e.message);
+  }
+}
+
+function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder, cryptoEnabled) {
+  const box = document.getElementById("topup-card");
+  renderReceiptCard(box, {
+    amount, cardNumber, cardHolder,
+    successText: "رسید ارسال شد. پس از تایید ادمین، کیف پول شما شارژ می‌شود.",
+    sendReceipt: async (file) => {
+      const fd = new FormData();
+      fd.append("topup_id", topupId);
+      fd.append("photo", file);
+      await apiUpload("/api/wallet/topup-receipt", fd);
+    },
+    cryptoEnabled,
+    createCryptoInvoice: async () => api("/api/wallet/crypto-invoice", { method: "POST", body: JSON.stringify({ topup_id: topupId }) }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت (فقط ادمین) - چیدمان دکمه‌های منوی اصلی
+// ---------------------------------------------------------------------------
+
+let adminMenuItems = [];
+
+const STYLE_OPTIONS = [
+  { value: "", label: "⚪️ پیش‌فرض" },
+  { value: "primary", label: "🔵 آبی" },
+  { value: "success", label: "🟢 سبز" },
+  { value: "danger", label: "🔴 قرمز" },
+];
+
+let adminSection = "stats"; // stats | menu | branding | catalog | tickets | livechat | sales | users | resellers
+let adminGroup = null; // گروه فعلاً باز در پنل مدیریت (سطح اول ناوبری)
+let adminCatalogView = { level: "categories" }; // categories | products | configs
+let adminPanelsView = { level: "servers" }; // servers | pricing
+let adminTicketView = { level: "list" }; // list | thread
+let adminLiveChatView = { level: "list" }; // list | thread
+let adminPresenceTimer = null;
+let adminLiveChatPollTimer = null;
+
+const ADMIN_TABS = [
+  { key: "stats", label: "📊 آمار", fullOnly: true, seniorOnly: true },
+  { key: "sales", label: "💰 فروش", fullOnly: true, seniorOnly: true },
+  { key: "catalog", label: "📦 محصولات", fullOnly: true, seniorOnly: true },
+  { key: "panels", label: "🖥 پنل‌های VPN", fullOnly: true, seniorOnly: true },
+  { key: "users", label: "👤 کاربران", fullOnly: true },
+  { key: "resellers", label: "🏪 نمایندگی‌ها", fullOnly: true, seniorOnly: true, mainBotOnly: true },
+  { key: "livechat", label: "💬 پشتیبانی زنده", fullOnly: false },
+  { key: "tickets", label: "🎫 تیکت‌ها", fullOnly: false },
+  { key: "menu", label: "🧩 چیدمان منو", fullOnly: true, seniorOnly: true },
+  { key: "branding", label: "🎨 برندینگ", fullOnly: true, seniorOnly: true },
+  { key: "banners", label: "🖼 بنرها", fullOnly: true, seniorOnly: true },
+  { key: "adminlog", label: "📜 لاگ ادمین", fullOnly: true, seniorOnly: true },
+  { key: "backup", label: "🗄 بکاپ", fullOnly: true, ownerOnly: true },
+];
+
+// دسته‌بندی سطح اول پنل مدیریت مینی‌اپ: به‌جای یک ردیف طولانیِ ۱۲ تایی از
+// تب‌های قابل اسکرول، ادمین اول یک گروه را انتخاب می‌کند و سپس زیرتب‌های
+// همان گروه (در صورت وجود بیش از یک مورد) نمایش داده می‌شود.
+const ADMIN_TAB_GROUPS = [
+  { key: "overview", label: "📊 آمار و فروش", tabs: ["stats", "sales"] },
+  { key: "catalog_panels", label: "📦 محصولات و پنل‌ها", tabs: ["catalog", "panels"] },
+  { key: "people", label: "👥 کاربران و نمایندگی", tabs: ["users", "resellers"] },
+  { key: "support", label: "💬 پشتیبانی", tabs: ["livechat", "tickets"] },
+  { key: "appearance", label: "🎨 منو و برندینگ", tabs: ["menu", "branding", "banners"] },
+  { key: "system", label: "🗂 سیستم", tabs: ["adminlog", "backup"] },
+];
+
+async function renderAdmin() {
+  const isMainBot = !TENANT_ID;
+
+  let adminRole = "admin";
+  try {
+    const check = await api("/api/admin/check");
+    adminRole = check.admin_role || "admin";
+  } catch (e) {
+    // در صورت خطا محتاطانه فرض می‌کنیم دسترسی کامل نیست
+  }
+  const isSupport = adminRole === "support";
+  const isMid = adminRole === "mid";
+  const isOwner = adminRole === "owner";
+  const isSenior = adminRole === "owner" || adminRole === "admin";
+  const visibleTabs = ADMIN_TABS.filter(
+    (t) =>
+      (!isSupport || !t.fullOnly) &&
+      (!t.seniorOnly || isSenior) &&
+      (!t.ownerOnly || isOwner) &&
+      (!t.mainBotOnly || isMainBot)
+  );
+  const visibleKeys = new Set(visibleTabs.map((t) => t.key));
+
+  // گروه‌هایی که حداقل یک تب قابل‌مشاهده دارند
+  const visibleGroups = ADMIN_TAB_GROUPS
+    .map((g) => ({ ...g, tabs: g.tabs.filter((k) => visibleKeys.has(k)) }))
+    .filter((g) => g.tabs.length > 0);
+
+  // اگر تب فعلی در هیچ گروه قابل‌مشاهده‌ای نیست (مثلاً به‌خاطر تغییر نقش)، ریست کن
+  if (!visibleKeys.has(adminSection)) {
+    adminSection = visibleGroups.length ? visibleGroups[0].tabs[0] : "";
+  }
+  // گروه فعلی را از روی تب فعال پیدا کن (اگر قبلاً تعیین نشده یا دیگر معتبر نیست)
+  let currentGroup = visibleGroups.find((g) => g.key === adminGroup);
+  if (!currentGroup || !currentGroup.tabs.includes(adminSection)) {
+    currentGroup = visibleGroups.find((g) => g.tabs.includes(adminSection)) || visibleGroups[0];
+  }
+  adminGroup = currentGroup ? currentGroup.key : null;
+
+  const tabLabel = (key) => (ADMIN_TABS.find((t) => t.key === key) || {}).label || key;
+
+  const prevTabsEl = document.getElementById("admin-section-tabs");
+  const prevScrollLeft = prevTabsEl ? prevTabsEl.scrollLeft : 0;
+  content.innerHTML = `
+    ${isSupport ? `<div class="banner" style="margin-bottom:10px"><div class="banner-title"><span class="ic">🎧</span>نقش شما: پشتیبان (دسترسی محدود)</div></div>` : ""}
+    ${isMid ? `<div class="banner" style="margin-bottom:10px"><div class="banner-title"><span class="ic">🥈</span>نقش شما: ادمین میانی (بدون آمار/فروش/نمایندگی/برندینگ/محصولات)</div></div>` : ""}
+    <div class="segmented-group" id="admin-group-tabs">
+      ${visibleGroups.map((g) => `<button class="seg-btn-group ${adminGroup === g.key ? "active" : ""}" data-group="${g.key}">${g.label}</button>`).join("")}
+    </div>
+    ${currentGroup && currentGroup.tabs.length > 1 ? `
+    <div class="segmented" id="admin-section-tabs">
+      ${currentGroup.tabs.map((k) => `<button class="seg-btn ${adminSection === k ? "active" : ""}" data-section="${k}">${tabLabel(k)}</button>`).join("")}
+    </div>` : ""}
+    <div id="admin-section-body">${skeleton(4)}</div>
+  `;
+  const newTabsEl = document.getElementById("admin-section-tabs");
+  if (newTabsEl) {
+    newTabsEl.scrollLeft = prevScrollLeft;
+    const activeBtn = newTabsEl.querySelector(".seg-btn.active");
+    if (activeBtn) activeBtn.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+  document.querySelectorAll("#admin-group-tabs .seg-btn-group").forEach((b) => {
+    b.onclick = () => {
+      const g = visibleGroups.find((x) => x.key === b.dataset.group);
+      if (!g) return;
+      if (adminSection !== "livechat") clearInterval(adminLiveChatPollTimer);
+      adminGroup = g.key;
+      adminSection = g.tabs[0];
+      if (adminSection === "catalog") adminCatalogView = { level: "categories" };
+      if (adminSection === "panels") adminPanelsView = { level: "servers" };
+      if (adminSection === "tickets") adminTicketView = { level: "list" };
+      if (adminSection === "livechat") adminLiveChatView = { level: "list" };
+      if (adminSection === "users") adminUserView = { level: "list", filter: "all", query: "" };
+      renderAdmin();
+    };
+  });
+  document.querySelectorAll("#admin-section-tabs .seg-btn").forEach((b) => {
+    b.onclick = () => {
+      if (adminSection !== "livechat") clearInterval(adminLiveChatPollTimer);
+      adminSection = b.dataset.section;
+      if (adminSection === "catalog") adminCatalogView = { level: "categories" };
+      if (adminSection === "panels") adminPanelsView = { level: "servers" };
+      if (adminSection === "tickets") adminTicketView = { level: "list" };
+      if (adminSection === "livechat") adminLiveChatView = { level: "list" };
+      if (adminSection === "users") adminUserView = { level: "list", filter: "all", query: "" };
+      renderAdmin();
+    };
+  });
+  if (adminSection !== "livechat") clearInterval(adminLiveChatPollTimer);
+  // با هر بار باز بودن پنل ادمین، حضور آنلاین ادمین به‌صورت دوره‌ای ثبت می‌شود
+  // تا پیام‌های پشتیبانی زنده‌ی جدید به او مسیریابی شوند.
+  clearInterval(adminPresenceTimer);
+  adminPresenceTimer = setInterval(() => { api("/api/admin/check").catch(() => {}); }, 20000);
+  if (adminSection === "stats") await renderAdminStatsSection();
+  else if (adminSection === "menu") await renderAdminMenuSection();
+  else if (adminSection === "branding") await renderAdminBrandingSection();
+  else if (adminSection === "banners") await renderAdminBannersSection();
+  else if (adminSection === "catalog") await renderAdminCatalogSection();
+  else if (adminSection === "panels") await renderAdminPanelsSection();
+  else if (adminSection === "users") await renderAdminUsersSection();
+  else if (adminSection === "sales") await renderAdminSalesSection();
+  else if (adminSection === "livechat") await renderAdminLiveChatSection();
+  else if (adminSection === "tickets") await renderAdminTicketsSection();
+  else if (adminSection === "adminlog") await renderAdminLogSection();
+  else if (adminSection === "resellers" && isMainBot && isSenior) await renderAdminResellersSection();
+  else if (adminSection === "backup") await renderAdminBackupSection();
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > آمار (داشبورد)
+// ---------------------------------------------------------------------------
+
+let adminStatsRange = { preset: 14, startDate: "", endDate: "" };
+
+function _statsRangeDates() {
+  if (adminStatsRange.startDate && adminStatsRange.endDate) {
+    return { start: adminStatsRange.startDate, end: adminStatsRange.endDate };
+  }
+  const end = new Date();
+  const start = new Date();
+  start.setDate(end.getDate() - (adminStatsRange.preset - 1));
+  const toISO = (d) => d.toISOString().slice(0, 10);
+  return { start: toISO(start), end: toISO(end) };
+}
+
+function _changeBadge(pct) {
+  if (pct === null || pct === undefined) return `<span class="hint-text" style="margin:0">—</span>`;
+  const up = pct >= 0;
+  const color = up ? "var(--cyan)" : "var(--danger)";
+  const arrow = up ? "▲" : "▼";
+  return `<span style="color:${color};font-weight:700;font-size:12px">${arrow} ${Math.abs(pct)}٪</span>`;
+}
+
+async function renderAdminStatsSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(4);
+  try {
+    const { start, end } = _statsRangeDates();
+    const s = await api(`/api/admin/dashboard?start_date=${start}&end_date=${end}`);
+    const maxRevenue = Math.max(...s.daily_series.map((d) => d.revenue), 1);
+    const presets = [7, 14, 30, 90];
+    const [sJy, sJm, sJd] = isoToJalaliYMD(start);
+    const [eJy, eJm, eJd] = isoToJalaliYMD(end);
+
+    body.innerHTML = `
+      <div class="card">
+        <div class="segmented" style="margin-bottom:10px">
+          ${presets.map((p) => `<button class="seg-btn ${!adminStatsRange.startDate && adminStatsRange.preset === p ? "active" : ""}" data-stats-preset="${p}">${p} روز اخیر</button>`).join("")}
+        </div>
+        <p class="hint-text" style="margin:0 0 4px">از تاریخ</p>
+        <div style="display:flex;gap:4px;margin-bottom:10px">
+          ${jalaliDateSelectHtml("stats-start", sJy, sJm, sJd)}
+        </div>
+        <p class="hint-text" style="margin:0 0 4px">تا تاریخ</p>
+        <div style="display:flex;gap:4px">
+          ${jalaliDateSelectHtml("stats-end", eJy, eJm, eJd)}
+        </div>
+        <button class="btn small outline" id="stats-apply-range" style="width:auto;margin-top:10px">اعمال بازه‌ی دلخواه</button>
+        <p class="hint-text">بازه‌ی نمایش‌داده‌شده: ${toJalaliStr(s.start_date)} تا ${toJalaliStr(s.end_date)}</p>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">💰 درآمد این بازه</div>
+        <div class="stat-row"><span>مبلغ</span><b>${fmt(s.revenue)} تومان</b></div>
+        <div class="stat-row"><span>نسبت به بازه‌ی قبل</span>${_changeBadge(s.revenue_change_pct)}</div>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><span class="stat-num">${fmt(s.total_users)}</span><span class="stat-label">کل کاربران</span></div>
+        <div class="stat-card"><span class="stat-num">+${fmt(s.new_users)}</span><span class="stat-label">کاربر جدید این بازه</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.approved)}</span><span class="stat-label">سفارش تاییدشده</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.pending)}</span><span class="stat-label">سفارش در انتظار</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.rejected)}</span><span class="stat-label">سفارش ردشده</span></div>
+        <div class="stat-card"><span class="stat-num">${s.conversion_rate}٪</span><span class="stat-label">نرخ تبدیل</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.aov)}</span><span class="stat-label">میانگین سبد خرید (تومان)</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.active_configs)}</span><span class="stat-label">کانفیگ فعال</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(s.open_tickets)}</span><span class="stat-label">تیکت باز</span></div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">📈 روند درآمد در بازه</div>
+        <div class="bar-chart">
+          ${s.daily_series.map((d) => `
+            <div class="bar-chart-col">
+              <div class="bar-chart-bar" style="height:${Math.max((d.revenue / maxRevenue) * 100, 3)}%" title="${fmt(d.revenue)} تومان"></div>
+              <span class="bar-chart-label">${toJalaliMonthDay(d.date)}</span>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🗂 تفکیک درآمد بر اساس دسته‌بندی</div>
+        ${s.category_breakdown.length === 0 ? `<div class="hint-text" style="margin:0">فروشی در این بازه ثبت نشده.</div>` : s.category_breakdown.map((c) => `
+          <div class="admin-list-row">
+            <div class="admin-list-row-main">
+              <span>${escHtml(c.name)}</span>
+              <span class="hint-text" style="margin:0">${c.orders} سفارش</span>
+            </div>
+            <div class="admin-list-row-actions"><b>${fmt(c.revenue)} تومان</b></div>
+          </div>
+        `).join("")}
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🤝 رفرال در مقابل خرید مستقیم</div>
+        <div class="stat-row"><span>از طریق رفرال</span><b>${fmt(s.referral_revenue)} تومان</b></div>
+        <div class="stat-row"><span>خرید مستقیم</span><b>${fmt(s.direct_revenue)} تومان</b></div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🏆 پرفروش‌ترین محصولات این بازه</div>
+        ${s.top_products.length === 0 ? `<div class="hint-text" style="margin:0">هنوز فروشی ثبت نشده.</div>` : s.top_products.map((p, i) => `
+          <div class="admin-list-row">
+            <div class="admin-list-row-main">
+              <span>${i + 1}. ${escHtml(p.name)}</span>
+              <span class="hint-text" style="margin:0">${p.orders} فروش · ${fmt(p.revenue)} تومان</span>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+
+      <a class="btn outline small" style="width:auto;display:inline-block;text-decoration:none;text-align:center" href="${withTenant(`/api/admin/orders/export?start_date=${s.start_date}&end_date=${s.end_date}`)}" target="_blank">📤 خروجی اکسل سفارش‌های این بازه (CSV)</a>
+    `;
+
+    body.querySelectorAll("[data-stats-preset]").forEach((el) => {
+      el.onclick = () => {
+        adminStatsRange = { preset: Number(el.dataset.statsPreset), startDate: "", endDate: "" };
+        renderAdminStatsSection();
+      };
+    });
+    document.getElementById("stats-apply-range").onclick = () => {
+      const sJyv = Number(document.getElementById("stats-start-y").value);
+      const sJmv = Number(document.getElementById("stats-start-m").value);
+      const sJdv = Number(document.getElementById("stats-start-d").value);
+      const eJyv = Number(document.getElementById("stats-end-y").value);
+      const eJmv = Number(document.getElementById("stats-end-m").value);
+      const eJdv = Number(document.getElementById("stats-end-d").value);
+      const sd = jalaliToISO(sJyv, sJmv, sJdv);
+      const ed = jalaliToISO(eJyv, eJmv, eJdv);
+      if (sd > ed) { notify("تاریخ شروع باید قبل از تاریخ پایان باشد."); return; }
+      adminStatsRange = { preset: 0, startDate: sd, endDate: ed };
+      renderAdminStatsSection();
+    };
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > چیدمان منو
+// ---------------------------------------------------------------------------
+
+async function renderAdminMenuSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  try {
+    const menu = await api("/api/admin/menu");
+    adminMenuItems = menu;
+    body.innerHTML = `
+      <p class="hint-text">ترتیب، متن، رنگ و فعال/غیرفعال بودن دکمه‌های منوی اصلی بات را از اینجا مدیریت کن. با فلش‌ها جای دکمه‌ها را جابه‌جا کن.</p>
+      <div class="card" id="admin-menu-list"></div>
+      <button class="btn" id="admin-menu-save">💾 ذخیره تغییرات</button>
+    `;
+    renderAdminMenuList();
+    document.getElementById("admin-menu-save").onclick = saveAdminMenu;
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > برندینگ (نام فروشگاه / بنر / عکس هدر / تم مینی‌اپ)
+// ---------------------------------------------------------------------------
+
+async function renderAdminBrandingSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  try {
+    const branding = await api("/api/admin/settings/branding");
+    body.innerHTML = `
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🎨 برندینگ مینی‌اپ</div>
+        <p class="hint-text">نام و متن بالای صفحه‌ی مینی‌اپ (بنر) همینجا قابل تغییره.</p>
+        <label class="field-label">نام فروشگاه (بالای صفحه، کنار آیکون ⚡)</label>
+        <input class="input" id="brand-store-name" type="text" placeholder="مثال: SHOP VPN" value="${branding.store_name.replace(/"/g, "&quot;")}" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:10px" />
+        <label class="field-label">متن بنر (زیر نام کاربر، مثلاً یک شعار کوتاه)</label>
+        <input class="input" id="brand-banner-text" type="text" placeholder="مثال: اتصال امن و پایدار برقرار است" value="${branding.banner_text.replace(/"/g, "&quot;")}" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:4px" />
+        <div class="field-error" id="brand-error"></div>
+        <button class="btn" id="brand-save" style="margin-top:8px">💾 ذخیره برندینگ</button>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🖼 عکس بالای صفحه (به‌جای خورشید)</div>
+        <p class="hint-text">می‌تونی به‌جای انیمیشن خورشید بالای مینی‌اپ، یک عکس/لوگوی دلخواه بذاری.</p>
+        <div id="header-logo-preview" style="margin-bottom:10px">
+          ${branding.header_image ? `<img src="${branding.header_image}" style="width:88px;height:88px;border-radius:50%;object-fit:cover;border:2px solid var(--glass-brd)" />` : `<span class="hint-text" style="margin:0">فعلاً عکسی تنظیم نشده؛ همون خورشید انیمیشنی نمایش داده می‌شه.</span>`}
+        </div>
+        <input type="file" accept="image/*" id="header-logo-file" style="margin-bottom:10px" />
+        <div class="field-error" id="header-logo-error"></div>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button class="btn" id="header-logo-save">💾 آپلود عکس</button>
+          ${branding.header_image ? `<button class="btn outline danger" id="header-logo-reset">🗑 بازگشت به خورشید</button>` : ""}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🎨 تم مینی‌اپ</div>
+        <p class="hint-text">یکی از تم‌های آماده رو برای رنگ‌بندی کل مینی‌اپ انتخاب کن.</p>
+        <select class="input" id="theme-select" style="margin-bottom:10px">
+          ${branding.themes.map((t) => `<option value="${t.id}" ${t.id === branding.theme ? "selected" : ""}>${t.label}</option>`).join("")}
+        </select>
+        <div class="field-error" id="theme-error"></div>
+        <button class="btn" id="theme-save">💾 اعمال تم</button>
+      </div>
+    `;
+
+    document.getElementById("brand-save").onclick = async () => {
+      const errBox = document.getElementById("brand-error");
+      errBox.textContent = "";
+      const storeName = document.getElementById("brand-store-name").value.trim();
+      const bannerText = document.getElementById("brand-banner-text").value.trim();
+      if (!storeName || !bannerText) { errBox.textContent = "هر دو کادر باید پر باشند."; return; }
+      try {
+        await api("/api/admin/settings/branding", {
+          method: "POST",
+          body: JSON.stringify({ store_name: storeName, banner_text: bannerText }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("برندینگ ذخیره شد. برای دیدن تغییر، صفحه را دوباره باز کن.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+
+    document.getElementById("header-logo-save").onclick = async () => {
+      const errBox = document.getElementById("header-logo-error");
+      errBox.textContent = "";
+      const fileInput = document.getElementById("header-logo-file");
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) { errBox.textContent = "ابتدا یک عکس انتخاب کن."; return; }
+      const fd = new FormData();
+      fd.append("photo", file);
+      try {
+        await apiUpload("/api/admin/settings/header-image", fd);
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("عکس بالای صفحه ذخیره شد. برای دیدن تغییر، صفحه را دوباره باز کن.");
+        renderAdminBrandingSection();
+      } catch (e) { errBox.textContent = e.message; }
+    };
+
+    const resetBtn = document.getElementById("header-logo-reset");
+    if (resetBtn) {
+      resetBtn.onclick = async () => {
+        if (!confirm("عکس سفارشی حذف و به خورشید انیمیشنی پیش‌فرض برگردد؟")) return;
+        try {
+          await api("/api/admin/settings/header-image", { method: "DELETE" });
+          tg.HapticFeedback.notificationOccurred("success");
+          renderAdminBrandingSection();
+        } catch (e) { notify(e.message); }
+      };
+    }
+
+    document.getElementById("theme-save").onclick = async () => {
+      const errBox = document.getElementById("theme-error");
+      errBox.textContent = "";
+      const theme = document.getElementById("theme-select").value;
+      try {
+        await api("/api/admin/settings/theme", { method: "POST", body: JSON.stringify({ theme }) });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("تم ذخیره شد. برای دیدن تغییر، صفحه را دوباره باز کن.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > بنرها (کاروسل بالای صفحه‌ی خانه)
+// ---------------------------------------------------------------------------
+
+let adminBannerItems = [];
+
+// مقصدهایی که با ضربه‌زدن روی یک بنر ممکن است باز شوند؛ value باید دقیقاً با
+// کلیدهای شیء `tabs` در پایین همین فایل یکی باشد.
+const BANNER_NAV_OPTIONS = [
+  { value: "store", label: "🛒 فروشگاه (خرید سرویس)" },
+  { value: "services", label: "🛡 سرویس‌های من" },
+  { value: "wallet", label: "💳 کیف پول" },
+  { value: "profile", label: "👤 حساب کاربری" },
+  { value: "support", label: "💬 پشتیبانی" },
+  { value: "referral", label: "🤝 دعوت دوستان" },
+  { value: "test", label: "🧪 کانفیگ تست رایگان" },
+  { value: "wheel", label: "🎡 چرخ شانس" },
+  { value: "home", label: "🏠 صفحه‌ی خانه" },
+];
+
+// چند گرادیانِ آماده برای انتخاب سریعِ رنگ پس‌زمینه‌ی بنر؛ روی هرکدام بزنی
+// در کادر متنی زیرش پر می‌شود و می‌شود آن را هم دستی ویرایش کرد.
+const BANNER_BG_PRESETS = [
+  "linear-gradient(120deg, #0d1a12, #123a20 55%, #17532c)",
+  "linear-gradient(120deg, #2b1608, #4d2510 55%, #7a3a14)",
+  "linear-gradient(120deg, #0d1420, #142845 55%, #1c3f6e)",
+  "linear-gradient(120deg, #150c22, #2a1440 55%, #431f66)",
+  "linear-gradient(120deg, #2a0d16, #4d1027 55%, #7a1b45)",
+  "linear-gradient(120deg, #1a1405, #3d2f0a 55%, #5e480f)",
+];
+
+const BANNER_ANGLE_OPTIONS = [
+  { value: "90", label: "↓ عمودی" },
+  { value: "120", label: "↘ مورب (پیش‌فرض)" },
+  { value: "180", label: "← افقی (راست به چپ)" },
+  { value: "0", label: "→ افقی (چپ به راست)" },
+  { value: "45", label: "↗ مورب معکوس" },
+];
+
+// از یک رشته‌ی گرادیان CSS، اولین یا دومین کد رنگ هگز را استخراج می‌کند (برای
+// مقداردهی اولیه‌ی انتخاب‌گرهای رنگی)؛ اگر چیزی پیدا نشود یک پیش‌فرض برمی‌گرداند.
+function bannerGradientColorAt(bgStr, index) {
+  const matches = String(bgStr || "").match(/#[0-9a-fA-F]{3,8}/g) || [];
+  if (matches[index]) {
+    let hex = matches[index];
+    if (hex.length === 4) hex = "#" + [...hex.slice(1)].map((c) => c + c).join(""); // #abc -> #aabbcc
+    return hex.slice(0, 7);
+  }
+  return index === 0 ? "#150c22" : "#431f66";
+}
+
+function bannerGradientAngle(bgStr) {
+  const m = String(bgStr || "").match(/linear-gradient\(\s*(\d+)deg/);
+  return m ? m[1] : "120";
+}
+
+function updateBannerGradientFromControls(idx) {
+  const c1 = document.querySelector(`.banner-color-swatch-btn[data-idx="${idx}"][data-which="1"]`).dataset.color;
+  const c2 = document.querySelector(`.banner-color-swatch-btn[data-idx="${idx}"][data-which="2"]`).dataset.color;
+  const angle = document.querySelector(`.banner-angle-input[data-idx="${idx}"]`).value;
+  const gradient = `linear-gradient(${angle}deg, ${c1}, ${c2})`;
+  const bgInput = document.querySelector(`.banner-bg-input[data-idx="${idx}"]`);
+  if (bgInput) bgInput.value = gradient;
+  if (!adminBannerItems[Number(idx)].image) {
+    const preview = document.querySelector(`.banner-preview[data-idx="${idx}"]`);
+    if (preview) preview.style.background = gradient;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// انتخاب‌گر کامل رنگ (طیف کامل + تیرگی/روشنی + هیو) — چون input[type=color]
+// داخل مرورگر درون‌برنامه‌ای تلگرام روی همه‌ی گوشی‌ها درست کار نمی‌کند، یک
+// پیکر رنگ اختصاصی با HTML/CSS/Pointer Events ساخته شده که در همه‌جا یکسان کار می‌کند.
+// ---------------------------------------------------------------------------
+
+function hsvToRgb(h, s, v) {
+  s /= 100; v /= 100;
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  let r, g, b;
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
+function rgbToHex(r, g, b) {
+  return "#" + [r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("");
+}
+
+function hsvToHex(h, s, v) {
+  return rgbToHex(...hsvToRgb(h, s, v));
+}
+
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || "").trim());
+  if (!m) return [21, 12, 34];
+  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+}
+
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0;
+  if (d !== 0) {
+    if (max === r) h = (((g - b) / d) % 6) * 60;
+    else if (max === g) h = ((b - r) / d + 2) * 60;
+    else h = ((r - g) / d + 4) * 60;
+    if (h < 0) h += 360;
+  }
+  return [h, max === 0 ? 0 : (d / max) * 100, max * 100];
+}
+
+function hexToHsv(hex) {
+  return rgbToHsv(...hexToRgb(hex));
+}
+
+function openColorPickerModal(initialHex, onConfirm) {
+  const [h0, s0, v0] = hexToHsv(initialHex);
+  const state = { h: h0, s: s0, v: v0 };
+
+  const overlay = document.createElement("div");
+  overlay.className = "color-picker-overlay";
+  overlay.innerHTML = `
+    <div class="color-picker-modal">
+      <div class="color-picker-picker-row">
+        <div class="color-picker-sv" id="cp-sv"><div class="color-picker-sv-thumb" id="cp-sv-thumb"></div></div>
+        <div class="color-picker-hue" id="cp-hue"><div class="color-picker-hue-thumb" id="cp-hue-thumb"></div></div>
+      </div>
+      <div class="color-picker-bottom">
+        <div class="color-picker-preview" id="cp-preview"></div>
+        <input class="input color-picker-hex" id="cp-hex" type="text" maxlength="7" />
+      </div>
+      <div class="color-picker-actions">
+        <button type="button" class="btn outline" id="cp-cancel">انصراف</button>
+        <button type="button" class="btn" id="cp-ok">✓ تایید انتخاب</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const svEl = overlay.querySelector("#cp-sv");
+  const svThumb = overlay.querySelector("#cp-sv-thumb");
+  const hueEl = overlay.querySelector("#cp-hue");
+  const hueThumb = overlay.querySelector("#cp-hue-thumb");
+  const preview = overlay.querySelector("#cp-preview");
+  const hexInput = overlay.querySelector("#cp-hex");
+
+  function render() {
+    svEl.style.background = `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent), hsl(${state.h}, 100%, 50%)`;
+    svThumb.style.left = `${state.s}%`;
+    svThumb.style.top = `${100 - state.v}%`;
+    hueThumb.style.top = `${(state.h / 360) * 100}%`;
+    const hex = hsvToHex(state.h, state.s, state.v);
+    preview.style.background = hex;
+    hexInput.value = hex;
+  }
+  render();
+
+  function setSvFromPoint(clientX, clientY) {
+    const rect = svEl.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    state.s = x * 100;
+    state.v = (1 - y) * 100;
+    render();
+  }
+  function setHueFromPoint(clientY) {
+    const rect = hueEl.getBoundingClientRect();
+    const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    state.h = y * 360;
+    render();
+  }
+
+  let draggingSv = false, draggingHue = false;
+  svEl.addEventListener("pointerdown", (e) => {
+    draggingSv = true;
+    svEl.setPointerCapture(e.pointerId);
+    setSvFromPoint(e.clientX, e.clientY);
+  });
+  svEl.addEventListener("pointermove", (e) => { if (draggingSv) setSvFromPoint(e.clientX, e.clientY); });
+  svEl.addEventListener("pointerup", () => { draggingSv = false; });
+  svEl.addEventListener("pointercancel", () => { draggingSv = false; });
+
+  hueEl.addEventListener("pointerdown", (e) => {
+    draggingHue = true;
+    hueEl.setPointerCapture(e.pointerId);
+    setHueFromPoint(e.clientY);
+  });
+  hueEl.addEventListener("pointermove", (e) => { if (draggingHue) setHueFromPoint(e.clientY); });
+  hueEl.addEventListener("pointerup", () => { draggingHue = false; });
+  hueEl.addEventListener("pointercancel", () => { draggingHue = false; });
+
+  hexInput.addEventListener("change", () => {
+    let v = hexInput.value.trim();
+    if (!v.startsWith("#")) v = "#" + v;
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+      const [h, s, val] = hexToHsv(v);
+      state.h = h; state.s = s; state.v = val;
+      render();
+    }
+  });
+
+  function close() { overlay.remove(); }
+  overlay.querySelector("#cp-cancel").onclick = close;
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector("#cp-ok").onclick = () => {
+    const hex = hexInput.value;
+    close();
+    onConfirm(hex);
+  };
+}
+
+async function renderAdminBannersSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  try {
+    const banners = await api("/api/admin/banners");
+    adminBannerItems = banners;
+    body.innerHTML = `
+      <p class="hint-text">بنرهای کاروسل بالای صفحه‌ی خانه را همین‌جا اضافه، ویرایش، حذف یا مرتب کن. مشخص کن با ضربه‌زدن روی هر بنر، کاربر به کدام بخش مینی‌اپ منتقل شود.</p>
+      <div class="card" id="admin-banner-list"></div>
+      <button class="btn outline" id="admin-banner-add" style="margin-bottom:10px">➕ افزودن بنر جدید</button>
+      <button class="btn" id="admin-banner-save">💾 ذخیره بنرها</button>
+    `;
+    renderAdminBannerList();
+    document.getElementById("admin-banner-add").onclick = () => {
+      collectBannerEdits();
+      adminBannerItems.push({
+        id: "",
+        icon: "✨",
+        title: "بنر جدید",
+        sub: "",
+        cta: "مشاهده",
+        nav: "store",
+        bg: BANNER_BG_PRESETS[0],
+        image: "",
+        image_only: false,
+        enabled: true,
+      });
+      renderAdminBannerList();
+    };
+    document.getElementById("admin-banner-save").onclick = saveAdminBanners;
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+function renderAdminBannerList() {
+  const list = document.getElementById("admin-banner-list");
+  if (adminBannerItems.length === 0) {
+    list.innerHTML = `<div class="state-msg"><span class="ic">🖼</span>هنوز بنری اضافه نشده.</div>`;
+    return;
+  }
+  list.innerHTML = adminBannerItems.map((item, idx) => adminBannerRow(item, idx)).join("");
+  adminBannerItems.forEach((item, idx) => {
+    const upBtn = document.getElementById(`banner-up-${idx}`);
+    const downBtn = document.getElementById(`banner-down-${idx}`);
+    const delBtn = document.getElementById(`banner-del-${idx}`);
+    if (upBtn) upBtn.onclick = () => moveBannerItem(idx, -1);
+    if (downBtn) downBtn.onclick = () => moveBannerItem(idx, 1);
+    if (delBtn) delBtn.onclick = () => removeBannerItem(idx);
+  });
+  list.querySelectorAll(".banner-bg-swatch").forEach((sw) => {
+    sw.onclick = () => {
+      const idx = Number(sw.dataset.idx);
+      const bg = sw.dataset.bg;
+      const input = document.querySelector(`.banner-bg-input[data-idx="${idx}"]`);
+      if (input) input.value = bg;
+      if (!adminBannerItems[idx].image) {
+        const preview = document.querySelector(`.banner-preview[data-idx="${idx}"]`);
+        if (preview) preview.style.background = bg;
+      }
+    };
+  });
+  list.querySelectorAll(".banner-bg-input").forEach((input) => {
+    input.oninput = () => {
+      if (adminBannerItems[Number(input.dataset.idx)].image) return;
+      const preview = document.querySelector(`.banner-preview[data-idx="${input.dataset.idx}"]`);
+      if (preview) preview.style.background = input.value;
+    };
+  });
+  list.querySelectorAll(".banner-color-swatch-btn, .banner-angle-input").forEach((el) => {
+    if (el.classList.contains("banner-angle-input")) {
+      el.onchange = () => updateBannerGradientFromControls(el.dataset.idx);
+      return;
+    }
+    el.onclick = () => {
+      openColorPickerModal(el.dataset.color, (hex) => {
+        el.dataset.color = hex;
+        el.style.background = hex;
+        updateBannerGradientFromControls(el.dataset.idx);
+      });
+    };
+  });
+  list.querySelectorAll(".banner-image-upload").forEach((btn) => {
+    btn.onclick = async () => {
+      const idx = Number(btn.dataset.idx);
+      const errBox = document.getElementById(`banner-image-error-${idx}`);
+      errBox.textContent = "";
+      const fileInput = document.querySelector(`.banner-image-file[data-idx="${idx}"]`);
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) { errBox.textContent = "ابتدا یک عکس انتخاب کن."; return; }
+      const fd = new FormData();
+      fd.append("photo", file);
+      btn.disabled = true;
+      btn.textContent = "در حال آپلود...";
+      try {
+        collectBannerEdits();
+        const res = await apiUpload("/api/admin/banners/upload-image", fd);
+        adminBannerItems[idx].image = res.image;
+        adminBannerItems[idx].image_only = true;
+        tg.HapticFeedback.notificationOccurred("success");
+        renderAdminBannerList();
+      } catch (e) {
+        errBox.textContent = e.message;
+        btn.disabled = false;
+        btn.textContent = "📤 آپلود این عکس";
+      }
+    };
+  });
+  list.querySelectorAll(".banner-image-clear").forEach((btn) => {
+    btn.onclick = () => {
+      collectBannerEdits();
+      const idx = Number(btn.dataset.idx);
+      adminBannerItems[idx].image = "";
+      adminBannerItems[idx].image_only = false;
+      renderAdminBannerList();
+    };
+  });
+}
+
+function adminBannerRow(item, idx) {
+  const previewBg = item.image ? `url('${item.image}') center/cover no-repeat` : (item.bg || BANNER_BG_PRESETS[0]);
+  return `
+    <div class="menu-row" data-idx="${idx}">
+      <div class="menu-row-top">
+        <span class="menu-row-label">بنر ${idx + 1}${item.enabled === false ? " (غیرفعال)" : ""}</span>
+        <div class="menu-row-arrows">
+          <button type="button" class="btn small outline" id="banner-up-${idx}" ${idx === 0 ? "disabled" : ""}>▲</button>
+          <button type="button" class="btn small outline" id="banner-down-${idx}" ${idx === adminBannerItems.length - 1 ? "disabled" : ""}>▼</button>
+          <button type="button" class="btn small outline danger" id="banner-del-${idx}">🗑</button>
+        </div>
+      </div>
+      <div class="menu-row-body">
+        <div class="banner-preview" data-idx="${idx}" style="background:${previewBg}">
+          ${item.image && item.image_only ? "" : `
+          <span class="banner-preview-icon banner-icon-input-wrap"><input class="banner-icon-input" data-idx="${idx}" type="text" value="${escHtml(item.icon || "")}" maxlength="4" /></span>
+          <span class="banner-preview-title">${escHtml(item.title || "بنر جدید")}</span>
+          `}
+        </div>
+
+        <p class="hint-text" style="margin-top:0">🖼 می‌تونی به‌جای رنگ گرادیانی، یک عکسِ از قبل طراحی‌شده برای این بنر آپلود کنی. اندازه‌ی پیشنهادی: عرض ۱۲۰۰ پیکسل، ارتفاع ۴۰۰ پیکسل (نسبت تقریبی ۳:۱ — همون شکل کشیده‌ی بنرهای بالای صفحه)، فرمت JPG / PNG / WebP، حجم زیر ۲ مگابایت. عکسی با نسبت دیگه هم کار می‌کنه ولی ممکنه بالا/پایینش برش بخوره چون کل کادر رو پر می‌کنه (cover).</p>
+        <div id="banner-image-preview-${idx}">
+          ${item.image ? `<img src="${item.image}" style="width:100%;max-width:260px;border-radius:10px;border:1px solid var(--glass-brd);margin-bottom:8px;display:block" />` : ""}
+        </div>
+        <input type="file" accept="image/*" class="banner-image-file" data-idx="${idx}" style="margin-bottom:8px" />
+        <div class="field-error" id="banner-image-error-${idx}"></div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <button type="button" class="btn small outline banner-image-upload" data-idx="${idx}">📤 آپلود این عکس</button>
+          ${item.image ? `<button type="button" class="btn small outline danger banner-image-clear" data-idx="${idx}">🗑 حذف عکس</button>` : ""}
+        </div>
+        ${item.image ? `
+        <label class="menu-toggle" style="margin-bottom:10px">
+          <input type="checkbox" class="banner-imageonly-input" data-idx="${idx}" ${item.image_only ? "checked" : ""} />
+          <span>فقط عکس نمایش داده شود (بدون آیکون/عنوان روی آن — برای بنرهای آماده مناسب‌تره)</span>
+        </label>
+        ` : ""}
+
+        <label class="field-label">عنوان بنر</label>
+        <input class="input banner-title-input" data-idx="${idx}" type="text" value="${escHtml(item.title || "")}" placeholder="مثال: خرید سرویس جدید!" style="direction:rtl;text-align:right;font-family:var(--font-body)" />
+        <label class="field-label">توضیح کوتاه</label>
+        <input class="input banner-sub-input" data-idx="${idx}" type="text" value="${escHtml(item.sub || "")}" placeholder="یک جمله‌ی کوتاه توضیحی" style="direction:rtl;text-align:right;font-family:var(--font-body)" />
+        <label class="field-label">متن دکمه</label>
+        <input class="input banner-cta-input" data-idx="${idx}" type="text" value="${escHtml(item.cta || "")}" placeholder="مثال: شروع خرید" style="direction:rtl;text-align:right;font-family:var(--font-body)" />
+        <label class="field-label">با ضربه‌زدن، کاربر منتقل شود به:</label>
+        <select class="input banner-nav-input" data-idx="${idx}">
+          ${BANNER_NAV_OPTIONS.map((o) => `<option value="${o.value}" ${o.value === item.nav ? "selected" : ""}>${o.label}</option>`).join("")}
+        </select>
+        <label class="field-label">رنگ پس‌زمینه (وقتی عکس آپلود نشده باشد)</label>
+        <p class="hint-text" style="margin-top:0">با دو دکمه‌ی رنگی زیر، صفحه‌ی کامل انتخاب رنگ باز می‌شه (طیف کامل + تیرگی/روشنی، دقیقاً مثل فتوشاپ) و ازشون یک گرادیان دورنگ می‌سازه. اگه دلت یک رنگ ساده (بدون گرادیان) بخواد، هر دو رنگ رو یکی انتخاب کن.</p>
+        <div class="banner-color-picker-row">
+          <div class="banner-color-picker">
+            <button type="button" class="banner-color-swatch-btn" data-idx="${idx}" data-which="1" data-color="${bannerGradientColorAt(item.bg, 0)}" style="background:${bannerGradientColorAt(item.bg, 0)}"></button>
+            <span>رنگ شروع</span>
+          </div>
+          <div class="banner-color-picker">
+            <button type="button" class="banner-color-swatch-btn" data-idx="${idx}" data-which="2" data-color="${bannerGradientColorAt(item.bg, 1)}" style="background:${bannerGradientColorAt(item.bg, 1)}"></button>
+            <span>رنگ پایان</span>
+          </div>
+          <select class="input banner-angle-input" data-idx="${idx}" style="width:auto;flex:1">
+            ${BANNER_ANGLE_OPTIONS.map((a) => `<option value="${a.value}" ${a.value === bannerGradientAngle(item.bg) ? "selected" : ""}>${a.label}</option>`).join("")}
+          </select>
+        </div>
+        <p class="hint-text" style="margin:6px 0 4px">یا از پیش‌فرض‌های آماده انتخاب کن:</p>
+        <div class="banner-bg-swatches">
+          ${BANNER_BG_PRESETS.map((bg) => `<button type="button" class="banner-bg-swatch" data-idx="${idx}" data-bg="${bg}" style="background:${bg}"></button>`).join("")}
+        </div>
+        <label class="field-label">کد CSS نهایی (می‌تونی دستی هم ویرایش کنی)</label>
+        <input class="input banner-bg-input" data-idx="${idx}" type="text" value="${escHtml(item.bg || "")}" placeholder="کد گرادیان/رنگ CSS دلخواه" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:11px" />
+        <label class="menu-toggle">
+          <input type="checkbox" class="banner-enabled-input" data-idx="${idx}" ${item.enabled !== false ? "checked" : ""} />
+          <span>فعال (در کاروسل خانه نمایش داده شود)</span>
+        </label>
+      </div>
+    </div>
+  `;
+}
+
+function collectBannerEdits() {
+  document.querySelectorAll(".banner-icon-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].icon = el.value;
+  });
+  document.querySelectorAll(".banner-title-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].title = el.value;
+  });
+  document.querySelectorAll(".banner-sub-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].sub = el.value;
+  });
+  document.querySelectorAll(".banner-cta-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].cta = el.value;
+  });
+  document.querySelectorAll(".banner-nav-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].nav = el.value;
+  });
+  document.querySelectorAll(".banner-bg-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].bg = el.value;
+  });
+  document.querySelectorAll(".banner-imageonly-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].image_only = el.checked;
+  });
+  document.querySelectorAll(".banner-enabled-input").forEach((el) => {
+    adminBannerItems[Number(el.dataset.idx)].enabled = el.checked;
+  });
+}
+
+function moveBannerItem(idx, dir) {
+  collectBannerEdits();
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= adminBannerItems.length) return;
+  const tmp = adminBannerItems[idx];
+  adminBannerItems[idx] = adminBannerItems[newIdx];
+  adminBannerItems[newIdx] = tmp;
+  renderAdminBannerList();
+}
+
+function removeBannerItem(idx) {
+  collectBannerEdits();
+  adminBannerItems.splice(idx, 1);
+  renderAdminBannerList();
+}
+
+async function saveAdminBanners() {
+  collectBannerEdits();
+  const saveBtn = document.getElementById("admin-banner-save");
+  saveBtn.disabled = true;
+  saveBtn.textContent = "در حال ذخیره...";
+  try {
+    const res = await api("/api/admin/banners", {
+      method: "POST",
+      body: JSON.stringify({ banners: adminBannerItems }),
+    });
+    adminBannerItems = res.banners;
+    tg.HapticFeedback.notificationOccurred("success");
+    notify("بنرها ذخیره شد. برای دیدن تغییرات، صفحه‌ی خانه را دوباره باز کن.");
+    renderAdminBannerList();
+  } catch (e) {
+    notify(e.message);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = "💾 ذخیره بنرها";
+  }
+}
+
+let menuDragState = null;
+
+function renderAdminMenuList() {
+  const list = document.getElementById("admin-menu-list");
+  list.innerHTML = adminMenuItems.map((item, idx) => adminMenuRow(item, idx)).join("");
+  adminMenuItems.forEach((item, idx) => {
+    const upBtn = document.getElementById(`menu-up-${idx}`);
+    const downBtn = document.getElementById(`menu-down-${idx}`);
+    if (upBtn) upBtn.onclick = () => moveMenuItem(idx, -1);
+    if (downBtn) downBtn.onclick = () => moveMenuItem(idx, 1);
+  });
+  list.querySelectorAll(".menu-row-drag-handle").forEach((handle) => {
+    handle.addEventListener("pointerdown", onMenuDragStart);
+  });
+}
+
+function adminMenuRow(item, idx) {
+  const styleSelect = item.has_style
+    ? `<select class="input menu-style-input" data-idx="${idx}">
+        ${STYLE_OPTIONS.map((o) => `<option value="${o.value}" ${o.value === (item.style || "") ? "selected" : ""}>${o.label}</option>`).join("")}
+      </select>`
+    : "";
+  const textInput = item.has_text
+    ? `<input class="input menu-text-input" data-idx="${idx}" type="text" value="${(item.text || "").replace(/"/g, "&quot;")}" placeholder="متن دکمه" />`
+    : `<div class="hint-text" style="margin:0">${item.label} (بدون متن قابل‌ویرایش)</div>`;
+  const toggle = item.togglable
+    ? `<label class="menu-toggle">
+        <input type="checkbox" class="menu-enabled-input" data-idx="${idx}" ${item.enabled ? "checked" : ""} />
+        <span>فعال</span>
+      </label>`
+    : "";
+  return `
+    <div class="menu-row" data-idx="${idx}">
+      <div class="menu-row-top">
+        <div class="menu-row-label-wrap">
+          <span class="menu-row-drag-handle" data-idx="${idx}">⠿</span>
+          <span class="menu-row-label">${item.label}${item.admin_only ? " (فقط ادمین)" : ""}</span>
+        </div>
+        <div class="menu-row-arrows">
+          <button type="button" class="btn small outline" id="menu-up-${idx}" ${idx === 0 ? "disabled" : ""}>▲</button>
+          <button type="button" class="btn small outline" id="menu-down-${idx}" ${idx === adminMenuItems.length - 1 ? "disabled" : ""}>▼</button>
+        </div>
+      </div>
+      <div class="menu-row-body">
+        ${textInput}
+        ${styleSelect}
+        ${toggle}
+      </div>
+    </div>
+  `;
+}
+
+function onMenuDragStart(e) {
+  e.preventDefault();
+  collectMenuEdits();
+  const startIdx = Number(e.currentTarget.dataset.idx);
+  const list = document.getElementById("admin-menu-list");
+  const rows = Array.from(list.querySelectorAll(".menu-row"));
+  const row = rows[startIdx];
+  row.classList.add("dragging");
+  menuDragState = { startIdx, currentIdx: startIdx, rows };
+
+  const onMove = (moveEvt) => {
+    if (!menuDragState) return;
+    const target = document.elementFromPoint(moveEvt.clientX, moveEvt.clientY);
+    const overRow = target && target.closest(".menu-row");
+    rows.forEach((r) => r.classList.remove("drag-over"));
+    if (overRow && overRow !== row) {
+      overRow.classList.add("drag-over");
+      menuDragState.currentIdx = Number(overRow.dataset.idx);
+    }
+  };
+
+  const onUp = () => {
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    if (menuDragState && menuDragState.currentIdx !== menuDragState.startIdx) {
+      const { startIdx, currentIdx } = menuDragState;
+      const [moved] = adminMenuItems.splice(startIdx, 1);
+      adminMenuItems.splice(currentIdx, 0, moved);
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+    }
+    menuDragState = null;
+    renderAdminMenuList();
+  };
+
+  document.addEventListener("pointermove", onMove);
+  document.addEventListener("pointerup", onUp);
+}
+
+function collectMenuEdits() {
+  document.querySelectorAll(".menu-text-input").forEach((el) => {
+    adminMenuItems[Number(el.dataset.idx)].text = el.value;
+  });
+  document.querySelectorAll(".menu-style-input").forEach((el) => {
+    adminMenuItems[Number(el.dataset.idx)].style = el.value;
+  });
+  document.querySelectorAll(".menu-enabled-input").forEach((el) => {
+    adminMenuItems[Number(el.dataset.idx)].enabled = el.checked;
+  });
+}
+
+function moveMenuItem(idx, dir) {
+  collectMenuEdits();
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= adminMenuItems.length) return;
+  const tmp = adminMenuItems[idx];
+  adminMenuItems[idx] = adminMenuItems[newIdx];
+  adminMenuItems[newIdx] = tmp;
+  renderAdminMenuList();
+}
+
+async function saveAdminMenu() {
+  collectMenuEdits();
+  const saveBtn = document.getElementById("admin-menu-save");
+  saveBtn.disabled = true;
+  saveBtn.textContent = "در حال ذخیره...";
+  try {
+    await api("/api/admin/menu", {
+      method: "POST",
+      body: JSON.stringify({
+        order: adminMenuItems.map((i) => i.key),
+        buttons: adminMenuItems.map((i) => ({ key: i.key, text: i.text, style: i.style, enabled: i.enabled })),
+      }),
+    });
+    tg.HapticFeedback.notificationOccurred("success");
+    notify("چیدمان منو با موفقیت ذخیره شد. برای دیدن تغییرات، بات را دوباره در تلگرام باز کن.");
+  } catch (e) {
+    notify(e.message);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = "💾 ذخیره تغییرات";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > پنل‌های VPN (ساخت کانفیگ شخصی)
+// ---------------------------------------------------------------------------
+
+async function renderAdminPanelsSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  try {
+    if (adminPanelsView.level === "add-server") {
+      body.innerHTML = `
+        <div class="card">
+          <div class="eyebrow" style="margin-top:0">➕ افزودن سرور پنل</div>
+          <label class="field-label">نام دلخواه سرور</label>
+          <input class="input" id="ps-name" type="text" placeholder="مثلاً: سرور آلمان" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:10px" />
+          <label class="field-label">نوع پنل</label>
+          <select class="input" id="ps-type" style="margin-bottom:10px">
+            <option value="pasarguard">PasarGuard</option>
+            <option value="3xui">3X-UI</option>
+          </select>
+          <label class="field-label">آدرس API (مثلاً https://panel.example.com)</label>
+          <input class="input" id="ps-url" type="text" placeholder="https://..." style="direction:ltr;text-align:left;margin-bottom:10px" />
+          <label class="field-label">نام کاربری ادمین پنل</label>
+          <input class="input" id="ps-username" type="text" style="direction:ltr;text-align:left;margin-bottom:10px" />
+          <label class="field-label">رمز عبور ادمین پنل</label>
+          <input class="input" id="ps-password" type="password" style="direction:ltr;text-align:left;margin-bottom:10px" />
+          <div id="ps-template-wrap">
+            <label class="field-label">نام کاربری نمونه (که از قبل روی پنل موجود است)</label>
+            <p class="hint-text" style="margin-top:0">تنظیمات پروتکل/گروه همین کاربر به‌عنوان قالب پیش‌فرض برای همه‌ی کانفیگ‌های جدید استفاده می‌شود.</p>
+            <input class="input" id="ps-template" type="text" style="direction:ltr;text-align:left;margin-bottom:4px" />
+          </div>
+          <p class="hint-text" id="ps-xui-hint" style="display:none;margin-top:0">بعد از اتصال، لیست inbound های پنل خوانده می‌شود و در مرحله‌ی بعد یکی را انتخاب می‌کنی.</p>
+          <div class="field-error" id="ps-error"></div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn" id="ps-save">💾 افزودن سرور</button>
+            <button class="btn outline" id="ps-cancel">انصراف</button>
+          </div>
+        </div>
+      `;
+      const psType = document.getElementById("ps-type");
+      const syncPsType = () => {
+        const is3xui = psType.value === "3xui";
+        document.getElementById("ps-template-wrap").style.display = is3xui ? "none" : "block";
+        document.getElementById("ps-xui-hint").style.display = is3xui ? "block" : "none";
+      };
+      psType.onchange = syncPsType;
+      syncPsType();
+      document.getElementById("ps-cancel").onclick = () => { adminPanelsView = { level: "servers" }; renderAdminPanelsSection(); };
+      document.getElementById("ps-save").onclick = async () => {
+        const errBox = document.getElementById("ps-error");
+        errBox.textContent = "";
+        const panelType = psType.value;
+        const payload = {
+          name: document.getElementById("ps-name").value.trim(),
+          panel_type: panelType,
+          api_url: document.getElementById("ps-url").value.trim(),
+          api_username: document.getElementById("ps-username").value.trim(),
+          api_password: document.getElementById("ps-password").value,
+          template_username: document.getElementById("ps-template").value.trim(),
+        };
+        if (!payload.name || !payload.api_url || !payload.api_username || !payload.api_password) {
+          errBox.textContent = "نام، آدرس، یوزرنیم و پسورد الزامی هستند."; return;
+        }
+        if (panelType !== "3xui" && !payload.template_username) {
+          errBox.textContent = "نام کاربری نمونه الزامی است."; return;
+        }
+        try {
+          document.getElementById("ps-save").textContent = "⏳ در حال اتصال...";
+          document.getElementById("ps-save").disabled = true;
+          const res = await api("/api/admin/panel-servers", { method: "POST", body: JSON.stringify(payload) });
+          tg.HapticFeedback.notificationOccurred("success");
+          if (panelType === "3xui") {
+            adminPanelsView = { level: "xui-config", serverId: res.id, inbounds: res.inbounds, name: payload.name };
+          } else {
+            notify("سرور با موفقیت اضافه شد.");
+            adminPanelsView = { level: "servers" };
+          }
+          renderAdminPanelsSection();
+        } catch (e) {
+          errBox.textContent = e.message;
+          document.getElementById("ps-save").textContent = "💾 افزودن سرور";
+          document.getElementById("ps-save").disabled = false;
+        }
+      };
+      return;
+    }
+
+    if (adminPanelsView.level === "xui-config") {
+      const inbounds = adminPanelsView.inbounds || [];
+      body.innerHTML = `
+        <div class="card">
+          <div class="eyebrow" style="margin-top:0">⚙️ تنظیم Inbound برای «${adminPanelsView.name || ""}»</div>
+          <label class="field-label">کدام inbound برای ساخت کاربرهای جدید استفاده شود؟</label>
+          <select class="input" id="ps-xui-inbound" style="margin-bottom:10px">
+            ${inbounds.map((ib) => `<option value="${ib.id}">#${ib.id} - ${ib.remark || "بدون‌نام"} (${ib.protocol}:${ib.port})</option>`).join("")}
+          </select>
+          <label class="field-label">آدرس پایه‌ی Subscription پنل</label>
+          <p class="hint-text" style="margin-top:0">همان چیزی که پنل موقع ساخت کاربر دستی نشانت می‌دهد، مثلاً https://domain:2096/sub یا https://domain/sub - بدون / انتهایی.</p>
+          <input class="input" id="ps-xui-suburl" type="text" placeholder="https://..." style="direction:ltr;text-align:left;margin-bottom:4px" />
+          <div class="field-error" id="ps-xui-error"></div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn" id="ps-xui-save">💾 ذخیره</button>
+            <button class="btn outline" id="ps-xui-cancel">بعداً</button>
+          </div>
+        </div>
+      `;
+      if (inbounds.length === 0) {
+        document.getElementById("ps-xui-error").textContent = "این پنل هیچ inbound ای ندارد.";
+      }
+      document.getElementById("ps-xui-cancel").onclick = () => { adminPanelsView = { level: "servers" }; renderAdminPanelsSection(); };
+      document.getElementById("ps-xui-save").onclick = async () => {
+        const errBox = document.getElementById("ps-xui-error");
+        errBox.textContent = "";
+        const inbound_id = parseInt(document.getElementById("ps-xui-inbound").value, 10);
+        const sub_base_url = document.getElementById("ps-xui-suburl").value.trim();
+        if (!inbound_id || !sub_base_url) {
+          errBox.textContent = "هر دو فیلد الزامی هستند."; return;
+        }
+        try {
+          document.getElementById("ps-xui-save").disabled = true;
+          await api(`/api/admin/panel-servers/${adminPanelsView.serverId}/xui-config`, {
+            method: "POST", body: JSON.stringify({ inbound_id, sub_base_url }),
+          });
+          tg.HapticFeedback.notificationOccurred("success");
+          notify("سرور 3X-UI با موفقیت تنظیم شد.");
+          adminPanelsView = { level: "servers" };
+          renderAdminPanelsSection();
+        } catch (e) {
+          errBox.textContent = e.message;
+          document.getElementById("ps-xui-save").disabled = false;
+        }
+      };
+      return;
+    }
+
+    if (adminPanelsView.level === "pricing") {
+      const tiers = await api("/api/admin/custom-config/pricing-tiers");
+      body.innerHTML = `
+        <div class="card">
+          <div class="eyebrow" style="margin-top:0">💰 قیمت‌گذاری بر اساس بازه‌ی حجم</div>
+          <p class="hint-text">قیمت نهایی = کل حجم انتخابی کاربر × نرخ همان بازه‌ای که حجم داخلش قرار می‌گیرد (یک نرخ ثابت برای کل حجم، نه پلکانی). اگر حجم کاربر از آخرین بازه هم بیشتر شود، با نرخ آخرین بازه حساب می‌شود.</p>
+          ${tiers.length === 0 ? `<p class="hint-text">هنوز بازه‌ای تعریف نشده.</p>` : ""}
+          <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
+            ${tiers.map((t) => `
+              <div style="display:flex;justify-content:space-between;align-items:center;background:var(--glass-bg);border:1px solid var(--glass-brd);border-radius:10px;padding:8px 12px">
+                <span>${t.from_gb} تا ${t.to_gb ?? "∞"} گیگ ← ${Number(t.price_per_gb).toLocaleString()} تومان/گیگ</span>
+                <button class="btn outline danger" data-tier="${t.id}" style="padding:4px 10px;font-size:12px">🗑</button>
+              </div>
+            `).join("")}
+          </div>
+          <button class="btn outline" id="pt-add-toggle">➕ افزودن بازه‌ی جدید</button>
+          <div id="pt-add-form" style="display:none;margin-top:12px">
+            <label class="field-label">از (گیگ)</label>
+            <input class="input" id="pt-from" type="number" min="1" style="margin-bottom:10px" />
+            <label class="field-label">تا (گیگ) - برای بی‌نهایت خالی بگذار</label>
+            <input class="input" id="pt-to" type="number" min="1" style="margin-bottom:10px" />
+            <label class="field-label">قیمت هر گیگ (تومان)</label>
+            <input class="input" id="pt-price" type="number" min="1" style="margin-bottom:4px" />
+            <div class="field-error" id="pt-error"></div>
+            <button class="btn" id="pt-save" style="margin-top:8px">💾 افزودن</button>
+          </div>
+          <div style="margin-top:14px">
+            <button class="btn outline" id="pt-back">⬅️ بازگشت</button>
+          </div>
+        </div>
+      `;
+      document.getElementById("pt-back").onclick = () => { adminPanelsView = { level: "servers" }; renderAdminPanelsSection(); };
+      document.getElementById("pt-add-toggle").onclick = () => {
+        document.getElementById("pt-add-form").style.display = "block";
+      };
+      document.querySelectorAll("[data-tier]").forEach((btn) => {
+        btn.onclick = async () => {
+          if (!confirm("این بازه حذف شود؟")) return;
+          await api(`/api/admin/custom-config/pricing-tiers/${btn.dataset.tier}`, { method: "DELETE" });
+          renderAdminPanelsSection();
+        };
+      });
+      document.getElementById("pt-save").onclick = async () => {
+        const errBox = document.getElementById("pt-error");
+        errBox.textContent = "";
+        const from_gb = parseInt(document.getElementById("pt-from").value, 10);
+        const toRaw = document.getElementById("pt-to").value.trim();
+        const to_gb = toRaw === "" ? null : parseInt(toRaw, 10);
+        const price_per_gb = parseInt(document.getElementById("pt-price").value, 10);
+        if (!from_gb || !price_per_gb || from_gb <= 0 || price_per_gb <= 0) {
+          errBox.textContent = "مقادیر باید عدد صحیح مثبت باشند."; return;
+        }
+        try {
+          await api("/api/admin/custom-config/pricing-tiers", {
+            method: "POST", body: JSON.stringify({ from_gb, to_gb, price_per_gb }),
+          });
+          tg.HapticFeedback.notificationOccurred("success");
+          renderAdminPanelsSection();
+        } catch (e) { errBox.textContent = e.message; }
+      };
+      return;
+    }
+
+    // level === "servers" (پیش‌فرض)
+    const [servers, settings] = await Promise.all([
+      api("/api/admin/panel-servers"),
+      api("/api/admin/custom-config/settings"),
+    ]);
+
+    body.innerHTML = `
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🛠 ساخت کانفیگ شخصی</div>
+        <p class="hint-text">کاربران می‌توانند با تعیین نام، حجم و پرداخت متناسب، کاربر خودشان را مستقیماً روی یکی از سرورهای زیر بسازند.</p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <span>وضعیت این بخش: <b>${settings.enabled ? "🟢 فعال" : "🔴 غیرفعال"}</b></span>
+          <button class="btn ${settings.enabled ? "outline danger" : ""}" id="cc-toggle" style="padding:6px 14px;font-size:13px">${settings.enabled ? "غیرفعال کن" : "فعال کن"}</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div>
+            <label class="field-label">حداقل حجم (گیگ)</label>
+            <input class="input" id="cc-min" type="number" min="1" value="${settings.min_gb}" style="width:110px" />
+          </div>
+          <div>
+            <label class="field-label">حداکثر حجم (گیگ)</label>
+            <input class="input" id="cc-max" type="number" min="1" value="${settings.max_gb}" style="width:110px" />
+          </div>
+          <button class="btn outline" id="cc-save-range" style="padding:8px 14px">💾 ذخیره بازه</button>
+        </div>
+        <div class="field-error" id="cc-error"></div>
+        <p class="hint-text" style="margin-top:8px">⏳ مدت اعتبار خرید شخصی فعلاً ثابت روی ${settings.duration_days} روز است.</p>
+        <hr style="border-color:var(--glass-brd);margin:14px 0" />
+        <div class="eyebrow" style="margin-top:0">🧪 کانفیگ تست (در صورت اتصال به پنل)</div>
+        <p class="hint-text" style="margin-top:0">اگر یکی از سرورها برای «کانفیگ تست» فعال باشد، به‌جای انبار ثابت، یک کاربر واقعی با این حجم/مدت روی همان سرور ساخته می‌شود.</p>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div>
+            <label class="field-label">حجم تست (گیگ)</label>
+            <input class="input" id="cc-test-vol" type="number" min="1" value="${settings.test_volume_gb}" style="width:110px" />
+          </div>
+          <div>
+            <label class="field-label">مدت تست (روز)</label>
+            <input class="input" id="cc-test-dur" type="number" min="1" value="${settings.test_duration_days}" style="width:110px" />
+          </div>
+          <button class="btn outline" id="cc-save-test" style="padding:8px 14px">💾 ذخیره</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🖥 سرورهای پنل متصل</div>
+        ${servers.length === 0 ? `<p class="hint-text">هنوز سروری اضافه نشده.</p>` : ""}
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+          ${servers.map((s) => `
+            <div style="background:var(--glass-bg);border:1px solid var(--glass-brd);border-radius:10px;padding:10px 12px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span>${s.is_active ? "🟢" : "🔴"} <b>${s.name}</b> <span class="hint-text" style="margin:0">(${s.panel_type})</span></span>
+              </div>
+              <div class="hint-text" style="margin:4px 0 4px;direction:ltr;text-align:left">${s.api_url}</div>
+              <div class="hint-text" style="margin:0 0 4px">${s.panel_type === "3xui"
+                ? (s.is_configured ? `⚙️ Inbound #${s.xui_inbound_id} تنظیم شده` : "⚠️ Inbound تنظیم نشده")
+                : (s.has_template ? `🧩 قالب از کاربر «${s.template_username}»` : "⚠️ قالب تنظیم نشده")}</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+                <span class="tag" style="opacity:${s.used_for_custom_config ? 1 : 0.4}">${s.used_for_custom_config ? "✅" : "◻️"} خرید شخصی</span>
+                <span class="tag" style="opacity:${s.used_for_test_config ? 1 : 0.4}">${s.used_for_test_config ? "✅" : "◻️"} کانفیگ تست</span>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="btn outline" data-test="${s.id}" style="padding:4px 10px;font-size:12px">🔌 تست اتصال</button>
+                ${s.panel_type === "3xui"
+                  ? `<button class="btn outline" data-xui-inbound="${s.id}" data-xui-name="${s.name}" style="padding:4px 10px;font-size:12px">⚙️ تنظیم Inbound</button>`
+                  : `<button class="btn outline" data-template="${s.id}" style="padding:4px 10px;font-size:12px">🧩 تغییر قالب</button>`}
+                <button class="btn outline" data-usage-custom="${s.id}" style="padding:4px 10px;font-size:12px">${s.used_for_custom_config ? "غیرفعال (خرید)" : "فعال (خرید)"}</button>
+                <button class="btn outline" data-usage-test="${s.id}" style="padding:4px 10px;font-size:12px">${s.used_for_test_config ? "غیرفعال (تست)" : "فعال (تست)"}</button>
+                <button class="btn outline" data-toggle="${s.id}" style="padding:4px 10px;font-size:12px">${s.is_active ? "غیرفعال کن" : "فعال کن"}</button>
+                <button class="btn outline danger" data-delete="${s.id}" style="padding:4px 10px;font-size:12px">🗑 حذف</button>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn" id="ps-add-btn">➕ افزودن سرور جدید</button>
+          <button class="btn outline" id="pt-goto-btn">💰 قیمت‌گذاری بر اساس بازه</button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById("cc-toggle").onclick = async () => {
+      await api("/api/admin/custom-config/settings", {
+        method: "POST", body: JSON.stringify({ enabled: !settings.enabled }),
+      });
+      renderAdminPanelsSection();
+    };
+    document.getElementById("cc-save-range").onclick = async () => {
+      const errBox = document.getElementById("cc-error");
+      errBox.textContent = "";
+      const min_gb = parseInt(document.getElementById("cc-min").value, 10);
+      const max_gb = parseInt(document.getElementById("cc-max").value, 10);
+      if (!min_gb || !max_gb || min_gb <= 0 || max_gb <= min_gb) {
+        errBox.textContent = "حداکثر باید بزرگ‌تر از حداقل باشد."; return;
+      }
+      try {
+        await api("/api/admin/custom-config/settings", {
+          method: "POST", body: JSON.stringify({ min_gb, max_gb }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("بازه‌ی حجم ذخیره شد.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+    document.getElementById("ps-add-btn").onclick = () => { adminPanelsView = { level: "add-server" }; renderAdminPanelsSection(); };
+    document.getElementById("pt-goto-btn").onclick = () => { adminPanelsView = { level: "pricing" }; renderAdminPanelsSection(); };
+    document.getElementById("cc-save-test").onclick = async () => {
+      const errBox = document.getElementById("cc-error");
+      errBox.textContent = "";
+      const test_volume_gb = parseInt(document.getElementById("cc-test-vol").value, 10);
+      const test_duration_days = parseInt(document.getElementById("cc-test-dur").value, 10);
+      if (!test_volume_gb || !test_duration_days || test_volume_gb <= 0 || test_duration_days <= 0) {
+        errBox.textContent = "مقادیر باید عدد صحیح مثبت باشند."; return;
+      }
+      try {
+        await api("/api/admin/custom-config/settings", {
+          method: "POST", body: JSON.stringify({ test_volume_gb, test_duration_days }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("تنظیمات کانفیگ تست ذخیره شد.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+    document.querySelectorAll("[data-test]").forEach((btn) => {
+      btn.onclick = async () => {
+        btn.textContent = "در حال تست...";
+        try {
+          const res = await api(`/api/admin/panel-servers/${btn.dataset.test}/test`, { method: "POST" });
+          notify(res.ok ? "✅ اتصال موفق بود." : `❌ اتصال ناموفق بود.${res.error ? " " + res.error : ""}`);
+        } catch (e) { notify(e.message); }
+        btn.textContent = "🔌 تست اتصال";
+      };
+    });
+    document.querySelectorAll("[data-template]").forEach((btn) => {
+      btn.onclick = async () => {
+        const username = prompt("نام کاربری نمونه‌ی جدید (که روی پنل موجود است) را وارد کن:");
+        if (!username || !username.trim()) return;
+        btn.textContent = "⏳...";
+        try {
+          await api(`/api/admin/panel-servers/${btn.dataset.template}/template`, {
+            method: "POST", body: JSON.stringify({ template_username: username.trim() }),
+          });
+          tg.HapticFeedback.notificationOccurred("success");
+          renderAdminPanelsSection();
+        } catch (e) { notify(e.message); btn.textContent = "🧩 تغییر قالب"; }
+      };
+    });
+    document.querySelectorAll("[data-xui-inbound]").forEach((btn) => {
+      btn.onclick = async () => {
+        const serverId = btn.dataset.xuiInbound;
+        btn.textContent = "⏳...";
+        try {
+          const inbounds = await api(`/api/admin/panel-servers/${serverId}/xui-inbounds`);
+          adminPanelsView = { level: "xui-config", serverId, inbounds, name: btn.dataset.xuiName };
+          renderAdminPanelsSection();
+        } catch (e) { notify(e.message); btn.textContent = "⚙️ تنظیم Inbound"; }
+      };
+    });
+    document.querySelectorAll("[data-usage-custom]").forEach((btn) => {
+      btn.onclick = async () => {
+        await api(`/api/admin/panel-servers/${btn.dataset.usageCustom}/usage/custom`, { method: "POST" });
+        renderAdminPanelsSection();
+      };
+    });
+    document.querySelectorAll("[data-usage-test]").forEach((btn) => {
+      btn.onclick = async () => {
+        await api(`/api/admin/panel-servers/${btn.dataset.usageTest}/usage/test`, { method: "POST" });
+        renderAdminPanelsSection();
+      };
+    });
+    document.querySelectorAll("[data-toggle]").forEach((btn) => {
+      btn.onclick = async () => {
+        await api(`/api/admin/panel-servers/${btn.dataset.toggle}/toggle`, { method: "POST" });
+        renderAdminPanelsSection();
+      };
+    });
+    document.querySelectorAll("[data-delete]").forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm("این سرور حذف شود؟")) return;
+        await api(`/api/admin/panel-servers/${btn.dataset.delete}`, { method: "DELETE" });
+        renderAdminPanelsSection();
+      };
+    });
+  } catch (e) {
+    body.innerHTML = `<div class="card"><p class="hint-text">خطا در بارگذاری: ${e.message}</p></div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > محصولات (دسته‌بندی‌ها / محصولات / بانک کانفیگ)
+// ---------------------------------------------------------------------------
+
+async function renderAdminCatalogSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  try {
+    if (adminCatalogView.level === "categories") {
+      await renderAdminCategories(body);
+    } else if (adminCatalogView.level === "products") {
+      await renderAdminProducts(body);
+    } else if (adminCatalogView.level === "configs") {
+      await renderAdminConfigs(body);
+    }
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+async function renderAdminCategories(body) {
+  const cats = await api("/api/admin/categories");
+  body.innerHTML = `
+    <div class="card">
+      ${cats.length === 0 ? `<div class="hint-text" style="margin:0">هنوز دسته‌بندی‌ای ثبت نشده.</div>` : cats.map((c) => `
+        <div class="admin-list-row">
+          <div class="admin-list-row-main" data-open-cat="${c.id}" data-cat-name="${(c.name || "").replace(/"/g, "&quot;")}">
+            <span>${c.name}</span>
+            <span class="hint-text" style="margin:0">${c.product_count} محصول ${c.is_active ? "" : "· غیرفعال"}</span>
+          </div>
+          <div class="admin-list-row-actions">
+            <button class="btn small outline" data-edit-cat="${c.id}">✏️</button>
+            <button class="btn small outline" data-toggle-cat="${c.id}">${c.is_active ? "⛔️" : "✅"}</button>
+            <button class="btn small outline danger" data-del-cat="${c.id}">🗑️</button>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">افزودن دسته‌بندی جدید</div>
+      <input class="input" id="new-cat-name" type="text" placeholder="نام دسته‌بندی" style="direction:rtl;text-align:right;font-family:var(--font-body)" />
+      <button class="btn" id="new-cat-save" style="margin-top:8px">➕ افزودن</button>
+    </div>
+  `;
+  body.querySelectorAll("[data-open-cat]").forEach((el) => {
+    el.onclick = () => {
+      adminCatalogView = { level: "products", categoryId: Number(el.dataset.openCat), categoryName: el.dataset.catName };
+      renderAdmin();
+    };
+  });
+  body.querySelectorAll("[data-edit-cat]").forEach((el) => {
+    el.onclick = async () => {
+      const cat = cats.find((c) => c.id === Number(el.dataset.editCat));
+      const name = prompt("نام جدید دسته‌بندی:", cat.name);
+      if (!name || !name.trim()) return;
+      try {
+        await api(`/api/admin/categories/${cat.id}`, { method: "PATCH", body: JSON.stringify({ name: name.trim() }) });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
+    };
+  });
+  body.querySelectorAll("[data-toggle-cat]").forEach((el) => {
+    el.onclick = async () => {
+      try {
+        await api(`/api/admin/categories/${el.dataset.toggleCat}/toggle`, { method: "POST" });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
+    };
+  });
+  body.querySelectorAll("[data-del-cat]").forEach((el) => {
+    el.onclick = async () => {
+      if (!confirm("حذف این دسته‌بندی و همه‌ی محصولاتش؟ این کار برگشت‌ناپذیر است.")) return;
+      try {
+        await api(`/api/admin/categories/${el.dataset.delCat}`, { method: "DELETE" });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
+    };
+  });
+  document.getElementById("new-cat-save").onclick = async () => {
+    const input = document.getElementById("new-cat-name");
+    if (!input.value.trim()) return;
+    try {
+      await api("/api/admin/categories", { method: "POST", body: JSON.stringify({ name: input.value.trim() }) });
+      renderAdmin();
+    } catch (e) { notify(e.message); }
+  };
+}
+
+async function renderAdminProducts(body) {
+  const { categoryId, categoryName } = adminCatalogView;
+  const products = await api(`/api/admin/categories/${categoryId}/products`);
+  body.innerHTML = `
+    <button class="btn outline small" id="back-to-cats" style="width:auto;margin-bottom:12px">→ بازگشت به دسته‌بندی‌ها</button>
+    <div class="eyebrow" style="margin-top:0">محصولات «${categoryName}»</div>
+    <div class="card">
+      ${products.length === 0 ? `<div class="hint-text" style="margin:0">هنوز محصولی در این دسته ثبت نشده.</div>` : products.map((p) => `
+        <div class="admin-list-row">
+          <div class="admin-list-row-main" data-open-prod="${p.id}" data-prod-name="${(p.name || "").replace(/"/g, "&quot;")}">
+            <span>${p.name}</span>
+            <span class="hint-text" style="margin:0">${fmt(p.price)} تومان · موجودی: ${p.stock} ${p.is_active ? "" : "· غیرفعال"}</span>
+          </div>
+          <div class="admin-list-row-actions">
+            <button class="btn small outline" data-edit-prod="${p.id}">✏️</button>
+            <button class="btn small outline" data-toggle-prod="${p.id}">${p.is_active ? "⛔️" : "✅"}</button>
+            <button class="btn small outline danger" data-del-prod="${p.id}">🗑️</button>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">افزودن محصول جدید</div>
+      <input class="input" id="new-prod-name" type="text" placeholder="نام محصول" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:8px" />
+      <input class="input" id="new-prod-price" type="number" placeholder="قیمت (تومان)" style="margin-bottom:8px" />
+      <input class="input" id="new-prod-duration" type="number" placeholder="مدت اعتبار (روز)" value="30" style="margin-bottom:8px" />
+      <input class="input" id="new-prod-desc" type="text" placeholder="توضیحات (اختیاری)" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:8px" />
+      <button class="btn" id="new-prod-save">➕ افزودن محصول</button>
+    </div>
+  `;
+  document.getElementById("back-to-cats").onclick = () => {
+    adminCatalogView = { level: "categories" };
+    renderAdmin();
+  };
+  body.querySelectorAll("[data-open-prod]").forEach((el) => {
+    el.onclick = () => {
+      adminCatalogView = {
+        level: "configs", productId: Number(el.dataset.openProd), productName: el.dataset.prodName,
+        categoryId, categoryName,
+      };
+      renderAdmin();
+    };
+  });
+  body.querySelectorAll("[data-edit-prod]").forEach((el) => {
+    el.onclick = async () => {
+      const p = products.find((x) => x.id === Number(el.dataset.editProd));
+      const name = prompt("نام محصول:", p.name);
+      if (name === null) return;
+      const price = prompt("قیمت (تومان):", p.price);
+      if (price === null) return;
+      const duration = prompt("مدت اعتبار (روز):", p.duration_days);
+      if (duration === null) return;
+      try {
+        await api(`/api/admin/products/${p.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name: name.trim() || undefined, price: Number(price), duration_days: Number(duration) }),
+        });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
+    };
+  });
+  body.querySelectorAll("[data-toggle-prod]").forEach((el) => {
+    el.onclick = async () => {
+      try {
+        await api(`/api/admin/products/${el.dataset.toggleProd}/toggle`, { method: "POST" });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
+    };
+  });
+  body.querySelectorAll("[data-del-prod]").forEach((el) => {
+    el.onclick = async () => {
+      if (!confirm("حذف این محصول و بانک کانفیگ‌هایش؟ این کار برگشت‌ناپذیر است.")) return;
+      try {
+        await api(`/api/admin/products/${el.dataset.delProd}`, { method: "DELETE" });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
+    };
+  });
+  document.getElementById("new-prod-save").onclick = async () => {
+    const name = document.getElementById("new-prod-name").value.trim();
+    const price = Number(document.getElementById("new-prod-price").value);
+    const duration = Number(document.getElementById("new-prod-duration").value) || 30;
+    const desc = document.getElementById("new-prod-desc").value.trim();
+    if (!name || !price) { notify("نام و قیمت الزامی است."); return; }
+    try {
+      await api("/api/admin/products", {
+        method: "POST",
+        body: JSON.stringify({ category_id: categoryId, name, price, duration_days: duration, description: desc }),
+      });
+      renderAdmin();
+    } catch (e) { notify(e.message); }
+  };
+}
+
+async function renderAdminConfigs(body) {
+  const { productId, productName, categoryId, categoryName } = adminCatalogView;
+  const configs = await api(`/api/admin/products/${productId}/configs`);
+  const PAGE_SIZE = 10;
+  let page = 0;
+  let query = "";
+  const normalizeSearchText = (s) => s.normalize("NFKC").replace(/[\s\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "").toLowerCase();
+  const filteredConfigs = () => {
+    const q = normalizeSearchText(query);
+    return q ? configs.filter((c) => normalizeSearchText(c.link).includes(q)) : configs;
+  };
+  const totalPages = () => Math.max(1, Math.ceil(filteredConfigs().length / PAGE_SIZE));
+
+  body.innerHTML = `
+    <button class="btn outline small" id="back-to-prods" style="width:auto;margin-bottom:12px">→ بازگشت به محصولات «${categoryName}»</button>
+    <div class="eyebrow" style="margin-top:0">بانک کانفیگ «${productName}»</div>
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">🎲 دریافت کانفیگ رندوم</div>
+      <p class="hint-text">یکی از کانفیگ‌های آزاد این محصول به‌صورت تصادفی برداشته و به تو اختصاص داده می‌شود (از انبار کم می‌شود).</p>
+      <button class="btn outline" id="take-random-cfg-btn">🎲 دریافت یک کانفیگ رندوم</button>
+      <div id="random-cfg-result"></div>
+    </div>
+    <div class="card">
+      <p class="hint-text" id="cfg-stock-count" style="margin:0 0 10px">موجودی فعلی: ${configs.length} کانفیگ استفاده‌نشده</p>
+      <input class="input" id="cfg-search" type="text" dir="ltr" placeholder="🔍 جستجو در لینک کانفیگ‌ها..." style="direction:ltr;text-align:left;margin-bottom:10px" />
+      <div id="cfg-list-box"></div>
+      <div id="cfg-pagination" style="display:flex;align-items:center;justify-content:space-between;margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">افزودن دسته‌ای کانفیگ</div>
+      <p class="hint-text">هر خط یک لینک کانفیگ (vmess/vless/...) وارد کن.</p>
+      <textarea class="input" id="new-configs-bulk" rows="5" style="direction:ltr;text-align:left;resize:vertical"></textarea>
+      <button class="btn" id="new-configs-save" style="margin-top:8px">➕ افزودن به انبار</button>
+    </div>
+  `;
+
+  function renderCfgList() {
+    const listBox = document.getElementById("cfg-list-box");
+    const pagBox = document.getElementById("cfg-pagination");
+    const items = filteredConfigs();
+    if (page >= totalPages()) page = totalPages() - 1;
+    if (page < 0) page = 0;
+    const start = page * PAGE_SIZE;
+    const pageItems = items.slice(start, start + PAGE_SIZE);
+
+    listBox.innerHTML = items.length === 0
+      ? `<div class="hint-text" style="margin:0">${query ? "کانفیگی با این جستجو پیدا نشد." : "کانفیگی در انبار نیست."}</div>`
+      : pageItems.map((c) => `
+          <div class="admin-list-row">
+            <div class="admin-list-row-main" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:12px;word-break:break-all;white-space:normal;user-select:all">${c.link}</div>
+            <div class="admin-list-row-actions">
+              <button class="btn small outline danger" data-del-cfg="${c.id}">🗑️</button>
+            </div>
+          </div>
+        `).join("");
+
+    listBox.querySelectorAll("[data-del-cfg]").forEach((el) => {
+      el.onclick = async () => {
+        if (!confirm("این کانفیگ حذف شود؟")) return;
+        try {
+          await api(`/api/admin/configs/${el.dataset.delCfg}`, { method: "DELETE" });
+          const idx = configs.findIndex((c) => String(c.id) === el.dataset.delCfg);
+          if (idx !== -1) configs.splice(idx, 1);
+          document.getElementById("cfg-stock-count").textContent = `موجودی فعلی: ${configs.length} کانفیگ استفاده‌نشده`;
+          renderCfgList();
+        } catch (e2) { notify(e2.message); }
+      };
+    });
+
+    pagBox.innerHTML = items.length === 0 ? "" : `
+      <button class="btn small outline" id="cfg-prev-page" ${page === 0 ? "disabled" : ""}>◀ قبلی</button>
+      <span class="hint-text" style="margin:0">صفحه ${page + 1} از ${totalPages()}${query ? ` (${items.length} نتیجه)` : ""}</span>
+      <button class="btn small outline" id="cfg-next-page" ${page >= totalPages() - 1 ? "disabled" : ""}>بعدی ▶</button>
+    `;
+    const prevBtn = document.getElementById("cfg-prev-page");
+    const nextBtn = document.getElementById("cfg-next-page");
+    if (prevBtn) prevBtn.onclick = () => { page--; renderCfgList(); };
+    if (nextBtn) nextBtn.onclick = () => { page++; renderCfgList(); };
+  }
+
+  renderCfgList();
+
+  const searchInput = document.getElementById("cfg-search");
+  const applySearch = () => {
+    query = searchInput.value;
+    page = 0;
+    renderCfgList();
+  };
+  searchInput.addEventListener("input", applySearch);
+  searchInput.addEventListener("keyup", applySearch);
+  searchInput.addEventListener("change", applySearch);
+
+  document.getElementById("back-to-prods").onclick = () => {
+    adminCatalogView = { level: "products", categoryId, categoryName };
+    renderAdmin();
+  };
+  document.getElementById("take-random-cfg-btn").onclick = async () => {
+    const resultBox = document.getElementById("random-cfg-result");
+    try {
+      const res = await api(`/api/admin/products/${productId}/take-random-config`, { method: "POST" });
+      tg.HapticFeedback.notificationOccurred("success");
+      resultBox.innerHTML = `
+        <div class="hint-text" style="margin:10px 0 4px">کانفیگ دریافت‌شده (این مورد از انبار کم شد):</div>
+        <div class="input" style="direction:ltr;text-align:left;word-break:break-all;user-select:all">${res.link}</div>
+      `;
+      // به‌جای رفرش کامل صفحه (که نتیجه‌ی بالا را پاک می‌کند)، فقط لیست و شمارنده را به‌روزرسانی می‌کنیم
+      const idx = configs.findIndex((c) => c.id === res.id);
+      if (idx !== -1) configs.splice(idx, 1);
+      document.getElementById("cfg-stock-count").textContent = `موجودی فعلی: ${configs.length} کانفیگ استفاده‌نشده`;
+      renderCfgList();
+    } catch (e) {
+      resultBox.innerHTML = `<div class="field-error" style="margin-top:10px">${e.message}</div>`;
+    }
+  };
+  body.querySelectorAll("[data-del-cfg]").forEach((el) => {
+    el.onclick = async () => {
+      if (!confirm("این کانفیگ حذف شود؟")) return;
+      try {
+        await api(`/api/admin/configs/${el.dataset.delCfg}`, { method: "DELETE" });
+        renderAdmin();
+      } catch (e) { notify(e.message); }
+    };
+  });
+  document.getElementById("new-configs-save").onclick = async () => {
+    const raw = document.getElementById("new-configs-bulk").value;
+    const links = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (links.length === 0) { notify("هیچ لینکی وارد نشده."); return; }
+    try {
+      const res = await api(`/api/admin/products/${productId}/configs`, { method: "POST", body: JSON.stringify({ links }) });
+      tg.HapticFeedback.notificationOccurred("success");
+      notify(`${res.added} کانفیگ اضافه شد.`);
+      renderAdmin();
+    } catch (e) { notify(e.message); }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > مدیریت کاربران (کیف‌پول و در آینده امکانات بیشتر)
+// ---------------------------------------------------------------------------
+
+let adminUserView = { level: "list", filter: "all", query: "" };
+const USER_STATUS_LABEL = { active: "فعال", expired: "منقضی‌شده", blocked: "بلاک‌شده", none: "بدون سرویس" };
+const USER_STATUS_BADGE_CLASS = { active: "approved", expired: "pending", blocked: "rejected", none: "" };
+
+function escHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+async function renderAdminUsersSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  try {
+    if (adminUserView.level === "list") await renderAdminUsersList(body);
+    else await renderAdminUserDetail(body);
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+async function renderAdminUsersList(body) {
+  const filter = adminUserView.filter || "all";
+  const query = adminUserView.query || "";
+  const data = await api(`/api/admin/users?query=${encodeURIComponent(query)}&status=${filter}&limit=50&offset=0`);
+
+  const filters = [
+    { k: "all", label: "همه" },
+    { k: "active", label: "فعال" },
+    { k: "expired", label: "منقضی‌شده" },
+    { k: "blocked", label: "بلاک‌شده" },
+  ];
+
+  body.innerHTML = `
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">📢 پیام گروهی به کاربران منقضی‌شده</div>
+      <textarea class="input" id="broadcast-expired-text" rows="2" placeholder="متن پیام تشویق به تمدید..." style="margin-bottom:8px;resize:vertical"></textarea>
+      <button class="btn outline small" id="broadcast-expired-btn" style="width:auto">ارسال به همه‌ی کاربران منقضی‌شده</button>
+    </div>
+
+    <div class="card">
+      <input class="input" id="user-search-input" type="text" placeholder="جستجو با آیدی عددی، یوزرنیم یا نام..." value="${escHtml(query)}" style="margin-bottom:10px" />
+      <div class="segmented" style="margin-bottom:0">
+        ${filters.map((f) => `<button class="seg-btn ${filter === f.k ? "active" : ""}" data-user-filter="${f.k}">${f.label}</button>`).join("")}
+      </div>
+    </div>
+
+    <div class="card">
+      ${data.users.length === 0
+        ? `<div class="state-msg"><span class="ic">👤</span>کاربری پیدا نشد.</div>`
+        : data.users.map((u) => `
+        <div class="admin-list-row" data-open-user="${u.telegram_id}" style="cursor:pointer">
+          <div class="admin-list-row-main">
+            <span>${escHtml(u.first_name || "بدون نام")}${u.username ? " (@" + escHtml(u.username) + ")" : ""}</span>
+            <span class="hint-text" style="margin:0">🆔 ${u.telegram_id} · 👛 ${fmt(u.wallet_credit)} تومان</span>
+          </div>
+          <div class="admin-list-row-actions">
+            <span class="badge ${USER_STATUS_BADGE_CLASS[u.status]}">${USER_STATUS_LABEL[u.status]}</span>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+    ${data.total > data.users.length ? `<p class="hint-text" style="text-align:center">${data.users.length} از ${data.total} کاربر نمایش داده شد؛ برای محدودکردن نتایج جستجو کنید.</p>` : ""}
+  `;
+
+  document.getElementById("user-search-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      adminUserView = { ...adminUserView, query: e.target.value.trim() };
+      renderAdminUsersSection();
+    }
+  });
+  body.querySelectorAll("[data-user-filter]").forEach((el) => {
+    el.onclick = () => {
+      adminUserView = { ...adminUserView, filter: el.dataset.userFilter };
+      renderAdminUsersSection();
+    };
+  });
+  body.querySelectorAll("[data-open-user]").forEach((el) => {
+    el.onclick = () => {
+      adminUserView = { level: "detail", telegramId: Number(el.dataset.openUser), returnTo: adminUserView };
+      renderAdminUsersSection();
+    };
+  });
+  document.getElementById("broadcast-expired-btn").onclick = async () => {
+    const text = document.getElementById("broadcast-expired-text").value.trim();
+    if (!text) { notify("متن پیام را وارد کن."); return; }
+    if (!confirm("این پیام برای همه‌ی کاربران منقضی‌شده ارسال می‌شود. ادامه؟")) return;
+    try {
+      const res = await api("/api/admin/users/broadcast-expired", { method: "POST", body: JSON.stringify({ text }) });
+      tg.HapticFeedback.notificationOccurred("success");
+      notify(`ارسال شد. موفق: ${res.success} از ${res.total}`);
+      document.getElementById("broadcast-expired-text").value = "";
+    } catch (e) { notify("⚠️ " + e.message); }
+  };
+}
+
+async function renderAdminUserDetail(body) {
+  const { telegramId } = adminUserView;
+  const u = await api(`/api/admin/users/${telegramId}`);
+
+  const statusLine = `<span class="badge ${USER_STATUS_BADGE_CLASS[u.status]}">${USER_STATUS_LABEL[u.status]}</span>`;
+
+  const ordersHtml = u.orders.length === 0
+    ? `<div class="hint-text" style="margin:0">هیچ سفارشی ثبت نکرده.</div>`
+    : u.orders.map((o) => `
+      <div class="admin-list-row">
+        <div class="admin-list-row-main">
+          <span>${escHtml(o.product_name || "نامشخص")} — ${fmt(o.final_price ?? o.base_price ?? 0)} تومان</span>
+          <span class="hint-text" style="margin:0">#${o.id} · ${o.created_at ? toJalaliStr(o.created_at, true) : ""}${o.config_link ? " · دارای کانفیگ" : ""}</span>
+        </div>
+        <div class="admin-list-row-actions">
+          <span class="badge ${o.status === "approved" ? "approved" : o.status === "pending" ? "pending" : "rejected"}">${o.status === "approved" ? "تاییدشده" : o.status === "pending" ? "در انتظار" : "ردشده"}</span>
+        </div>
+      </div>
+    `).join("");
+
+  const topupsHtml = u.topups.length === 0
+    ? `<div class="hint-text" style="margin:0">هیچ شارژ کیف‌پولی ثبت نکرده.</div>`
+    : u.topups.map((t) => `
+      <div class="admin-list-row">
+        <div class="admin-list-row-main">
+          <span>${fmt(t.amount)} تومان</span>
+          <span class="hint-text" style="margin:0">${t.created_at ? toJalaliStr(t.created_at, true) : ""}</span>
+        </div>
+        <div class="admin-list-row-actions">
+          <span class="badge ${t.status === "approved" ? "approved" : t.status === "pending" ? "pending" : "rejected"}">${t.status === "approved" ? "تاییدشده" : t.status === "pending" ? "در انتظار" : "ردشده"}</span>
+        </div>
+      </div>
+    `).join("");
+
+  body.innerHTML = `
+    <button class="btn outline small" id="back-to-user-list" style="width:auto;margin-bottom:12px">→ بازگشت به لیست کاربران</button>
+
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">${escHtml(u.first_name || "بدون نام")}${u.username ? " (@" + escHtml(u.username) + ")" : ""}</div>
+      <div class="stat-row"><span>🆔 آیدی عددی</span><span>${u.telegram_id}</span></div>
+      <div class="stat-row"><span>📅 تاریخ عضویت</span><span>${u.joined_at ? toJalaliStr(u.joined_at) : "---"}</span></div>
+      <div class="stat-row"><span>👛 موجودی کیف‌پول</span><span>${fmt(u.wallet_credit)} تومان</span></div>
+      <div class="stat-row"><span>وضعیت سرویس</span>${statusLine}</div>
+      <button class="btn ${u.is_blocked ? "" : "outline"} small" id="toggle-block-btn" style="width:auto;margin-top:10px">
+        ${u.is_blocked ? "✅ رفع بلاک کاربر" : "⛔️ بلاک‌کردن کاربر"}
+      </button>
+    </div>
+
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">✏️ تغییر موجودی کیف‌پول</div>
+      <input class="input" id="detail-wallet-amount" type="number" placeholder="مثال: 50000 یا -20000" style="margin-bottom:8px" />
+      <button class="btn small" id="detail-wallet-save" style="width:auto">💾 اعمال تغییر</button>
+    </div>
+
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">✉️ ارسال پیام مستقیم</div>
+      <textarea class="input" id="detail-message-text" rows="2" placeholder="متن پیام..." style="margin-bottom:8px;resize:vertical"></textarea>
+      <button class="btn small" id="detail-message-send" style="width:auto">ارسال پیام</button>
+    </div>
+
+    <div class="eyebrow">🧾 تاریخچه سفارش‌ها</div>
+    <div class="card">${ordersHtml}</div>
+
+    <div class="eyebrow">💳 تاریخچه شارژ کیف‌پول</div>
+    <div class="card">${topupsHtml}</div>
+  `;
+
+  document.getElementById("back-to-user-list").onclick = () => {
+    adminUserView = adminUserView.returnTo || { level: "list", filter: "all", query: "" };
+    renderAdminUsersSection();
+  };
+
+  document.getElementById("toggle-block-btn").onclick = async () => {
+    const willBlock = !u.is_blocked;
+    if (willBlock && !confirm("این کاربر بلاک شود؟ دیگر نمی‌تواند از بات یا فروشگاه استفاده کند.")) return;
+    try {
+      await api(`/api/admin/users/${telegramId}/block`, { method: "POST", body: JSON.stringify({ blocked: willBlock }) });
+      tg.HapticFeedback.notificationOccurred("success");
+      notify(willBlock ? "کاربر بلاک شد." : "بلاک کاربر برداشته شد.");
+      renderAdminUsersSection();
+    } catch (e) { notify("⚠️ " + e.message); }
+  };
+
+  document.getElementById("detail-wallet-save").onclick = async () => {
+    const amountRaw = document.getElementById("detail-wallet-amount").value.trim();
+    const amount = Number(amountRaw);
+    if (!amountRaw || isNaN(amount) || amount === 0) { notify("مبلغ باید عددی غیرصفر باشد."); return; }
+    try {
+      const res = await api("/api/admin/wallet/adjust", {
+        method: "POST",
+        body: JSON.stringify({ telegram_id: telegramId, amount }),
+      });
+      tg.HapticFeedback.notificationOccurred("success");
+      notify(`موجودی به ${fmt(res.new_balance)} تومان تغییر کرد.`);
+      renderAdminUsersSection();
+    } catch (e) { notify("⚠️ " + e.message); }
+  };
+
+  document.getElementById("detail-message-send").onclick = async () => {
+    const text = document.getElementById("detail-message-text").value.trim();
+    if (!text) { notify("متن پیام را وارد کن."); return; }
+    try {
+      await api(`/api/admin/users/${telegramId}/message`, { method: "POST", body: JSON.stringify({ text }) });
+      tg.HapticFeedback.notificationOccurred("success");
+      notify("پیام ارسال شد.");
+      document.getElementById("detail-message-text").value = "";
+    } catch (e) { notify("⚠️ " + e.message); }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > لاگ فعالیت ادمین
+// ---------------------------------------------------------------------------
+
+const ADMIN_ACTION_LABELS = {
+  wallet_adjust: "✏️ تغییر موجودی کیف‌پول",
+  product_price_edit: "💲 ویرایش قیمت محصول",
+  order_approve: "✅ تایید سفارش",
+  order_reject: "❌ رد سفارش",
+  topup_approve: "✅ تایید شارژ کیف‌پول",
+  topup_reject: "❌ رد شارژ کیف‌پول",
+  admin_add: "➕ افزودن ادمین",
+  admin_remove: "➖ حذف ادمین",
+  admin_role_change: "🔄 تغییر نقش ادمین",
+  card_change: "💳 تغییر شماره کارت",
+  backup_create: "🗄 دریافت بکاپ",
+  backup_restore: "♻️ بازیابی بکاپ",
+  category_add: "📂 افزودن دسته‌بندی",
+  category_toggle: "📂 تغییر وضعیت دسته‌بندی",
+  category_delete: "🗑 حذف دسته‌بندی",
+  product_add: "📦 افزودن محصول",
+  product_toggle: "📦 تغییر وضعیت محصول",
+  product_delete: "🗑 حذف محصول",
+  discount_add: "🎟 افزودن کد تخفیف",
+  discount_toggle: "🎟 تغییر وضعیت کد تخفیف",
+  discount_delete: "🗑 حذف کد تخفیف",
+  broadcast: "📢 ارسال پیام همگانی",
+};
+
+let adminLogSelectedId = "";
+
+function _renderAdminLogRows(logs) {
+  if (logs.length === 0) return `<div class="hint-text" style="margin:0">هنوز رخدادی برای این ادمین ثبت نشده.</div>`;
+  return logs.map((l) => `
+    <div class="admin-list-row">
+      <div class="admin-list-row-main">
+        <span>${ADMIN_ACTION_LABELS[l.action] || l.action}</span>
+        <span class="hint-text" style="margin:0">${escHtml(l.details)}</span>
+        <span class="hint-text" style="margin:0">👤 ${escHtml(l.admin_name)} (${l.admin_id}) · ${toJalaliStr(l.created_at, true)}</span>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function searchAdminLogById() {
+  const input = document.getElementById("adminlog-id-input");
+  const resultsBox = document.getElementById("adminlog-results");
+  const id = (input.value || "").trim();
+  if (!id || !/^\d+$/.test(id)) {
+    resultsBox.innerHTML = `<div class="hint-text" style="margin:0">لطفاً آیدی عددی ادمین را وارد کن.</div>`;
+    return;
+  }
+  adminLogSelectedId = id;
+  resultsBox.innerHTML = skeleton(3);
+  try {
+    const data = await api(`/api/admin/logs?limit=100&offset=0&admin_id=${id}`);
+    resultsBox.innerHTML = `
+      <div class="card" style="margin-top:10px">
+        ${_renderAdminLogRows(data.logs)}
+      </div>
+      ${data.total > data.logs.length ? `<p class="hint-text" style="text-align:center">${data.logs.length} از ${data.total} رخداد نمایش داده شد.</p>` : ""}
+    `;
+  } catch (e) {
+    resultsBox.innerHTML = errorState(e.message);
+  }
+}
+
+async function renderAdminLogSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(4);
+  try {
+    const adminsData = await api("/api/admin/logs/admins");
+    const admins = adminsData.admins || [];
+    body.innerHTML = `
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">📜 لاگ فعالیت ادمین</div>
+        <p class="hint-text">تایید/رد سفارش و شارژ کیف‌پول، تغییر موجودی، مدیریت ادمین‌ها، محصولات، بکاپ و سایر اقدامات هر ادمین اینجا با آیدی عددی همان ادمین ثبت و نمایش داده می‌شود.</p>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <input type="text" inputmode="numeric" id="adminlog-id-input" placeholder="آیدی عددی ادمین را وارد کن" value="${escHtml(adminLogSelectedId)}" style="flex:1" />
+          <button class="btn small" id="adminlog-search-btn" style="width:auto">جستجو</button>
+        </div>
+        ${admins.length ? `
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+            ${admins.map((a) => `<button class="btn small outline adminlog-chip" data-admin-id="${a.telegram_id}" style="width:auto">${escHtml(a.name) || a.telegram_id} (${a.telegram_id})</button>`).join("")}
+          </div>
+        ` : ""}
+      </div>
+      <div id="adminlog-results">
+        ${adminLogSelectedId ? "" : `<div class="card"><div class="hint-text" style="margin:0">برای مشاهده‌ی لاگ، آیدی عددی یک ادمین را وارد کن یا از لیست بالا انتخاب کن.</div></div>`}
+      </div>
+    `;
+    document.getElementById("adminlog-search-btn").addEventListener("click", searchAdminLogById);
+    document.getElementById("adminlog-id-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") searchAdminLogById();
+    });
+    document.querySelectorAll(".adminlog-chip").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.getElementById("adminlog-id-input").value = btn.dataset.adminId;
+        searchAdminLogById();
+      });
+    });
+    if (adminLogSelectedId) await searchAdminLogById();
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > بکاپ و بازیابی (فقط مالک اصلی)
+// ---------------------------------------------------------------------------
+
+async function downloadAdminBackup() {
+  const btn = document.getElementById("admin-backup-create-btn");
+  const status = document.getElementById("admin-backup-status");
+  if (btn) btn.disabled = true;
+  status.innerHTML = `<span class="hint-text">⏳ در حال آماده‌سازی و ارسال بکاپ به چت بات...</span>`;
+  try {
+    const result = await api("/api/admin/backup/create", { method: "POST" });
+    status.innerHTML = `<span class="hint-text">✅ بکاپ (${escHtml(result.filename)}) به چت بات ارسال شد. برای دریافت فایل، چت بات خودت را در تلگرام باز کن.</span>`;
+  } catch (e) {
+    status.innerHTML = errorState(e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+let adminRestorePendingFile = null;
+
+function renderAdminRestoreUploadUI() {
+  const status = document.getElementById("admin-restore-status");
+  const fileInput = document.getElementById("admin-restore-file");
+  if (!adminRestorePendingFile) {
+    status.innerHTML = "";
+    if (fileInput) fileInput.style.display = "";
+    return;
+  }
+  if (fileInput) fileInput.style.display = "none";
+  const sizeMb = (adminRestorePendingFile.size / (1024 * 1024)).toFixed(1);
+  status.innerHTML = `
+    <div class="card" style="margin-top:0">
+      <p class="hint-text" style="margin:0 0 8px">📦 فایل انتخاب‌شده: ${escHtml(adminRestorePendingFile.name)} (${sizeMb} مگابایت)</p>
+      <p class="hint-text" style="margin:0 0 10px">⚠️ با تایید، دیتابیس فعلی جایگزین می‌شود (یک نسخه از وضعیت فعلی هم قبلش ذخیره می‌شود).</p>
+      <div style="display:flex;gap:8px">
+        <button class="btn small" id="admin-restore-confirm-btn" style="width:auto">✅ تایید و جایگزینی</button>
+        <button class="btn small outline" id="admin-restore-cancel-btn" style="width:auto">❌ انصراف</button>
+      </div>
+    </div>
+  `;
+  document.getElementById("admin-restore-confirm-btn").onclick = confirmAdminRestore;
+  document.getElementById("admin-restore-cancel-btn").onclick = cancelAdminRestore;
+}
+
+function cancelAdminRestore() {
+  adminRestorePendingFile = null;
+  const fileInput = document.getElementById("admin-restore-file");
+  if (fileInput) fileInput.value = "";
+  renderAdminRestoreUploadUI();
+}
+
+async function confirmAdminRestore() {
+  const file = adminRestorePendingFile;
+  const status = document.getElementById("admin-restore-status");
+  if (!file) return;
+  status.innerHTML = `<span class="hint-text">⏳ در حال بازیابی...</span>`;
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const result = await apiUpload("/api/admin/backup/restore", formData);
+    adminRestorePendingFile = null;
+    status.innerHTML = `<span class="hint-text">✅ دیتابیس با موفقیت بازیابی شد. نسخه‌ی قبلی هم به‌عنوان «${escHtml(result.pre_restore_backup)}» کنار دیتابیس ذخیره شد. صفحه را رفرش کن.</span>`;
+    const fileInput = document.getElementById("admin-restore-file");
+    if (fileInput) { fileInput.value = ""; fileInput.style.display = ""; }
+  } catch (e) {
+    status.innerHTML = errorState(e.message);
+  }
+}
+
+function selectAdminRestoreFile(file) {
+  if (!file) return;
+  if (!/\.(db|sqlite|sqlite3)$/i.test(file.name)) {
+    document.getElementById("admin-restore-status").innerHTML = errorState("فایل باید پسوند .db یا .sqlite داشته باشد.");
+    return;
+  }
+  adminRestorePendingFile = file;
+  renderAdminRestoreUploadUI();
+}
+
+async function renderAdminBackupSection() {
+  adminRestorePendingFile = null;
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = `
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">📥 دریافت بکاپ فوری</div>
+      <p class="hint-text">یک نسخه‌ی کامل از دیتابیس فعلی همین الان ساخته و به چت بات ارسال می‌شود.</p>
+      <button class="btn" id="admin-backup-create-btn">📥 دریافت بکاپ فوری</button>
+      <div id="admin-backup-status" style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">♻️ بازیابی از فایل بکاپ</div>
+      <p class="hint-text">⚠️ با آپلود یک فایل بکاپ (.db)، دیتابیس فعلی کامل با آن جایگزین می‌شود. این کار قابل بازگشت نیست مگر با بکاپ دیگری. قبل از جایگزینی، یک نسخه‌ی ایمن از وضعیت فعلی هم خودکار ذخیره می‌شود.</p>
+      <input type="file" id="admin-restore-file" accept=".db,.sqlite,.sqlite3" style="margin-bottom:10px" />
+      <div id="admin-restore-status"></div>
+    </div>
+  `;
+  document.getElementById("admin-backup-create-btn").onclick = downloadAdminBackup;
+  document.getElementById("admin-restore-file").onchange = (e) => {
+    const file = e.target.files[0];
+    selectAdminRestoreFile(file);
+  };
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > فروش (رفرال / گردونه شانس / یادآوری تمدید / کدهای تخفیف)
+// ---------------------------------------------------------------------------
+
+async function renderAdminSalesSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(4);
+  try {
+    const [referral, wheel, renewal, volumeRem, crypto, discounts] = await Promise.all([
+      api("/api/admin/settings/referral"),
+      api("/api/admin/settings/wheel"),
+      api("/api/admin/settings/renewal"),
+      api("/api/admin/settings/volume-reminder"),
+      api("/api/admin/settings/crypto"),
+      api("/api/admin/discounts"),
+    ]);
+
+    body.innerHTML = `
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🤝 زیرمجموعه‌گیری (رفرال)</div>
+        <p class="hint-text">وقتی کاربری با لینک دعوت یکی دیگه وارد بشه و خرید کنه، درصدی از خریدش به‌عنوان اعتبار کیف‌پول به دعوت‌کننده تعلق می‌گیره.</p>
+        <div class="field-switch-row">
+          <span>سیستم رفرال فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="ref-enabled" ${referral.enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">درصد پاداش دعوت‌کننده از هر خرید زیرمجموعه (۰ تا ۱۰۰)</label>
+        <input class="input" id="ref-percent" type="number" placeholder="مثال: 10" value="${referral.percent}" style="margin-bottom:4px" />
+        <div class="field-error" id="ref-error"></div>
+        <button class="btn" id="ref-save" style="margin-top:8px">💾 ذخیره</button>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🎡 گردونه شانس</div>
+        <p class="hint-text">کاربرها با گردوندن این چرخ، شانس بردن کد تخفیف دارن.</p>
+        <div class="field-switch-row">
+          <span>گردونه شانس فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="wheel-enabled" ${wheel.enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">احتمال برد در هر چرخش (درصد از ۰ تا ۱۰۰)</label>
+        <input class="input" id="wheel-win-percent" type="number" placeholder="مثال: 30" value="${wheel.win_percent}" style="margin-bottom:10px" />
+        <label class="field-label">لیست درصد جوایز، با کاما جدا شود</label>
+        <input class="input" id="wheel-prizes" type="text" placeholder="مثال: 10,20,30,50" value="${wheel.prizes.join(",")}" style="margin-bottom:10px" />
+        <label class="field-label">مدت اعتبار کد جایزه پس از برد (ساعت)</label>
+        <input class="input" id="wheel-expiry" type="number" placeholder="مثال: 24" value="${wheel.expiry_hours}" style="margin-bottom:10px" />
+        <label class="field-label">حداقل فاصله‌ی زمانی بین دو چرخش هر کاربر (ساعت)</label>
+        <input class="input" id="wheel-cooldown" type="number" placeholder="مثال: 24" value="${wheel.cooldown_hours}" style="margin-bottom:4px" />
+        <div class="field-error" id="wheel-error"></div>
+        <button class="btn" id="wheel-save" style="margin-top:8px">💾 ذخیره</button>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">⏰ یادآوری تمدید سرویس</div>
+        <p class="hint-text">چند روز مانده به اتمام سرویس، به کاربر پیام یادآوری همراه با کد تخفیف تشویقی برای تمدید فرستاده می‌شود.</p>
+        <div class="field-switch-row">
+          <span>یادآوری تمدید فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="ren-enabled" ${renewal.enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">چند روز مانده به پایان سرویس، یادآوری ارسال شود</label>
+        <input class="input" id="ren-days" type="number" placeholder="مثال: 5" value="${renewal.days_before}" style="margin-bottom:10px" />
+        <label class="field-label">درصد تخفیف کد تشویقی تمدید (۰ تا ۱۰۰)</label>
+        <input class="input" id="ren-percent" type="number" placeholder="مثال: 20" value="${renewal.discount_percent}" style="margin-bottom:10px" />
+        <label class="field-label">مدت اعتبار کد تشویقی (ساعت)</label>
+        <input class="input" id="ren-expiry" type="number" placeholder="مثال: 24" value="${renewal.discount_expiry_hours}" style="margin-bottom:4px" />
+        <div class="field-error" id="ren-error"></div>
+        <button class="btn" id="ren-save" style="margin-top:8px">💾 ذخیره</button>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">📉 یادآوری اتمام حجم</div>
+        <p class="hint-text">وقتی حجم مصرفی کاربر به آستانه‌ی تعیین‌شده برسد، پیام یادآوری همراه با کد تخفیف تشویقی برای تمدید فرستاده می‌شود. این یادآوری مستقل از یادآوری تاریخ انقضاست و برای کانفیگ‌های با حجم نامحدود اعمال نمی‌شود.</p>
+        <div class="field-switch-row">
+          <span>یادآوری اتمام حجم فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="vol-enabled" ${volumeRem.enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">مبنای آستانه</label>
+        <select class="input" id="vol-mode" style="margin-bottom:10px">
+          <option value="percent" ${volumeRem.mode === "percent" ? "selected" : ""}>درصد مصرف</option>
+          <option value="gb" ${volumeRem.mode === "gb" ? "selected" : ""}>حجم باقی‌مانده (گیگابایت)</option>
+        </select>
+        <label class="field-label">وقتی چند درصد از حجم مصرف شد (حالت «درصد مصرف»)</label>
+        <input class="input" id="vol-percent" type="number" placeholder="مثال: 80" value="${volumeRem.percent}" style="margin-bottom:10px" />
+        <label class="field-label">وقتی چند گیگابایت باقی ماند (حالت «حجم باقی‌مانده»)</label>
+        <input class="input" id="vol-gb" type="number" step="0.1" placeholder="مثال: 2" value="${volumeRem.gb_left}" style="margin-bottom:10px" />
+        <label class="field-label">درصد تخفیف کد تشویقی (۰ تا ۱۰۰)</label>
+        <input class="input" id="vol-discount-percent" type="number" placeholder="مثال: 20" value="${volumeRem.discount_percent}" style="margin-bottom:10px" />
+        <label class="field-label">مدت اعتبار کد تشویقی (ساعت)</label>
+        <input class="input" id="vol-discount-expiry" type="number" placeholder="مثال: 24" value="${volumeRem.discount_expiry_hours}" style="margin-bottom:4px" />
+        <div class="field-error" id="vol-error"></div>
+        <button class="btn" id="vol-save" style="margin-top:8px">💾 ذخیره</button>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🪙 پرداخت کریپتو (Plisio)</div>
+        ${crypto.gateway_configured ? "" : (
+          !crypto.has_own_key
+            ? `<p class="hint-text" style="color:var(--danger,#ff5a7a)">⚠️ هنوز API Key درگاه تنظیم نشده. از داخل بات، پنل مدیریت → «تنظیم درگاه کریپتو (Plisio)» رو بزن و کلیدت رو بفرست.</p>`
+            : `<p class="hint-text" style="color:var(--danger,#ff5a7a)">⚠️ API Key ثبت شده (منبع: ${crypto.key_source === "db" ? "پنل بات" : crypto.key_source === "env" ? ".env" : "نامشخص"})، ولی آدرس MINIAPP_URL روی سرور تنظیم نشده. این رو دولوپر باید تو .env بذاره و هر دو سرویس (بات و مینی‌اپ) رو ری‌استارت کنه.</p>`
+        )}
+        <p class="hint-text">با فعال شدن، کاربر هم موقع خرید مستقیم و هم موقع شارژ کیف پول می‌تونه با ارز دیجیتال (BTC/ETH/USDT/...) پرداخت کنه و بلافاصله بعد از تایید تراکنش، سفارش/کیف‌پول به‌صورت خودکار تسویه می‌شه.</p>
+        <div class="field-switch-row">
+          <span>پرداخت کریپتو فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="crypto-enabled" ${crypto.enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">نرخ تبدیل هر ۱ دلار به تومان (خالی یا ۰ = خودکار از tgju/نوبیتکس/والکس/ارزدیجیتال)</label>
+        <input class="input" id="crypto-rate" type="number" placeholder="خودکار (tgju/نوبیتکس/والکس/ارزدیجیتال)" value="${crypto.usd_to_toman_rate || ""}" style="margin-bottom:4px" />
+        <div class="field-error" id="crypto-error"></div>
+        <button class="btn" id="crypto-save" style="margin-top:8px">💾 ذخیره</button>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🏷️ کدهای تخفیف</div>
+        <div id="discounts-list">
+          ${discounts.length === 0 ? `<div class="hint-text" style="margin:0">هنوز کد تخفیفی ثبت نشده.</div>` : discounts.map((d) => `
+            <div class="admin-list-row">
+              <div class="admin-list-row-main">
+                <span style="direction:ltr">${d.code}</span>
+                <span class="hint-text" style="margin:0">
+                  ${d.percent ? `${d.percent}٪` : `${fmt(d.fixed_amount)} تومان`} ·
+                  استفاده: ${d.used_count}${d.max_uses ? "/" + d.max_uses : " (نامحدود)"}
+                  ${d.is_active ? "" : "· غیرفعال"}
+                </span>
+              </div>
+              <div class="admin-list-row-actions">
+                <button class="btn small outline" data-toggle-disc="${d.id}">${d.is_active ? "⛔️" : "✅"}</button>
+                <button class="btn small outline danger" data-del-disc="${d.id}">🗑️</button>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--glass-brd)">
+          <div class="eyebrow">افزودن کد تخفیف جدید</div>
+          <label class="field-label">کد تخفیف (حروف/عدد انگلیسی، مثال: SUMMER25)</label>
+          <input class="input" id="new-disc-code" type="text" placeholder="SUMMER25" style="margin-bottom:10px;direction:ltr;text-align:left" />
+          <label class="field-label">درصد تخفیف (اگر می‌خوای درصدی باشه)</label>
+          <input class="input" id="new-disc-percent" type="number" placeholder="مثال: 25" style="margin-bottom:10px" />
+          <label class="field-label">یا مبلغ ثابت تخفیف به تومان (فقط یکی از این دو را پر کن)</label>
+          <input class="input" id="new-disc-fixed" type="number" placeholder="مثال: 50000" style="margin-bottom:10px" />
+          <label class="field-label">حداکثر تعداد دفعات استفاده (۰ یعنی نامحدود)</label>
+          <input class="input" id="new-disc-maxuses" type="number" placeholder="0" value="0" style="margin-bottom:4px" />
+          <div class="field-error" id="new-disc-error"></div>
+          <button class="btn" id="new-disc-save" style="margin-top:8px">➕ افزودن کد تخفیف</button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById("ref-save").onclick = async () => {
+      const errBox = document.getElementById("ref-error");
+      errBox.textContent = "";
+      const percentRaw = document.getElementById("ref-percent").value.trim();
+      if (percentRaw === "") { errBox.textContent = "درصد پاداش را وارد کن."; return; }
+      const percent = Number(percentRaw);
+      if (isNaN(percent) || percent < 0 || percent > 100) { errBox.textContent = "درصد باید عددی بین ۰ تا ۱۰۰ باشد."; return; }
+      try {
+        await api("/api/admin/settings/referral", {
+          method: "POST",
+          body: JSON.stringify({ enabled: document.getElementById("ref-enabled").checked, percent }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("تنظیمات رفرال ذخیره شد.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+
+    document.getElementById("wheel-save").onclick = async () => {
+      const errBox = document.getElementById("wheel-error");
+      errBox.textContent = "";
+      const winRaw = document.getElementById("wheel-win-percent").value.trim();
+      const prizesRaw = document.getElementById("wheel-prizes").value.trim();
+      const expiryRaw = document.getElementById("wheel-expiry").value.trim();
+      const cooldownRaw = document.getElementById("wheel-cooldown").value.trim();
+      if (!winRaw || !prizesRaw || !expiryRaw || !cooldownRaw) { errBox.textContent = "همه‌ی کادرها باید پر شوند."; return; }
+      const winPercent = Number(winRaw);
+      const prizes = prizesRaw.split(",").map((p) => Number(p.trim())).filter((p) => p > 0);
+      const expiry = Number(expiryRaw);
+      const cooldown = Number(cooldownRaw);
+      if (isNaN(winPercent) || winPercent < 0 || winPercent > 100) { errBox.textContent = "احتمال برد باید عددی بین ۰ تا ۱۰۰ باشد."; return; }
+      if (prizes.length === 0) { errBox.textContent = "حداقل یک جایزه‌ی معتبر وارد کن."; return; }
+      if (isNaN(expiry) || expiry <= 0) { errBox.textContent = "اعتبار کد جایزه باید عددی بزرگ‌تر از صفر باشد."; return; }
+      if (isNaN(cooldown) || cooldown <= 0) { errBox.textContent = "فاصله‌ی بین چرخش‌ها باید عددی بزرگ‌تر از صفر باشد."; return; }
+      try {
+        await api("/api/admin/settings/wheel", {
+          method: "POST",
+          body: JSON.stringify({
+            enabled: document.getElementById("wheel-enabled").checked,
+            win_percent: winPercent, prizes, expiry_hours: expiry, cooldown_hours: cooldown,
+          }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("تنظیمات گردونه شانس ذخیره شد.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+
+    document.getElementById("ren-save").onclick = async () => {
+      const errBox = document.getElementById("ren-error");
+      errBox.textContent = "";
+      const daysRaw = document.getElementById("ren-days").value.trim();
+      const percentRaw = document.getElementById("ren-percent").value.trim();
+      const expiryRaw = document.getElementById("ren-expiry").value.trim();
+      if (!daysRaw || !percentRaw || !expiryRaw) { errBox.textContent = "همه‌ی کادرها باید پر شوند."; return; }
+      const days = Number(daysRaw), percent = Number(percentRaw), expiry = Number(expiryRaw);
+      if (isNaN(days) || days <= 0) { errBox.textContent = "تعداد روز باید عددی بزرگ‌تر از صفر باشد."; return; }
+      if (isNaN(percent) || percent < 0 || percent > 100) { errBox.textContent = "درصد تخفیف باید عددی بین ۰ تا ۱۰۰ باشد."; return; }
+      if (isNaN(expiry) || expiry <= 0) { errBox.textContent = "اعتبار کد باید عددی بزرگ‌تر از صفر باشد."; return; }
+      try {
+        await api("/api/admin/settings/renewal", {
+          method: "POST",
+          body: JSON.stringify({
+            enabled: document.getElementById("ren-enabled").checked,
+            days_before: days, discount_percent: percent, discount_expiry_hours: expiry,
+          }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("تنظیمات یادآوری تمدید ذخیره شد.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+
+    document.getElementById("vol-save").onclick = async () => {
+      const errBox = document.getElementById("vol-error");
+      errBox.textContent = "";
+      const mode = document.getElementById("vol-mode").value;
+      const percentRaw = document.getElementById("vol-percent").value.trim();
+      const gbRaw = document.getElementById("vol-gb").value.trim();
+      const discPercentRaw = document.getElementById("vol-discount-percent").value.trim();
+      const discExpiryRaw = document.getElementById("vol-discount-expiry").value.trim();
+      if (!percentRaw || !gbRaw || !discPercentRaw || !discExpiryRaw) { errBox.textContent = "همه‌ی کادرها باید پر شوند."; return; }
+      const percent = Number(percentRaw), gb = Number(gbRaw);
+      const discPercent = Number(discPercentRaw), discExpiry = Number(discExpiryRaw);
+      if (isNaN(percent) || percent <= 0 || percent >= 100) { errBox.textContent = "درصد آستانه باید عددی بین ۱ تا ۹۹ باشد."; return; }
+      if (isNaN(gb) || gb <= 0) { errBox.textContent = "آستانه‌ی گیگابایت باید عددی بزرگ‌تر از صفر باشد."; return; }
+      if (isNaN(discPercent) || discPercent < 0 || discPercent > 100) { errBox.textContent = "درصد تخفیف باید عددی بین ۰ تا ۱۰۰ باشد."; return; }
+      if (isNaN(discExpiry) || discExpiry <= 0) { errBox.textContent = "اعتبار کد باید عددی بزرگ‌تر از صفر باشد."; return; }
+      try {
+        await api("/api/admin/settings/volume-reminder", {
+          method: "POST",
+          body: JSON.stringify({
+            enabled: document.getElementById("vol-enabled").checked,
+            mode, percent, gb_left: gb,
+            discount_percent: discPercent, discount_expiry_hours: discExpiry,
+          }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("تنظیمات یادآوری اتمام حجم ذخیره شد.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+
+    document.getElementById("crypto-save").onclick = async () => {
+      const errBox = document.getElementById("crypto-error");
+      errBox.textContent = "";
+      const rateRaw = document.getElementById("crypto-rate").value.trim();
+      const rate = rateRaw ? Number(rateRaw) : 0;
+      if (isNaN(rate) || rate < 0) { errBox.textContent = "نرخ تبدیل باید عددی معتبر باشد (یا خالی بذار برای حالت خودکار)."; return; }
+      try {
+        await api("/api/admin/settings/crypto", {
+          method: "POST",
+          body: JSON.stringify({ enabled: document.getElementById("crypto-enabled").checked, usd_to_toman_rate: rate }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("تنظیمات پرداخت کریپتو ذخیره شد.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+
+    body.querySelectorAll("[data-toggle-disc]").forEach((el) => {
+      el.onclick = async () => {
+        try {
+          await api(`/api/admin/discounts/${el.dataset.toggleDisc}/toggle`, { method: "POST" });
+          renderAdminSalesSection();
+        } catch (e) { notify(e.message); }
+      };
+    });
+    body.querySelectorAll("[data-del-disc]").forEach((el) => {
+      el.onclick = async () => {
+        if (!confirm("این کد تخفیف حذف شود؟")) return;
+        try {
+          await api(`/api/admin/discounts/${el.dataset.delDisc}`, { method: "DELETE" });
+          renderAdminSalesSection();
+        } catch (e) { notify(e.message); }
+      };
+    });
+    document.getElementById("new-disc-save").onclick = async () => {
+      const errBox = document.getElementById("new-disc-error");
+      errBox.textContent = "";
+      const code = document.getElementById("new-disc-code").value.trim();
+      const percentVal = document.getElementById("new-disc-percent").value.trim();
+      const fixedVal = document.getElementById("new-disc-fixed").value.trim();
+      const maxUses = Number(document.getElementById("new-disc-maxuses").value) || 0;
+      if (!code) { errBox.textContent = "کد تخفیف را وارد کن."; return; }
+      if (!percentVal && !fixedVal) { errBox.textContent = "باید یکی از دو کادر درصد یا مبلغ ثابت را پر کنی."; return; }
+      if (percentVal && fixedVal) { errBox.textContent = "فقط یکی از دو کادر درصد یا مبلغ ثابت را پر کن، نه هردو."; return; }
+      try {
+        await api("/api/admin/discounts", {
+          method: "POST",
+          body: JSON.stringify({
+            code, percent: percentVal ? Number(percentVal) : null,
+            fixed_amount: fixedVal ? Number(fixedVal) : null, max_uses: maxUses,
+          }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        renderAdminSalesSection();
+      } catch (e) { errBox.textContent = e.message; }
+    };
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > پشتیبانی زنده
+// ---------------------------------------------------------------------------
+
+async function renderAdminLiveChatSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  clearInterval(adminLiveChatPollTimer);
+  try {
+    if (adminLiveChatView.level === "list") {
+      await renderAdminLiveChatList(body);
+      adminLiveChatPollTimer = setInterval(() => {
+        if (adminLiveChatView.level === "list") renderAdminLiveChatList(body).catch(() => {});
+      }, 6000);
+    } else {
+      await renderAdminLiveChatThread(body);
+    }
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+async function renderAdminLiveChatList(body) {
+  const convs = await api("/api/admin/support/conversations");
+  body.innerHTML = `
+    <div class="card">
+      ${convs.length === 0 ? `<div class="hint-text" style="margin:0">هنوز گفتگویی ثبت نشده.</div>` : convs.map((c) => `
+        <div class="admin-list-row" data-open-chat="${c.user_id}" style="cursor:pointer">
+          <div class="admin-list-row-main">
+            <span>${c.user_name || "کاربر"} (@${c.user_username || "---"})${c.unread ? ` <span class="badge">${c.unread}</span>` : ""}</span>
+            <span class="hint-text" style="margin:0">${c.last_sender === "admin" ? "شما: " : ""}${(c.last_message || "").slice(0, 40)}${c.locked_for_me ? " · 🔒 پاسخ توسط ادمین دیگر" : ""}</span>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+  body.querySelectorAll("[data-open-chat]").forEach((el) => {
+    el.onclick = () => {
+      clearInterval(adminLiveChatPollTimer);
+      adminLiveChatView = { level: "thread", userId: Number(el.dataset.openChat) };
+      renderAdminLiveChatSection();
+    };
+  });
+}
+
+let adminChatThreadLastId = 0;
+
+async function renderAdminLiveChatThread(body) {
+  const { userId } = adminLiveChatView;
+  const data = await api(`/api/admin/support/${userId}/messages`);
+  const { user, messages } = data;
+  adminChatThreadLastId = messages.length ? messages[messages.length - 1].id : 0;
+  body.innerHTML = `
+    <button class="btn outline small" id="back-to-admin-chats" style="width:auto;margin-bottom:12px">→ بازگشت به لیست گفتگوها</button>
+    <div class="eyebrow" style="margin-top:0">${user.user_name || "کاربر"} (@${user.user_username || "---"}) · شناسه: ${user.user_id}</div>
+    ${user.locked_for_me ? `<p class="hint-text">🔒 این گفتگو در حال حاضر توسط ادمین دیگری پاسخ داده می‌شود.</p>` : ""}
+    <div class="chat-wrap">
+      <div class="chat-messages" id="admin-chat-messages"></div>
+      ${user.locked_for_me
+        ? ""
+        : `<form class="chat-input-row" id="admin-chat-form">
+            <input type="text" id="admin-chat-input" placeholder="پاسخ خود را بنویسید..." autocomplete="off" />
+            <button type="submit" class="chat-send-btn" aria-label="ارسال">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 12 20 4l-6 16-3-7-7-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+            </button>
+          </form>`}
+    </div>
+  `;
+  document.getElementById("back-to-admin-chats").onclick = () => {
+    clearInterval(adminLiveChatPollTimer);
+    adminLiveChatView = { level: "list" };
+    renderAdminLiveChatSection();
+  };
+  const box = document.getElementById("admin-chat-messages");
+  if (messages.length === 0) {
+    box.innerHTML = `<div class="state-msg"><span class="ic">💬</span>پیامی هنوز ثبت نشده.</div>`;
+  }
+  messages.forEach((m) => appendAdminChatMessage(box, m));
+  box.scrollTop = box.scrollHeight;
+
+  if (!user.locked_for_me) {
+    const form = document.getElementById("admin-chat-form");
+    const input = document.getElementById("admin-chat-input");
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      appendAdminChatMessage(box, { sender: "admin", message: text, created_at: new Date().toISOString() });
+      box.scrollTop = box.scrollHeight;
+      try {
+        await api(`/api/admin/support/${userId}/messages`, { method: "POST", body: JSON.stringify({ message: text }) });
+      } catch (e2) {
+        notify("خطا: " + e2.message);
+      }
+    };
+  }
+
+  clearInterval(adminLiveChatPollTimer);
+  adminLiveChatPollTimer = setInterval(async () => {
+    if (adminLiveChatView.level !== "thread" || adminLiveChatView.userId !== userId) return;
+    try {
+      const fresh = await api(`/api/admin/support/${userId}/messages?since_id=${adminChatThreadLastId}`);
+      fresh.messages.forEach((m) => appendAdminChatMessage(box, m));
+      if (fresh.messages.length) box.scrollTop = box.scrollHeight;
+    } catch (e) {
+      // در پس‌زمینه صامت
+    }
+  }, 4000);
+}
+
+function appendAdminChatMessage(box, m) {
+  if (!box) return;
+  if (box.querySelector(".state-msg")) box.innerHTML = "";
+  if (m.id) adminChatThreadLastId = Math.max(adminChatThreadLastId, m.id);
+  const time = new Date(m.created_at).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+  const bubble = document.createElement("div");
+  bubble.className = `chat-bubble ${m.sender === "admin" ? "mine" : "admin"}`;
+  bubble.innerHTML = `<div class="chat-text"></div><div class="chat-time">${time}</div>`;
+  bubble.querySelector(".chat-text").textContent = m.message;
+  box.appendChild(bubble);
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > تیکت‌ها
+// ---------------------------------------------------------------------------
+
+async function renderAdminTicketsSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  try {
+    if (adminTicketView.level === "list") await renderAdminTicketsList(body);
+    else await renderAdminTicketThread(body);
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+async function renderAdminTicketsList(body) {
+  const tickets = await api("/api/admin/tickets");
+  body.innerHTML = `
+    <div class="card">
+      ${tickets.length === 0 ? `<div class="hint-text" style="margin:0">هیچ تیکتی ثبت نشده.</div>` : tickets.map((t) => `
+        <div class="admin-list-row" data-open-admin-ticket="${t.id}" style="cursor:pointer">
+          <div class="admin-list-row-main">
+            <span>${t.subject}</span>
+            <span class="hint-text" style="margin:0">${t.user_name || "کاربر"} (@${t.user_username || "---"}) · ${TICKET_STATUS_LABEL[t.status] || t.status}${t.locked_for_me ? " · 🔒 پاسخ توسط ادمین دیگر" : ""}</span>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+  body.querySelectorAll("[data-open-admin-ticket]").forEach((el) => {
+    el.onclick = () => {
+      adminTicketView = { level: "thread", ticketId: Number(el.dataset.openAdminTicket) };
+      renderAdminTicketsSection();
+    };
+  });
+}
+
+async function renderAdminTicketThread(body) {
+  const { ticketId } = adminTicketView;
+  const data = await api(`/api/admin/tickets/${ticketId}/messages`);
+  const { ticket, messages } = data;
+  const closed = ticket.status === "closed";
+  const locked = ticket.locked_for_me;
+  body.innerHTML = `
+    <button class="btn outline small" id="back-to-admin-tickets" style="width:auto;margin-bottom:12px">→ بازگشت به لیست تیکت‌ها</button>
+    <div class="eyebrow" style="margin-top:0">${ticket.subject}</div>
+    <p class="hint-text">${ticket.user_name || "کاربر"} (@${ticket.user_username || "---"}) · شناسه: ${ticket.user_id} · ${TICKET_STATUS_LABEL[ticket.status] || ""}</p>
+    ${locked ? `<p class="hint-text">🔒 این تیکت توسط ادمین دیگری claim شده و فقط برای او (و مالک) فعال است.</p>` : ""}
+    <div class="chat-wrap">
+      <div class="chat-messages" id="admin-ticket-messages"></div>
+      ${closed
+        ? `<p class="hint-text" style="text-align:center">این تیکت بسته شده است.</p>`
+        : locked
+        ? ""
+        : `<form class="chat-input-row" id="admin-ticket-form">
+            <input type="text" id="admin-ticket-input" placeholder="پاسخ خود را بنویسید..." autocomplete="off" />
+            <button type="submit" class="chat-send-btn" aria-label="ارسال">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 12 20 4l-6 16-3-7-7-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+            </button>
+          </form>
+          <button class="btn outline small" id="admin-close-ticket-btn" style="width:auto;margin-top:8px">بستن این تیکت</button>`}
+    </div>
+  `;
+  document.getElementById("back-to-admin-tickets").onclick = () => {
+    adminTicketView = { level: "list" };
+    renderAdminTicketsSection();
+  };
+  const box = document.getElementById("admin-ticket-messages");
+  if (messages.length === 0) {
+    box.innerHTML = `<div class="state-msg"><span class="ic">🎫</span>پیامی هنوز ثبت نشده.</div>`;
+  }
+  messages.forEach((m) => {
+    if (box.querySelector(".state-msg")) box.innerHTML = "";
+    const time = new Date(m.created_at).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+    const bubble = document.createElement("div");
+    bubble.className = `chat-bubble ${m.sender === "admin" ? "mine" : "admin"}`;
+    bubble.innerHTML = `<div class="chat-text"></div><div class="chat-time">${time}</div>`;
+    bubble.querySelector(".chat-text").textContent = m.message;
+    box.appendChild(bubble);
+  });
+  box.scrollTop = box.scrollHeight;
+
+  if (!closed && !locked) {
+    const form = document.getElementById("admin-ticket-form");
+    const input = document.getElementById("admin-ticket-input");
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      const time = new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+      const bubble = document.createElement("div");
+      bubble.className = "chat-bubble mine";
+      bubble.innerHTML = `<div class="chat-text"></div><div class="chat-time">${time}</div>`;
+      bubble.querySelector(".chat-text").textContent = text;
+      box.appendChild(bubble);
+      box.scrollTop = box.scrollHeight;
+      try {
+        await api(`/api/admin/tickets/${ticketId}/messages`, { method: "POST", body: JSON.stringify({ message: text }) });
+      } catch (e2) {
+        notify("خطا: " + e2.message);
+      }
+    };
+    document.getElementById("admin-close-ticket-btn").onclick = async () => {
+      if (!confirm("این تیکت بسته شود؟")) return;
+      try {
+        await api(`/api/admin/tickets/${ticketId}/close`, { method: "POST" });
+        renderAdminTicketsSection();
+      } catch (e) { notify(e.message); }
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// تب مدیریت > نمایندگی‌ها (فقط بات اصلی)
+// ---------------------------------------------------------------------------
+
+async function renderAdminResellersSection() {
+  const body = document.getElementById("admin-section-body");
+  body.innerHTML = skeleton(3);
+  try {
+    const resellers = await api("/api/admin/resellers");
+    body.innerHTML = `
+      <p class="hint-text">تغییرات فعال/غیرفعال‌کردن یا حذف، حداکثر تا ۱۰ ثانیه دیگر روی بات واقعی اعمال می‌شود.</p>
+      <div class="card">
+        ${resellers.length === 0 ? `<div class="hint-text" style="margin:0">هنوز نماینده‌ای ثبت نشده.</div>` : resellers.map((r) => `
+          <div class="reseller-row" style="${resellers.indexOf(r) > 0 ? "border-top:1px solid var(--border,rgba(255,255,255,.08));padding-top:12px;margin-top:12px" : ""}">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:6px;direction:ltr">
+                <span style="font-weight:600">@${r.bot_username}</span>
+                ${r.is_active ? `<span class="badge" style="background:rgba(60,220,140,.15);color:#3cdc8c">فعال</span>` : `<span class="badge" style="background:rgba(255,90,122,.15);color:var(--danger,#ff5a7a)">غیرفعال</span>`}
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                ${r.miniapp_link ? `<button class="btn small outline" data-copy-res-link="${r.id}">🔗 کپی لینک</button>` : ""}
+                <button class="btn small outline" data-regen-res-link="${r.id}">🔁 تغییر لینک مینی‌اپ</button>
+                <button class="btn small outline" data-edit-res="${r.id}">✏️ ویرایش</button>
+                <button class="btn small outline" data-change-res-token="${r.id}">🔄 تغییر بات</button>
+                <button class="btn small outline" data-toggle-res="${r.id}">${r.is_active ? "⛔️ غیرفعال" : "✅ فعال"}</button>
+                <button class="btn small outline danger" data-del-res="${r.id}">🗑️ حذف</button>
+              </div>
+            </div>
+            <div class="hint-text" style="margin:8px 0 0">👤 ${r.owner_name || "بدون نام"} &nbsp;·&nbsp; شناسه: ${r.owner_telegram_id}</div>
+            ${r.miniapp_link ? `
+              <div class="hint-text" style="margin:4px 0 0;direction:ltr;text-align:left;word-break:break-all;opacity:.85">${r.miniapp_link}</div>
+            ` : `<div class="hint-text" style="margin:4px 0 0;color:var(--danger,#ff5a7a)">⚠️ آدرس MINIAPP_URL روی سرور تنظیم نشده - لینک ساخته نمی‌شود.</div>`}
+          </div>
+        `).join("")}
+      </div>
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">افزودن نماینده‌ی جدید</div>
+        <input class="input" id="new-res-token" type="text" placeholder="توکن بات (از BotFather)" style="margin-bottom:8px" />
+        <button class="btn outline" id="new-res-validate">🔎 بررسی توکن</button>
+        <div id="new-res-step2" style="display:none;margin-top:10px">
+          <p class="hint-text" id="new-res-username-line"></p>
+          <input class="input" id="new-res-owner-id" type="number" placeholder="آیدی عددی نماینده" style="margin-bottom:8px" />
+          <input class="input" id="new-res-owner-name" type="text" placeholder="نام نماینده (برای نمایش)" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:8px" />
+          <button class="btn" id="new-res-save">➕ افزودن نماینده</button>
+        </div>
+      </div>
+    `;
+    body.querySelectorAll("[data-copy-res-link]").forEach((el) => {
+      el.onclick = async () => {
+        const r = resellers.find((x) => x.id === Number(el.dataset.copyResLink));
+        if (!r || !r.miniapp_link) return;
+        try {
+          await navigator.clipboard.writeText(r.miniapp_link);
+          notify("لینک مینی‌اپ کپی شد ✅");
+        } catch (e) {
+          prompt("کپی خودکار ممکن نشد؛ لینک را دستی کپی کن:", r.miniapp_link);
+        }
+      };
+    });
+    body.querySelectorAll("[data-edit-res]").forEach((el) => {
+      el.onclick = async () => {
+        const r = resellers.find((x) => x.id === Number(el.dataset.editRes));
+        const ownerId = prompt("آیدی عددی نماینده:", r.owner_telegram_id);
+        if (ownerId === null || !ownerId.trim()) return;
+        const ownerName = prompt("نام نماینده:", r.owner_name || "");
+        if (ownerName === null) return;
+        try {
+          await api(`/api/admin/resellers/${r.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ owner_telegram_id: Number(ownerId), owner_name: ownerName.trim() }),
+          });
+          renderAdmin();
+        } catch (e) { notify(e.message); }
+      };
+    });
+    body.querySelectorAll("[data-regen-res-link]").forEach((el) => {
+      el.onclick = async () => {
+        const ok = confirm("لینک فعلی مینی‌اپ این نماینده از کار می‌افتد و یک لینک تازه ساخته می‌شود.\nادامه می‌دی؟");
+        if (!ok) return;
+        try {
+          const res = await api(`/api/admin/resellers/${el.dataset.regenResLink}/regenerate-link`, { method: "POST" });
+          tg.HapticFeedback.notificationOccurred("success");
+          try {
+            await navigator.clipboard.writeText(res.miniapp_link);
+            notify("✅ لینک جدید ساخته و کپی شد.");
+          } catch (e) {
+            prompt("لینک جدید مینی‌اپ (کپی کن):", res.miniapp_link);
+          }
+          renderAdmin();
+        } catch (e) { notify(e.message); }
+      };
+    });
+    body.querySelectorAll("[data-change-res-token]").forEach((el) => {
+      el.onclick = async () => {
+        const r = resellers.find((x) => x.id === Number(el.dataset.changeResToken));
+        const newToken = prompt(`توکن جدید بات را وارد کن (از BotFather).\nبات فعلی: @${r.bot_username}\n\n⚠️ با این کار بات نمایندگی از توکن فعلی جدا و به بات جدید وصل می‌شود.`, "");
+        if (newToken === null || !newToken.trim()) return;
+        try {
+          const res = await api(`/api/admin/resellers/${r.id}/token`, {
+            method: "PATCH",
+            body: JSON.stringify({ token: newToken.trim() }),
+          });
+          tg.HapticFeedback.notificationOccurred("success");
+          notify(`✅ لینک نماینده به @${res.username} تغییر کرد. ${res.note || ""}`);
+          renderAdmin();
+        } catch (e) { notify(e.message); }
+      };
+    });
+    body.querySelectorAll("[data-toggle-res]").forEach((el) => {
+      el.onclick = async () => {
+        try {
+          const res = await api(`/api/admin/resellers/${el.dataset.toggleRes}/toggle`, { method: "POST" });
+          notify(res.note || "وضعیت تغییر کرد.");
+          renderAdmin();
+        } catch (e) { notify(e.message); }
+      };
+    });
+    body.querySelectorAll("[data-del-res]").forEach((el) => {
+      el.onclick = async () => {
+        const purge = confirm("همراه با حذف نماینده، فایل دیتابیسش هم برای همیشه پاک شود؟\n(تایید = بله پاک شود / لغو = فقط حذف از لیست، فایل نگه داشته شود)");
+        try {
+          const res = await api(`/api/admin/resellers/${el.dataset.delRes}?purge_db=${purge}`, { method: "DELETE" });
+          notify((res.db_purged ? "نماینده حذف و دیتابیسش پاک شد. " : "نماینده حذف شد (دیتابیس نگه داشته شد). ") + (res.note || ""));
+          renderAdmin();
+        } catch (e) { notify(e.message); }
+      };
+    });
+    document.getElementById("new-res-validate").onclick = async () => {
+      const token = document.getElementById("new-res-token").value.trim();
+      if (!token) { notify("توکن را وارد کن."); return; }
+      try {
+        const res = await api("/api/admin/resellers/validate", { method: "POST", body: JSON.stringify({ token }) });
+        document.getElementById("new-res-step2").style.display = "";
+        document.getElementById("new-res-username-line").textContent = `✅ توکن معتبر است: @${res.username}`;
+        document.getElementById("new-res-save").onclick = async () => {
+          const ownerId = Number(document.getElementById("new-res-owner-id").value);
+          const ownerName = document.getElementById("new-res-owner-name").value.trim();
+          if (!ownerId) { notify("آیدی عددی نماینده الزامی است."); return; }
+          try {
+            const createRes = await api("/api/admin/resellers", {
+              method: "POST",
+              body: JSON.stringify({ token, username: res.username, owner_telegram_id: ownerId, owner_name: ownerName }),
+            });
+            tg.HapticFeedback.notificationOccurred("success");
+            notify(createRes.note || "نماینده اضافه شد.");
+            renderAdmin();
+          } catch (e) { notify(e.message); }
+        };
+      } catch (e) { notify(e.message); }
+    };
+  } catch (e) {
+    body.innerHTML = errorState(e.message);
+  }
+}
+
+
+const tabs = {
+  home: renderHome,
+  store: enterStoreTab,
+  services: enterServicesTab,
+  profile: renderProfile,
+  test: renderTestConfig,
+  wheel: renderWheel,
+  referral: renderReferral,
+  support: renderSupport,
+  wallet: renderWallet,
+  admin: renderAdmin,
+};
+
+function switchTab(name) {
+  document.querySelectorAll("#tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  if (name !== "support") clearInterval(supportPollTimer);
+  if (name !== "admin") {
+    clearInterval(adminPresenceTimer);
+    clearInterval(adminLiveChatPollTimer);
+  }
+  content.classList.remove("fade-in");
+  void content.offsetWidth; // ری‌استارت انیمیشن
+  tabs[name]();
+  content.classList.add("fade-in");
+}
+
+document.querySelectorAll("#tabbar button").forEach((b) => b.onclick = () => switchTab(b.dataset.tab));
+
+const headerWalletBtn = document.getElementById("header-wallet-btn");
+if (headerWalletBtn) headerWalletBtn.onclick = () => switchTab("wallet");
+
+switchTab("home");
