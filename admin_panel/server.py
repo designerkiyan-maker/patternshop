@@ -28,6 +28,7 @@ from stock_alerts import check_and_notify_low_stock
 from panel_providers import get_provider, PanelError, PANEL_TYPE_LABELS
 from renewal_reminders import STATUS_KEY_LAST_RUN, STATUS_KEY_LAST_DATE_SENT, STATUS_KEY_LAST_VOLUME_SENT
 from backup import create_backup, restore_backup, is_valid_sqlite_db
+import exchange_rate
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 COOKIE_NAME = "panel_session"
@@ -839,6 +840,46 @@ async def api_test_panel_server(server_id: int, admin=Depends(require_senior)):
     except PanelError as e:
         return {"ok": False, "error": str(e)}
     return {"ok": ok}
+
+
+# ----------------------------------------------------------- exchange rate --
+
+
+def _rate_response(ok: bool, status: dict, error: Optional[str] = None) -> dict:
+    ts = status.get("ts") or 0
+    return {
+        "ok": ok,
+        "rate": status.get("rate"),
+        "source": status.get("source"),
+        "updated_at": datetime.fromtimestamp(ts).isoformat(sep=" ") if ts else None,
+        "cache_ttl_seconds": exchange_rate.CACHE_TTL_SECONDS,
+        "error": error,
+    }
+
+
+@app.get("/api/exchange-rate")
+async def api_exchange_rate(admin=Depends(require_senior)):
+    """نرخ فعلی دلار به تومان (از کش یا در صورت انقضا، از منابع خارجی) + نام منبع."""
+    try:
+        await exchange_rate.get_usd_to_toman_rate()
+        return _rate_response(True, exchange_rate.get_cache_status())
+    except Exception as e:
+        # حتی اگر دریافت زنده شکست بخورد، هر مقدار کش‌شده‌ی قدیمی را نشان بده
+        return _rate_response(False, exchange_rate.get_cache_status(), str(e))
+
+
+@app.post("/api/exchange-rate/refresh")
+async def api_exchange_rate_refresh(admin=Depends(require_senior)):
+    """کش نرخ را باطل و دوباره از منابع خارجی (tgju/نوبیتکس/والکس/ارزدیجیتال) دریافت می‌کند."""
+    try:
+        status = await exchange_rate.refresh_rate()
+    except Exception as e:
+        raise HTTPException(502, str(e))
+    db.log_admin_action(
+        admin["id"], "exchange_rate_refresh",
+        f"نرخ دلار به {status['rate']:,} تومان (منبع: {status['source']}) رفرش شد (پنل وب - {admin['username']})",
+    )
+    return _rate_response(True, status)
 
 
 # --------------------------------------------------------------- settings --
