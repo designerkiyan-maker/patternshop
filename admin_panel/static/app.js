@@ -1215,6 +1215,8 @@ async function renderSystem() {
   const r = jobs.renewal;
   const stockRows = jobs.stock;
   const lowCount = stockRows.filter(p => p.low).length;
+  const backupStatus = await apiGet('/system/backup/status');
+  const isOwner = ME.role === 'owner';
 
   setContent(`
     <div class="card" style="margin-bottom:18px">
@@ -1227,7 +1229,7 @@ async function renderSystem() {
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" style="margin-bottom:18px">
       <div class="card-head">
         <h3>وضعیت لحظه‌ای موجودی محصولات</h3>
         <span class="card-sub">${lowCount ? `${lowCount} محصول زیر آستانه هشدار` : 'همه محصولات موجودی کافی دارند'}</span>
@@ -1244,7 +1246,125 @@ async function renderSystem() {
         </tr>`).join('') || `<tr><td colspan="4" class="empty-state"><div class="icon">${svg('empty')}</div>محصولی برای نمایش نیست</td></tr>`}</tbody>
       </table></div>
     </div>
+
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-head"><h3>بکاپ دیتابیس</h3></div>
+      <div class="chip-row" style="margin-bottom:14px">
+        <span class="chip">آخرین بکاپ: ${backupStatus.last_backup_at ? fmtDate(backupStatus.last_backup_at) : 'ثبت نشده'}</span>
+        <span class="chip">حجم آخرین بکاپ: ${backupStatus.last_backup_size_mb ?? '—'} مگابایت</span>
+        <span class="chip">تعداد نسخه‌های نگه‌داشته‌شده: ${fmt(backupStatus.count)}</span>
+      </div>
+      ${isOwner ? `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px">
+        <button class="btn btn-primary" id="backup-create-btn">📥 گرفتن بکاپ فوری و ارسال به تلگرام</button>
+      </div>
+      <div id="backup-create-status"></div>
+
+      <div class="card-head" style="margin-top:10px"><h3>بازیابی از فایل بکاپ</h3></div>
+      <p class="card-sub" style="margin-bottom:10px">⚠️ با تایید، کل دیتابیس فعلی با فایل آپلودی جایگزین می‌شود. این کار قابل بازگشت نیست مگر با بکاپ دیگر. قبل از جایگزینی، یک نسخه از وضعیت فعلی خودکار ذخیره می‌شود.</p>
+      <input type="file" class="input" id="restore-file" accept=".db,.sqlite,.sqlite3" style="margin-bottom:10px">
+      <div id="restore-area"></div>
+      ` : `<p class="card-sub">گرفتن بکاپ فوری و بازیابی فقط برای مالک در دسترس است.</p>`}
+    </div>
   `);
+
+  if (!isOwner) return;
+
+  $('#backup-create-btn').addEventListener('click', async () => {
+    const btn = $('#backup-create-btn');
+    const status = $('#backup-create-status', content());
+    btn.disabled = true;
+    status.innerHTML = '<span class="card-sub">⏳ در حال ساخت و ارسال بکاپ...</span>';
+    try {
+      const res = await apiPost('/system/backup/create');
+      status.innerHTML = `<span class="card-sub">✅ بکاپ (${esc(res.filename)}, ${res.size_mb} مگابایت) ساخته شد و به ${res.sent} ادمین ارسال شد${res.failed ? ` (${res.failed} ناموفق)` : ''}.</span>`;
+      toast('بکاپ گرفته شد.');
+    } catch (e) {
+      status.innerHTML = '';
+      handleErr(e);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  let restorePendingFile = null;
+
+  function renderRestoreArea() {
+    const area = $('#restore-area', content());
+    if (!restorePendingFile) {
+      area.innerHTML = '';
+      return;
+    }
+    const sizeMb = (restorePendingFile.size / (1024 * 1024)).toFixed(1);
+    area.innerHTML = `
+      <div class="card" style="margin-top:0;border-color:var(--rose)">
+        <p class="card-sub" style="margin:0 0 8px">📦 فایل انتخاب‌شده: ${esc(restorePendingFile.name)} (${sizeMb} مگابایت)</p>
+        <p class="card-sub" style="margin:0 0 10px">⚠️ مرحله ۱: این عمل کل دیتابیس فعلی رو با این فایل جایگزین می‌کنه. مطمئنی؟</p>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-danger btn-sm" id="restore-step1-btn">بله، ادامه بده</button>
+          <button class="btn btn-ghost btn-sm" id="restore-cancel-btn">انصراف</button>
+        </div>
+      </div>
+    `;
+    $('#restore-step1-btn', area).addEventListener('click', () => renderRestoreConfirmStep());
+    $('#restore-cancel-btn', area).addEventListener('click', cancelRestore);
+  }
+
+  function renderRestoreConfirmStep() {
+    const area = $('#restore-area', content());
+    area.innerHTML = `
+      <div class="card" style="margin-top:0;border-color:var(--rose)">
+        <p class="card-sub" style="margin:0 0 10px">⚠️ مرحله ۲ (نهایی): برای تایید نهایی، عبارت <strong class="mono">RESTORE</strong> رو دقیقاً تایپ کن.</p>
+        <input class="input" id="restore-confirm-input" placeholder="RESTORE" style="margin-bottom:10px">
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-danger btn-sm" id="restore-final-btn">✅ تایید نهایی و جایگزینی</button>
+          <button class="btn btn-ghost btn-sm" id="restore-cancel-btn2">انصراف</button>
+        </div>
+        <div id="restore-final-status" style="margin-top:10px"></div>
+      </div>
+    `;
+    $('#restore-cancel-btn2', area).addEventListener('click', cancelRestore);
+    $('#restore-final-btn', area).addEventListener('click', async () => {
+      const phrase = $('#restore-confirm-input', area).value.trim();
+      if (phrase.toUpperCase() !== 'RESTORE') {
+        $('#restore-final-status', area).innerHTML = '<span class="card-sub" style="color:var(--rose)">عبارت را دقیقاً RESTORE وارد کن.</span>';
+        return;
+      }
+      const statusEl = $('#restore-final-status', area);
+      statusEl.innerHTML = '<span class="card-sub">⏳ در حال بازیابی...</span>';
+      try {
+        const formData = new FormData();
+        formData.append('file', restorePendingFile);
+        formData.append('confirm_phrase', phrase);
+        const res = await fetch('/api/system/backup/restore', { method: 'POST', credentials: 'include', body: formData });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'خطای ناشناخته');
+        statusEl.innerHTML = `<span class="card-sub">✅ دیتابیس بازیابی شد. نسخه‌ی قبلی به‌عنوان «${esc(data.pre_restore_backup)}» ذخیره شد. صفحه را رفرش کن.</span>`;
+        restorePendingFile = null;
+        $('#restore-file').value = '';
+      } catch (e) {
+        statusEl.innerHTML = `<span class="card-sub" style="color:var(--rose)">${esc(e.message)}</span>`;
+      }
+    });
+  }
+
+  function cancelRestore() {
+    restorePendingFile = null;
+    $('#restore-file').value = '';
+    renderRestoreArea();
+  }
+
+  $('#restore-file').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) { restorePendingFile = null; renderRestoreArea(); return; }
+    if (!/\.(db|sqlite|sqlite3)$/i.test(file.name)) {
+      toast('فایل باید پسوند .db یا .sqlite داشته باشد.', true);
+      e.target.value = '';
+      return;
+    }
+    restorePendingFile = file;
+    renderRestoreArea();
+  });
 }
 
 /* ============================================================= account === */
