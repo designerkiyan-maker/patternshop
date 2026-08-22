@@ -791,6 +791,14 @@ def api_reseller_status(tg_id: int, body: ResellerToggleBody, admin=Depends(requ
     return {"ok": True}
 
 
+@app.get("/api/resellers/analytics/cohort")
+def api_reseller_cohort(days: int = 30, months: int = 6, admin=Depends(require_senior)):
+    """تحلیل کوهورت (نگهداشت ماهانه) و ریزش (churn) نمایندگی‌ها."""
+    days = max(1, min(days, 365))
+    months = max(1, min(months, 12))
+    return db.get_reseller_cohort_churn(inactivity_days=days, months=months)
+
+
 @app.get("/api/reseller-requests")
 def api_reseller_requests(status: Optional[str] = None, admin=Depends(require_senior)):
     return rows_to_list(db.list_reseller_requests(status))
