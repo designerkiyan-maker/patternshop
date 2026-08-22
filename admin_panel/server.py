@@ -10,21 +10,24 @@
 
 import asyncio
 import os
+import tempfile
+from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, Request, Response, Depends, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET
 from database import Database
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
-from admin_panel.telegram_notify import send_message as tg_send
+from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document
 from reseller_auto_provision import provision_auto_config, ProvisionError
 from stock_alerts import check_and_notify_low_stock
 from panel_providers import get_provider, PanelError, PANEL_TYPE_LABELS
 from renewal_reminders import STATUS_KEY_LAST_RUN, STATUS_KEY_LAST_DATE_SENT, STATUS_KEY_LAST_VOLUME_SENT
+from backup import create_backup, restore_backup, is_valid_sqlite_db
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 COOKIE_NAME = "panel_session"
@@ -170,6 +173,98 @@ def api_system_jobs(admin=Depends(require_senior)):
         },
         "stock": db.get_low_stock_overview(),
     }
+
+
+# ------------------------------------------------------------------ backup --
+
+BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "backups")
+
+
+@app.get("/api/system/backup/status")
+def api_backup_status(admin=Depends(require_senior)):
+    """آخرین وضعیت بکاپ‌ها؛ فقط‌خواندنی، برای نمایش در پنل."""
+    if not os.path.isdir(BACKUP_DIR):
+        return {"last_backup_at": None, "last_backup_size_mb": None, "count": 0}
+    files = sorted(
+        (f for f in os.listdir(BACKUP_DIR) if f.endswith(".db") and not f.startswith("pre_restore_")),
+    )
+    if not files:
+        return {"last_backup_at": None, "last_backup_size_mb": None, "count": 0}
+    last_path = os.path.join(BACKUP_DIR, files[-1])
+    return {
+        "last_backup_at": db.get_setting("_job_backup_last_at", "") or None,
+        "last_backup_size_mb": round(os.path.getsize(last_path) / (1024 * 1024), 1),
+        "count": len(files),
+    }
+
+
+@app.post("/api/system/backup/create")
+async def api_backup_create(admin=Depends(require_owner)):
+    """یک بکاپ فوری می‌سازد و به همه‌ی ادمین‌های تلگرامی همین بات ارسال می‌کند."""
+    backup_path = await asyncio.to_thread(create_backup, DB_PATH, BACKUP_DIR, 14)
+    if not backup_path:
+        raise HTTPException(404, "فایل دیتابیس پیدا نشد.")
+
+    size_mb = round(os.path.getsize(backup_path) / (1024 * 1024), 1)
+    caption = f"🗄 بکاپ فوری دیتابیس (پنل وب - {admin['username']})"
+
+    sent, failed = 0, 0
+    for admin_tg_id in db.list_admins():
+        ok = await tg_send_document(BOT_TOKEN, admin_tg_id, backup_path, caption)
+        sent += 1 if ok else 0
+        failed += 0 if ok else 1
+
+    db.set_setting("_job_backup_last_at", datetime.now().isoformat())
+    db.log_admin_action(
+        admin["id"], "backup_create",
+        f"بکاپ فوری ساخته شد ({os.path.basename(backup_path)}, {size_mb} مگابایت) — ارسال به {sent} ادمین "
+        f"(پنل وب - {admin['username']})",
+    )
+    return {"ok": True, "filename": os.path.basename(backup_path), "size_mb": size_mb, "sent": sent, "failed": failed}
+
+
+@app.post("/api/system/backup/restore")
+async def api_backup_restore(
+    file: UploadFile = File(...), confirm_phrase: str = Form(""), admin=Depends(require_owner)
+):
+    """جایگزینی کامل دیتابیس با فایل بکاپ آپلودشده. چون این کار overwrite کامل و
+    غیرقابل‌برگشت (به‌جز با بکاپ دیگر) است، علاوه بر تاییدیه‌ی دوگانه‌ی فرانت‌اند،
+    سمت سرور هم عبارت تاییدی «RESTORE» را الزامی می‌کند."""
+    if confirm_phrase.strip().upper() != "RESTORE":
+        raise HTTPException(400, "برای تایید بازیابی، عبارت RESTORE را دقیقاً وارد کن.")
+    if not file.filename or not file.filename.lower().endswith((".db", ".sqlite", ".sqlite3")):
+        raise HTTPException(400, "فایل باید پسوند .db یا .sqlite داشته باشد.")
+
+    tmp_dir = tempfile.mkdtemp(prefix="restore_")
+    tmp_path = os.path.join(tmp_dir, "uploaded.db")
+    content = await file.read()
+    with open(tmp_path, "wb") as f:
+        f.write(content)
+
+    if not is_valid_sqlite_db(tmp_path):
+        os.remove(tmp_path)
+        os.rmdir(tmp_dir)
+        raise HTTPException(400, "این فایل یک دیتابیس sqlite معتبر نیست.")
+
+    try:
+        pre_restore_path = await asyncio.to_thread(restore_backup, db, DB_PATH, tmp_path)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"بازیابی ناموفق بود: {e}")
+    finally:
+        try:
+            os.remove(tmp_path)
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
+
+    db.log_admin_action(
+        admin["id"], "backup_restore",
+        f"دیتابیس از فایل آپلودی بازیابی شد؛ نسخه‌ی قبلی: {os.path.basename(pre_restore_path)} "
+        f"(پنل وب - {admin['username']})",
+    )
+    return {"ok": True, "pre_restore_backup": os.path.basename(pre_restore_path)}
 
 
 # ------------------------------------------------------------------ orders --
