@@ -36,6 +36,7 @@ const ICONS = {
   catalog: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line>',
   discounts: '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z"></path><circle cx="7" cy="7" r="1.4"></circle>',
   tickets: '<path d="M21 11.5a8.38 8.38 0 0 1-4.5 7.4 8.5 8.5 0 0 1-7.6-.1L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 8-8.5h.5a8.48 8.48 0 0 1 8 8v.5Z"></path>',
+  broadcast: '<path d="m3 11 18-5v12L3 14v-3z"></path><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"></path>',
   resellers: '<rect x="2" y="7" width="20" height="14" rx="2.5"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>',
   panels: '<rect x="2" y="3" width="20" height="7" rx="2"></rect><rect x="2" y="14" width="20" height="7" rx="2"></rect><line x1="6" y1="6.5" x2="6.01" y2="6.5"></line><line x1="6" y1="17.5" x2="6.01" y2="17.5"></line>',
   settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"></path>',
@@ -217,6 +218,7 @@ const NAV = [
   { key: 'catalog', label: 'محصولات و بانک کانفیگ', icon: 'catalog', role: 'senior' },
   { key: 'discounts', label: 'کدهای تخفیف', icon: 'discounts', role: 'senior' },
   { key: 'tickets', label: 'تیکت‌ها', icon: 'tickets', role: 'any' },
+  { key: 'broadcast', label: 'پیام همگانی', icon: 'broadcast', role: 'full' },
   { key: 'resellers', label: 'نمایندگی‌ها', icon: 'resellers', role: 'senior' },
   { key: 'panels', label: 'پنل‌های VPN', icon: 'panels', role: 'senior' },
   { key: 'settings', label: 'تنظیمات و برندینگ', icon: 'settings', role: 'senior' },
@@ -228,6 +230,7 @@ const FULL_ROLES = ['owner', 'admin', 'mid'];
 const SENIOR_ROLES = ['owner', 'admin'];
 function canSee(navRole) {
   if (navRole === 'any') return true;
+  if (navRole === 'full') return FULL_ROLES.includes(ME.role);
   if (navRole === 'senior') return SENIOR_ROLES.includes(ME.role);
   if (navRole === 'owner') return ME.role === 'owner';
   return false;
@@ -336,6 +339,7 @@ async function renderPage(tab) {
       case 'catalog': return renderCatalog();
       case 'discounts': return renderDiscounts();
       case 'tickets': return renderTickets();
+      case 'broadcast': return renderBroadcast();
       case 'resellers': return renderResellers();
       case 'panels': return renderPanels();
       case 'settings': return renderSettings();
@@ -863,6 +867,53 @@ async function showTicket(ticketId) {
     const closeBtn = $('#ticket-close-btn', body);
     if (closeBtn) closeBtn.addEventListener('click', async () => {
       try { await apiPost(`/tickets/${ticketId}/close`); toast('تیکت بسته شد.'); close(); renderTickets(); } catch (e) { handleErr(e); }
+    });
+  });
+}
+
+/* =========================================================== broadcast === */
+async function renderBroadcast() {
+  setContent(`
+    <div class="card" style="max-width:640px">
+      <h3 style="margin:0 0 4px">ارسال پیام همگانی</h3>
+      <p class="card-sub" style="margin:0 0 14px">این پیام برای همه‌ی کاربران ربات (غیرمسدود) به‌صورت متنی ارسال می‌شود.</p>
+      <textarea class="input" id="bc-text" rows="6" maxlength="4000" placeholder="متن پیام را بنویس..."></textarea>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+        <span class="card-sub" id="bc-count">۰ / ۴۰۰۰</span>
+        <button class="btn btn-primary" id="bc-send">ارسال به همه</button>
+      </div>
+      <div id="bc-result" style="margin-top:14px"></div>
+    </div>
+  `);
+  const ta = $('#bc-text', content());
+  ta.addEventListener('input', () => { $('#bc-count', content()).textContent = `${ta.value.length} / 4000`; });
+
+  $('#bc-send', content()).addEventListener('click', () => {
+    const text = ta.value.trim();
+    if (!text) return toast('متن پیام خالی است.', true);
+    openModal('تایید ارسال همگانی', `
+      <p style="font-size:13px;line-height:1.9">این پیام برای <strong>همه‌ی کاربران</strong> ربات ارسال می‌شود و قابل بازگشت نیست. مطمئنی؟</p>
+      <div style="background:var(--panel-2);padding:10px 12px;border-radius:9px;font-size:13px;white-space:pre-wrap;max-height:160px;overflow-y:auto">${esc(text)}</div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="bc-confirm">بله، ارسال کن</button>
+      </div>
+    `, (body, close) => {
+      $('#bc-confirm', body).addEventListener('click', async () => {
+        const btn = $('#bc-confirm', body);
+        btn.disabled = true; btn.textContent = 'در حال ارسال...';
+        try {
+          const res = await apiPost('/broadcast', { message: text });
+          close();
+          $('#bc-result', content()).innerHTML = `
+            <div class="card" style="background:var(--panel-2)">
+              📢 ارسال تمام شد — کل: <strong>${res.total}</strong> ·
+              موفق: <strong style="color:var(--ok, #3ddc84)">${res.success}</strong> ·
+              ناموفق: <strong style="color:var(--danger, #ff6b52)">${res.failed}</strong>
+            </div>`;
+          ta.value = ''; $('#bc-count', content()).textContent = '۰ / ۴۰۰۰';
+          toast('پیام همگانی ارسال شد.');
+        } catch (e) { close(); handleErr(e); }
+      });
     });
   });
 }
