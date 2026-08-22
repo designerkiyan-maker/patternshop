@@ -294,7 +294,7 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
 
     if order["is_custom_config"]:
         db.approve_custom_config_order(order_id)
-        db.log_admin_action(admin["id"], "order_approve", f"سفارش شخصی #{order_id} (پنل وب - {admin['username']})")
+        db.log_admin_action(admin["id"], "order_approve", f"سفارش شخصی #{order_id} (پنل وب - {admin['username']})", "order", order_id)
         await notify_user(order["user_id"], "✅ خرید شما تایید شد.")
         return {"ok": True}
 
@@ -310,6 +310,7 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
         db.log_admin_action(
             admin["id"], "order_approve",
             f"سفارش #{order_id} (خودکار) | کاربر {order['user_id']} | محصول «{product['name']}» (پنل وب - {admin['username']})",
+            "order", order_id,
         )
         links = "\n".join(r["subscription_url"] for r in results)
         await notify_user(order["user_id"], f"✅ خرید شما تایید شد!\n📦 محصول: {product['name']}\n\n{links}")
@@ -322,6 +323,7 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
     db.log_admin_action(
         admin["id"], "order_approve",
         f"سفارش #{order_id} | کاربر {order['user_id']} | محصول «{product['name'] if product else '---'}» (پنل وب - {admin['username']})",
+        "order", order_id,
     )
     await check_and_notify_low_stock(lambda aid, text: tg_send(BOT_TOKEN, aid, text), db, order["product_id"])
     db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or (product["price"] if product else 0))
@@ -336,7 +338,7 @@ async def api_reject_order(order_id: int, admin=Depends(require_permission("orde
     if not order or order["status"] != "pending":
         raise HTTPException(400, "سفارش یافت نشد یا قبلاً بررسی شده.")
     db.reject_order(order_id)
-    db.log_admin_action(admin["id"], "order_reject", f"سفارش #{order_id} رد شد (پنل وب - {admin['username']})")
+    db.log_admin_action(admin["id"], "order_reject", f"سفارش #{order_id} رد شد (پنل وب - {admin['username']})", "order", order_id)
     await notify_user(order["user_id"], "⛔️ سفارش شما رد شد. در صورت کسر از کیف پول، مبلغ برگشت داده شد.")
     return {"ok": True}
 
@@ -363,7 +365,7 @@ async def api_approve_topup(topup_id: int, admin=Depends(require_permission("ord
         raise HTTPException(404, "یافت نشد.")
     if not db.approve_topup(topup_id):
         raise HTTPException(400, "قبلاً بررسی شده است.")
-    db.log_admin_action(admin["id"], "topup_approve", f"شارژ #{topup_id} تایید شد (پنل وب - {admin['username']})")
+    db.log_admin_action(admin["id"], "topup_approve", f"شارژ #{topup_id} تایید شد (پنل وب - {admin['username']})", "topup", topup_id)
     await notify_user(topup["user_id"], f"✅ شارژ کیف پول شما به مبلغ {topup['amount']:,} تومان تایید شد.")
     return {"ok": True}
 
@@ -374,7 +376,7 @@ async def api_reject_topup(topup_id: int, admin=Depends(require_permission("orde
     if not topup or topup["status"] != "pending":
         raise HTTPException(400, "یافت نشد یا قبلاً بررسی شده.")
     db.reject_topup(topup_id)
-    db.log_admin_action(admin["id"], "topup_reject", f"شارژ #{topup_id} رد شد (پنل وب - {admin['username']})")
+    db.log_admin_action(admin["id"], "topup_reject", f"شارژ #{topup_id} رد شد (پنل وب - {admin['username']})", "topup", topup_id)
     await notify_user(topup["user_id"], "⛔️ درخواست شارژ کیف پول شما رد شد.")
     return {"ok": True}
 
@@ -408,14 +410,14 @@ def api_user_detail(tg_id: int, admin=Depends(get_current_admin)):
 @app.post("/api/users/{tg_id}/block")
 def api_block_user(tg_id: int, admin=Depends(require_permission("users"))):
     db.set_user_blocked(tg_id, True)
-    db.log_admin_action(admin["id"], "user_block", f"کاربر {tg_id} مسدود شد (پنل وب - {admin['username']})")
+    db.log_admin_action(admin["id"], "user_block", f"کاربر {tg_id} مسدود شد (پنل وب - {admin['username']})", "user", tg_id)
     return {"ok": True}
 
 
 @app.post("/api/users/{tg_id}/unblock")
 def api_unblock_user(tg_id: int, admin=Depends(require_permission("users"))):
     db.set_user_blocked(tg_id, False)
-    db.log_admin_action(admin["id"], "user_unblock", f"کاربر {tg_id} رفع مسدودیت شد (پنل وب - {admin['username']})")
+    db.log_admin_action(admin["id"], "user_unblock", f"کاربر {tg_id} رفع مسدودیت شد (پنل وب - {admin['username']})", "user", tg_id)
     return {"ok": True}
 
 
@@ -427,7 +429,8 @@ class WalletAdjustBody(BaseModel):
 async def api_adjust_wallet(tg_id: int, body: WalletAdjustBody, admin=Depends(require_permission("users"))):
     db.add_wallet_credit(tg_id, body.delta)
     db.log_admin_action(
-        admin["id"], "wallet_adjust", f"کیف پول کاربر {tg_id} به میزان {body.delta:,} تغییر کرد (پنل وب - {admin['username']})"
+        admin["id"], "wallet_adjust", f"کیف پول کاربر {tg_id} به میزان {body.delta:,} تغییر کرد (پنل وب - {admin['username']})",
+        "user", tg_id,
     )
     if body.delta:
         sign = "افزایش" if body.delta > 0 else "کاهش"
@@ -450,26 +453,28 @@ def api_categories(admin=Depends(get_current_admin)):
 @app.post("/api/categories")
 def api_add_category(body: CategoryBody, admin=Depends(require_permission("catalog"))):
     cat_id = db.add_category(body.name)
-    db.log_admin_action(admin["id"], "category_add", body.name)
+    db.log_admin_action(admin["id"], "category_add", body.name, "category", cat_id)
     return {"id": cat_id}
 
 
 @app.put("/api/categories/{cat_id}")
 def api_edit_category(cat_id: int, body: CategoryBody, admin=Depends(require_permission("catalog"))):
     db.edit_category(cat_id, body.name)
+    db.log_admin_action(admin["id"], "category_edit", body.name, "category", cat_id)
     return {"ok": True}
 
 
 @app.post("/api/categories/{cat_id}/toggle")
 def api_toggle_category(cat_id: int, admin=Depends(require_permission("catalog"))):
     db.toggle_category(cat_id)
+    db.log_admin_action(admin["id"], "category_toggle", str(cat_id), "category", cat_id)
     return {"ok": True}
 
 
 @app.delete("/api/categories/{cat_id}")
 def api_delete_category(cat_id: int, admin=Depends(require_permission("catalog"))):
     db.delete_category(cat_id)
-    db.log_admin_action(admin["id"], "category_delete", str(cat_id))
+    db.log_admin_action(admin["id"], "category_delete", str(cat_id), "category", cat_id)
     return {"ok": True}
 
 
@@ -497,7 +502,7 @@ def api_add_product(body: ProductBody, admin=Depends(require_permission("catalog
         body.category_id, body.name, body.price, body.description, body.duration_days,
         body.is_auto_provision, body.auto_provision_volume_gb,
     )
-    db.log_admin_action(admin["id"], "product_add", f"{body.name} (پنل وب - {admin['username']})")
+    db.log_admin_action(admin["id"], "product_add", f"{body.name} (پنل وب - {admin['username']})", "product", pid)
     return {"id": pid}
 
 
@@ -511,20 +516,21 @@ class ProductEditBody(BaseModel):
 @app.put("/api/products/{product_id}")
 def api_edit_product(product_id: int, body: ProductEditBody, admin=Depends(require_permission("catalog"))):
     db.edit_product(product_id, body.name, body.price, body.description, body.duration_days)
-    db.log_admin_action(admin["id"], "product_edit", f"#{product_id} (پنل وب - {admin['username']})")
+    db.log_admin_action(admin["id"], "product_edit", f"#{product_id} (پنل وب - {admin['username']})", "product", product_id)
     return {"ok": True}
 
 
 @app.post("/api/products/{product_id}/toggle")
 def api_toggle_product(product_id: int, admin=Depends(require_permission("catalog"))):
     db.toggle_product(product_id)
+    db.log_admin_action(admin["id"], "product_toggle", str(product_id), "product", product_id)
     return {"ok": True}
 
 
 @app.delete("/api/products/{product_id}")
 def api_delete_product(product_id: int, admin=Depends(require_permission("catalog"))):
     db.delete_product(product_id)
-    db.log_admin_action(admin["id"], "product_delete", str(product_id))
+    db.log_admin_action(admin["id"], "product_delete", str(product_id), "product", product_id)
     return {"ok": True}
 
 
@@ -544,13 +550,14 @@ def api_product_configs(product_id: int, admin=Depends(require_permission("catal
 def api_add_configs(product_id: int, body: ConfigsAddBody, admin=Depends(require_permission("catalog"))):
     links = [l.strip() for l in body.links.splitlines() if l.strip()]
     added, duplicates = db.add_configs(product_id, links)
-    db.log_admin_action(admin["id"], "configs_add", f"{added} لینک به محصول #{product_id} (پنل وب - {admin['username']})")
+    db.log_admin_action(admin["id"], "configs_add", f"{added} لینک به محصول #{product_id} (پنل وب - {admin['username']})", "product", product_id)
     return {"added": added, "duplicates": duplicates}
 
 
 @app.delete("/api/configs/{config_id}")
 def api_delete_config(config_id: int, admin=Depends(require_permission("catalog"))):
     db.delete_config(config_id)
+    db.log_admin_action(admin["id"], "config_delete", str(config_id), "config", config_id)
     return {"ok": True}
 
 
@@ -573,19 +580,21 @@ def api_discounts(admin=Depends(require_permission("discounts"))):
 @app.post("/api/discounts")
 def api_add_discount(body: DiscountBody, admin=Depends(require_permission("discounts"))):
     code_id = db.create_discount_code(body.code, body.percent, body.fixed_amount, body.max_uses, body.expires_at)
-    db.log_admin_action(admin["id"], "discount_add", body.code)
+    db.log_admin_action(admin["id"], "discount_add", body.code, "discount", code_id)
     return {"id": code_id}
 
 
 @app.post("/api/discounts/{code_id}/toggle")
 def api_toggle_discount(code_id: int, admin=Depends(require_permission("discounts"))):
     db.toggle_discount_code(code_id)
+    db.log_admin_action(admin["id"], "discount_toggle", str(code_id), "discount", code_id)
     return {"ok": True}
 
 
 @app.delete("/api/discounts/{code_id}")
 def api_delete_discount(code_id: int, admin=Depends(require_permission("discounts"))):
     db.delete_discount_code(code_id)
+    db.log_admin_action(admin["id"], "discount_delete", str(code_id), "discount", code_id)
     return {"ok": True}
 
 
@@ -621,12 +630,14 @@ async def api_ticket_reply(ticket_id: int, body: TicketReplyBody, admin=Depends(
     db.claim_ticket_if_open(ticket_id, admin["id"])
     db.add_ticket_message(ticket_id, "admin", body.message)
     await notify_user(ticket["user_id"], f"📩 پاسخ پشتیبانی برای تیکت «{ticket['subject']}»:\n\n{body.message}")
+    db.log_admin_action(admin["id"], "ticket_reply", f"تیکت #{ticket_id} (پنل وب - {admin['username']})", "ticket", ticket_id)
     return {"ok": True}
 
 
 @app.post("/api/tickets/{ticket_id}/close")
 def api_ticket_close(ticket_id: int, admin=Depends(require_permission("tickets"))):
     db.close_ticket(ticket_id)
+    db.log_admin_action(admin["id"], "ticket_close", f"تیکت #{ticket_id} (پنل وب - {admin['username']})", "ticket", ticket_id)
     return {"ok": True}
 
 
@@ -749,7 +760,7 @@ async def api_support_send(user_id: int, body: SupportReplyBody, admin=Depends(g
 
     msg_id = db.add_support_message(user_id, "admin", text)
     await notify_user(user_id, f"💬 پشتیبانی:\n\n{text}")
-    db.log_admin_action(admin["id"], "support_reply", f"پاسخ چت زنده به کاربر {user_id} (پنل وب - {admin['username']})")
+    db.log_admin_action(admin["id"], "support_reply", f"پاسخ چت زنده به کاربر {user_id} (پنل وب - {admin['username']})", "user", user_id)
     return {"ok": True, "id": msg_id}
 
 
@@ -772,6 +783,7 @@ async def api_adjust_reseller_credit(tg_id: int, body: ResellerCreditBody, admin
     db.log_admin_action(
         admin["id"], "reseller_credit_adjust",
         f"نماینده {tg_id} به میزان {body.delta_gb:,} گیگ (پنل وب - {admin['username']})",
+        "reseller", tg_id,
     )
     await notify_user(tg_id, f"📦 اعتبار حجمی نمایندگی شما تغییر کرد: {body.delta_gb:+,} گیگابایت")
     return {"ok": True}
@@ -789,6 +801,7 @@ class ResellerToggleBody(BaseModel):
 @app.post("/api/resellers/{tg_id}/status")
 def api_reseller_status(tg_id: int, body: ResellerToggleBody, admin=Depends(require_permission("resellers"))):
     db.set_reseller_status(tg_id, body.enabled)
+    db.log_admin_action(admin["id"], "reseller_status_toggle", f"نماینده {tg_id} -> {body.enabled}", "reseller", tg_id)
     return {"ok": True}
 
 
@@ -828,13 +841,14 @@ def api_panel_servers(admin=Depends(require_permission("panels"))):
 @app.post("/api/panel-servers")
 def api_add_panel_server(body: PanelServerBody, admin=Depends(require_permission("panels"))):
     sid = db.add_panel_server(body.name, body.panel_type, body.api_url, body.api_username, body.api_password, body.default_group)
-    db.log_admin_action(admin["id"], "panel_add", body.name)
+    db.log_admin_action(admin["id"], "panel_add", body.name, "panel", sid)
     return {"id": sid}
 
 
 @app.delete("/api/panel-servers/{server_id}")
 def api_delete_panel_server(server_id: int, admin=Depends(require_permission("panels"))):
     db.delete_panel_server(server_id)
+    db.log_admin_action(admin["id"], "panel_delete", str(server_id), "panel", server_id)
     return {"ok": True}
 
 
@@ -915,7 +929,7 @@ class SettingBody(BaseModel):
 @app.post("/api/settings")
 def api_set_setting(body: SettingBody, admin=Depends(require_permission("settings"))):
     db.set_setting(body.key, body.value)
-    db.log_admin_action(admin["id"], "setting_change", f"{body.key}={body.value} (پنل وب - {admin['username']})")
+    db.log_admin_action(admin["id"], "setting_change", f"{body.key}={body.value} (پنل وب - {admin['username']})", "setting", body.key)
     return {"ok": True}
 
 
@@ -923,10 +937,21 @@ def api_set_setting(body: SettingBody, admin=Depends(require_permission("setting
 
 
 @app.get("/api/admin-logs")
-def api_admin_logs(page: int = 1, admin=Depends(require_permission("system"))):
+def api_admin_logs(
+    page: int = 1, action: Optional[str] = None, record_type: Optional[str] = None,
+    record_id: Optional[str] = None, admin=Depends(require_permission("system")),
+):
     limit = 40
-    rows, total = db.get_admin_logs(limit=limit, offset=(page - 1) * limit)
+    rows, total = db.get_admin_logs(
+        limit=limit, offset=(page - 1) * limit,
+        action=action or None, record_type=record_type or None, record_id=record_id or None,
+    )
     return {"items": rows_to_list(rows), "total": total, "page": page, "limit": limit}
+
+
+@app.get("/api/admin-logs/actions")
+def api_admin_log_actions(admin=Depends(require_permission("system"))):
+    return {"actions": db.list_admin_log_actions()}
 
 
 # ----------------------------------------------------------- web admins ---
@@ -959,7 +984,7 @@ def api_create_web_admin(body: WebAdminCreateBody, admin=Depends(require_owner))
     if len(body.password) < 8:
         raise HTTPException(400, "پسورد باید حداقل ۸ کاراکتر باشد.")
     new_id = db.create_web_admin(body.username, hash_password(body.password), body.role, body.permissions)
-    db.log_admin_action(admin["id"], "web_admin_add", f"{body.username} ({body.role})")
+    db.log_admin_action(admin["id"], "web_admin_add", f"{body.username} ({body.role})", "webadmin", new_id)
     return {"id": new_id}
 
 
@@ -982,7 +1007,7 @@ class WebAdminPermissionsBody(BaseModel):
 def api_set_web_admin_permissions(admin_id: int, body: WebAdminPermissionsBody, admin=Depends(require_owner)):
     if not db.set_web_admin_permissions(admin_id, body.permissions):
         raise HTTPException(400, "امکان تغییر مجوزهای این حساب نیست.")
-    db.log_admin_action(admin["id"], "web_admin_permissions", f"admin#{admin_id} -> {body.permissions}")
+    db.log_admin_action(admin["id"], "web_admin_permissions", f"admin#{admin_id} -> {body.permissions}", "webadmin", admin_id)
     return {"ok": True}
 
 
@@ -994,6 +1019,7 @@ class WebAdminActiveBody(BaseModel):
 def api_set_web_admin_active(admin_id: int, body: WebAdminActiveBody, admin=Depends(require_owner)):
     if not db.set_web_admin_active(admin_id, body.active):
         raise HTTPException(400, "امکان تغییر وضعیت این حساب نیست.")
+    db.log_admin_action(admin["id"], "web_admin_active", f"admin#{admin_id} -> {body.active}", "webadmin", admin_id)
     return {"ok": True}
 
 
@@ -1001,6 +1027,7 @@ def api_set_web_admin_active(admin_id: int, body: WebAdminActiveBody, admin=Depe
 def api_delete_web_admin(admin_id: int, admin=Depends(require_owner)):
     if not db.delete_web_admin(admin_id):
         raise HTTPException(400, "امکان حذف این حساب نیست.")
+    db.log_admin_action(admin["id"], "web_admin_delete", f"admin#{admin_id}", "webadmin", admin_id)
     return {"ok": True}
 
 
