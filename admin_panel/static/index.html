@@ -11,11 +11,11 @@
 <script>
 (function(){
   try{
-    var t = JSON.parse(localStorage.getItem('sv-theme') || 'null') || { style:'2', mode:'dark' };
+    var t = JSON.parse(localStorage.getItem('sv-theme') || 'null') || { style:'6', mode:'dark' };
     document.documentElement.setAttribute('data-style', t.style);
     document.documentElement.setAttribute('data-mode', t.mode);
   }catch(e){
-    document.documentElement.setAttribute('data-style','2');
+    document.documentElement.setAttribute('data-style','6');
     document.documentElement.setAttribute('data-mode','dark');
   }
 })();

@@ -11,10 +11,11 @@ const THEMES = [
   { id: '3', name: 'ترمینال عملیاتی', desc: 'مونوسپیس، حس اتاق سرور', colors: ['#3ddc84', '#ff6b52', '#e0b23c'] },
   { id: '4', name: 'بنتوی نرم', desc: 'گرم، گرد، صمیمی', colors: ['#d97757', '#5b8a72', '#c99a3a'] },
   { id: '5', name: 'پالس شبکه', desc: 'HUD تیره، درخشش نئونی، حس اتاق کنترل', colors: ['#00e5ff', '#7c5cff', '#ff4fd8'] },
+  { id: '6', name: 'پرمیوم سیگنال', desc: 'تیره، شیشه‌ای ملایم، فیروزه‌ای/طلایی — حس یک هاب VPN حرفه‌ای', colors: ['#32E6C4', '#E7B84E', '#6C8EFF'] },
 ];
 function loadTheme() {
-  try { return JSON.parse(localStorage.getItem('sv-theme')) || { style: '2', mode: 'dark' }; }
-  catch (e) { return { style: '2', mode: 'dark' }; }
+  try { return JSON.parse(localStorage.getItem('sv-theme')) || { style: '6', mode: 'dark' }; }
+  catch (e) { return { style: '6', mode: 'dark' }; }
 }
 function applyTheme(style, mode) {
   document.documentElement.setAttribute('data-style', style);
