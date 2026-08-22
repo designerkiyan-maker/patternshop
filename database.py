@@ -2842,6 +2842,133 @@ class Database:
                 "SELECT * FROM users WHERE is_reseller=1 ORDER BY reseller_credit_gb DESC"
             ).fetchall()
 
+    def get_reseller_cohort_churn(self, inactivity_days: int = 30, months: int = 6):
+        """تحلیل کوهورت (cohort) و ریزش (churn) نمایندگی‌ها بر پایه‌ی لاگ اعتبار حجمی.
+
+        کوهورت هر نماینده = ماه اولین رکورد او در reseller_credit_log (یعنی اولین
+        شارژ/فعال‌سازی)؛ اگر نماینده‌ای هیچ لاگی نداشته باشد (مثلاً با ست دستی
+        فلگ is_reseller)، ماه عضویتش (joined_at) به‌عنوان جایگزین در نظر گرفته می‌شود.
+        «فعال بودن در ماه» یعنی حداقل یک رکورد لاگ (شارژ یا مصرف) در آن ماه.
+        «ریزش» یعنی نماینده‌ای که is_reseller=1 است ولی طی inactivity_days روز
+        اخیر هیچ رکورد لاگی نداشته (و بیش از همان مدت از عضویتش گذشته باشد).
+        """
+        with self._get_conn() as conn:
+            first_activity = conn.execute(
+                """
+                SELECT u.telegram_id AS tg_id, u.username AS username, u.reseller_credit_gb AS credit_gb,
+                       u.is_reseller AS is_reseller, u.joined_at AS joined_at,
+                       COALESCE(MIN(l.created_at), u.joined_at) AS cohort_at,
+                       MAX(l.created_at) AS last_activity
+                FROM users u
+                LEFT JOIN reseller_credit_log l ON l.user_id = u.telegram_id
+                WHERE u.is_reseller = 1 OR EXISTS (
+                    SELECT 1 FROM reseller_credit_log l2 WHERE l2.user_id = u.telegram_id
+                )
+                GROUP BY u.telegram_id
+                """
+            ).fetchall()
+
+            monthly_activity = conn.execute(
+                """
+                SELECT user_id, strftime('%Y-%m', created_at) AS ym
+                FROM reseller_credit_log
+                GROUP BY user_id, ym
+                """
+            ).fetchall()
+
+        active_months_by_user = {}
+        for row in monthly_activity:
+            active_months_by_user.setdefault(row["user_id"], set()).add(row["ym"])
+
+        def month_key(dt_str):
+            return (dt_str or "")[:7]
+
+        def add_months(ym: str, n: int) -> str:
+            y, m = int(ym[:4]), int(ym[5:7])
+            total = (y * 12 + (m - 1)) + n
+            return f"{total // 12:04d}-{total % 12 + 1:02d}"
+
+        now = datetime.now()
+        cur_ym = now.strftime("%Y-%m")
+        cohort_months = []
+        ym = cur_ym
+        for _ in range(months):
+            cohort_months.append(ym)
+            ym = add_months(ym, -1)
+        cohort_months.reverse()
+
+        cohorts_map = {m: [] for m in cohort_months}
+        for r in first_activity:
+            cm = month_key(r["cohort_at"])
+            if cm in cohorts_map:
+                cohorts_map[cm].append(r["tg_id"])
+
+        cohorts_out = []
+        for cm in cohort_months:
+            members = cohorts_map[cm]
+            size = len(members)
+            retention = []
+            max_offset = add_months(cur_ym, 0)
+            offset = 0
+            probe = cm
+            while probe <= cur_ym:
+                active = sum(1 for uid in members if probe in active_months_by_user.get(uid, ()))
+                retention.append({
+                    "offset": offset,
+                    "month": probe,
+                    "active": active,
+                    "pct": round(active * 100 / size, 1) if size else 0.0,
+                })
+                offset += 1
+                probe = add_months(probe, 1)
+            cohorts_out.append({"cohort_month": cm, "size": size, "retention": retention})
+
+        churn_list = []
+        active_count = 0
+        cutoff = now.timestamp() - inactivity_days * 86400
+
+        def to_ts(dt_str):
+            if not dt_str:
+                return None
+            try:
+                return datetime.fromisoformat(dt_str.replace("Z", "")).timestamp()
+            except ValueError:
+                return None
+
+        current_resellers = [r for r in first_activity if r["is_reseller"]]
+        for r in current_resellers:
+            last_ts = to_ts(r["last_activity"])
+            joined_ts = to_ts(r["joined_at"]) or 0
+            is_new = joined_ts and joined_ts > cutoff
+            if last_ts and last_ts >= cutoff:
+                active_count += 1
+                continue
+            if not last_ts and is_new:
+                active_count += 1
+                continue
+            days_inactive = int((now.timestamp() - (last_ts or joined_ts)) / 86400)
+            churn_list.append({
+                "telegram_id": r["tg_id"],
+                "username": r["username"],
+                "credit_gb": r["credit_gb"],
+                "last_activity": r["last_activity"],
+                "days_inactive": days_inactive,
+            })
+
+        total_resellers = len(current_resellers)
+        churn_list.sort(key=lambda x: -x["days_inactive"])
+        return {
+            "cohorts": cohorts_out,
+            "churn": {
+                "total": total_resellers,
+                "active": active_count,
+                "churned": len(churn_list),
+                "churn_rate": round(len(churn_list) * 100 / total_resellers, 1) if total_resellers else 0.0,
+                "inactivity_days": inactivity_days,
+                "list": churn_list,
+            },
+        }
+
     def set_reseller_panel(self, user_tg_id: int, panel_server_id):
         """پنل اختصاصی که ادمین برای این نماینده تعیین کرده (None = پیش‌فرض خودکار)."""
         with self._get_conn() as conn:
