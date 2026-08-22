@@ -1257,7 +1257,9 @@ const SETTINGS_GROUPS = [
     { key: 'btn_my_orders', label: 'متن دکمه سفارش‌های من', type: 'text' },
     { key: 'btn_wallet', label: 'متن دکمه کیف پول', type: 'text' },
     { key: 'btn_referral', label: 'متن دکمه زیرمجموعه‌گیری', type: 'text' },
+    { key: 'referral_enabled', label: 'نمایش دکمه زیرمجموعه‌گیری', type: 'bool' },
     { key: 'btn_wheel', label: 'متن دکمه گردونه شانس', type: 'text' },
+    { key: 'wheel_enabled', label: 'نمایش دکمه گردونه شانس', type: 'bool' },
     { key: 'btn_contact', label: 'متن دکمه ارتباط با پشتیبانی', type: 'text' },
     { key: 'btn_admin_panel', label: 'متن دکمه پنل مدیریت (فقط برای ادمین‌ها)', type: 'text' },
   ]},
@@ -1286,11 +1288,9 @@ const SETTINGS_GROUPS = [
     { key: 'force_join_channel', label: 'آیدی کانال (مثلاً ‎@mychannel)', type: 'text' },
   ]},
   { tab: 'campaign', title: 'زیرمجموعه‌گیری (رفرال)', fields: [
-    { key: 'referral_enabled', label: 'فعال بودن سیستم رفرال', type: 'bool' },
     { key: 'referral_percent', label: 'درصد پورسانت رفرال', type: 'number' },
   ]},
   { tab: 'campaign', title: 'گردونه شانس', fields: [
-    { key: 'wheel_enabled', label: 'فعال بودن گردونه شانس', type: 'bool' },
     { key: 'wheel_win_percent', label: 'درصد احتمال برد در هر چرخش', type: 'number' },
     { key: 'wheel_prizes', label: 'درصدهای تخفیف ممکن (با کاما جدا کنید، مثلاً 10,20,30,50)', type: 'text' },
     { key: 'wheel_code_expiry_hours', label: 'اعتبار کد جایزه پس از برد (ساعت)', type: 'number' },
