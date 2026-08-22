@@ -2860,4 +2860,5 @@ async def api_admin_backup_restore(file: UploadFile = File(...), auth=Depends(re
     return {"status": "ok", "pre_restore_backup": os.path.basename(pre_restore_path)}
 
 
+app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
