@@ -82,6 +82,91 @@ function activateBars(root) {
     }, 60);
   });
 }
+// پر شدن نوار‌های افقی (تفکیک درآمد / پرفروش‌ترین‌ها)
+function activateBarFills(root) {
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      $$('.bar-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
+    }, 60);
+  });
+}
+// انیمیشن گیج SVG (سلامت سیستم)
+function activateGauge(root, pct) {
+  const ring = $('#gaugeRing', root);
+  if (!ring) return;
+  const c = 2 * Math.PI * 64;
+  ring.style.strokeDasharray = c;
+  ring.style.strokeDashoffset = c;
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      ring.style.transition = 'stroke-dashoffset 1.3s cubic-bezier(.16,1,.3,1)';
+      ring.style.strokeDashoffset = c - Math.max(0, Math.min(100, pct)) / 100 * c;
+    }, 60);
+  });
+}
+// رسم رادار عملکرد از مقادیر ۰..۱
+function drawRadar(root, axes, values, color = '#8B5CF6') {
+  const svgEl = $('#radarChart', root);
+  if (!svgEl) return;
+  const cx = 110, cy = 95, r = 62, n = axes.length;
+  const pt = (i, scale) => {
+    const ang = -Math.PI / 2 + i * (Math.PI * 2 / n);
+    return [cx + Math.cos(ang) * r * scale, cy + Math.sin(ang) * r * scale];
+  };
+  let out = '';
+  [0.33, 0.66, 1].forEach(scale => {
+    out += `<polygon points="${axes.map((_, i) => pt(i, scale).join(',')).join(' ')}" fill="none" stroke="var(--border)" stroke-width="1"/>`;
+  });
+  axes.forEach((label, i) => {
+    const [x, y] = pt(i, 1.18), [x2, y2] = pt(i, 1);
+    out += `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="var(--border)" stroke-width="1"/>`;
+    out += `<text x="${x}" y="${y}" font-size="9.5" fill="var(--text-muted)" text-anchor="middle" font-family="Vazirmatn">${esc(label)}</text>`;
+  });
+  const vp = axes.map((_, i) => pt(i, values[i]).join(',')).join(' ');
+  out += `<polygon points="${vp}" fill="${color}33" stroke="${color}" stroke-width="1.6"/>`;
+  axes.forEach((_, i) => { const [x, y] = pt(i, values[i]); out += `<circle cx="${x}" cy="${y}" r="2.6" fill="${color}"/>`; });
+  svgEl.innerHTML = out;
+}
+// بوم امبیانت شبکه‌ی سیگنال در کارت خوش‌آمدگویی (هاب اتصال VPN)
+function drawHeroNet(canvas) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = canvas.clientWidth || 150, h = canvas.clientHeight || 150;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const colors = ['#22D3EE', '#EC4899', '#8B5CF6'];
+  const N = 6;
+  const nodes = Array.from({ length: N }, (_, i) => ({
+    ang: (i / N) * Math.PI * 2, radius: 0.62 + (i % 2) * 0.16, speed: 0.15 + Math.random() * 0.08,
+  }));
+  const packets = nodes.map(() => ({ t: Math.random(), speed: 0.006 + Math.random() * 0.006 }));
+  let t = 0;
+  const cx = w / 2, cy = h / 2;
+  function pos(n) { const a = n.ang + t * n.speed * 0.2; return [cx + Math.cos(a) * w * 0.36 * n.radius, cy + Math.sin(a) * h * 0.36 * n.radius]; }
+  function frame() {
+    if (!canvas.isConnected) return;
+    t += 0.016;
+    ctx.clearRect(0, 0, w, h);
+    nodes.forEach((n, i) => {
+      const [x, y] = pos(n);
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y);
+      ctx.strokeStyle = 'rgba(139,92,246,0.18)'; ctx.lineWidth = 1; ctx.stroke();
+      const p = packets[i]; p.t += p.speed; if (p.t > 1) p.t = 0;
+      const px = cx + (x - cx) * p.t, py = cy + (y - cy) * p.t;
+      ctx.beginPath(); ctx.arc(px, py, 2.2, 0, Math.PI * 2);
+      ctx.fillStyle = colors[i % 3]; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 8; ctx.fill(); ctx.shadowBlur = 0;
+      ctx.beginPath(); ctx.arc(x, y, 3.2, 0, Math.PI * 2); ctx.fillStyle = 'rgba(245,242,255,0.75)'; ctx.fill();
+    });
+    const pulse = (Math.sin(t * 1.6) + 1) / 2;
+    const grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, 26 + pulse * 8);
+    grad.addColorStop(0, 'rgba(236,72,153,0.9)'); grad.addColorStop(1, 'rgba(139,92,246,0)');
+    ctx.beginPath(); ctx.arc(cx, cy, 14 + pulse * 6, 0, Math.PI * 2); ctx.fillStyle = grad; ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2); ctx.fillStyle = '#F5F2FF'; ctx.fill();
+    requestAnimationFrame(frame);
+  }
+  frame();
+}
 
 /* ============================================================== api === */
 async function api(path, opts = {}) {
@@ -295,6 +380,40 @@ async function renderDashboard() {
       ${resRingHtml(sys.disk.percent, 'var(--cyan)', 'فضای دیسک', `${sys.disk.used_gb} از ${sys.disk.total_gb} گیگابایت`)}
     </div>` : '';
 
+  // امتیاز سلامت سیستم = میانگین معکوس مصرف CPU/RAM/دیسک
+  const healthPct = sys ? Math.round(100 - (sys.cpu.percent + sys.ram.percent + sys.disk.percent) / 3) : null;
+  const healthLabel = healthPct === null ? '—' : healthPct >= 80 ? 'سالم' : healthPct >= 50 ? 'قابل‌قبول' : 'نیازمند بررسی';
+  const healthColor = healthPct === null ? 'var(--text-muted)' : healthPct >= 80 ? 'var(--emerald)' : healthPct >= 50 ? 'var(--amber)' : 'var(--rose)';
+
+  // نوارهای تفکیک درآمد (از category_breakdown واقعی)
+  const maxCatRev = Math.max(...s.category_breakdown.map(c => c.revenue), 1);
+  const catColors = ['var(--violet)', 'var(--cyan)', 'var(--emerald)', 'var(--amber)', 'var(--rose)', 'var(--fuchsia)'];
+  const catBars = s.category_breakdown.map((c, i) => `
+    <div class="bar-row">
+      <span class="bar-name">${esc(c.name)}</span>
+      <span class="bar-track"><span class="bar-fill" data-w="${(c.revenue / maxCatRev) * 100}" style="background:${catColors[i % catColors.length]}"></span></span>
+      <span class="bar-val">${fmt(c.revenue)} (${fmt(c.orders)})</span>
+    </div>`).join('') || '<span class="card-sub">داده‌ای برای این بازه نیست</span>';
+
+  // لیدربورد پرفروش‌ترین محصولات (از top_products واقعی)
+  const maxProdRev = Math.max(...s.top_products.map(p => p.revenue), 1);
+  const prodBars = s.top_products.map((p, i) => `
+    <div class="bar-row">
+      <span class="bar-name">${esc(p.name)}</span>
+      <span class="bar-track"><span class="bar-fill" data-w="${(p.revenue / maxProdRev) * 100}" style="background:${catColors[i % catColors.length]}"></span></span>
+      <span class="bar-val">${fmt(p.orders)} فروش</span>
+    </div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+
+  // مقادیر رادار (۰..۱) از شاخص‌های واقعی داشبورد و سرور
+  const radarAxes = ['فروش', 'رضایت مشتری', 'سلامت سرور', 'ظرفیت', 'رشد'];
+  const radarValues = [
+    Math.max(0, Math.min(s.conversion_rate / 100, 1)),
+    1 - Math.min(s.open_tickets / Math.max(s.active_configs, 1), 1),
+    sys ? Math.max(0, Math.min(1 - (sys.cpu.percent + sys.ram.percent + sys.disk.percent) / 300, 1)) : 0.8,
+    Math.max(0, Math.min(s.active_configs / Math.max(s.total_users, 1), 1)),
+    Math.max(0, Math.min((s.revenue_change_pct ?? 0) / 100 + 0.5, 1)),
+  ];
+
   setContent(`
     ${resHtml}
     <div class="hero">
@@ -302,11 +421,7 @@ async function renderDashboard() {
         <h2>${greetingByHour()}، ${esc(ME.username)} 👋</h2>
         <p>وضعیت فروشگاه در ${s.start_date} تا ${s.end_date} — همه چیز آنلاین و در حال گزارش‌دهی زنده است.</p>
       </div>
-      <div class="hero-orbit">
-        <div class="o1"><span class="dot"></span></div>
-        <div class="o2"></div>
-        <div class="core">${svg('panels')}</div>
-      </div>
+      <div class="hero-net"><canvas id="hero-net-canvas"></canvas></div>
     </div>
 
     <div class="grid grid-4">
@@ -342,27 +457,44 @@ async function renderDashboard() {
       </div>
     </div>
 
-    <div class="grid grid-2" style="margin-top:18px">
-      <div class="card">
+    <div class="bento" style="margin-top:18px">
+      <div class="card span-4 rows-2">
         <div class="card-head"><h3>روند فروش روزانه</h3><span class="card-sub">${s.start_date} تا ${s.end_date}</span></div>
-        <div class="spark">${spark}</div>
+        <div class="spark" style="flex:1">${spark}</div>
       </div>
-      <div class="card">
-        <div class="card-head"><h3>تفکیک درآمد</h3></div>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div class="chip-row"><span class="chip">مستقیم: ${fmt(s.direct_revenue)}</span><span class="chip">رفرال: ${fmt(s.referral_revenue)}</span></div>
-          ${s.category_breakdown.map(c => `
-            <div style="display:flex;justify-content:space-between;font-size:13px">
-              <span>${esc(c.name)}</span><span class="mono">${fmt(c.revenue)} (${fmt(c.orders)})</span>
-            </div>`).join('') || '<span class="card-sub">داده‌ای برای این بازه نیست</span>'}
-        </div>
-      </div>
-    </div>
 
-    <div class="card" style="margin-top:18px">
-      <div class="card-head"><h3>پرفروش‌ترین محصولات</h3></div>
-      <div class="table-wrap"><table><thead><tr><th>محصول</th><th>تعداد فروش</th><th>درآمد</th></tr></thead>
-      <tbody>${s.top_products.map(p => `<tr><td>${esc(p.name)}</td><td class="mono">${fmt(p.orders)}</td><td class="mono">${fmt(p.revenue)}</td></tr>`).join('') || `<tr><td colspan="3" class="empty-state">داده‌ای نیست</td></tr>`}</tbody></table></div>
+      ${sys ? `
+      <div class="card span-2 rows-2">
+        <div class="card-head"><h3>امتیاز سلامت سیستم</h3></div>
+        <div class="gauge-wrap">
+          <svg viewBox="0 0 150 150">
+            <circle cx="75" cy="75" r="64" fill="none" stroke="var(--border)" stroke-width="11"/>
+            <circle id="gaugeRing" cx="75" cy="75" r="64" fill="none" stroke="${healthColor}" stroke-width="11" stroke-linecap="round"/>
+          </svg>
+          <div class="gauge-center"><div class="v mono">${healthPct}٪</div><div class="l">${healthLabel}</div></div>
+        </div>
+      </div>` : `
+      <div class="card span-2 rows-2">
+        <div class="card-head"><h3>رادار عملکرد</h3></div>
+        <div class="radar-wrap"><svg id="radarChart" viewBox="0 0 220 190"></svg></div>
+      </div>`}
+
+      <div class="card ${sys ? 'span-3' : 'span-4'}">
+        <div class="card-head"><h3>تفکیک درآمد</h3></div>
+        <div class="chip-row" style="margin-bottom:10px"><span class="chip">مستقیم: ${fmt(s.direct_revenue)}</span><span class="chip">رفرال: ${fmt(s.referral_revenue)}</span></div>
+        ${catBars}
+      </div>
+
+      ${sys ? `
+      <div class="card span-3">
+        <div class="card-head"><h3>رادار عملکرد</h3></div>
+        <div class="radar-wrap"><svg id="radarChart" viewBox="0 0 220 190"></svg></div>
+      </div>` : ''}
+
+      <div class="card span-3">
+        <div class="card-head"><h3>پرفروش‌ترین محصولات</h3></div>
+        ${prodBars}
+      </div>
     </div>
   `);
 
@@ -370,6 +502,10 @@ async function renderDashboard() {
   $$('.value[data-count]', root).forEach(el => animateCount(el, Number(el.dataset.count)));
   activateRings(root);
   activateBars(root);
+  activateBarFills(root);
+  drawRadar(root, radarAxes, radarValues, '#8B5CF6');
+  if (sys) activateGauge(root, healthPct);
+  drawHeroNet($('#hero-net-canvas', root));
 }
 
 /* ============================================================ orders === */
