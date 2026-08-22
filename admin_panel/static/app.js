@@ -218,27 +218,26 @@ const NAV = [
   { key: 'orders', label: 'سفارش‌ها', icon: 'orders', role: 'any' },
   { key: 'topups', label: 'شارژ کیف پول', icon: 'topups', role: 'any' },
   { key: 'users', label: 'کاربران', icon: 'users', role: 'any' },
-  { key: 'catalog', label: 'محصولات و بانک کانفیگ', icon: 'catalog', role: 'senior' },
-  { key: 'discounts', label: 'کدهای تخفیف', icon: 'discounts', role: 'senior' },
+  { key: 'catalog', label: 'محصولات و بانک کانفیگ', icon: 'catalog', role: 'catalog' },
+  { key: 'discounts', label: 'کدهای تخفیف', icon: 'discounts', role: 'discounts' },
   { key: 'tickets', label: 'تیکت‌ها', icon: 'tickets', role: 'any' },
   { key: 'support', label: 'چت زنده', icon: 'support', role: 'any' },
-  { key: 'broadcast', label: 'پیام همگانی', icon: 'broadcast', role: 'full' },
-  { key: 'resellers', label: 'نمایندگی‌ها', icon: 'resellers', role: 'senior' },
-  { key: 'panels', label: 'پنل‌های VPN', icon: 'panels', role: 'senior' },
-  { key: 'system', label: 'سیستم و نگهداری', icon: 'logs', role: 'senior' },
-  { key: 'settings', label: 'تنظیمات و برندینگ', icon: 'settings', role: 'senior' },
-  { key: 'logs', label: 'لاگ فعالیت ادمین‌ها', icon: 'logs', role: 'senior' },
+  { key: 'broadcast', label: 'پیام همگانی', icon: 'broadcast', role: 'broadcast' },
+  { key: 'resellers', label: 'نمایندگی‌ها', icon: 'resellers', role: 'resellers' },
+  { key: 'panels', label: 'پنل‌های VPN', icon: 'panels', role: 'panels' },
+  { key: 'system', label: 'سیستم و نگهداری', icon: 'logs', role: 'system' },
+  { key: 'settings', label: 'تنظیمات و برندینگ', icon: 'settings', role: 'settings' },
+  { key: 'logs', label: 'لاگ فعالیت ادمین‌ها', icon: 'logs', role: 'system' },
   { key: 'webadmins', label: 'کاربران پنل', icon: 'webadmins', role: 'owner' },
   { key: 'account', label: 'حساب من', icon: 'account', role: 'any' },
 ];
-const FULL_ROLES = ['owner', 'admin', 'mid'];
-const SENIOR_ROLES = ['owner', 'admin'];
+function hasPerm(perm) {
+  return ME.role === 'owner' || (ME.permissions || []).includes(perm);
+}
 function canSee(navRole) {
   if (navRole === 'any') return true;
-  if (navRole === 'full') return FULL_ROLES.includes(ME.role);
-  if (navRole === 'senior') return SENIOR_ROLES.includes(ME.role);
   if (navRole === 'owner') return ME.role === 'owner';
-  return false;
+  return hasPerm(navRole);
 }
 const ROLE_LABEL = { owner: 'مالک', admin: 'مدیر کامل', mid: 'ادمین میانی', support: 'پشتیبان' };
 
@@ -523,7 +522,7 @@ async function renderDashboard() {
 /* ============================================================ orders === */
 let ordersStatus = 'pending';
 async function renderOrders() {
-  const canAct = FULL_ROLES.includes(ME.role);
+  const canAct = hasPerm('orders');
   const orders = await apiGet(`/orders?status=${ordersStatus}`);
   setContent(`
     <div class="tabs">
@@ -565,7 +564,7 @@ async function renderOrders() {
 /* ============================================================ topups === */
 let topupsStatus = 'pending';
 async function renderTopups() {
-  const canAct = FULL_ROLES.includes(ME.role);
+  const canAct = hasPerm('orders');
   const topups = await apiGet(`/topups?status=${topupsStatus}`);
   setContent(`
     <div class="tabs">
@@ -616,7 +615,7 @@ async function renderUsers() {
           <td class="mono">${fmtDate(u.joined_at)}</td>
           <td>
             <button class="btn btn-ghost btn-sm" data-detail="${u.telegram_id}">جزئیات</button>
-            ${FULL_ROLES.includes(ME.role) ? (u.is_blocked
+            ${hasPerm('users') ? (u.is_blocked
               ? `<button class="btn btn-sm" data-unblock="${u.telegram_id}">رفع مسدودی</button>`
               : `<button class="btn btn-danger btn-sm" data-block="${u.telegram_id}">مسدودسازی</button>`) : ''}
           </td>
@@ -639,7 +638,7 @@ async function renderUsers() {
 
 async function showUserDetail(tgId) {
   const d = await apiGet(`/users/${tgId}`);
-  const isSenior = SENIOR_ROLES.includes(ME.role);
+  const isSenior = hasPerm('users');
   openModal(`کاربر ${esc(d.user.username || tgId)}`, `
     <div class="chip-row" style="margin-bottom:14px">
       <span class="chip">کیف پول: ${fmt(d.user.referral_credit)} تومان</span>
@@ -936,7 +935,7 @@ async function renderTickets() {
 
 async function showTicket(ticketId) {
   const d = await apiGet(`/tickets/${ticketId}/messages`);
-  const canAct = FULL_ROLES.includes(ME.role);
+  const canAct = hasPerm('tickets');
   openModal(`تیکت: ${esc(d.ticket.subject)}`, `
     <div style="display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;margin-bottom:12px">
       ${d.messages.map(m => `<div style="background:${m.sender === 'admin' ? 'var(--signal-dim)' : 'var(--panel-2)'};padding:8px 12px;border-radius:9px;font-size:13px">
@@ -1292,21 +1291,39 @@ async function renderLogs() {
 }
 
 /* ========================================================== webadmins === */
+const PERM_LABEL = {
+  orders: 'سفارش‌ها و شارژ کیف پول', users: 'کاربران (بلاک/کیف پول)', catalog: 'محصولات و بانک کانفیگ',
+  discounts: 'کدهای تخفیف', tickets: 'تیکت‌ها و چت زنده', broadcast: 'پیام همگانی',
+  resellers: 'نمایندگی‌ها', panels: 'پنل‌های VPN و نرخ ارز', system: 'سیستم، بکاپ (وضعیت) و لاگ‌ها',
+  settings: 'تنظیمات و برندینگ', backup: 'ساخت بکاپ فوری',
+};
+
+function permChecklistHtml(idPrefix, selected) {
+  return `<div class="chip-row" style="flex-wrap:wrap;gap:6px">${PERM_KEYS.map(p => `
+    <label style="display:flex;align-items:center;gap:4px;font-size:12px;background:var(--panel-2);padding:4px 8px;border-radius:7px">
+      <input type="checkbox" id="${idPrefix}-${p}" data-perm="${p}" ${selected.includes(p) ? 'checked' : ''}>${PERM_LABEL[p] || p}
+    </label>`).join('')}</div>`;
+}
+function readPermChecklist(root, idPrefix) {
+  return PERM_KEYS.filter(p => $(`#${idPrefix}-${p}`, root)?.checked);
+}
+
+let PERM_KEYS = [];
 async function renderWebAdmins() {
+  if (!PERM_KEYS.length) PERM_KEYS = (await apiGet('/web-admins/permissions')).permissions;
   const admins = await apiGet('/web-admins');
   setContent(`
     <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-admin">+ کاربر پنل جدید</button></div>
     <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>یوزرنیم</th><th>نقش</th><th>وضعیت</th><th>آخرین ورود</th><th>عملیات</th></tr></thead>
+      <thead><tr><th>یوزرنیم</th><th>نقش</th><th>مجوزها</th><th>وضعیت</th><th>آخرین ورود</th><th>عملیات</th></tr></thead>
       <tbody>${admins.map(a => `<tr>
         <td>${esc(a.username)}</td>
         <td><span class="badge badge-${a.role}">${ROLE_LABEL[a.role]}</span></td>
+        <td>${a.role === 'owner' ? '<span class="card-sub">همه</span>' : `<span class="card-sub">${a.permissions.length ? a.permissions.map(p => PERM_LABEL[p] || p).join('، ') : 'بدون مجوز (فقط مشاهده)'}</span>`}</td>
         <td>${a.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
         <td class="mono">${fmtDate(a.last_login)}</td>
         <td>${a.role === 'owner' ? '<span class="card-sub">مالک</span>' : `
-          <select class="input" data-role="${a.id}" style="width:auto;display:inline-block">
-            ${['admin', 'mid', 'support'].map(r => `<option value="${r}" ${r === a.role ? 'selected' : ''}>${ROLE_LABEL[r]}</option>`).join('')}
-          </select>
+          <button class="btn btn-sm" data-edit-perms="${a.id}">ویرایش مجوزها</button>
           <button class="btn btn-sm" data-toggle-active="${a.id}" data-active="${a.is_active}">${a.is_active ? 'غیرفعال' : 'فعال'}</button>
           <button class="btn btn-danger btn-sm" data-del="${a.id}">حذف</button>`}</td>
       </tr>`).join('')}</tbody>
@@ -1316,18 +1333,33 @@ async function renderWebAdmins() {
     <div class="form-grid">
       <input class="input" id="na-user" placeholder="یوزرنیم">
       <input class="input" id="na-pass" type="password" placeholder="پسورد (حداقل ۸ کاراکتر)">
-      <select class="input" id="na-role">${['admin', 'mid', 'support'].map(r => `<option value="${r}">${ROLE_LABEL[r]}</option>`).join('')}</select>
+      <div class="card-sub" style="margin-top:4px">مجوزها:</div>
+      ${permChecklistHtml('na', [])}
       <button class="btn btn-primary" id="na-save">ثبت</button>
     </div>`, (body, close) => {
     $('#na-save', body).addEventListener('click', async () => {
       try {
-        await apiPost('/web-admins', { username: $('#na-user', body).value.trim(), password: $('#na-pass', body).value, role: $('#na-role', body).value });
+        await apiPost('/web-admins', {
+          username: $('#na-user', body).value.trim(), password: $('#na-pass', body).value,
+          role: 'admin', permissions: readPermChecklist(body, 'na'),
+        });
         toast('کاربر ساخته شد.'); close(); renderWebAdmins();
       } catch (e) { handleErr(e); }
     });
   }));
-  $$('[data-role]', content()).forEach(sel => sel.addEventListener('change', async () => {
-    try { await apiPost(`/web-admins/${sel.dataset.role}/role`, { role: sel.value }); toast('نقش تغییر کرد.'); } catch (e) { handleErr(e); renderWebAdmins(); }
+  $$('[data-edit-perms]', content()).forEach(b => b.addEventListener('click', () => {
+    const a = admins.find(x => x.id === Number(b.dataset.editPerms));
+    openModal(`مجوزهای ${esc(a.username)}`, `
+      ${permChecklistHtml('ep', a.permissions)}
+      <button class="btn btn-primary" id="ep-save" style="margin-top:14px">ذخیره</button>
+    `, (body, close) => {
+      $('#ep-save', body).addEventListener('click', async () => {
+        try {
+          await apiPost(`/web-admins/${a.id}/permissions`, { permissions: readPermChecklist(body, 'ep') });
+          toast('مجوزها به‌روزرسانی شد.'); close(); renderWebAdmins();
+        } catch (e) { handleErr(e); }
+      });
+    });
   }));
   $$('[data-toggle-active]', content()).forEach(b => b.addEventListener('click', async () => {
     try { await apiPost(`/web-admins/${b.dataset.toggleActive}/active`, { active: b.dataset.active !== 'true' }); renderWebAdmins(); } catch (e) { handleErr(e); }
