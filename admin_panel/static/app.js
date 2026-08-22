@@ -259,6 +259,14 @@ function goTo(tab) {
   renderPage(tab);
 }
 
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-history]');
+  if (!btn) return;
+  const [recordType, recordId] = btn.dataset.history.split(':');
+  $$('.modal-backdrop').forEach(m => m.remove());
+  goToLogsFor(recordType, recordId);
+});
+
 /* ============================================================= boot === */
 async function boot() {
   try {
@@ -533,7 +541,7 @@ async function renderOrders() {
         <thead><tr><th>#</th><th>کاربر</th><th>محصول</th><th>تعداد</th><th>مبلغ</th><th>تاریخ</th>${canAct && ordersStatus === 'pending' ? '<th>عملیات</th>' : ''}</tr></thead>
         <tbody>
           ${orders.map(o => `<tr>
-            <td class="mono">#${o.id}</td>
+            <td class="mono">#${o.id} ${historyBtn('order', o.id)}</td>
             <td>${esc(o.username || o.user_id)}</td>
             <td>${esc(o.product_name)}</td>
             <td class="mono">${fmt(o.quantity || 1)}</td>
@@ -644,6 +652,7 @@ async function showUserDetail(tgId) {
       <span class="chip">کیف پول: ${fmt(d.user.referral_credit)} تومان</span>
       <span class="chip">زیرمجموعه‌ها: ${fmt(d.referral.count)}</span>
       ${d.is_reseller ? `<span class="chip">اعتبار نمایندگی: ${fmt(d.reseller_credit)} گیگ</span>` : ''}
+      ${historyBtn('user', tgId)}
     </div>
     ${isSenior ? `<div class="form-row" style="margin-bottom:14px">
       <input class="input" id="wallet-delta" type="number" placeholder="مبلغ (مثبت=افزایش، منفی=کاهش)">
@@ -1276,18 +1285,62 @@ async function renderSettings() {
 
 /* ================================================================ logs === */
 let logsPage = 1;
+let logsFilter = { action: '', record_type: '', record_id: '' };
+const RECORD_TYPE_LABEL = {
+  order: 'سفارش', topup: 'شارژ کیف پول', user: 'کاربر', category: 'دسته‌بندی', product: 'محصول',
+  config: 'کانفیگ', discount: 'کد تخفیف', ticket: 'تیکت', reseller: 'نماینده', panel: 'پنل VPN',
+  setting: 'تنظیم', webadmin: 'ادمین پنل',
+};
+function goToLogsFor(recordType, recordId) {
+  logsFilter = { action: '', record_type: recordType, record_id: String(recordId) };
+  logsPage = 1;
+  goTo('logs');
+}
+function historyBtn(recordType, recordId) {
+  return hasPerm('system')
+    ? `<button class="btn btn-ghost btn-sm" data-history="${recordType}:${recordId}" title="تاریخچه">تاریخچه</button>` : '';
+}
 async function renderLogs() {
-  const res = await apiGet(`/admin-logs?page=${logsPage}`);
+  const actionsRes = await apiGet('/admin-logs/actions');
+  const qs = new URLSearchParams({ page: logsPage });
+  if (logsFilter.action) qs.set('action', logsFilter.action);
+  if (logsFilter.record_type) qs.set('record_type', logsFilter.record_type);
+  if (logsFilter.record_id) qs.set('record_id', logsFilter.record_id);
+  const res = await apiGet(`/admin-logs?${qs.toString()}`);
   const pages = Math.max(Math.ceil(res.total / res.limit), 1);
   setContent(`
+    <div class="card" style="margin-bottom:14px">
+      <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+        <select class="input" id="lf-action">
+          <option value="">همه‌ی عملیات</option>
+          ${actionsRes.actions.map(a => `<option value="${a}" ${a === logsFilter.action ? 'selected' : ''}>${esc(a)}</option>`).join('')}
+        </select>
+        <select class="input" id="lf-type">
+          <option value="">همه‌ی رکوردها</option>
+          ${Object.keys(RECORD_TYPE_LABEL).map(t => `<option value="${t}" ${t === logsFilter.record_type ? 'selected' : ''}>${RECORD_TYPE_LABEL[t]}</option>`).join('')}
+        </select>
+        <input class="input" id="lf-id" placeholder="شناسه رکورد (مثلاً آیدی سفارش)" value="${esc(logsFilter.record_id)}">
+        <button class="btn btn-primary btn-sm" id="lf-apply">اعمال فیلتر</button>
+        <button class="btn btn-sm" id="lf-clear">پاک‌کردن</button>
+      </div>
+    </div>
     <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>ادمین</th><th>عملیات</th><th>جزئیات</th><th>تاریخ</th></tr></thead>
-      <tbody>${res.items.map(l => `<tr><td class="mono">${l.admin_id}</td><td>${esc(l.action)}</td><td>${esc(l.details)}</td><td class="mono">${fmtDate(l.created_at)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty-state">لاگی ثبت نشده</td></tr>'}</tbody>
+      <thead><tr><th>ادمین</th><th>عملیات</th><th>رکورد</th><th>جزئیات</th><th>تاریخ</th></tr></thead>
+      <tbody>${res.items.map(l => `<tr>
+        <td class="mono">${l.admin_id}</td><td>${esc(l.action)}</td>
+        <td>${l.record_type ? `<span class="chip">${RECORD_TYPE_LABEL[l.record_type] || esc(l.record_type)} #${esc(l.record_id)}</span>` : '—'}</td>
+        <td>${esc(l.details)}</td><td class="mono">${fmtDate(l.created_at)}</td>
+      </tr>`).join('') || '<tr><td colspan="5" class="empty-state">لاگی ثبت نشده</td></tr>'}</tbody>
     </table></div>
     <div class="pager">${Array.from({ length: pages }, (_, i) => i + 1).map(p => `<button class="btn btn-sm ${p === logsPage ? 'btn-primary' : ''}" data-page="${p}">${p}</button>`).join('')}</div>
     </div>
   `);
   $$('[data-page]', content()).forEach(b => b.addEventListener('click', () => { logsPage = Number(b.dataset.page); renderLogs(); }));
+  $('#lf-apply').addEventListener('click', () => {
+    logsFilter = { action: $('#lf-action').value, record_type: $('#lf-type').value, record_id: $('#lf-id').value.trim() };
+    logsPage = 1; renderLogs();
+  });
+  $('#lf-clear').addEventListener('click', () => { logsFilter = { action: '', record_type: '', record_id: '' }; logsPage = 1; renderLogs(); });
 }
 
 /* ========================================================== webadmins === */
