@@ -551,6 +551,96 @@ async def api_broadcast(body: BroadcastBody, admin=Depends(require_full)):
     return {"total": len(user_ids), "success": counters["success"], "failed": counters["failed"]}
 
 
+# --------------------------------------------------------- live support chat --
+
+
+def _support_lock_label(assigned_admin_id):
+    """assigned_admin_id مثبت یعنی قفل روی ادمین تلگرام (بات/میان‌اپ)، منفی یعنی
+    قفل روی ادمین وب (چون ادمین‌های وب آیدی تلگرام ندارند، با -admin_id ذخیره می‌شوند)."""
+    if not assigned_admin_id:
+        return None
+    if assigned_admin_id < 0:
+        wa = db.get_web_admin(-assigned_admin_id)
+        return f"{wa['username']} (پنل وب)" if wa else "ادمین وب"
+    return f"ادمین تلگرام #{assigned_admin_id}"
+
+
+@app.get("/api/support/conversations")
+def api_support_conversations(admin=Depends(get_current_admin)):
+    my_lock_id = -admin["id"]
+    is_owner = admin["role"] == "owner"
+    convs = rows_to_list(db.list_support_conversations())
+    for c in convs:
+        user = row_to_dict(db.get_user(c["user_id"]))
+        c["user_name"] = (user["first_name"] if user else "") or ""
+        c["user_username"] = (user["username"] if user else "") or ""
+        assigned = c.get("assigned_admin_id")
+        c["locked_by"] = _support_lock_label(assigned)
+        c["locked_for_me"] = bool(assigned) and assigned != my_lock_id and not is_owner
+    return convs
+
+
+@app.get("/api/support/{user_id}/messages")
+def api_support_messages(user_id: int, since_id: int = 0, admin=Depends(get_current_admin)):
+    user = db.get_user(user_id)
+    if not user:
+        raise HTTPException(404, "کاربر یافت نشد.")
+    db.mark_support_read_by_admin(user_id)
+    rows = rows_to_list(db.get_support_messages(user_id, since_id=since_id))
+    conv = db.get_support_conversation(user_id)
+    assigned = conv["assigned_admin_id"] if conv else None
+    my_lock_id = -admin["id"]
+    is_owner = admin["role"] == "owner"
+    return {
+        "user": {
+            "user_id": user_id,
+            "user_name": (user["first_name"] if user else "") or "",
+            "user_username": (user["username"] if user else "") or "",
+            "locked_by": _support_lock_label(assigned),
+            "locked_for_me": bool(assigned) and assigned != my_lock_id and not is_owner,
+        },
+        "messages": [
+            {"id": m["id"], "sender": m["sender"], "message": m["message"], "created_at": m["created_at"]}
+            for m in rows
+        ],
+    }
+
+
+class SupportReplyBody(BaseModel):
+    message: str
+
+
+@app.post("/api/support/{user_id}/messages")
+async def api_support_send(user_id: int, body: SupportReplyBody, admin=Depends(get_current_admin)):
+    user = db.get_user(user_id)
+    if not user:
+        raise HTTPException(404, "کاربر یافت نشد.")
+    text = (body.message or "").strip()
+    if not text:
+        raise HTTPException(400, "پیام نمی‌تواند خالی باشد.")
+    if len(text) > 2000:
+        raise HTTPException(400, "پیام بیش از حد طولانی است.")
+
+    # قفل مکالمه: چون ادمین‌های وب آیدی تلگرام ندارند، با -admin_id در همان
+    # ستون assigned_admin_id ذخیره می‌شود (که با آیدی‌های واقعی تلگرام تداخل ندارد).
+    my_lock_id = -admin["id"]
+    is_owner = admin["role"] == "owner"
+    conv = db.get_support_conversation(user_id)
+    assigned = conv["assigned_admin_id"] if conv else None
+    if assigned and assigned != my_lock_id and not is_owner:
+        raise HTTPException(
+            403,
+            f"این گفتگو در حال حاضر توسط {_support_lock_label(assigned)} در حال پاسخ‌دهی است.",
+        )
+    if not is_owner:
+        db.set_support_conversation_admin(user_id, my_lock_id)
+
+    msg_id = db.add_support_message(user_id, "admin", text)
+    await notify_user(user_id, f"💬 پشتیبانی:\n\n{text}")
+    db.log_admin_action(admin["id"], "support_reply", f"پاسخ چت زنده به کاربر {user_id} (پنل وب - {admin['username']})")
+    return {"ok": True, "id": msg_id}
+
+
 # -------------------------------------------------------------- resellers --
 
 
