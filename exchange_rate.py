@@ -14,6 +14,7 @@
 """
 
 import asyncio
+import socket
 import time
 import logging
 import re
@@ -38,18 +39,52 @@ BROWSER_HEADERS = {
 }
 
 
+class _DoHResolver(aiohttp.abc.AbstractResolver):
+    """Resolver مبتنی بر DNS-over-HTTPS کلودفلر (به IP لیترال 1.1.1.1 وصل
+    می‌شود، پس خودش نیازی به DNS سیستم ندارد). جایگزین aiohttp.AsyncResolver
+    شد چون آن یکی هم به نصب بودن پکیج aiodns وابسته است و هم در نهایت از
+    همان resolver سیستم عامل استفاده می‌کند - اگر resolv.conf سرور دامنه‌های
+    .ir را درست resolve نکند (مورد رایج روی سرورهای خارج از ایران)، همان
+    خطای 'Name or service not known' باز هم رخ می‌دهد. DoH این مشکل را کامل
+    دور می‌زند."""
+
+    def __init__(self):
+        self._cache: dict[str, str] = {}
+
+    async def _lookup(self, host: str) -> str:
+        if host in self._cache:
+            return self._cache[host]
+        async with aiohttp.ClientSession() as s:
+            async with s.get(
+                "https://1.1.1.1/dns-query",
+                params={"name": host, "type": "A"},
+                headers={"Accept": "application/dns-json"},
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                data = await resp.json(content_type=None)
+        for ans in data.get("Answer", []):
+            if ans.get("type") == 1:  # A record
+                ip = ans["data"]
+                self._cache[host] = ip
+                return ip
+        raise socket.gaierror(f"DoH: هیچ A record برای {host} پیدا نشد")
+
+    async def resolve(self, host: str, port: int = 0, family: int = socket.AF_INET):
+        ip = await self._lookup(host)
+        return [{
+            "hostname": host, "host": ip, "port": port,
+            "family": family, "proto": 0, "flags": 0,
+        }]
+
+    async def close(self) -> None:
+        pass
+
+
 def _make_connector() -> aiohttp.TCPConnector:
-    """سعی می‌کند از یک resolver با DNS عمومی (کلودفلر/گوگل) استفاده کند تا
-    مشکل معمول 'Name or service not known' روی برخی سرورها که resolver
-    پیش‌فرضشان دامنه‌های .ir را درست resolve نمی‌کند، دور زده شود. اگر
-    پکیج aiodns نصب نباشد (وابستگی AsyncResolver)، بی‌صدا به resolver
-    پیش‌فرض سیستم برمی‌گردد."""
-    try:
-        resolver = aiohttp.AsyncResolver(nameservers=["1.1.1.1", "8.8.8.8"])
-        return aiohttp.TCPConnector(resolver=resolver)
-    except Exception as e:
-        logger.warning("AsyncResolver در دسترس نیست (احتمالاً aiodns نصب نیست)؛ استفاده از resolver پیش‌فرض: %s", e)
-        return aiohttp.TCPConnector()
+    """از DoH برای resolve دامنه‌ها استفاده می‌کند تا مشکل معمول 'Name or
+    service not known' روی سرورهایی که resolver سیستمشان دامنه‌های .ir را
+    درست resolve نمی‌کند دور زده شود؛ بدون وابستگی به نصب بودن aiodns."""
+    return aiohttp.TCPConnector(resolver=_DoHResolver())
 
 # مجموعه‌ای از الگوهای احتمالی برای استخراج نرخ دلار از tgju.org.
 # ⚠️ tgju به‌مرور ساختار صفحه‌اش را عوض می‌کند و هر الگوی تکی دیر یا زود
