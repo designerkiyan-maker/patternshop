@@ -32,6 +32,37 @@ const fmt = n => (n === null || n === undefined) ? '—' : Number(n).toLocaleStr
 const fmtDate = iso => iso ? new Date(iso.replace(' ', 'T') + (iso.includes('Z') ? '' : 'Z')).toLocaleString('fa-IR') : '—';
 const esc = s => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
+/* ==================================================== micro-animation === */
+// شمارش انیمیشنی اعداد هنگام بارگذاری کارت‌ها
+function animateCount(el, target, duration = 900) {
+  if (!el) return;
+  const start = 0;
+  const t0 = performance.now();
+  function tick(now) {
+    const p = Math.min((now - t0) / duration, 1);
+    const eased = 1 - Math.pow(1 - p, 3);
+    el.textContent = fmt(Math.round(start + (target - start) * eased));
+    if (p < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+// پر شدن حلقه‌های سیگنال بعد از mount (برای انیمیشن conic-gradient)
+function activateRings(root) {
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      $$('.ring[data-pct]', root).forEach(r => { r.style.setProperty('--pct', r.dataset.pct); });
+    }, 60);
+  });
+}
+// رشد میله‌های نمودار بعد از mount
+function activateBars(root) {
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      $$('.spark i[data-h]', root).forEach(b => { b.style.height = b.dataset.h + '%'; });
+    }, 60);
+  });
+}
+
 /* ============================================================== api === */
 async function api(path, opts = {}) {
   const res = await fetch('/api' + path, {
@@ -100,8 +131,9 @@ const ROLE_LABEL = { owner: 'مالک', admin: 'مدیر کامل', mid: 'ادم
 
 function renderNav() {
   const el = $('#nav-tunnel');
-  el.innerHTML = NAV.filter(n => canSee(n.role)).map(n => `
-    <div class="nav-item ${n.key === CURRENT_TAB ? 'active' : ''}" data-tab="${n.key}">
+  const CYCLE = ['nav-c1', 'nav-c2', 'nav-c3', 'nav-c4'];
+  el.innerHTML = NAV.filter(n => canSee(n.role)).map((n, i) => `
+    <div class="nav-item ${CYCLE[i % 4]} ${n.key === CURRENT_TAB ? 'active' : ''}" data-tab="${n.key}">
       <span class="nav-icon">${svg(n.icon)}</span><span>${n.label}</span>
     </div>`).join('');
   $$('.nav-item', el).forEach(item => item.addEventListener('click', () => goTo(item.dataset.tab)));
@@ -196,46 +228,68 @@ async function renderPage(tab) {
 }
 
 /* ========================================================= dashboard === */
+function greetingByHour() {
+  const h = new Date().getHours();
+  if (h < 12) return 'صبح بخیر';
+  if (h < 18) return 'ظهر بخیر';
+  return 'شب بخیر';
+}
+
 async function renderDashboard() {
   const s = await apiGet('/dashboard');
   const maxRev = Math.max(...s.daily_series.map(d => d.revenue), 1);
-  const spark = s.daily_series.map(d => `<i style="height:${Math.max((d.revenue / maxRev) * 100, 3)}%" title="${d.date}: ${fmt(d.revenue)} تومان"></i>`).join('');
+  const spark = s.daily_series.map(d => `<i data-h="${Math.max((d.revenue / maxRev) * 100, 3)}" title="${d.date}: ${fmt(d.revenue)} تومان"></i>`).join('');
   const deltaCls = (s.revenue_change_pct ?? 0) >= 0 ? 'up' : 'down';
   const deltaSign = (s.revenue_change_pct ?? 0) >= 0 ? '▲' : '▼';
+  const ticketRatio = s.active_configs ? Math.min(Math.round((s.open_tickets / s.active_configs) * 100), 100) : 0;
 
   setContent(`
+    <div class="hero">
+      <div class="hero-text">
+        <h2>${greetingByHour()}، ${esc(ME.username)} 👋</h2>
+        <p>وضعیت فروشگاه در ${s.start_date} تا ${s.end_date} — همه چیز آنلاین و در حال گزارش‌دهی زنده است.</p>
+      </div>
+      <div class="hero-orbit">
+        <div class="o1"><span class="dot"></span></div>
+        <div class="o2"></div>
+        <div class="core">${svg('panels')}</div>
+      </div>
+    </div>
+
     <div class="grid grid-4">
       <div class="card stat-card">
         <div class="stat-top">
-          <span class="stat-icon stat-icon-signal">${svg('revenue')}</span>
+          <span class="stat-icon stat-icon-1">${svg('revenue')}</span>
           <span class="delta ${deltaCls} mono">${deltaSign} ${Math.abs(s.revenue_change_pct ?? 0)}%</span>
         </div>
-        <span class="value mono">${fmt(s.revenue)}</span>
+        <span class="value mono" data-count="${s.revenue}">۰</span>
         <span class="label">درآمد (۱۴ روز اخیر)</span>
       </div>
       <div class="card stat-card">
         <div class="stat-top">
-          <span class="stat-icon stat-icon-indigo">${svg('check')}</span>
-          <div class="ring" style="--pct:${s.conversion_rate}"><span>${s.conversion_rate}٪</span></div>
+          <span class="stat-icon stat-icon-2">${svg('check')}</span>
+          <div class="ring" style="--ring-a:var(--cyan)" data-pct="${s.conversion_rate}"><span>${s.conversion_rate}٪</span></div>
         </div>
-        <span class="value mono">${fmt(s.approved)}</span>
+        <span class="value mono" data-count="${s.approved}">۰</span>
         <span class="label">سفارش‌های تایید شده · نرخ تبدیل</span>
       </div>
       <div class="card stat-card">
-        <div class="stat-top"><span class="stat-icon stat-icon-amber">${svg('users')}</span></div>
-        <span class="value mono">${fmt(s.total_users)}</span>
+        <div class="stat-top"><span class="stat-icon stat-icon-3">${svg('users')}</span></div>
+        <span class="value mono" data-count="${s.total_users}">۰</span>
         <span class="label">کاربران کل</span>
         <span class="card-sub">${fmt(s.new_users)} کاربر جدید در این بازه</span>
       </div>
       <div class="card stat-card">
-        <div class="stat-top"><span class="stat-icon stat-icon-coral">${svg('tickets')}</span></div>
-        <span class="value mono">${fmt(s.open_tickets)}</span>
-        <span class="label">تیکت‌های باز</span>
-        <span class="card-sub">${fmt(s.active_configs)} کانفیگ فعال</span>
+        <div class="stat-top">
+          <span class="stat-icon stat-icon-4">${svg('tickets')}</span>
+          <div class="ring" style="--ring-a:var(--rose)" data-pct="${ticketRatio}"><span>${fmt(s.open_tickets)}</span></div>
+        </div>
+        <span class="value mono" data-count="${s.active_configs}">۰</span>
+        <span class="label">کانفیگ فعال · تیکت باز</span>
       </div>
     </div>
 
-    <div class="grid grid-2" style="margin-top:16px">
+    <div class="grid grid-2" style="margin-top:18px">
       <div class="card">
         <div class="card-head"><h3>روند فروش روزانه</h3><span class="card-sub">${s.start_date} تا ${s.end_date}</span></div>
         <div class="spark">${spark}</div>
@@ -252,12 +306,17 @@ async function renderDashboard() {
       </div>
     </div>
 
-    <div class="card" style="margin-top:16px">
+    <div class="card" style="margin-top:18px">
       <div class="card-head"><h3>پرفروش‌ترین محصولات</h3></div>
       <div class="table-wrap"><table><thead><tr><th>محصول</th><th>تعداد فروش</th><th>درآمد</th></tr></thead>
       <tbody>${s.top_products.map(p => `<tr><td>${esc(p.name)}</td><td class="mono">${fmt(p.orders)}</td><td class="mono">${fmt(p.revenue)}</td></tr>`).join('') || `<tr><td colspan="3" class="empty-state">داده‌ای نیست</td></tr>`}</tbody></table></div>
     </div>
   `);
+
+  const root = content();
+  $$('.value[data-count]', root).forEach(el => animateCount(el, Number(el.dataset.count)));
+  activateRings(root);
+  activateBars(root);
 }
 
 /* ============================================================ orders === */
