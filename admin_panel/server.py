@@ -30,9 +30,9 @@ from typing import Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import aiohttp
-from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form, Depends, Query, Request
+from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form, Depends, Query, Request, Cookie, Response as FastAPIResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, Response, FileResponse
+from fastapi.responses import HTMLResponse, Response, FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -41,7 +41,8 @@ import sqlite3
 
 logging.basicConfig(level=logging.INFO)
 
-from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, resolve_db_path, RESELLER_DBS_DIR, MINIAPP_URL, API_BASE_URL, PLISIO_API_KEY
+from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, resolve_db_path, RESELLER_DBS_DIR, MINIAPP_URL, API_BASE_URL, PLISIO_API_KEY, ADMIN_PANEL_SECRET
+from admin_panel.security import verify_password, create_session_token, verify_session_token
 import plisio_client
 import exchange_rate
 import crypto_payment
@@ -144,12 +145,78 @@ def get_tenant(b: str = Query("", description="شناسه یا اسلاگ لین
     return Tenant(db=tenant_db, bot_token=row["bot_token"], tenant_id=b)
 
 
-def get_verified_user(x_init_data: str = Header(...), tenant: Tenant = Depends(get_tenant)):
-    """initData را با توکن همان مستأجر تایید می‌کند. خروجی: (tg_id, db, tenant)"""
+def get_verified_user(
+    x_init_data: str = Header(None),
+    panel_session: str = Cookie(None),
+    tenant: Tenant = Depends(get_tenant),
+):
+    """هویت درخواست را یا از initData تلگرام (مینی‌اپ) یا از کوکی نشست پنل مدیریت
+    مستقل (وب، یوزر/پسورد) تایید می‌کند. خروجی: (tg_id, db, tenant)
+
+    برای ورود از طریق پنل وب مستقل: نشست معتبر، معادل هویت «مالک بات» همان
+    مستأجر در نظر گرفته می‌شود (چون فقط حساب‌های پنل وب که قبلاً با یوزر/پسورد
+    احراز هویت شده‌اند اجازه‌ی ساخت این کوکی را دارند)."""
+    if panel_session:
+        payload = verify_session_token(ADMIN_PANEL_SECRET, panel_session)
+        if payload:
+            owner_tg_id = tenant.db.get_owner_telegram_id()
+            if owner_tg_id is not None:
+                return owner_tg_id, tenant.db, tenant
+
+    if not x_init_data:
+        raise HTTPException(status_code=401, detail="نیاز به ورود دارید.")
     result = validate_init_data(x_init_data, tenant.bot_token)
     if not result or "user" not in result:
         raise HTTPException(status_code=401, detail="initData نامعتبر است.")
     return result["user"]["id"], tenant.db, tenant
+
+
+# ---------------------------------------------------------------------------
+# پنل مدیریت وب مستقل - ورود/خروج با یوزرنیم و پسورد (جدا از initData تلگرام)
+# ---------------------------------------------------------------------------
+
+PANEL_SESSION_COOKIE = "panel_session"
+PANEL_SESSION_HOURS = 12
+
+
+class PanelLoginBody(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/panel/login")
+def api_panel_login(body: PanelLoginBody, response: FastAPIResponse):
+    username = body.username.strip().lower()
+    admin_row = main_db.get_web_admin_by_username(username)
+    if not admin_row or not admin_row["is_active"]:
+        raise HTTPException(status_code=401, detail="یوزرنیم یا پسورد اشتباه است.")
+    if not verify_password(body.password, admin_row["password_hash"]):
+        raise HTTPException(status_code=401, detail="یوزرنیم یا پسورد اشتباه است.")
+
+    token = create_session_token(
+        ADMIN_PANEL_SECRET, admin_row["id"], admin_row["username"], admin_row["role"],
+        hours=PANEL_SESSION_HOURS,
+    )
+    main_db.touch_web_admin_login(admin_row["id"])
+    response.set_cookie(
+        key=PANEL_SESSION_COOKIE, value=token, max_age=PANEL_SESSION_HOURS * 3600,
+        httponly=True, samesite="lax", secure=True, path="/",
+    )
+    return {"username": admin_row["username"], "role": admin_row["role"]}
+
+
+@app.post("/api/panel/logout")
+def api_panel_logout(response: FastAPIResponse):
+    response.delete_cookie(PANEL_SESSION_COOKIE, path="/")
+    return {"ok": True}
+
+
+@app.get("/api/panel/me")
+def api_panel_me(panel_session: str = Cookie(None)):
+    payload = verify_session_token(ADMIN_PANEL_SECRET, panel_session) if panel_session else None
+    if not payload:
+        raise HTTPException(status_code=401, detail="نشست نامعتبر یا منقضی شده است.")
+    return {"username": payload["u"], "role": payload["r"]}
 
 
 def require_admin(auth=Depends(get_verified_user)):
