@@ -8,6 +8,18 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/assets/style.css">
+<script>
+(function(){
+  try{
+    var t = JSON.parse(localStorage.getItem('sv-theme') || 'null') || { style:'2', mode:'dark' };
+    document.documentElement.setAttribute('data-style', t.style);
+    document.documentElement.setAttribute('data-mode', t.mode);
+  }catch(e){
+    document.documentElement.setAttribute('data-style','2');
+    document.documentElement.setAttribute('data-mode','dark');
+  }
+})();
+</script>
 </head>
 <body>
 

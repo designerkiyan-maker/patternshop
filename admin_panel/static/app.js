@@ -4,6 +4,24 @@
 let ME = null;
 let CURRENT_TAB = 'dashboard';
 
+/* ============================================================= theme === */
+const THEMES = [
+  { id: '1', name: 'فلت کورپوریت', desc: 'ساده، تمیز، اداری', colors: ['#0f6e5f', '#1f7ae0', '#c78a10'] },
+  { id: '2', name: 'نئون گلس', desc: 'همان طرح پیش‌فرض ShopVPN', colors: ['#8B5CF6', '#EC4899', '#22D3EE'] },
+  { id: '3', name: 'ترمینال عملیاتی', desc: 'مونوسپیس، حس اتاق سرور', colors: ['#3ddc84', '#ff6b52', '#e0b23c'] },
+  { id: '4', name: 'بنتوی نرم', desc: 'گرم، گرد، صمیمی', colors: ['#d97757', '#5b8a72', '#c99a3a'] },
+];
+function loadTheme() {
+  try { return JSON.parse(localStorage.getItem('sv-theme')) || { style: '2', mode: 'dark' }; }
+  catch (e) { return { style: '2', mode: 'dark' }; }
+}
+function applyTheme(style, mode) {
+  document.documentElement.setAttribute('data-style', style);
+  document.documentElement.setAttribute('data-mode', mode);
+  localStorage.setItem('sv-theme', JSON.stringify({ style, mode }));
+}
+applyTheme(loadTheme().style, loadTheme().mode);
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
@@ -50,7 +68,7 @@ function animateCount(el, target, duration = 900) {
 function activateRings(root) {
   requestAnimationFrame(() => {
     setTimeout(() => {
-      $$('.ring[data-pct]', root).forEach(r => { r.style.setProperty('--pct', r.dataset.pct); });
+      $$('.ring[data-pct], .res-ring[data-pct]', root).forEach(r => { r.style.setProperty('--pct', r.dataset.pct); });
     }, 60);
   });
 }
@@ -235,15 +253,34 @@ function greetingByHour() {
   return 'شب بخیر';
 }
 
+function resRingHtml(pct, colorVar, title, sub) {
+  const p = Math.max(0, Math.min(100, Math.round(pct)));
+  return `
+    <div class="card res-card">
+      <div class="res-ring" style="--ring-a:${colorVar}" data-pct="${p}"><span>${p}٪</span></div>
+      <div class="res-info"><strong>${title}</strong><span>${sub}</span></div>
+    </div>`;
+}
+
 async function renderDashboard() {
   const s = await apiGet('/dashboard');
+  let sys = null;
+  try { sys = await apiGet('/system/stats'); } catch (e) { /* psutil ممکن است نصب نباشد */ }
   const maxRev = Math.max(...s.daily_series.map(d => d.revenue), 1);
   const spark = s.daily_series.map(d => `<i data-h="${Math.max((d.revenue / maxRev) * 100, 3)}" title="${d.date}: ${fmt(d.revenue)} تومان"></i>`).join('');
   const deltaCls = (s.revenue_change_pct ?? 0) >= 0 ? 'up' : 'down';
   const deltaSign = (s.revenue_change_pct ?? 0) >= 0 ? '▲' : '▼';
   const ticketRatio = s.active_configs ? Math.min(Math.round((s.open_tickets / s.active_configs) * 100), 100) : 0;
 
+  const resHtml = sys ? `
+    <div class="res-grid">
+      ${resRingHtml(sys.cpu.percent, 'var(--violet)', 'پردازنده (CPU)', `${sys.cpu.cores} هسته`)}
+      ${resRingHtml(sys.ram.percent, 'var(--amber)', 'حافظه رم (RAM)', `${sys.ram.used_gb} از ${sys.ram.total_gb} گیگابایت`)}
+      ${resRingHtml(sys.disk.percent, 'var(--cyan)', 'فضای دیسک', `${sys.disk.used_gb} از ${sys.disk.total_gb} گیگابایت`)}
+    </div>` : '';
+
   setContent(`
+    ${resHtml}
     <div class="hero">
       <div class="hero-text">
         <h2>${greetingByHour()}، ${esc(ME.username)} 👋</h2>
@@ -767,7 +804,27 @@ async function renderSettings() {
     ['low_stock_threshold', 'آستانه هشدار موجودی کم'],
     ['referral_percent', 'درصد پورسانت رفرال'],
   ];
+  const cur = loadTheme();
   setContent(`
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-head">
+        <h3>ظاهر پنل</h3>
+        <div class="mode-toggle" id="mode-toggle">
+          <button data-mode="light" class="${cur.mode === 'light' ? 'active' : ''}">☀️ روشن</button>
+          <button data-mode="dark" class="${cur.mode === 'dark' ? 'active' : ''}">🌙 تیره</button>
+        </div>
+      </div>
+      <div class="theme-grid" id="theme-grid">
+        ${THEMES.map(t => `
+          <div class="theme-opt ${cur.style === t.id ? 'active' : ''}" data-style="${t.id}">
+            <div class="swatch">${t.colors.map(c => `<i style="background:${c}"></i>`).join('')}</div>
+            <strong>${esc(t.name)}</strong>
+            <span>${esc(t.desc)}</span>
+          </div>`).join('')}
+      </div>
+      <span class="card-sub">هر وقت خواستی می‌تونی طرح یا حالت روشن/تیره رو عوض کنی؛ فقط برای همین مرورگر ذخیره می‌شود.</span>
+    </div>
+
     <div class="card"><div class="form-grid">
       ${fields.map(([key, label]) => `
         <label class="field"><span>${label}</span>
@@ -776,6 +833,14 @@ async function renderSettings() {
       <button class="btn btn-primary" id="settings-save">ذخیره تغییرات</button>
     </div></div>
   `);
+  $$('.theme-opt', content()).forEach(el => el.addEventListener('click', () => {
+    applyTheme(el.dataset.style, loadTheme().mode);
+    $$('.theme-opt', content()).forEach(o => o.classList.toggle('active', o === el));
+  }));
+  $$('#mode-toggle button', content()).forEach(btn => btn.addEventListener('click', () => {
+    applyTheme(loadTheme().style, btn.dataset.mode);
+    $$('#mode-toggle button', content()).forEach(b => b.classList.toggle('active', b === btn));
+  }));
   $('#settings-save').addEventListener('click', async () => {
     try {
       for (const inp of $$('[data-key]', content())) {
