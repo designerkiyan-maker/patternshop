@@ -3,6 +3,8 @@
 /* ============================================================ state === */
 let ME = null;
 let CURRENT_TAB = 'dashboard';
+let SUPPORT_POLL_TIMER = null;
+function stopSupportPoll() { if (SUPPORT_POLL_TIMER) { clearInterval(SUPPORT_POLL_TIMER); SUPPORT_POLL_TIMER = null; } }
 
 /* ============================================================= theme === */
 const THEMES = [
@@ -37,6 +39,7 @@ const ICONS = {
   discounts: '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z"></path><circle cx="7" cy="7" r="1.4"></circle>',
   tickets: '<path d="M21 11.5a8.38 8.38 0 0 1-4.5 7.4 8.5 8.5 0 0 1-7.6-.1L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 8-8.5h.5a8.48 8.48 0 0 1 8 8v.5Z"></path>',
   broadcast: '<path d="m3 11 18-5v12L3 14v-3z"></path><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"></path>',
+  support: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>',
   resellers: '<rect x="2" y="7" width="20" height="14" rx="2.5"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>',
   panels: '<rect x="2" y="3" width="20" height="7" rx="2"></rect><rect x="2" y="14" width="20" height="7" rx="2"></rect><line x1="6" y1="6.5" x2="6.01" y2="6.5"></line><line x1="6" y1="17.5" x2="6.01" y2="17.5"></line>',
   settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"></path>',
@@ -218,6 +221,7 @@ const NAV = [
   { key: 'catalog', label: 'محصولات و بانک کانفیگ', icon: 'catalog', role: 'senior' },
   { key: 'discounts', label: 'کدهای تخفیف', icon: 'discounts', role: 'senior' },
   { key: 'tickets', label: 'تیکت‌ها', icon: 'tickets', role: 'any' },
+  { key: 'support', label: 'چت زنده', icon: 'support', role: 'any' },
   { key: 'broadcast', label: 'پیام همگانی', icon: 'broadcast', role: 'full' },
   { key: 'resellers', label: 'نمایندگی‌ها', icon: 'resellers', role: 'senior' },
   { key: 'panels', label: 'پنل‌های VPN', icon: 'panels', role: 'senior' },
@@ -248,6 +252,7 @@ function renderNav() {
 }
 
 function goTo(tab) {
+  stopSupportPoll();
   CURRENT_TAB = tab;
   renderNav();
   $('#page-title').textContent = NAV.find(n => n.key === tab)?.label || '';
@@ -339,6 +344,7 @@ async function renderPage(tab) {
       case 'catalog': return renderCatalog();
       case 'discounts': return renderDiscounts();
       case 'tickets': return renderTickets();
+      case 'support': return renderSupport();
       case 'broadcast': return renderBroadcast();
       case 'resellers': return renderResellers();
       case 'panels': return renderPanels();
@@ -818,6 +824,90 @@ async function renderDiscounts() {
     if (!confirm('حذف شود؟')) return;
     try { await apiDelete(`/discounts/${b.dataset.del}`); toast('حذف شد.'); renderDiscounts(); } catch (e) { handleErr(e); }
   }));
+}
+
+/* ============================================================= support === */
+async function renderSupport() {
+  stopSupportPoll();
+  const convs = await apiGet('/support/conversations');
+  setContent(`
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>کاربر</th><th>آخرین پیام</th><th>زمان</th><th></th></tr></thead>
+      <tbody>${convs.map(c => `<tr>
+        <td>${esc(c.user_name || c.user_username || ('#' + c.user_id))}${c.unread ? ` <span class="badge badge-pending">${c.unread}</span>` : ''}${c.locked_for_me ? ` <span class="badge badge-rejected" title="${esc(c.locked_by || '')}">🔒</span>` : ''}</td>
+        <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.last_sender === 'admin' ? '↩ ' : ''}${esc(c.last_message || '')}</td>
+        <td class="mono">${fmtDate(c.last_at)}</td>
+        <td><button class="btn btn-sm" data-open="${c.user_id}">مشاهده</button></td>
+      </tr>`).join('') || '<tr><td colspan="4" class="empty-state">گفتگویی نیست</td></tr>'}</tbody>
+    </table></div></div>
+  `);
+  $$('[data-open]', content()).forEach(b => b.addEventListener('click', () => showSupportChat(Number(b.dataset.open))));
+  SUPPORT_POLL_TIMER = setInterval(async () => {
+    if (CURRENT_TAB !== 'support') return stopSupportPoll();
+    try { const fresh = await apiGet('/support/conversations'); renderSupportRows(fresh); } catch (e) { /* silent */ }
+  }, 5000);
+}
+
+function renderSupportRows(convs) {
+  const tbody = $('table tbody', content());
+  if (!tbody) return;
+  tbody.innerHTML = convs.map(c => `<tr>
+    <td>${esc(c.user_name || c.user_username || ('#' + c.user_id))}${c.unread ? ` <span class="badge badge-pending">${c.unread}</span>` : ''}${c.locked_for_me ? ` <span class="badge badge-rejected" title="${esc(c.locked_by || '')}">🔒</span>` : ''}</td>
+    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.last_sender === 'admin' ? '↩ ' : ''}${esc(c.last_message || '')}</td>
+    <td class="mono">${fmtDate(c.last_at)}</td>
+    <td><button class="btn btn-sm" data-open="${c.user_id}">مشاهده</button></td>
+  </tr>`).join('') || '<tr><td colspan="4" class="empty-state">گفتگویی نیست</td></tr>';
+  $$('[data-open]', tbody).forEach(b => b.addEventListener('click', () => showSupportChat(Number(b.dataset.open))));
+}
+
+async function showSupportChat(userId) {
+  let lastId = 0;
+  const d = await apiGet(`/support/${userId}/messages`);
+  lastId = d.messages.length ? d.messages[d.messages.length - 1].id : 0;
+  const title = d.user.user_name || d.user.user_username || `#${userId}`;
+  const locked = d.user.locked_for_me;
+  let pollTimer = null;
+  const bubble = m => `<div style="align-self:${m.sender === 'admin' ? 'flex-end' : 'flex-start'};max-width:80%;background:${m.sender === 'admin' ? 'var(--signal-dim)' : 'var(--panel-2)'};padding:8px 12px;border-radius:9px;font-size:13px">
+        ${esc(m.message)}<div class="card-sub" style="font-size:10px;margin-top:3px">${fmtDate(m.created_at)}</div>
+      </div>`;
+  const modal = openModal(`چت با ${esc(title)}`, `
+    <div id="sc-log" style="display:flex;flex-direction:column;gap:8px;max-height:320px;overflow-y:auto;margin-bottom:12px">
+      ${d.messages.map(bubble).join('') || '<span class="card-sub">پیامی نیست</span>'}
+    </div>
+    ${locked ? `<div class="card-sub" style="color:var(--danger,#ff6b52);margin-bottom:8px">🔒 این گفتگو در حال حاضر توسط ${esc(d.user.locked_by || 'ادمین دیگری')} پاسخ داده می‌شود.</div>` : ''}
+    <div style="display:flex;gap:8px">
+      <input class="input" id="sc-input" placeholder="پاسخ..." style="flex:1" ${locked ? 'disabled' : ''}>
+      <button class="btn btn-primary" id="sc-send" ${locked ? 'disabled' : ''}>ارسال</button>
+    </div>
+  `, (body, close) => {
+    const log = $('#sc-log', body);
+    const input = $('#sc-input', body);
+    log.scrollTop = log.scrollHeight;
+    const send = async () => {
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      try {
+        await apiPost(`/support/${userId}/messages`, { message: text });
+        log.insertAdjacentHTML('beforeend', bubble({ sender: 'admin', message: text, created_at: new Date().toISOString() }));
+        log.scrollTop = log.scrollHeight;
+      } catch (e) { handleErr(e); }
+    };
+    $('#sc-send', body).addEventListener('click', send);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+
+    pollTimer = setInterval(async () => {
+      try {
+        const fresh = await apiGet(`/support/${userId}/messages?since_id=${lastId}`);
+        fresh.messages.forEach(m => {
+          log.insertAdjacentHTML('beforeend', bubble(m));
+          lastId = m.id;
+        });
+        if (fresh.messages.length) log.scrollTop = log.scrollHeight;
+      } catch (e) { /* silent */ }
+    }, 4000);
+  });
+  modal.addEventListener('click', e => { if (e.target === modal) { clearInterval(pollTimer); renderSupport(); } });
 }
 
 /* ============================================================= tickets === */
