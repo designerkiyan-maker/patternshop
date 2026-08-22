@@ -69,3 +69,12 @@ if not API_BASE_URL and MINIAPP_URL:
 # کلید API درگاه پرداخت کریپتو Plisio (فقط به‌عنوان فال‌بک سراسری؛ در عمل هر بات
 # (اصلی یا نمایندگی) کلید خودش را از داخل پنل مدیریت بات تنظیم می‌کند)
 PLISIO_API_KEY = os.getenv("PLISIO_API_KEY", "")
+
+# کلید امضای نشست (session) پنل مدیریت وب مستقل - فقط توسط admin_panel/server.py
+# استفاده می‌شود. اگر ست نشود، هر ری‌استارت پروسه همه‌ی نشست‌های وب‌ادمین‌ها را
+# باطل می‌کند (کاربران دوباره باید لاگین کنند) اما خطایی نمی‌دهد، چون بات اصلی
+# به این مقدار وابسته نیست.
+ADMIN_PANEL_SECRET = os.getenv("ADMIN_PANEL_SECRET", "")
+if not ADMIN_PANEL_SECRET:
+    import secrets as _secrets
+    ADMIN_PANEL_SECRET = _secrets.token_hex(32)

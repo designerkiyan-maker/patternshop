@@ -106,6 +106,17 @@ print_status_line() {
         echo -e "Mini App Status: ${YELLOW}نصب نشده${RESET}"
     fi
 
+    PANEL_SERVICE="${SERVICE_NAME}-adminpanel"
+    if systemctl list-units --type=service --all 2>/dev/null | grep -q "${PANEL_SERVICE}.service"; then
+        if systemctl is-active --quiet "$PANEL_SERVICE" 2>/dev/null; then
+            echo -e "Admin Panel Status: ${GREEN}${BOLD}در حال اجراست ✅${RESET}"
+        else
+            echo -e "Admin Panel Status: ${RED}${BOLD}متوقف ⛔️${RESET}"
+        fi
+    else
+        echo -e "Admin Panel Status: ${YELLOW}نصب نشده${RESET}"
+    fi
+
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
 }
 
@@ -451,6 +462,156 @@ remove_miniapp() {
 }
 
 # ---------------------------------------------------------------------------
+# عملیات: نصب/تنظیم کامل پنل مدیریت وب مستقل (دامنه + SSL + nginx + سرویس)
+# ---------------------------------------------------------------------------
+setup_admin_panel() {
+    if [ ! -d "$INSTALL_DIR/admin_panel" ]; then
+        echo -e "${RED}⛔️ پوشه admin_panel پیدا نشد. اول باید کد پروژه را آپدیت کنی (گزینه ۲).${RESET}"
+        return
+    fi
+
+    read -rp "دامنه‌ای که به IP همین سرور اشاره می‌کند را وارد کن (مثلاً panel.example.com): " DOMAIN
+    if [ -z "$DOMAIN" ]; then
+        echo -e "${RED}دامنه خالی است، لغو شد.${RESET}"
+        return
+    fi
+
+    echo -e "${CYAN}🔎 بررسی DNS دامنه...${RESET}"
+    SERVER_IP=$(curl -fsSL ifconfig.me || echo "")
+    DOMAIN_IP=$(getent ahosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -1)
+    if [ -n "$SERVER_IP" ] && [ -n "$DOMAIN_IP" ] && [ "$SERVER_IP" != "$DOMAIN_IP" ]; then
+        echo -e "${YELLOW}⚠️ هشدار: دامنه به IP این سرور ($SERVER_IP) اشاره نمی‌کند (الان $DOMAIN_IP است).${RESET}"
+        read -rp "همچنان ادامه بدهم؟ (yes برای ادامه): " CONT
+        [ "$CONT" != "yes" ] && return
+    fi
+
+    echo -e "${CYAN}📦 نصب nginx و certbot...${RESET}"
+    sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
+    timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 \
+        apt-get install -y -qq nginx certbot python3-certbot-nginx > /dev/null
+
+    echo -e "${CYAN}🐍 نصب پکیج‌های پنل (fastapi, uvicorn)...${RESET}"
+    cd "$INSTALL_DIR"
+    source venv/bin/activate
+    pip install -r requirements.txt --quiet
+
+    if ! grep -q "^ADMIN_PANEL_SECRET=" "$INSTALL_DIR/.env" 2>/dev/null; then
+        echo "ADMIN_PANEL_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')" >> "$INSTALL_DIR/.env"
+    fi
+
+    echo ""
+    echo -e "${YELLOW}${BOLD}🔑 حساب مالک (owner) پنل را بساز:${RESET}"
+    read -rp "یوزرنیم: " PANEL_USER
+    read -rsp "پسورد (حداقل ۸ کاراکتر): " PANEL_PASS
+    echo ""
+    python3 -m admin_panel.create_admin "$PANEL_USER" "$PANEL_PASS"
+    deactivate
+
+    echo -e "${CYAN}⚙️ ساخت سرویس systemd برای پنل مدیریت وب...${RESET}"
+    PANEL_SERVICE="${SERVICE_NAME}-adminpanel"
+    sudo bash -c "cat > /etc/systemd/system/${PANEL_SERVICE}.service" <<EOF
+[Unit]
+Description=ShopVPN Standalone Admin Panel
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$INSTALL_DIR/venv/bin/uvicorn admin_panel.server:app --host 127.0.0.1 --port 8002
+Restart=always
+RestartSec=5
+User=$(whoami)
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    sudo systemctl daemon-reload
+    sudo systemctl enable "$PANEL_SERVICE" > /dev/null 2>&1
+    sudo systemctl restart "$PANEL_SERVICE"
+
+    echo -e "${CYAN}🌐 تنظیم nginx برای $DOMAIN...${RESET}"
+    sudo bash -c "cat > /etc/nginx/sites-available/${DOMAIN}.conf" <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+
+    location / {
+        proxy_pass http://127.0.0.1:8002;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+    sudo ln -sf "/etc/nginx/sites-available/${DOMAIN}.conf" "/etc/nginx/sites-enabled/${DOMAIN}.conf"
+    if ! sudo nginx -t > /dev/null 2>&1; then
+        echo -e "${RED}⛔️ کانفیگ nginx خطا دارد. جزئیات: $(sudo nginx -t 2>&1)${RESET}"
+        return
+    fi
+    sudo systemctl reload nginx
+
+    echo -e "${CYAN}🔐 دریافت گواهی SSL رایگان (Let's Encrypt)...${RESET}"
+    sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos \
+        --register-unsafely-without-email --redirect
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}⛔️ دریافت SSL ناموفق بود. مطمئن شو دامنه درست به این سرور اشاره می‌کند و پورت 80/443 باز است.${RESET}"
+        return
+    fi
+
+    echo -e "${GREEN}${BOLD}✅ پنل مدیریت آماده است: https://$DOMAIN${RESET}"
+    echo -e "${GREEN}با یوزرنیم/پسوردی که ساختی وارد شو.${RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# عملیات: آپدیت پنل مدیریت وب مستقل
+# ---------------------------------------------------------------------------
+update_admin_panel() {
+    PANEL_SERVICE="${SERVICE_NAME}-adminpanel"
+    if ! systemctl list-units --full -all | grep -q "${PANEL_SERVICE}.service"; then
+        echo -e "${RED}⛔️ پنل مدیریت هنوز نصب نشده. اول گزینه ۱۳ (نصب/تنظیم پنل مدیریت) را بزن.${RESET}"
+        return
+    fi
+    if [ ! -d "$INSTALL_DIR/.git" ]; then
+        echo -e "${RED}⛔️ بات هنوز نصب نشده. اول گزینه ۱ (نصب) را بزن.${RESET}"
+        return
+    fi
+    cd "$INSTALL_DIR"
+    echo -e "${CYAN}🔄 دریافت آخرین تغییرات از گیت‌هاب...${RESET}"
+    git pull
+    echo -e "${CYAN}🐍 آپدیت پکیج‌ها...${RESET}"
+    source venv/bin/activate
+    pip install -r requirements.txt --quiet
+    deactivate
+    echo -e "${CYAN}♻️ ری‌استارت سرویس پنل مدیریت...${RESET}"
+    sudo systemctl restart "$PANEL_SERVICE"
+    sleep 2
+    echo -e "${GREEN}✅ آپدیت پنل مدیریت انجام شد.${RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# عملیات: حذف کامل پنل مدیریت وب مستقل
+# ---------------------------------------------------------------------------
+remove_admin_panel() {
+    echo -e "${RED}${BOLD}⚠️ این کار سرویس و کانفیگ nginx پنل مدیریت را حذف می‌کند (گواهی SSL نگه داشته می‌شود؛ حساب‌های پنل در دیتابیس دست‌نخورده می‌مانند).${RESET}"
+    read -rp "آیا مطمئن هستی؟ (yes برای تایید): " CONFIRM
+    [ "$CONFIRM" != "yes" ] && { echo -e "${YELLOW}لغو شد.${RESET}"; return; }
+
+    PANEL_SERVICE="${SERVICE_NAME}-adminpanel"
+    sudo systemctl stop "$PANEL_SERVICE" 2>/dev/null || true
+    sudo systemctl disable "$PANEL_SERVICE" 2>/dev/null || true
+    sudo rm -f "/etc/systemd/system/${PANEL_SERVICE}.service"
+    sudo systemctl daemon-reload
+
+    read -rp "دامنه‌ای که برای پنل مدیریت استفاده کرده بودی چه بود؟ (برای حذف کانفیگ nginx): " DOMAIN
+    if [ -n "$DOMAIN" ]; then
+        sudo rm -f "/etc/nginx/sites-enabled/${DOMAIN}.conf" "/etc/nginx/sites-available/${DOMAIN}.conf"
+        sudo systemctl reload nginx 2>/dev/null || true
+    fi
+    echo -e "${GREEN}✅ پنل مدیریت حذف شد.${RESET}"
+}
+
+# ---------------------------------------------------------------------------
 # منوی اصلی
 # ---------------------------------------------------------------------------
 ensure_figlet
@@ -475,10 +636,14 @@ while true; do
     echo -e "${YELLOW}[11]${RESET} » ${GREEN}حذف مینی‌اپ${RESET}"
     echo -e "${YELLOW}[12]${RESET} » ${GREEN}آپدیت مینی‌اپ${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
+    echo -e "${YELLOW}[13]${RESET} » ${GREEN}نصب/تنظیم پنل مدیریت وب مستقل (خودکار: دامنه + SSL + سرویس)${RESET}"
+    echo -e "${YELLOW}[14]${RESET} » ${GREEN}حذف پنل مدیریت وب${RESET}"
+    echo -e "${YELLOW}[15]${RESET} » ${GREEN}آپدیت پنل مدیریت وب${RESET}"
+    echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo -e "${RED}[0]${RESET} » ${GREEN}خروج${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo ""
-    read -rp "$(echo -e ${MAGENTA}${BOLD}"Enter choice [0-12]: "${RESET})" choice
+    read -rp "$(echo -e ${MAGENTA}${BOLD}"Enter choice [0-15]: "${RESET})" choice
 
     case $choice in
         1) install_bot; pause ;;
@@ -493,6 +658,9 @@ while true; do
         9) edit_env; pause ;;
         10) setup_miniapp; pause ;;
         11) remove_miniapp; pause ;;
+        13) setup_admin_panel; pause ;;
+        14) remove_admin_panel; pause ;;
+        15) update_admin_panel; pause ;;
         0) echo -e "${CYAN}خدانگهدار 👋${RESET}"; exit 0 ;;
         *) echo -e "${RED}گزینه نامعتبر است.${RESET}"; sleep 1 ;;
     esac

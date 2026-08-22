@@ -547,6 +547,18 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_reseller_requests_user ON reseller_requests(user_id);
                 CREATE INDEX IF NOT EXISTS idx_reseller_requests_status ON reseller_requests(status);
+
+                -- ===================== پنل مدیریت وب مستقل (خارج از تلگرام) =====================
+                CREATE TABLE IF NOT EXISTS web_admins (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'admin',
+                    is_active INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    last_login TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_web_admins_username ON web_admins(username);
                 """
             )
 
@@ -1020,6 +1032,83 @@ class Database:
             return [{"telegram_id": r["telegram_id"], "role": r["role"] or "admin"} for r in rows]
 
     # -----------------------------------------------------------------------
+    # پنل مدیریت وب مستقل (کاربران وب، جدا از ادمین‌های تلگرام)
+    # -----------------------------------------------------------------------
+
+    def create_web_admin(self, username: str, password_hash: str, role: str = "admin") -> int:
+        if role not in ("owner", "admin", "mid", "support"):
+            role = "admin"
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO web_admins (username, password_hash, role) VALUES (?, ?, ?)",
+                (username.strip().lower(), password_hash, role),
+            )
+            return cur.lastrowid
+
+    def get_web_admin_by_username(self, username: str):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM web_admins WHERE username=?", (username.strip().lower(),)
+            ).fetchone()
+
+    def get_web_admin(self, admin_id: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM web_admins WHERE id=?", (admin_id,)).fetchone()
+
+    def list_web_admins(self):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM web_admins ORDER BY "
+                "CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'mid' THEN 2 ELSE 3 END, id"
+            ).fetchall()
+
+    def count_web_admins(self) -> int:
+        with self._get_conn() as conn:
+            return conn.execute("SELECT COUNT(*) c FROM web_admins").fetchone()["c"]
+
+    def set_web_admin_password(self, admin_id: int, password_hash: str):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE web_admins SET password_hash=? WHERE id=?", (password_hash, admin_id))
+
+    def set_web_admin_role(self, admin_id: int, role: str) -> bool:
+        if role not in ("admin", "mid", "support"):
+            return False
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT role FROM web_admins WHERE id=?", (admin_id,)).fetchone()
+            if not row or row["role"] == "owner":
+                return False
+            conn.execute("UPDATE web_admins SET role=? WHERE id=?", (role, admin_id))
+            return True
+
+    def set_web_admin_active(self, admin_id: int, active: bool) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT role FROM web_admins WHERE id=?", (admin_id,)).fetchone()
+            if not row or row["role"] == "owner":
+                return False
+            conn.execute("UPDATE web_admins SET is_active=? WHERE id=?", (1 if active else 0, admin_id))
+            return True
+
+    def delete_web_admin(self, admin_id: int) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT role FROM web_admins WHERE id=?", (admin_id,)).fetchone()
+            if not row or row["role"] == "owner":
+                return False
+            conn.execute("DELETE FROM web_admins WHERE id=?", (admin_id,))
+            return True
+
+    def touch_web_admin_login(self, admin_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE web_admins SET last_login=? WHERE id=?", (datetime.utcnow().isoformat(), admin_id)
+            )
+
+    def is_full_web_admin(self, role: str) -> bool:
+        return role in ("owner", "admin", "mid")
+
+    def is_senior_web_admin(self, role: str) -> bool:
+        return role in ("owner", "admin")
+
+    # -----------------------------------------------------------------------
     # لاگ فعالیت ادمین (audit log)
     # -----------------------------------------------------------------------
 
@@ -1471,6 +1560,12 @@ class Database:
             if order["discount_code_id"]:
                 self.decrement_discount_usage(order["discount_code_id"])
 
+    def get_orders_by_status(self, status: str, limit: int = 200):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM orders WHERE status=? ORDER BY id DESC LIMIT ?", (status, limit)
+            ).fetchall()
+
     def get_pending_orders(self):
         """سفارش‌های نیازمند بررسی دستی؛ سفارش‌هایی که برایشان فاکتور کریپتو ساخته شده‌اند اینجا نمی‌آیند."""
         with self._get_conn() as conn:
@@ -1848,6 +1943,12 @@ class Database:
                 "UPDATE wallet_topups SET status='rejected', updated_at=? WHERE id=?",
                 (datetime.utcnow().isoformat(), topup_id),
             )
+
+    def get_topups_by_status(self, status: str, limit: int = 200):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM wallet_topups WHERE status=? ORDER BY id DESC LIMIT ?", (status, limit)
+            ).fetchall()
 
     def get_pending_topups(self):
         """شارژهای نیازمند بررسی دستی؛ شارژهای دارای فاکتور کریپتو اینجا نمی‌آیند."""
