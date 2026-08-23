@@ -396,7 +396,12 @@ async def scan_subscription(link: str, *, force_refresh: bool = False, check_sta
             # ممکن است پشت CDN/فرانتینگ باشد و geoip آن گمراه‌کننده باشد.
             name, lat, lon = COUNTRY_INFO[label_cc]
             cc, country, source = label_cc, name, "label"
-            city = geo_entry["city"] if geo_entry and geo_entry["country_code"] == label_cc else ""
+            city = ""
+            if geo_entry and geo_entry["country_code"] == label_cc:
+                # geoip هم روی همان کشور توافق دارد یعنی IP پشت یک CDN
+                # گمراه‌کننده نیست — پس مختصات دقیق‌تر (سطح شهر) آن را به‌جای
+                # مرکز/پایتخت کشور استفاده می‌کنیم تا پین روی نقشه دقیق‌تر بیفتد.
+                lat, lon, city, source = geo_entry["lat"], geo_entry["lon"], geo_entry["city"], "label+geoip"
         elif geo_entry:
             cc, country = geo_entry["country_code"], geo_entry["country"]
             lat, lon, city, source = geo_entry["lat"], geo_entry["lon"], geo_entry["city"], "geoip"
