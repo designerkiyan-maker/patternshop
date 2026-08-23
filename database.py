@@ -1440,6 +1440,15 @@ class Database:
             })
         return out
 
+    def get_config_stats(self, product_id: int) -> dict:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT SUM(CASE WHEN is_used=0 THEN 1 ELSE 0 END) unused, "
+                "SUM(CASE WHEN is_used=1 THEN 1 ELSE 0 END) used FROM configs WHERE product_id=?",
+                (product_id,),
+            ).fetchone()
+            return {"unused": row["unused"] or 0, "used": row["used"] or 0}
+
     def get_unused_configs(self, product_id: int):
         with self._get_conn() as conn:
             return conn.execute(
