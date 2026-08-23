@@ -414,13 +414,76 @@ document.addEventListener('click', e => {
 });
 
 /* ============================================================= boot === */
+function tenantParam() {
+  return new URLSearchParams(location.search).get('b') || '';
+}
+
 async function boot() {
+  if (location.pathname === '/setup') return boot_setup();
   try {
     ME = await apiGet('/me');
     showApp();
   } catch (e) {
     showLogin();
   }
+}
+
+async function boot_setup() {
+  const b = tenantParam();
+  const t = new URLSearchParams(location.search).get('t') || '';
+  $('#login-screen').hidden = true;
+  $('#app').hidden = true;
+  $('#setup-screen').hidden = false;
+  if (!b || !t) {
+    $('#setup-subtitle').textContent = 'لینک ناقص است.';
+    $('#setup-form').hidden = true;
+    return;
+  }
+  try {
+    const info = await fetch(`/api/setup/info?b=${encodeURIComponent(b)}&t=${encodeURIComponent(t)}`).then(async r => {
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(formatApiError(data.detail));
+      return data;
+    });
+    $('#setup-subtitle').textContent = info.bot_username
+      ? `پنل نمایندگی @${info.bot_username} - یک یوزرنیم و پسورد انتخاب کن`
+      : 'یک یوزرنیم و پسورد برای پنل وب خودت انتخاب کن';
+  } catch (e) {
+    $('#setup-subtitle').textContent = e.message;
+    $('#setup-form').hidden = true;
+    return;
+  }
+
+  $('#setup-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = $('#setup-submit');
+    const errBox = $('#setup-error');
+    errBox.hidden = true;
+    btn.disabled = true; btn.textContent = 'در حال ساخت حساب...';
+    try {
+      const res = await fetch('/api/setup', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          b, t,
+          username: $('#setup-username').value.trim(),
+          password: $('#setup-password').value,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(formatApiError(data.detail));
+      ME = data;
+      history.replaceState(null, '', `/?b=${encodeURIComponent(b)}`);
+      $('#setup-screen').hidden = true;
+      showApp();
+    } catch (e) {
+      errBox.textContent = e.message;
+      errBox.hidden = false;
+    } finally {
+      btn.disabled = false; btn.textContent = 'ساخت حساب و ورود';
+    }
+  });
 }
 
 function showLogin() {
@@ -578,6 +641,7 @@ $('#login-form').addEventListener('submit', async e => {
     ME = await apiPost('/login', {
       username: $('#login-username').value.trim(),
       password: $('#login-password').value,
+      b: tenantParam(),
     });
     showApp();
   } catch (e) {
