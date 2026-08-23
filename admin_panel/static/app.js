@@ -467,7 +467,14 @@ async function pushStatus() {
   try {
     const reg = await navigator.serviceWorker.getRegistration();
     const sub = reg ? await reg.pushManager.getSubscription() : null;
-    return sub ? 'subscribed' : 'not-subscribed';
+    if (!sub) return 'not-subscribed';
+    // subscription محلی مرورگر کافی نیست؛ باید مطمئن شویم سرور هم واقعاً آن را ذخیره کرده
+    try {
+      const { registered } = await apiGet(`/push/status?endpoint=${encodeURIComponent(sub.endpoint)}`);
+      return registered ? 'subscribed' : 'not-subscribed';
+    } catch (e) {
+      return 'not-subscribed';
+    }
   } catch (e) {
     return 'not-subscribed';
   }
@@ -494,7 +501,7 @@ async function enablePushNotifications() {
     toast('اعلان مرورگر فعال شد — حتی وقتی مرورگر بسته باشد پیام می‌رسد.');
     return true;
   } catch (e) {
-    toast('فعال‌سازی اعلان ناموفق بود.', true);
+    handleErr(e);
     return false;
   }
 }
