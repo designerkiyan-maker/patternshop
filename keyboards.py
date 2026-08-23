@@ -213,6 +213,37 @@ def custom_config_username_kb() -> InlineKeyboardMarkup:
     ])
 
 
+# ---------------------------------------------------------------------------
+# سفارش‌های من (منوی کانفیگ‌ها با قابلیت حذف)
+# ---------------------------------------------------------------------------
+
+def my_orders_menu_kb(items) -> InlineKeyboardMarkup:
+    """items: لیستی از دیکشنری‌های {cb_id, label} که هر کدام یک ردیف/دکمه‌ی جدا می‌شوند."""
+    rows = [[InlineKeyboardButton(text=it["label"], callback_data=f"mo_v:{it['cb_id']}")] for it in items]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def my_order_item_kb(cb_id: str, deletable: bool) -> InlineKeyboardMarkup:
+    rows = []
+    if deletable:
+        rows.append([InlineKeyboardButton(text="🗑 حذف کامل این کانفیگ", callback_data=f"mo_del:{cb_id}")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت به لیست", callback_data="mo_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def my_order_delete_confirm_kb(cb_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚠️ بله، برای همیشه حذف شود", callback_data=f"mo_delok:{cb_id}")],
+        [InlineKeyboardButton(text="↩️ انصراف", callback_data=f"mo_v:{cb_id}")],
+    ])
+
+
+def my_orders_back_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت به لیست", callback_data="mo_back")]]
+    )
+
+
 def reseller_panel_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ ساخت کانفیگ جدید", callback_data="reseller_new_config")],

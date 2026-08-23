@@ -1011,60 +1011,183 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         )
 
     # -----------------------------------------------------------------------
-    # سفارش‌های من
+    # سفارش‌های من (منوی کانفیگ‌ها + امکان حذف کامل هر کانفیگ)
     # -----------------------------------------------------------------------
+
+    _MO_STATUS_MAP = {"pending": "⏳ در انتظار بررسی", "approved": "✅ تایید شده", "rejected": "❌ رد شده"}
+    _MO_STATUS_ICON = {"pending": "⏳", "approved": "✅", "rejected": "❌"}
+
+    def _my_orders_items(user_tg_id: int):
+        """هر آیتم یک ردیف/دکمه‌ی جدا در منوست: یک کانفیگ محصول، یک کانفیگ شخصی،
+        یا (فقط برای سفارش‌های بی‌کانفیگ مثل در-انتظار/رد‌شده) خود سفارش."""
+        items = []
+        for o in db.get_user_orders(user_tg_id):
+            if o["is_custom_config"]:
+                # نسخه‌ی تاییدشده‌ی کانفیگ شخصی از جدول custom_configs (پایین‌تر)
+                # با جزئیات کامل نمایش داده می‌شود؛ اینجا فقط سفارش‌های در
+                # انتظار/رد‌شده (که هنوز/دیگر کانفیگی ندارند) را نشان می‌دهیم.
+                if o["status"] != "approved":
+                    label = (
+                        f"{_MO_STATUS_ICON.get(o['status'], '')} #{o['id']} "
+                        f"کانفیگ شخصی «{o['custom_username']}» ({o['custom_volume_gb']} گیگ)"
+                    )
+                    items.append({"cb_id": f"o{o['id']}", "kind": "order", "label": label, "order": o})
+                continue
+            product = db.get_product(o["product_id"])
+            pname = product["name"] if product else "نامشخص"
+            qty = o["quantity"] or 1
+            base_label = f"{_MO_STATUS_ICON.get(o['status'], '')} #{o['id']} {pname}" + (f" ×{qty}" if qty > 1 else "")
+            if o["status"] == "approved":
+                configs = db.get_order_configs(o["id"])
+                if not configs and o["config_id"]:
+                    cfg = db.get_config_by_id(o["config_id"])
+                    configs = [cfg] if cfg else []
+                if configs:
+                    for i, cfg in enumerate(configs, start=1):
+                        label = base_label + (f" ({i}/{len(configs)})" if len(configs) > 1 else "")
+                        items.append({
+                            "cb_id": f"c{cfg['id']}", "kind": "config", "label": label,
+                            "order": o, "product_name": pname, "config": cfg,
+                        })
+                    continue
+            items.append({"cb_id": f"o{o['id']}", "kind": "order", "label": base_label, "order": o, "product_name": pname})
+
+        for cc in db.get_custom_configs_for_user(user_tg_id):
+            if cc["source"] == "test":
+                continue
+            label = f"🛠 «{cc['username']}» ({cc['volume_gb']} گیگ / {cc['duration_days']} روز)"
+            items.append({"cb_id": f"x{cc['id']}", "kind": "custom", "label": label, "custom": cc})
+        return items
+
+    def _find_my_orders_item(user_tg_id: int, cb_id: str):
+        for it in _my_orders_items(user_tg_id):
+            if it["cb_id"] == cb_id:
+                return it
+        return None
+
+    async def _my_orders_item_text(item) -> str:
+        kind = item["kind"]
+        if kind == "config":
+            cfg, o, pname = item["config"], item["order"], item["product_name"]
+            text = f"📦 سفارش #{o['id']} | {pname}\n🔗 `{cfg['link']}`\n"
+            if cfg["expires_at"]:
+                text += f"⏳ انقضا: {cfg['expires_at']}\n"
+            info = await fetch_sub_info(cfg["link"])
+            text += f"\n{format_sub_info_fa(info)}"
+            return text
+        if kind == "custom":
+            cc = item["custom"]
+            text = (
+                f"🛠 کانفیگ شخصی «{cc['username']}»\n"
+                f"📶 حجم: {cc['volume_gb']} گیگ | ⏳ مدت: {cc['duration_days']} روز\n"
+            )
+            if cc["expires_at"]:
+                text += f"📅 انقضا: {cc['expires_at']}\n"
+            if cc["subscription_url"]:
+                text += f"🔗 `{cc['subscription_url']}`\n"
+                info = await fetch_sub_info(cc["subscription_url"])
+                text += f"\n{format_sub_info_fa(info)}"
+            return text
+        # kind == "order": سفارشی بدون کانفیگ فعلی (در انتظار بررسی/رد‌شده)
+        o = item["order"]
+        pname = item.get("product_name") or f"کانفیگ شخصی «{o['custom_username']}» ({o['custom_volume_gb']} گیگ)"
+        return f"📦 سفارش #{o['id']} | {pname}\nوضعیت: {_MO_STATUS_MAP.get(o['status'], o['status'])}"
+
+    async def _show_my_orders_list(target, user_tg_id: int, edit: bool):
+        items = _my_orders_items(user_tg_id)
+        if not items:
+            text = "شما تاکنون سفارشی ثبت نکرده‌اید."
+            if edit:
+                await target.edit_text(text)
+            else:
+                await target.answer(text)
+            return
+        text = "📦 سفارش‌ها و کانفیگ‌های شما\n\nیکی از موارد زیر را برای مشاهده‌ی جزئیات انتخاب کنید:"
+        markup = kb.my_orders_menu_kb(items)
+        if edit:
+            await target.edit_text(text, reply_markup=markup)
+        else:
+            await target.answer(text, reply_markup=markup)
 
     @router.message(F.text.func(lambda t: t == db.get_setting("btn_my_orders")))
     async def my_orders(message: Message):
-        orders = db.get_user_orders(message.from_user.id)
-        custom_configs = db.get_custom_configs_for_user(message.from_user.id)
-        if not orders and not custom_configs:
-            await message.answer("شما تاکنون سفارشی ثبت نکرده‌اید.")
+        await _show_my_orders_list(message, message.from_user.id, edit=False)
+
+    @router.callback_query(F.data == "mo_back")
+    async def cb_my_orders_back(call: CallbackQuery):
+        await _show_my_orders_list(call.message, call.from_user.id, edit=True)
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("mo_v:"))
+    async def cb_my_orders_view(call: CallbackQuery):
+        cb_id = call.data.split(":", 1)[1]
+        item = _find_my_orders_item(call.from_user.id, cb_id)
+        if not item:
+            await call.answer("این مورد یافت نشد (شاید قبلاً حذف شده).", show_alert=True)
+            await _show_my_orders_list(call.message, call.from_user.id, edit=True)
+            return
+        await call.answer()
+        text = await _my_orders_item_text(item)
+        deletable = item["kind"] in ("config", "custom")
+        await call.message.edit_text(text, parse_mode="Markdown", reply_markup=kb.my_order_item_kb(cb_id, deletable))
+
+    @router.callback_query(F.data.startswith("mo_del:"))
+    async def cb_my_orders_delete_ask(call: CallbackQuery):
+        cb_id = call.data.split(":", 1)[1]
+        item = _find_my_orders_item(call.from_user.id, cb_id)
+        if not item or item["kind"] not in ("config", "custom"):
+            await call.answer("این مورد یافت نشد (شاید قبلاً حذف شده).", show_alert=True)
+            await _show_my_orders_list(call.message, call.from_user.id, edit=True)
+            return
+        await call.answer()
+        await call.message.edit_text(
+            "⚠️ آیا مطمئن هستید؟\n\n"
+            "با حذف این کانفیگ، اطلاعات و لینک آن برای همیشه از سیستم پاک می‌شود و "
+            "این عملیات **غیرقابل بازگشت** است.",
+            parse_mode="Markdown",
+            reply_markup=kb.my_order_delete_confirm_kb(cb_id),
+        )
+
+    @router.callback_query(F.data.startswith("mo_delok:"))
+    async def cb_my_orders_delete_confirm(call: CallbackQuery):
+        cb_id = call.data.split(":", 1)[1]
+        user_tg_id = call.from_user.id
+        kind = cb_id[0]
+        try:
+            item_id = int(cb_id[1:])
+        except ValueError:
+            await call.answer("درخواست نامعتبر.", show_alert=True)
             return
 
-        status_map = {"pending": "⏳ در انتظار بررسی", "approved": "✅ تایید شده", "rejected": "❌ رد شده"}
-        lines = []
-        approved = []  # (product_name, link)
-        for o in orders:
-            if o["is_custom_config"]:
-                pname = f"کانفیگ شخصی «{o['custom_username']}» ({o['custom_volume_gb']} گیگ)"
+        if kind == "c":
+            removed = db.delete_owned_config(item_id, user_tg_id)
+            if not removed:
+                await call.answer("این کانفیگ یافت نشد (شاید قبلاً حذف شده).", show_alert=True)
             else:
-                product = db.get_product(o["product_id"])
-                pname = product["name"] if product else "نامشخص"
-            qty = o["quantity"] or 1
-            line = f"#{o['id']} | {pname}" + (f" × {qty}" if qty > 1 else "") + f" | {status_map.get(o['status'], o['status'])}"
-            if o["status"] == "approved" and not o["is_custom_config"]:
-                configs = db.get_order_configs(o["id"])
-                links = [c["link"] for c in configs] if configs else None
-                if not links and o["config_id"]:
-                    cfg = db.get_config_by_id(o["config_id"])
-                    links = [cfg["link"]] if cfg else []
-                for i, link in enumerate(links or [], start=1):
-                    prefix = f"\n🔗 کانفیگ {i}: " if len(links) > 1 else "\n🔗 "
-                    line += f"{prefix}`{link}`"
-                    approved.append((pname, link))
-            lines.append(line)
+                await call.answer("✅ کانفیگ برای همیشه حذف شد.", show_alert=True)
+        elif kind == "x":
+            cc = db.get_custom_configs_for_user(user_tg_id)
+            cc_row = next((c for c in cc if c["id"] == item_id), None)
+            if not cc_row:
+                await call.answer("این کانفیگ یافت نشد (شاید قبلاً حذف شده).", show_alert=True)
+            else:
+                if cc_row["panel_server_id"]:
+                    server = db.get_panel_server(cc_row["panel_server_id"])
+                    if server:
+                        try:
+                            provider = get_provider(server)
+                            await provider.delete_user(cc_row["username"])
+                        except Exception:
+                            logging.getLogger("handlers_user").exception(
+                                "حذف کاربر «%s» از پنل سرور #%s ناموفق بود؛ در هر صورت از لیست کاربر حذف می‌شود.",
+                                cc_row["username"], cc_row["panel_server_id"],
+                            )
+                db.delete_owned_custom_config(item_id, user_tg_id)
+                await call.answer("✅ کانفیگ برای همیشه حذف شد.", show_alert=True)
+        else:
+            await call.answer("درخواست نامعتبر.", show_alert=True)
 
-        for cc in custom_configs:
-            pname = f"کانفیگ شخصی «{cc['username']}»"
-            line = f"🛠 {pname} | {cc['volume_gb']} گیگ | {cc['duration_days']} روز"
-            if cc["subscription_url"]:
-                line += f"\n🔗 `{cc['subscription_url']}`"
-                approved.append((pname, cc["subscription_url"]))
-            lines.append(line)
-
-        await message.answer("\n\n".join(lines), parse_mode="Markdown")
-
-        if approved:
-            wait_msg = await message.answer("⏳ در حال دریافت اطلاعات لحظه‌ای مصرف سرویس‌ها...")
-            infos = await asyncio.gather(*[fetch_sub_info(link) for _, link in approved])
-            try:
-                await wait_msg.delete()
-            except Exception:
-                pass
-            for (pname, _link), info in zip(approved, infos):
-                text = f"📦 {pname}\n\n{format_sub_info_fa(info)}"
-                await message.answer(text)
+        await _show_my_orders_list(call.message, user_tg_id, edit=True)
 
     # -----------------------------------------------------------------------
     # زیرمجموعه‌گیری (رفرال)

@@ -688,6 +688,10 @@ class Database:
             ("web_admins", "permissions", "TEXT"),
             ("admin_logs", "record_type", "TEXT"),
             ("admin_logs", "record_id", "TEXT"),
+            # حذف کانفیگ/سفارش توسط خود کاربر (از منوی «سفارش‌های من» در بات یا
+            # مینی‌اپ)؛ سفارش‌هایی که همه‌ی کانفیگ‌هایشان حذف شده به این صورت از
+            # لیست کاربر مخفی می‌شوند ولی برای گزارش‌های ادمین دست‌نخورده می‌مانند.
+            ("orders", "user_deleted", "INTEGER DEFAULT 0"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -1776,8 +1780,47 @@ class Database:
     def get_user_orders(self, user_tg_id: int):
         with self._get_conn() as conn:
             return conn.execute(
-                "SELECT * FROM orders WHERE user_id=? ORDER BY id DESC", (user_tg_id,)
+                "SELECT * FROM orders WHERE user_id=? AND (user_deleted IS NULL OR user_deleted=0) "
+                "ORDER BY id DESC",
+                (user_tg_id,),
             ).fetchall()
+
+    def delete_owned_config(self, config_id: int, user_tg_id: int):
+        """حذف کامل و برگشت‌ناپذیر یک کانفیگ متعلق به همین کاربر (از بانک محصولات).
+        اگر کانفیگ متعلق به این کاربر نباشد، None برمی‌گرداند و کاری انجام نمی‌شود.
+        اگر با این حذف، سفارشی که این کانفیگ از آن بود دیگر هیچ کانفیگی نداشته
+        باشد، آن سفارش هم از لیست «سفارش‌های من» کاربر مخفی می‌شود (بدون این‌که
+        از دیتابیس یا گزارش‌های ادمین حذف شود)."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM configs WHERE id=? AND assigned_user_id=?", (config_id, user_tg_id)
+            ).fetchone()
+            if not row:
+                return None
+            order_id = row["order_id"]
+            conn.execute("DELETE FROM configs WHERE id=?", (config_id,))
+            if order_id:
+                remaining = conn.execute(
+                    "SELECT COUNT(*) c FROM configs WHERE order_id=?", (order_id,)
+                ).fetchone()["c"]
+                if remaining == 0:
+                    conn.execute(
+                        "UPDATE orders SET user_deleted=1 WHERE id=? AND user_id=?", (order_id, user_tg_id)
+                    )
+            return dict(row)
+
+    def delete_owned_custom_config(self, custom_config_id: int, user_tg_id: int):
+        """حذف کامل و برگشت‌ناپذیر یک کانفیگ شخصی متعلق به همین کاربر. فقط ردیف
+        دیتابیس را حذف می‌کند؛ حذف واقعی کاربر از روی پنل VPN (در صورت وجود
+        panel_server_id) باید قبل از فراخوانی این متد و جداگانه انجام شود."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM custom_configs WHERE id=? AND user_id=?", (custom_config_id, user_tg_id)
+            ).fetchone()
+            if not row:
+                return None
+            conn.execute("DELETE FROM custom_configs WHERE id=?", (custom_config_id,))
+            return dict(row)
 
     # -----------------------------------------------------------------------
     # آمار
