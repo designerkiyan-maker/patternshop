@@ -1223,6 +1223,7 @@ html[data-theme="cyberpunk"] .live-dot{ background:var(--primary); box-shadow:0 
 .sv-tt-status-offline{ color:var(--rose); }
 .sv-tt-status-unknown{ color:var(--amber); }
 .sv-tt-protocols{ display:flex; flex-wrap:wrap; gap:4px; }
+.sv-tt-source{ margin-top:6px; padding-top:6px; border-top:1px dashed var(--border); color:var(--text-muted); font-size:10.5px; }
 
 .sv-map-empty, .sv-map-loading{
   position:absolute; inset:0; z-index:4; display:flex; align-items:center; justify-content:center;

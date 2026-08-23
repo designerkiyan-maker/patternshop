@@ -1459,11 +1459,14 @@ function serverMapCardHtml() {
 
 function svTooltipHtml(s) {
   const protoBadges = (s.protocols || []).map(p => `<span class="chip">${esc(p.name)} × ${fmt(p.count)}</span>`).join(' ');
+  const ipLine = s.ip ? esc(s.ip) + (s.ip_count > 1 ? ` + ${fmt(s.ip_count - 1)} مورد دیگر` : '') : 'نامشخص';
+  const srcNote = s.source === 'label' ? '🏷️ بر اساس نام کانفیگ (سرور پشت CDN است)' : '📡 بر اساس موقعیت واقعی IP';
   return `
     <div class="sv-tt-head">${svFlagEmoji(s.country_code)} <b>${esc(s.city || s.country || '—')}</b><span class="sv-tt-country">${esc(s.country || '')}</span></div>
-    <div class="sv-tt-ip mono">${esc(s.ip)}</div>
+    <div class="sv-tt-ip mono">${ipLine}</div>
     <div class="sv-tt-row">وضعیت: <b class="sv-tt-status-${s.status}">${SV_STATUS_LABEL[s.status] || 'نامشخص'}</b> · ${fmt(s.configs_count)} کانفیگ</div>
-    <div class="sv-tt-protocols">${protoBadges}</div>`;
+    <div class="sv-tt-protocols">${protoBadges}</div>
+    <div class="sv-tt-source">${srcNote}</div>`;
 }
 
 function svShowTooltip(s) {
@@ -1522,8 +1525,8 @@ function svServerListHtml(servers) {
     <div class="sv-map-list-row" data-idx="${i}">
       <i class="dot ${SV_STATUS_LABEL[s.status] ? s.status : 'unknown'}"></i>
       <span class="sv-ml-flag">${svFlagEmoji(s.country_code)}</span>
-      <span class="sv-ml-name">${esc(s.city || '—')}<small>${esc(s.country || '')}</small></span>
-      <span class="sv-ml-ip mono">${esc(s.ip)}</span>
+      <span class="sv-ml-name">${esc(s.city || s.country || '—')}<small>${esc(s.city ? s.country : (s.ip_count > 1 ? fmt(s.ip_count) + ' سرور' : ''))}</small></span>
+      <span class="sv-ml-ip mono">${esc(s.ip || '—')}</span>
       <span class="sv-ml-count mono">${fmt(s.configs_count)} کانفیگ</span>
     </div>`).join('');
 }
