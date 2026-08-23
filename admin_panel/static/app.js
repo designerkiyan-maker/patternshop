@@ -51,6 +51,30 @@ const THEMES = [
     supportsMode: false,
     swatch: ['#00FF9C', '#FF2E9A', '#050a08'],
   },
+  {
+    id: 'clay',
+    name: 'Dawn Clay',
+    desc: 'خمیریِ گرم، حجیم و دوستانه — کارت‌های بادکرده هلویی',
+    ready: true,
+    supportsMode: false,
+    swatch: ['#F97316', '#FFF7ED', '#FB7185'],
+  },
+  {
+    id: 'paper',
+    name: 'Ink Paper',
+    desc: 'سرمقاله‌ای مینیمال — کاغذ لوکس، خط مویی و فضای سفید',
+    ready: true,
+    supportsMode: false,
+    swatch: ['#111827', '#FFFBF0', '#9CA3AF'],
+  },
+  {
+    id: 'obsidian',
+    name: 'Obsidian Signal',
+    desc: 'ترمینال داده متراکم — مشکی AMOLED با سیگنال مونو',
+    ready: true,
+    supportsMode: false,
+    swatch: ['#0AFF6B', '#000000', '#1A1A1A'],
+  },
 ];
 const DEFAULT_THEME = 'flat';
 
@@ -712,6 +736,9 @@ async function renderDashboard() {
   if (theme === 'brutalist') return renderDashboardBrutalist(s, sys);
   if (theme === 'glass') return renderDashboardGlass(s, sys);
   if (theme === 'cyberpunk') return renderDashboardCyberpunk(s, sys);
+  if (theme === 'clay') return renderDashboardClay(s, sys);
+  if (theme === 'paper') return renderDashboardPaper(s, sys);
+  if (theme === 'obsidian') return renderDashboardObsidian(s, sys);
   return renderDashboardFlat(s, sys);
 }
 
@@ -1435,53 +1462,168 @@ async function renderDashboardFlat(s, sys) {
   mountServerMap();
 }
 
+/* ------------------------------------------------------ dashboard: clay --- */
+function renderDashboardClay(s, sys){
+  const clayColors = ['#F97316','#FB923C','#FBBF24','#10B981','#EC4899','#06B6D4'];
+  const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
+  const maxRev = Math.max(...s.daily_series.map(d=>d.revenue),1);
+  const bars = s.daily_series.map((d,i)=>`<div class="clay-bar" data-h="${Math.max((d.revenue/maxRev)*100,6)}" title="${d.date}: ${fmt(d.revenue)}" style="background:${clayColors[i%clayColors.length]}"></div>`).join('');
+  const totalCat = s.category_breakdown.reduce((a,b)=>a+b.revenue,0)||1;
+  const donut = donutSegments(70,70,52, s.category_breakdown.map(c=>({value:c.revenue})), clayColors, 16);
+  const legend = s.category_breakdown.map((c,i)=>`<span class="clay-legend-item"><i style="background:${clayColors[i%clayColors.length]}"></i>${esc(c.name)}<b class="mono">${fmt(c.revenue)}</b></span>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+  const prodRows = s.top_products.map((p,i)=>`<div class="clay-row"><span class="clay-row-num" style="background:${clayColors[i%clayColors.length]}">${i+1}</span><span class="clay-row-name">${esc(p.name)}</span><span class="mono" style="font-size:12px;color:var(--text-muted)">${fmt(p.orders)} فروش</span></div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+  const resHtml = sys ? `<div class="clay-res-grid" style="margin-bottom:16px"><div class="clay-res-card" style="background:#FFF7ED"><span class="clay-stat-label">CPU</span><b class="mono" style="font-size:20px">${sys.cpu.percent}٪</b><span class="clay-res-track"><span class="clay-res-fill" data-w="${sys.cpu.percent}" style="background:#F97316"></span></span><span style="font-size:11px;color:var(--text-muted)">${sys.cpu.cores} هسته</span></div><div class="clay-res-card" style="background:#FFFBEB"><span class="clay-stat-label">RAM</span><b class="mono" style="font-size:20px">${sys.ram.percent}٪</b><span class="clay-res-track"><span class="clay-res-fill" data-w="${sys.ram.percent}" style="background:#F59E0B"></span></span><span style="font-size:11px;color:var(--text-muted)">${sys.ram.used_gb}/${sys.ram.total_gb} گیگ</span></div><div class="clay-res-card" style="background:#ECFDF5"><span class="clay-stat-label">DISK</span><b class="mono" style="font-size:20px">${sys.disk.percent}٪</b><span class="clay-res-track"><span class="clay-res-fill" data-w="${sys.disk.percent}" style="background:#10B981"></span></span><span style="font-size:11px;color:var(--text-muted)">${sys.disk.used_gb}/${sys.disk.total_gb} گیگ</span></div></div>` : '';
+  setContent(`
+    <div class="clay-hero"><div><h2>${greetingByHour()}، ${esc(ME.username)} ☀️</h2><p>${s.start_date} تا ${s.end_date} — روزی گرم و پر از فروش!</p></div><div class="clay-hero-orb"></div></div>
+    ${resHtml}
+    <div class="grid grid-4">
+      <div class="card clay-stat"><span class="clay-stat-label">درآمد ۱۴ روز</span><span class="clay-stat-val mono" data-count="${s.revenue}">۰</span><span class="clay-pill ${deltaUp?'up':'down'}">${deltaUp?'▲':'▼'} ${Math.abs(s.revenue_change_pct??0)}٪</span></div>
+      <div class="card clay-stat"><span class="clay-stat-label">سفارش تایید شده</span><span class="clay-stat-val mono" data-count="${s.approved}">۰</span></div>
+      <div class="card clay-stat"><span class="clay-stat-label">کاربران کل</span><span class="clay-stat-val mono" data-count="${s.total_users}">۰</span><span style="font-size:11px;color:var(--text-muted)">${fmt(s.new_users)} جدید</span></div>
+      <div class="card clay-stat"><span class="clay-stat-label">کانفیگ فعال</span><span class="clay-stat-val mono" data-count="${s.active_configs}">۰</span></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="clay-card-head">روند فروش روزانه</div><div class="clay-bars">${bars}</div></div>
+    <div class="grid grid-2" style="margin-top:16px">
+      <div class="card"><div class="clay-card-head">تفکیک درآمد</div><div class="clay-donut-wrap"><svg viewBox="0 0 140 140">${donut}</svg><div class="clay-legend">${legend}</div></div></div>
+      <div class="card"><div class="clay-card-head">پرفروش‌ترین‌ها</div>${prodRows}</div>
+    </div>
+    <div style="margin-top:16px">${serverMapCardHtml()}</div>
+  `);
+  const root2 = content();
+  $$('.clay-stat-val[data-count]',root2).forEach(el=>animateCount(el,Number(el.dataset.count)));
+  requestAnimationFrame(()=>setTimeout(()=>{
+    $$('.clay-bar[data-h]',root2).forEach(b=>{ b.style.height=b.dataset.h+'%'; });
+    $$('.clay-res-fill[data-w]',root2).forEach(b=>{ b.style.width=b.dataset.w+'%'; });
+  },60));
+  mountServerMap();
+}
+
+/* ----------------------------------------------------- dashboard: paper --- */
+function renderDashboardPaper(s, sys){
+  const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
+  const maxRev = Math.max(...s.daily_series.map(d=>d.revenue),1);
+  const spark = s.daily_series.map(d=>`<i data-h="${Math.max((d.revenue/maxRev)*100,4)}" title="${d.date}: ${fmt(d.revenue)}"></i>`).join('');
+  const maxCat = Math.max(...s.category_breakdown.map(c=>c.revenue),1);
+  const catRows = s.category_breakdown.map(c=>`<div class="paper-row"><span class="paper-row-name">${esc(c.name)}</span><span class="paper-row-bar"><span class="paper-row-fill" data-w="${(c.revenue/maxCat)*100}"></span></span><b class="mono" style="font-size:11.5px">${fmt(c.revenue)}</b></div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+  const prodRows = s.top_products.map(p=>`<div class="paper-row"><span class="paper-row-name">${esc(p.name)}</span><span class="mono" style="font-size:11.5px;color:var(--text-muted)">${fmt(p.orders)} فروش</span></div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+  const resHtml = sys ? `<div class="paper-res-grid" style="margin-bottom:16px"><div class="paper-res-card"><span class="paper-res-label">CPU</span><span class="paper-res-val mono">${sys.cpu.percent}٪</span><span style="font-size:11px;color:var(--text-muted)">${sys.cpu.cores} هسته</span></div><div class="paper-res-card"><span class="paper-res-label">RAM</span><span class="paper-res-val mono">${sys.ram.percent}٪</span><span style="font-size:11px;color:var(--text-muted)">${sys.ram.used_gb}/${sys.ram.total_gb} گیگ</span></div><div class="paper-res-card"><span class="paper-res-label">DISK</span><span class="paper-res-val mono">${sys.disk.percent}٪</span><span style="font-size:11px;color:var(--text-muted)">${sys.disk.used_gb}/${sys.disk.total_gb} گیگ</span></div></div>` : '';
+  setContent(`
+    <div class="paper-hero"><h2>${greetingByHour()}، ${esc(ME.username)}</h2><p>گزارش فروش ${s.start_date} تا ${s.end_date}</p><div class="paper-hero-meta"><span>${fmt(s.revenue)} تومان درآمد</span><span>·</span><span>${fmt(s.approved)} سفارش</span><span>·</span><span>${fmt(s.total_users)} کاربر</span></div><div class="paper-hero-rule"></div></div>
+    ${resHtml}
+    <div class="paper-stats">
+      <div class="paper-stat"><span class="paper-stat-label">درآمد ۱۴ روز</span><span class="paper-stat-val mono" data-count="${s.revenue}">۰</span><span class="paper-delta ${deltaUp?'up':'down'}">${deltaUp?'▲':'▼'} ${Math.abs(s.revenue_change_pct??0)}٪ نسبت به قبل</span></div>
+      <div class="paper-stat"><span class="paper-stat-label">سفارش تایید شده</span><span class="paper-stat-val mono" data-count="${s.approved}">۰</span><span class="paper-stat-sub">${s.conversion_rate}٪ نرخ تبدیل</span></div>
+      <div class="paper-stat"><span class="paper-stat-label">کاربران کل</span><span class="paper-stat-val mono" data-count="${s.total_users}">۰</span><span class="paper-stat-sub">${fmt(s.new_users)} جدید در این بازه</span></div>
+      <div class="paper-stat"><span class="paper-stat-label">کانفیگ فعال</span><span class="paper-stat-val mono" data-count="${s.active_configs}">۰</span><span class="paper-stat-sub">${fmt(s.open_tickets)} تیکت باز</span></div>
+    </div>
+    <div class="paper-panel" style="margin-top:16px"><div class="paper-panel-head">روند فروش روزانه — ${s.start_date} تا ${s.end_date}</div><div class="paper-spark">${spark}</div></div>
+    <div class="grid grid-2" style="margin-top:16px">
+      <div class="paper-panel"><div class="paper-panel-head">تفکیک درآمد</div>${catRows}</div>
+      <div class="paper-panel"><div class="paper-panel-head">پرفروش‌ترین محصولات</div>${prodRows}</div>
+    </div>
+    <div style="margin-top:16px">${serverMapCardHtml()}</div>
+  `);
+  const root2 = content();
+  $$('.paper-stat-val[data-count]',root2).forEach(el=>animateCount(el,Number(el.dataset.count)));
+  requestAnimationFrame(()=>setTimeout(()=>{
+    $$('.paper-spark i[data-h]',root2).forEach(b=>{ b.style.height=b.dataset.h+'%'; });
+    $$('.paper-row-fill[data-w]',root2).forEach(b=>{ b.style.width=b.dataset.w+'%'; });
+  },60));
+  mountServerMap();
+}
+
+/* -------------------------------------------------- dashboard: obsidian --- */
+function renderDashboardObsidian(s, sys){
+  const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
+  const maxRev = Math.max(...s.daily_series.map(d=>d.revenue),1);
+  const bars = s.daily_series.map(d=>`<div class="obs-bar" data-h="${Math.max((d.revenue/maxRev)*100,4)}" title="${d.date}: ${fmt(d.revenue)}"></div>`).join('');
+  const meters = [
+    {label:'نرخ تبدیل', pct:s.conversion_rate},
+    {label:'سلامت سرور', pct: sys ? Math.max(0,100-(sys.cpu.percent+sys.ram.percent+sys.disk.percent)/3) : 80},
+    {label:'تیکت باز', pct: s.active_configs ? Math.min(Math.round((s.open_tickets/s.active_configs)*100),100) : 0},
+  ];
+  const meterHtml = meters.map(m=>`<div class="obs-meter"><span class="obs-meter-label">${m.label}</span><span class="obs-meter-track"><span class="obs-meter-fill" data-w="${m.pct}" style="background:var(--emerald)"></span></span><span class="obs-meter-val mono">${fmt(Math.round(m.pct))}٪</span></div>`).join('');
+  const prodRows = s.top_products.map((p,i)=>`<tr><td class="mono" style="color:var(--emerald)">${String(i+1).padStart(2,'0')}</td><td>${esc(p.name)}</td><td class="mono">${fmt(p.orders)}</td></tr>`).join('') || `<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">داده‌ای نیست</td></tr>`;
+  const catRows = s.category_breakdown.map(c=>`<div class="obs-meter"><span class="obs-meter-label">${esc(c.name)}</span><span class="obs-meter-track"><span class="obs-meter-fill" data-w="${(c.revenue/Math.max(...s.category_breakdown.map(x=>x.revenue),1))*100}" style="background:var(--text-muted)"></span></span><b class="mono" style="font-size:11px">${fmt(c.revenue)}</b></div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+  const resHtml = sys ? `<div class="obs-res-grid" style="margin-bottom:14px"><div class="obs-res-card"><span class="obs-res-label">CPU</span><span class="obs-res-val mono">${sys.cpu.percent}٪</span><span class="obs-meter-track"><span class="obs-meter-fill" data-w="${sys.cpu.percent}" style="background:var(--emerald)"></span></span><span class="mono" style="font-size:10.5px;color:var(--text-muted)">${sys.cpu.cores} cores</span></div><div class="obs-res-card"><span class="obs-res-label">RAM</span><span class="obs-res-val mono">${sys.ram.percent}٪</span><span class="obs-meter-track"><span class="obs-meter-fill" data-w="${sys.ram.percent}" style="background:var(--amber)"></span></span><span class="mono" style="font-size:10.5px;color:var(--text-muted)">${sys.ram.used_gb}/${sys.ram.total_gb} GB</span></div><div class="obs-res-card"><span class="obs-res-label">DISK</span><span class="obs-res-val mono">${sys.disk.percent}٪</span><span class="obs-meter-track"><span class="obs-meter-fill" data-w="${sys.disk.percent}" style="background:var(--text-muted)"></span></span><span class="mono" style="font-size:10.5px;color:var(--text-muted)">${sys.disk.used_gb}/${sys.disk.total_gb} GB</span></div></div>` : '';
+  setContent(`
+    <div class="obs-hero"><div><span class="obs-hero-tag">● SYSTEM ONLINE — ${s.start_date} → ${s.end_date}</span><h2>${greetingByHour()}، ${esc(ME.username)}</h2><p>${fmt(s.revenue)} تومان · ${fmt(s.approved)} سفارش · ${fmt(s.total_users)} کاربر</p></div></div>
+    ${resHtml}
+    <div class="obs-grid4">
+      <div class="obs-stat accent"><span class="obs-stat-label">Revenue / 14d</span><span class="obs-stat-val mono" data-count="${s.revenue}">۰</span><span class="obs-stat-sub" style="color:${deltaUp?'var(--emerald)':'var(--rose)'}">${deltaUp?'▲':'▼'} ${Math.abs(s.revenue_change_pct??0)}%</span></div>
+      <div class="obs-stat"><span class="obs-stat-label">Approved</span><span class="obs-stat-val mono" data-count="${s.approved}">۰</span><span class="obs-stat-sub">${s.conversion_rate}% conv</span></div>
+      <div class="obs-stat"><span class="obs-stat-label">Users</span><span class="obs-stat-val mono" data-count="${s.total_users}">۰</span><span class="obs-stat-sub">+${fmt(s.new_users)} new</span></div>
+      <div class="obs-stat"><span class="obs-stat-label">Active / Open</span><span class="obs-stat-val mono" data-count="${s.active_configs}">۰</span><span class="obs-stat-sub">${fmt(s.open_tickets)} open tickets</span></div>
+    </div>
+    <div class="obs-panel" style="margin-top:14px"><div class="obs-panel-head">Daily Revenue</div><div class="obs-bars">${bars}</div></div>
+    <div class="grid grid-2" style="margin-top:14px">
+      <div class="obs-panel"><div class="obs-panel-head">Key Metrics</div>${meterHtml}</div>
+      <div class="obs-panel"><div class="obs-panel-head">Revenue Breakdown</div>${catRows}</div>
+    </div>
+    <div class="obs-panel" style="margin-top:14px"><div class="obs-panel-head">Top Products</div><table class="obs-table"><thead><tr><th>#</th><th>نام</th><th>فروش</th></tr></thead><tbody>${prodRows}</tbody></table></div>
+    <div style="margin-top:14px">${serverMapCardHtml()}</div>
+  `);
+  const root2 = content();
+  $$('.obs-stat-val[data-count]',root2).forEach(el=>animateCount(el,Number(el.dataset.count)));
+  requestAnimationFrame(()=>setTimeout(()=>{
+    $$('.obs-bar[data-h]',root2).forEach(b=>{ b.style.height=b.dataset.h+'%'; });
+    $$('.obs-meter-fill[data-w], .obs-res-card .obs-meter-fill[data-w]',root2).forEach(b=>{ b.style.width=b.dataset.w+'%'; });
+  },60));
+  mountServerMap();
+}
+
 /* ====================================================== world map === */
 // ویجت مشترک «نقشه‌ی جهانی سرورها» — در هر ۵ تم از طریق کلاس عمومی .card
 // (که هرکدام از تم‌ها استایل خودش را رویش اعمال می‌کند) و متغیرهای CSS
 // رنگ تم فعلی (--primary/--emerald/--rose/...) نمایش داده می‌شود؛ یعنی
 // یک پیاده‌سازی، هم‌رنگ با هر پنج تم.
 
-// نسخه‌ی واقعی نقشه (خطوط ساحلی) دیگر مستقیماً از CDNهای خارجی گرفته
-// نمی‌شود — چون اگر مرورگر ادمین به آن دامنه‌ها دسترسی نداشته باشد (فیلتر/
-// قطعی)، دانلود ساکت fail می‌شد و فقط گرید خالی می‌ماند. حالا خودِ سرور
-// پنل یک‌بار این کار را می‌کند (و روی دیسک cache می‌کند) و ما فقط از
-// endpoint خودمان (هم‌مبدأ، بدون نیاز به هیچ CDN) می‌خوانیم. نتیجه هم در
-// localStorage کش می‌شود تا در بازدیدهای بعدی اصلاً نیازی به فراخوانی
-// مجدد نباشد.
-const SV_MAP_CACHE_KEY = 'sv_map_real_v2';
+// نسخه‌ی واقعی نقشه (خطوط ساحلی دقیق Natural Earth) به‌صورت lazy از CDN
+// بارگذاری می‌شود — چون خودِ پنل روی سرور واقعی با اینترنت اجرا می‌شود
+// (برخلاف محیط توسعه). تا وقتی لود نشده، همان چندضلعی‌های تقریبی/گرید
+// دستی بالا را نشان می‌دهیم؛ به‌محض آماده‌شدن، جای‌گزین دقیق می‌شود.
 let SV_REAL = null;
 let SV_REAL_PROMISE = null;
-
+function svLoadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('load failed: ' + src));
+    document.head.appendChild(s);
+  });
+}
 async function svEnsureRealMap() {
   if (SV_REAL) return SV_REAL;
   if (SV_REAL_PROMISE) return SV_REAL_PROMISE;
   SV_REAL_PROMISE = (async () => {
-    // اول کش محلی را امتحان کن — سریع و بدون نیاز به درخواست جدید
     try {
-      const cached = localStorage.getItem(SV_MAP_CACHE_KEY);
-      if (cached) {
-        SV_REAL = JSON.parse(cached);
-        return SV_REAL;
-      }
-    } catch (e) { /* کش خراب/در دسترس نیست — بی‌اهمیت */ }
-
-    try {
-      const data = await apiGet('/dashboard/world-map');
-      if (!data || !data.ok || !data.land_path) return null;
-      SV_REAL = { landPathD: data.land_path };
-      try { localStorage.setItem(SV_MAP_CACHE_KEY, JSON.stringify(SV_REAL)); } catch (e) { /* بی‌اهمیت */ }
+      const timeout = (p) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 7000))]);
+      if (!window.d3 || !window.d3.geoPath) await timeout(svLoadScript('https://cdn.jsdelivr.net/npm/d3-geo@3/dist/d3-geo.min.js'));
+      if (!window.topojson) await timeout(svLoadScript('https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js'));
+      const res = await timeout(fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json'));
+      const world = await res.json();
+      const land = window.topojson.feature(world, world.objects.land);
+      const projection = d3.geoEquirectangular().fitSize([1000, 500], { type: 'Sphere' });
+      const path = d3.geoPath(projection);
+      SV_REAL = {
+        projection,
+        landPathD: path(land),
+        graticuleD: path(d3.geoGraticule10()),
+      };
       return SV_REAL;
     } catch (e) {
-      return null; // اتصال به پنل خودمان هم ناموفق بود — همان گرید ساده باقی می‌ماند
+      return null; // بی‌اهمیت — همان نسخه‌ی تقریبی/آفلاین باقی می‌ماند
     }
   })();
   return SV_REAL_PROMISE;
 }
 
-// معادل خطیِ d3.geoEquirectangular().fitSize([1000, 500], {type:'Sphere'})
-// است، پس چه نقشه‌ی دقیق لود شده باشد چه نه، پین‌ها دقیقاً روی همان
-// تصویربرداری خطوط ساحلی می‌افتند.
 function svProject(lat, lon) {
+  if (SV_REAL && SV_REAL.projection) {
+    const p = SV_REAL.projection([Number(lon), Number(lat)]);
+    if (p) return p;
+  }
   const x = (Number(lon) + 180) / 360 * 1000;
   const y = (90 - Number(lat)) / 180 * 500;
   return [x, y];
@@ -1494,11 +1636,28 @@ function svMapGraticule() {
   return out;
 }
 
-// تا وقتی نقشه‌ی دقیق (از CDN یا کش) لود نشده، بک‌گراند فقط همان گرید
-// عرض/طول جغرافیایی (svMapGraticule) است — بدون هیچ چندضلعی تقریبی؛ به
-// محض آماده‌شدن svEnsureRealMap، خطوط ساحلی واقعی جای‌گزین می‌شوند.
+// خطوط ساده‌شده‌ی سواحل قاره‌ها (چند ده نقطه lon/lat تقریبی، نه داده‌ی دقیق
+// کارتوگرافیک) که با همان svProject روی نقشه پروجکت می‌شوند — فقط برای
+// اینکه پس‌زمینه واقعاً «شبیه نقشه‌ی جهان» باشد، نه یک گرید خالی.
+const SV_MAP_LAND = [
+  [[-165, 68], [-140, 70], [-95, 73], [-70, 60], [-52, 47], [-65, 45], [-75, 35], [-80, 25], [-97, 26], [-90, 20], [-84, 9], [-92, 15], [-105, 20], [-115, 30], [-124, 40], [-124, 49], [-130, 55], [-140, 60], [-165, 60]],
+  [[-45, 60], [-20, 70], [-25, 83], [-55, 82], [-73, 78], [-65, 65], [-45, 60]],
+  [[-77, 8], [-60, 10], [-51, 0], [-35, -5], [-40, -20], [-48, -25], [-58, -35], [-65, -55], [-72, -52], [-70, -30], [-70, -18], [-80, -5]],
+  [[-17, 15], [-10, 5], [9, 4], [9, -5], [12, -18], [18, -34], [32, -28], [40, -15], [43, -3], [51, 10], [43, 12], [37, 15], [33, 31], [10, 37], [-6, 35], [-17, 21]],
+  [[-9, 43], [-5, 36], [15, 37], [23, 35], [28, 41], [40, 45], [30, 46], [30, 60], [25, 70], [5, 62], [5, 51], [-5, 50]],
+  [[28, 41], [35, 45], [48, 42], [60, 42], [70, 40], [80, 50], [110, 52], [135, 55], [145, 60], [140, 45], [130, 35], [122, 31], [110, 20], [100, 10], [95, 15], [98, 25], [89, 22], [80, 8], [72, 21], [68, 24], [60, 25], [48, 30], [35, 32]],
+  [[95, 5], [105, -3], [115, -8], [125, -3], [135, -5], [130, 2], [118, 4], [105, 2]],
+  [[130, 33], [140, 36], [142, 40], [141, 45], [132, 34]],
+  [[-8, 51], [-2, 50], [1, 52], [-3, 58], [-6, 55], [-10, 53]],
+  [[43, -25], [47, -18], [50, -15], [47, -25]],
+  [[113, -22], [122, -14], [136, -12], [145, -16], [153, -27], [150, -37], [140, -38], [131, -32], [115, -34]],
+  [[166, -46], [174, -41], [178, -38], [172, -34]],
+];
 function svMapLandPaths() {
-  return '';
+  return SV_MAP_LAND.map(poly => {
+    const pts = poly.map(([lon, lat]) => svProject(lat, lon).map(n => n.toFixed(1)).join(',')).join(' ');
+    return `<polygon points="${pts}" class="sv-map-land-poly"></polygon>`;
+  }).join('');
 }
 
 function svFlagEmoji(cc) {
@@ -1545,18 +1704,13 @@ function serverMapCardHtml() {
 }
 
 function svTooltipHtml(s) {
-  const protoBadges = (s.protocols || []).map(p => `<span class="chip">${esc(p.name)}</span>`).join(' ');
-  const ipLine = s.ip || 'نامشخص';
-  const srcNote = s.source === 'label+geoip'
-    ? '🏷️📡 نام کانفیگ + موقعیت دقیق IP (هر دو هم‌راستا)'
-    : s.source === 'label'
-      ? '🏷️ بر اساس نام کانفیگ (سرور پشت CDN است، مختصات تقریبی مرکز کشور)'
-      : '📡 بر اساس موقعیت واقعی IP';
+  const protoBadges = (s.protocols || []).map(p => `<span class="chip">${esc(p.name)} × ${fmt(p.count)}</span>`).join(' ');
+  const ipLine = s.ip ? esc(s.ip) + (s.ip_count > 1 ? ` + ${fmt(s.ip_count - 1)} مورد دیگر` : '') : 'نامشخص';
+  const srcNote = s.source === 'label' ? '🏷️ بر اساس نام کانفیگ (سرور پشت CDN است)' : '📡 بر اساس موقعیت واقعی IP';
   return `
     <div class="sv-tt-head">${svFlagEmoji(s.country_code)} <b>${esc(s.city || s.country || '—')}</b><span class="sv-tt-country">${esc(s.country || '')}</span></div>
-    <div class="sv-tt-name">${esc(s.remark || '—')}</div>
-    <div class="sv-tt-ip mono">${esc(ipLine)}</div>
-    <div class="sv-tt-row">وضعیت: <b class="sv-tt-status-${s.status}">${SV_STATUS_LABEL[s.status] || 'نامشخص'}</b></div>
+    <div class="sv-tt-ip mono">${ipLine}</div>
+    <div class="sv-tt-row">وضعیت: <b class="sv-tt-status-${s.status}">${SV_STATUS_LABEL[s.status] || 'نامشخص'}</b> · ${fmt(s.configs_count)} کانفیگ</div>
     <div class="sv-tt-protocols">${protoBadges}</div>
     <div class="sv-tt-source">${srcNote}</div>`;
 }
@@ -1582,43 +1736,18 @@ function svHideTooltip() {
   if (tip) tip.hidden = true;
 }
 
-// چون هر کانفیگ حالا پین جدای خودش را دارد، ممکن است چند کانفیگ دقیقاً
-// روی یک سرور (همان lat/lon) باشند — بدون این تابع دقیقاً روی هم می‌افتند
-// و فقط بالایی‌شان قابل کلیک می‌ماند. این تابع پین‌های هم‌مکان را به‌صورت
-// یک دایره‌ی کوچک دور نقطه‌ی اصلی پخش می‌کند تا همه جدا و کلیک‌پذیر بمانند.
-function svSpreadOverlapping(points) {
-  const buckets = new Map();
-  points.forEach((p, i) => {
-    const key = p.x.toFixed(1) + ',' + p.y.toFixed(1);
-    if (!buckets.has(key)) buckets.set(key, []);
-    buckets.get(key).push(i);
-  });
-  const out = points.map(p => ({ x: p.x, y: p.y }));
-  buckets.forEach(idxs => {
-    if (idxs.length < 2) return;
-    const spread = Math.min(3 + idxs.length * 0.6, 9);
-    idxs.forEach((idx, j) => {
-      const angle = (2 * Math.PI * j) / idxs.length;
-      out[idx].x += Math.cos(angle) * spread;
-      out[idx].y += Math.sin(angle) * spread;
-    });
-  });
-  return out;
-}
-
 function svRenderMarkers(servers) {
   const root = content();
   const g = $('#sv-map-markers', root);
   if (!g) return;
-  const positions = servers.map(s => (s.lat != null && s.lon != null) ? (([x, y]) => ({ x, y }))(svProject(s.lat, s.lon)) : null);
-  const spread = svSpreadOverlapping(positions.map(p => p || { x: -9999, y: -9999 }));
-  const r = 6; // چون هر پین حالا دقیقاً یک کانفیگ است، اندازه‌ی ثابت (بدون وزن‌دهی به تعداد) واضح‌تر است
+  const maxCount = Math.max(...servers.map(s => s.configs_count || 1), 1);
   g.innerHTML = servers.map((s, i) => {
-    if (!positions[i]) return '';
-    const { x, y } = spread[i];
+    if (s.lat == null || s.lon == null) return '';
+    const [x, y] = svProject(s.lat, s.lon);
+    const r = 4.5 + Math.min(Math.sqrt((s.configs_count || 1) / maxCount) * 9, 9);
     const st = SV_STATUS_LABEL[s.status] ? s.status : 'unknown';
     return `<g class="sv-map-pin ${st}" data-idx="${i}" tabindex="0">
-      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(r + 6).toFixed(1)}" class="sv-map-pulse"></circle>
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(r + 7).toFixed(1)}" class="sv-map-pulse"></circle>
       <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" class="sv-map-dot"></circle>
     </g>`;
   }).join('');
@@ -1638,13 +1767,13 @@ function svStatsHtml(data) {
 }
 
 function svServerListHtml(servers) {
-  return servers.map((s, i) => `
+  return servers.slice(0, 40).map((s, i) => `
     <div class="sv-map-list-row" data-idx="${i}">
       <i class="dot ${SV_STATUS_LABEL[s.status] ? s.status : 'unknown'}"></i>
       <span class="sv-ml-flag">${svFlagEmoji(s.country_code)}</span>
-      <span class="sv-ml-name">${esc(s.remark || s.city || s.country || '—')}<small>${esc(s.country || '')}</small></span>
+      <span class="sv-ml-name">${esc(s.city || s.country || '—')}<small>${esc(s.city ? s.country : (s.ip_count > 1 ? fmt(s.ip_count) + ' سرور' : ''))}</small></span>
       <span class="sv-ml-ip mono">${esc(s.ip || '—')}</span>
-      <span class="sv-ml-count mono">${esc((s.protocols && s.protocols[0] && s.protocols[0].name) || '')}</span>
+      <span class="sv-ml-count mono">${fmt(s.configs_count)} کانفیگ</span>
     </div>`).join('');
 }
 
@@ -1674,6 +1803,8 @@ async function mountServerMap() {
     if (!$('.sv-map-card', r)) return; // کاربر جابه‌جا شده
     const landG = $('#sv-map-wrap .sv-map-land', r);
     if (landG) landG.innerHTML = `<path d="${real.landPathD}" class="sv-map-land-poly"></path>`;
+    const gridG = $('#sv-map-wrap .sv-map-grid', r);
+    if (gridG) gridG.innerHTML = `<path d="${real.graticuleD}" class="sv-map-graticule-path"></path>`;
     if (currentServers.length) svRenderMarkers(currentServers);
   });
 
