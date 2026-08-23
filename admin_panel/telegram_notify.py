@@ -10,18 +10,40 @@ import aiohttp
 logger = logging.getLogger("admin_panel.telegram_notify")
 
 
-async def send_message(bot_token: str, chat_id: int, text: str) -> bool:
+async def send_message(bot_token: str, chat_id: int, text: str, parse_mode: str = None) -> bool:
     if not bot_token:
         return False
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                url, json={"chat_id": chat_id, "text": text}, timeout=aiohttp.ClientTimeout(total=10)
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
             ) as resp:
                 return resp.status == 200
     except Exception:
         logger.exception("ارسال پیام تلگرام به %s ناموفق بود", chat_id)
+        return False
+
+
+async def send_photo(bot_token: str, chat_id: int, photo_bytes: bytes, filename: str = "photo.png", caption: str = "") -> bool:
+    """ارسال عکس (مثلاً QR کد کانفیگ) به کاربر تلگرامی، بدون وابستگی به aiogram."""
+    if not bot_token:
+        return False
+    url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+    try:
+        form = aiohttp.FormData()
+        form.add_field("chat_id", str(chat_id))
+        if caption:
+            form.add_field("caption", caption)
+        form.add_field("photo", photo_bytes, filename=filename, content_type="image/png")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, data=form, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                return resp.status == 200
+    except Exception:
+        logger.exception("ارسال عکس تلگرام به %s ناموفق بود", chat_id)
         return False
 
 

@@ -24,6 +24,7 @@ from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET, VAPID_PUBLI
 from database import Database, WEB_ADMIN_PERMISSIONS, MENU_BUTTON_META
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
 from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document, fetch_telegram_file
+from admin_panel.config_delivery_web import deliver_config_to_user_web
 from admin_panel.webpush import PUSH_ENABLED, send_push
 from reseller_auto_provision import provision_auto_config, ProvisionError
 from stock_alerts import check_and_notify_low_stock
@@ -494,7 +495,11 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
             f"{order['custom_volume_gb']} گیگ | مبلغ: {order['final_price']:,} (پنل وب - {admin['username']})",
             "order", order_id,
         )
-        await notify_user(order["user_id"], f"✅ کانفیگ شخصی شما ساخته شد!\n\n{result.subscription_url}")
+        await notify_user(order["user_id"], "✅ کانفیگ شخصی شما ساخته شد!")
+        asyncio.create_task(deliver_config_to_user_web(
+            order["user_id"], "کانفیگ شخصی", result.subscription_url,
+            final_price=order["final_price"], order_id=order_id,
+        ))
         return {"ok": True}
 
     product = db.get_product(order["product_id"])
@@ -511,8 +516,12 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
             f"سفارش #{order_id} (خودکار) | کاربر {order['user_id']} | محصول «{product['name']}» (پنل وب - {admin['username']})",
             "order", order_id,
         )
-        links = "\n".join(r["subscription_url"] for r in results)
-        await notify_user(order["user_id"], f"✅ خرید شما تایید شد!\n📦 محصول: {product['name']}\n\n{links}")
+        links = [r["subscription_url"] for r in results]
+        await notify_user(order["user_id"], "✅ خرید شما تایید شد!")
+        asyncio.create_task(deliver_config_to_user_web(
+            order["user_id"], product["name"], links,
+            final_price=order["final_price"], order_id=order_id,
+        ))
         return {"ok": True}
 
     results = db.take_unused_configs(order["product_id"], order["user_id"], quantity)
@@ -526,8 +535,12 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
     )
     await check_and_notify_low_stock(lambda aid, text: tg_send(BOT_TOKEN, aid, text), db, order["product_id"])
     db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or (product["price"] if product else 0))
-    links = "\n".join(r["link"] for r in results)
-    await notify_user(order["user_id"], f"✅ خرید شما تایید شد!\n📦 محصول: {product['name'] if product else ''}\n\n{links}")
+    links = [r["link"] for r in results]
+    await notify_user(order["user_id"], "✅ خرید شما تایید شد!")
+    asyncio.create_task(deliver_config_to_user_web(
+        order["user_id"], product["name"] if product else "", links,
+        final_price=order["final_price"], order_id=order_id,
+    ))
     return {"ok": True}
 
 
