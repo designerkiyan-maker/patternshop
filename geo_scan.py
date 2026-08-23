@@ -167,10 +167,14 @@ _COUNTRY_NAME_MAP = {
 _COUNTRY_NAMES_SORTED = sorted(_COUNTRY_NAME_MAP, key=len, reverse=True)
 
 
+_INVISIBLE_RE = re.compile(r"[\u200b\u200c\u200d\ufe0f\u2060]")
+
+
 def detect_label_country(remark: str):
     """کد دو حرفی کشور را از روی پرچم یونیکد یا نام کشور داخل remark پیدا می‌کند."""
     if not remark:
         return None
+    remark = _INVISIBLE_RE.sub("", remark)
     m = _FLAG_RE.search(remark)
     if m:
         cc = _flag_to_cc(m.group(0))
@@ -214,6 +218,21 @@ def _parse_vmess(uri: str) -> Optional[dict]:
     return {"protocol": "vmess", "host": host, "port": port, "remark": remark}
 
 
+def _unquote_fully(s: str) -> str:
+    """بعضی پنل‌ها fragment را دوبار percent-encode می‌کنند (مثلاً پرچم یونیکد
+    به‌صورت %25F0%259F... درمی‌آید)؛ یک بار unquote آن را کاملاً باز نمی‌کند
+    و پرچم/نام کشور برای تشخیص کشور در remark ناقص/خراب می‌ماند. اینجا تا
+    وقتی unquote چیزی تغییر می‌دهد ادامه می‌دهیم (حداکثر ۳ بار، کافی برای
+    دوبل/سه‌بل‌انکود و بی‌خطر برای متن عادی چون دیگر تغییری نمی‌کند)."""
+    prev = s
+    for _ in range(3):
+        cur = unquote(prev)
+        if cur == prev:
+            break
+        prev = cur
+    return prev
+
+
 def _parse_generic(uri: str, protocol: str) -> Optional[dict]:
     """vless / trojan / hysteria2 / hy2 / hysteria / tuic — همه URI-shaped‌اند."""
     try:
@@ -221,7 +240,7 @@ def _parse_generic(uri: str, protocol: str) -> Optional[dict]:
         host = p.hostname
         if not host:
             return None
-        remark = unquote(p.fragment) if p.fragment else host
+        remark = _unquote_fully(p.fragment) if p.fragment else host
         return {"protocol": protocol, "host": host, "port": str(p.port or ""), "remark": remark}
     except Exception:
         return None
@@ -232,7 +251,7 @@ def _parse_ss(uri: str) -> Optional[dict]:
     frag = ""
     if "#" in body:
         body, frag = body.split("#", 1)
-    remark = unquote(frag) if frag else None
+    remark = _unquote_fully(frag) if frag else None
     if "@" in body:
         _, hostport = body.rsplit("@", 1)
         host, _, port = hostport.partition(":")
