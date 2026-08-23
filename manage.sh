@@ -612,6 +612,63 @@ remove_admin_panel() {
 }
 
 # ---------------------------------------------------------------------------
+# عملیات: ساخت خودکار کلیدهای VAPID برای اعلان Push پنل مدیریت وب
+# ---------------------------------------------------------------------------
+setup_vapid_keys() {
+    if [ ! -d "$INSTALL_DIR/admin_panel" ]; then
+        echo -e "${RED}⛔️ پوشه admin_panel پیدا نشد. اول باید کد پروژه را آپدیت کنی (گزینه ۲).${RESET}"
+        return
+    fi
+
+    ENV_FILE="$INSTALL_DIR/.env"
+    touch "$ENV_FILE"
+
+    if grep -q "^VAPID_PUBLIC_KEY=" "$ENV_FILE" 2>/dev/null && [ -n "$(grep '^VAPID_PUBLIC_KEY=' "$ENV_FILE" | cut -d= -f2-)" ]; then
+        echo -e "${YELLOW}⚠️ کلیدهای VAPID از قبل تنظیم شده‌اند.${RESET}"
+        echo -e "${YELLOW}اگر دوباره بسازی، تمام دستگاه‌هایی که قبلاً اعلان را فعال کرده‌اند از کار می‌افتند و باید دوباره فعال‌سازی کنند.${RESET}"
+        read -rp "همچنان کلید جدید بسازم و جایگزین کنم؟ (yes برای تایید): " CONFIRM
+        [ "$CONFIRM" != "yes" ] && { echo -e "${YELLOW}لغو شد.${RESET}"; return; }
+    fi
+
+    echo ""
+    read -rp "ایمیل تماس برای VAPID (اختیاری، Enter بزن برای پیش‌فرض admin@example.com): " CLAIM_EMAIL
+    CLAIM_EMAIL=${CLAIM_EMAIL:-admin@example.com}
+
+    echo -e "${CYAN}🔑 در حال ساخت کلیدهای VAPID...${RESET}"
+    cd "$INSTALL_DIR"
+    source venv/bin/activate
+    KEYS_OUTPUT=$(python3 -m admin_panel.generate_vapid_keys 2>/dev/null | grep -E "^VAPID_(PUBLIC|PRIVATE)_KEY=")
+    deactivate
+
+    VAPID_PUB=$(echo "$KEYS_OUTPUT" | grep "^VAPID_PUBLIC_KEY=" | cut -d= -f2-)
+    VAPID_PRIV=$(echo "$KEYS_OUTPUT" | grep "^VAPID_PRIVATE_KEY=" | cut -d= -f2-)
+
+    if [ -z "$VAPID_PUB" ] || [ -z "$VAPID_PRIV" ]; then
+        echo -e "${RED}⛔️ ساخت کلیدها ناموفق بود.${RESET}"
+        return
+    fi
+
+    # حذف مقادیر قبلی (اگر بودند) و افزودن مقادیر جدید به .env
+    sed -i '/^VAPID_PUBLIC_KEY=/d; /^VAPID_PRIVATE_KEY=/d; /^VAPID_CLAIM_EMAIL=/d' "$ENV_FILE"
+    {
+        echo "VAPID_PUBLIC_KEY=$VAPID_PUB"
+        echo "VAPID_PRIVATE_KEY=$VAPID_PRIV"
+        echo "VAPID_CLAIM_EMAIL=$CLAIM_EMAIL"
+    } >> "$ENV_FILE"
+
+    echo -e "${GREEN}✅ کلیدهای VAPID ساخته و در .env ذخیره شدند.${RESET}"
+
+    PANEL_SERVICE="${SERVICE_NAME}-adminpanel"
+    if systemctl list-units --full -all | grep -q "${PANEL_SERVICE}.service"; then
+        echo -e "${CYAN}♻️ ری‌استارت سرویس پنل مدیریت...${RESET}"
+        sudo systemctl restart "$PANEL_SERVICE"
+        echo -e "${GREEN}✅ سرویس ری‌استارت شد. حالا وارد پنل شو و روی «فعال‌سازی» اعلان بزن.${RESET}"
+    else
+        echo -e "${YELLOW}پنل مدیریت هنوز نصب نشده. بعد از نصب (گزینه ۱۳) این کلیدها خودکار استفاده می‌شوند.${RESET}"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # منوی اصلی
 # ---------------------------------------------------------------------------
 ensure_figlet
@@ -639,11 +696,12 @@ while true; do
     echo -e "${YELLOW}[13]${RESET} » ${GREEN}نصب/تنظیم پنل مدیریت وب مستقل (خودکار: دامنه + SSL + سرویس)${RESET}"
     echo -e "${YELLOW}[14]${RESET} » ${GREEN}حذف پنل مدیریت وب${RESET}"
     echo -e "${YELLOW}[15]${RESET} » ${GREEN}آپدیت پنل مدیریت وب${RESET}"
+    echo -e "${YELLOW}[16]${RESET} » ${GREEN}ساخت خودکار کلید VAPID (اعلان Push پنل مدیریت)${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo -e "${RED}[0]${RESET} » ${GREEN}خروج${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo ""
-    read -rp "$(echo -e ${MAGENTA}${BOLD}"Enter choice [0-15]: "${RESET})" choice
+    read -rp "$(echo -e ${MAGENTA}${BOLD}"Enter choice [0-16]: "${RESET})" choice
 
     case $choice in
         1) install_bot; pause ;;
@@ -661,6 +719,7 @@ while true; do
         13) setup_admin_panel; pause ;;
         14) remove_admin_panel; pause ;;
         15) update_admin_panel; pause ;;
+        16) setup_vapid_keys; pause ;;
         0) echo -e "${CYAN}خدانگهدار 👋${RESET}"; exit 0 ;;
         *) echo -e "${RED}گزینه نامعتبر است.${RESET}"; sleep 1 ;;
     esac
