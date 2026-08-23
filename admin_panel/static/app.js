@@ -256,6 +256,27 @@ function toast(msg, isError = false) {
 }
 function handleErr(e) { if (e.message !== 'unauthorized') toast(e.message, true); }
 
+/* ==================================================== receipt viewer === */
+function showReceiptModal(kind, id) {
+  const url = `/api/${kind === 'order' ? 'orders' : 'topups'}/${id}/receipt`;
+  openModal('رسید پرداخت', `
+    <div class="receipt-view" style="text-align:center">
+      <img src="${url}" alt="رسید پرداخت" style="max-width:100%;max-height:70vh;border-radius:10px" />
+      <div style="margin-top:12px">
+        <a href="${url}" target="_blank" rel="noopener" class="btn btn-sm">باز کردن در تب جدید</a>
+      </div>
+    </div>
+  `, body => {
+    const img = body.querySelector('img');
+    img.addEventListener('error', () => {
+      body.innerHTML = `
+        <div class="empty-state">${svg('empty')}<div>نمایش پیش‌نمایش ممکن نشد (شاید فایل رسید سند/PDF باشد).</div></div>
+        <div style="text-align:center;margin-top:12px"><a href="${url}" target="_blank" rel="noopener" class="btn btn-sm">باز کردن رسید</a></div>
+      `;
+    });
+  });
+}
+
 /* ============================================================ modal === */
 function openModal(title, bodyHtml, onMount, opts = {}) {
   const backdrop = document.createElement('div');
@@ -1191,7 +1212,7 @@ async function renderOrders() {
     </div>
     <div class="card">
       <div class="table-wrap"><table>
-        <thead><tr><th>#</th><th>کاربر</th><th>محصول</th><th>تعداد</th><th>مبلغ</th><th>تاریخ</th>${canAct && ordersStatus === 'pending' ? '<th>عملیات</th>' : ''}</tr></thead>
+        <thead><tr><th>#</th><th>کاربر</th><th>محصول</th><th>تعداد</th><th>مبلغ</th><th>تاریخ</th><th>رسید</th>${canAct && ordersStatus === 'pending' ? '<th>عملیات</th>' : ''}</tr></thead>
         <tbody>
           ${orders.map(o => `<tr>
             <td class="mono">#${o.id} ${historyBtn('order', o.id)}</td>
@@ -1200,16 +1221,21 @@ async function renderOrders() {
             <td class="mono">${fmt(o.quantity || 1)}</td>
             <td class="mono">${fmt(o.final_price ?? o.base_price)}</td>
             <td class="mono">${fmtDate(o.created_at)}</td>
+            <td>${o.receipt_file_id ? `<button class="btn btn-sm" data-receipt="order:${o.id}">مشاهده رسید</button>` : '<span class="mono">-</span>'}</td>
             ${canAct && ordersStatus === 'pending' ? `<td>
               <button class="btn btn-primary btn-sm" data-approve="${o.id}">تایید</button>
               <button class="btn btn-danger btn-sm" data-reject="${o.id}">رد</button>
             </td>` : ''}
-          </tr>`).join('') || `<tr><td colspan="7" class="empty-state"><div class="icon">${svg('empty')}</div>سفارشی در این وضعیت نیست</td></tr>`}
+          </tr>`).join('') || `<tr><td colspan="8" class="empty-state"><div class="icon">${svg('empty')}</div>سفارشی در این وضعیت نیست</td></tr>`}
         </tbody>
       </table></div>
     </div>
   `);
   $$('.tab-btn', content()).forEach(b => b.addEventListener('click', () => { ordersStatus = b.dataset.status; renderOrders(); }));
+  $$('[data-receipt]', content()).forEach(b => b.addEventListener('click', () => {
+    const [kind, id] = b.dataset.receipt.split(':');
+    showReceiptModal(kind, id);
+  }));
   $$('[data-approve]', content()).forEach(b => b.addEventListener('click', async () => {
     b.disabled = true;
     try { await apiPost(`/orders/${b.dataset.approve}/approve`); toast('سفارش تایید شد.'); renderOrders(); }
@@ -1233,19 +1259,24 @@ async function renderTopups() {
     </div>
     <div class="card">
       <div class="table-wrap"><table>
-        <thead><tr><th>#</th><th>کاربر</th><th>مبلغ</th><th>تاریخ</th>${canAct && topupsStatus === 'pending' ? '<th>عملیات</th>' : ''}</tr></thead>
+        <thead><tr><th>#</th><th>کاربر</th><th>مبلغ</th><th>تاریخ</th><th>رسید</th>${canAct && topupsStatus === 'pending' ? '<th>عملیات</th>' : ''}</tr></thead>
         <tbody>${topups.map(t => `<tr>
           <td class="mono">#${t.id}</td><td>${esc(t.username || t.user_id)}</td>
           <td class="mono">${fmt(t.amount)}</td><td class="mono">${fmtDate(t.created_at)}</td>
+          <td>${t.receipt_file_id ? `<button class="btn btn-sm" data-receipt="topup:${t.id}">مشاهده رسید</button>` : '<span class="mono">-</span>'}</td>
           ${canAct && topupsStatus === 'pending' ? `<td>
             <button class="btn btn-primary btn-sm" data-approve="${t.id}">تایید</button>
             <button class="btn btn-danger btn-sm" data-reject="${t.id}">رد</button>
           </td>` : ''}
-        </tr>`).join('') || `<tr><td colspan="5" class="empty-state"><div class="icon">${svg('empty')}</div>درخواستی در این وضعیت نیست</td></tr>`}</tbody>
+        </tr>`).join('') || `<tr><td colspan="6" class="empty-state"><div class="icon">${svg('empty')}</div>درخواستی در این وضعیت نیست</td></tr>`}</tbody>
       </table></div>
     </div>
   `);
   $$('.tab-btn', content()).forEach(b => b.addEventListener('click', () => { topupsStatus = b.dataset.status; renderTopups(); }));
+  $$('[data-receipt]', content()).forEach(b => b.addEventListener('click', () => {
+    const [kind, id] = b.dataset.receipt.split(':');
+    showReceiptModal(kind, id);
+  }));
   $$('[data-approve]', content()).forEach(b => b.addEventListener('click', async () => {
     try { await apiPost(`/topups/${b.dataset.approve}/approve`); toast('شارژ تایید شد.'); renderTopups(); } catch (e) { handleErr(e); }
   }));
