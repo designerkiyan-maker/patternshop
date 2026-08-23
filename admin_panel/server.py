@@ -32,6 +32,7 @@ from panel_providers import get_provider, PanelError, PanelUsernameTakenError, P
 from renewal_reminders import STATUS_KEY_LAST_RUN, STATUS_KEY_LAST_DATE_SENT, STATUS_KEY_LAST_VOLUME_SENT
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 import exchange_rate
+import geo_scan
 
 logger = logging.getLogger("admin_panel.server")
 
@@ -296,6 +297,36 @@ async def notify_user(chat_id: int, text: str):
 @app.get("/api/dashboard")
 def api_dashboard(start: Optional[str] = None, end: Optional[str] = None, admin=Depends(get_current_admin)):
     return db.get_sales_stats(start, end)
+
+
+# ------------------------------------------------------------- servers map --
+# نقشه‌ی جهان در داشبورد: بر اساس یک «لینک ساب مادر» که ادمین وارد می‌کند،
+# کانفیگ‌های داخلش پارس و آدرس هرکدام جئولوکیت می‌شود.
+
+class MasterSubBody(BaseModel):
+    link: str
+
+
+@app.get("/api/settings/master-sub")
+def api_get_master_sub(admin=Depends(get_current_admin)):
+    return {"link": db.get_setting("master_sub_link", "")}
+
+
+@app.post("/api/settings/master-sub")
+def api_set_master_sub(body: MasterSubBody, admin=Depends(require_permission("settings"))):
+    link = (body.link or "").strip()
+    if link and not (link.startswith("http://") or link.startswith("https://")):
+        raise HTTPException(400, "لینک ساب باید با http:// یا https:// شروع شود.")
+    db.set_setting("master_sub_link", link)
+    return {"ok": True}
+
+
+@app.get("/api/dashboard/servers-map")
+async def api_dashboard_servers_map(refresh: bool = False, admin=Depends(get_current_admin)):
+    link = db.get_setting("master_sub_link", "").strip()
+    if not link:
+        return {"ok": False, "error": "no_link"}
+    return await geo_scan.scan_subscription(link, force_refresh=refresh)
 
 
 # ------------------------------------------------------------------ system --
