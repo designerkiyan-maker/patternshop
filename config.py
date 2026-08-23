@@ -78,3 +78,8 @@ ADMIN_PANEL_SECRET = os.getenv("ADMIN_PANEL_SECRET", "")
 if not ADMIN_PANEL_SECRET:
     import secrets as _secrets
     ADMIN_PANEL_SECRET = _secrets.token_hex(32)
+
+# اگر پنل پشت HTTPS سرو نمی‌شود (مثلاً تست محلی روی http://127.0.0.1)، این
+# مقدار را در .env برابر "0" بگذار تا کوکی نشست بدون فلگ Secure ست شود؛
+# پیش‌فرض امن (Secure) است چون این پنل دسترسی کامل مدیریتی می‌دهد.
+ADMIN_PANEL_COOKIE_SECURE = os.getenv("ADMIN_PANEL_COOKIE_SECURE", "1").strip().lower() not in ("0", "false", "no")
