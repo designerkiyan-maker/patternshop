@@ -543,7 +543,8 @@ class ConfigsAddBody(BaseModel):
 
 @app.get("/api/products/{product_id}/configs")
 def api_product_configs(product_id: int, admin=Depends(require_permission("catalog"))):
-    return rows_to_list(db.get_unused_configs(product_id))
+    stats = db.get_config_stats(product_id)
+    return {"items": rows_to_list(db.get_unused_configs(product_id)), "used_count": stats["used"]}
 
 
 @app.post("/api/products/{product_id}/configs")
