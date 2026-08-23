@@ -257,10 +257,10 @@ function toast(msg, isError = false) {
 function handleErr(e) { if (e.message !== 'unauthorized') toast(e.message, true); }
 
 /* ============================================================ modal === */
-function openModal(title, bodyHtml, onMount) {
+function openModal(title, bodyHtml, onMount, opts = {}) {
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
-  backdrop.innerHTML = `<div class="modal"><h3>${title}</h3><div class="modal-body">${bodyHtml}</div></div>`;
+  backdrop.innerHTML = `<div class="modal${opts.wide ? ' modal-lg' : ''}"><h3>${title}</h3><div class="modal-body">${bodyHtml}</div></div>`;
   backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.remove(); });
   document.body.appendChild(backdrop);
   if (onMount) onMount(backdrop.querySelector('.modal-body'), () => backdrop.remove());
@@ -1301,20 +1301,46 @@ async function renderUsers() {
 async function showUserDetail(tgId) {
   const d = await apiGet(`/users/${tgId}`);
   const isSenior = hasPerm('users');
-  openModal(`کاربر ${esc(d.user.username || tgId)}`, `
-    <div class="chip-row" style="margin-bottom:14px">
-      <span class="chip">کیف پول: ${fmt(d.user.referral_credit)} تومان</span>
-      <span class="chip">زیرمجموعه‌ها: ${fmt(d.referral.count)}</span>
-      ${d.is_reseller ? `<span class="chip">اعتبار نمایندگی: ${fmt(d.reseller_credit)} گیگ</span>` : ''}
+  const u = d.user;
+  const displayName = u.username ? '@' + u.username : (u.first_name || tgId);
+  const initial = (u.first_name || u.username || String(tgId)).trim().charAt(0).toUpperCase();
+
+  const statCards = [
+    { label: 'کیف پول', val: `${fmt(u.referral_credit)} تومان` },
+    { label: 'زیرمجموعه‌ها', val: fmt(d.referral.count) },
+    { label: 'تاریخ عضویت', val: fmtDate(u.joined_at) },
+    { label: 'تست دریافتی', val: u.test_used ? 'بله' : 'خیر' },
+  ];
+  if (d.is_reseller) statCards.push({ label: 'اعتبار نمایندگی', val: `${fmt(d.reseller_credit)} گیگ` });
+  if (u.referred_by) statCards.push({ label: 'دعوت‌شده توسط', val: `#${u.referred_by}` });
+
+  openModal(`کاربر ${esc(displayName)}`, `
+    <div class="ud-head">
+      <div class="ud-avatar">${esc(initial)}</div>
+      <div class="ud-id">
+        <strong>${esc(displayName)}</strong>
+        <span class="mono">ID: ${tgId}</span>
+      </div>
+      <span class="badge ${u.is_blocked ? 'badge-rejected' : 'badge-approved'}">${u.is_blocked ? 'مسدود' : 'فعال'}</span>
       ${historyBtn('user', tgId)}
     </div>
-    ${isSenior ? `<div class="form-row" style="margin-bottom:14px">
+
+    <div class="ud-stats">
+      ${statCards.map(s => `<div class="ud-stat"><span>${s.label}</span><b class="mono">${s.val}</b></div>`).join('')}
+    </div>
+
+    ${isSenior ? `<div class="form-row" style="margin:16px 0">
       <input class="input" id="wallet-delta" type="number" placeholder="مبلغ (مثبت=افزایش، منفی=کاهش)">
       <button class="btn btn-primary" id="wallet-submit">اعمال</button>
     </div>` : ''}
-    <h4 style="font-size:13px;margin:10px 0">سفارش‌های اخیر</h4>
-    <div class="table-wrap"><table><thead><tr><th>#</th><th>محصول</th><th>مبلغ</th><th>وضعیت</th></tr></thead>
-    <tbody>${d.orders.slice(0, 10).map(o => `<tr><td class="mono">#${o.id}</td><td>${esc(o.product_name || '-')}</td><td class="mono">${fmt(o.final_price)}</td><td>${o.status}</td></tr>`).join('') || '<tr><td colspan="4" class="empty-state">سفارشی نیست</td></tr>'}</tbody></table></div>
+
+    <h4 class="ud-section-title">سفارش‌های اخیر</h4>
+    <div class="table-wrap"><table><thead><tr><th>#</th><th>محصول</th><th>مبلغ</th><th>وضعیت</th><th>تاریخ</th></tr></thead>
+    <tbody>${d.orders.slice(0, 10).map(o => `<tr><td class="mono">#${o.id}</td><td>${esc(o.product_name || '-')}</td><td class="mono">${fmt(o.final_price)}</td><td>${esc(o.status)}</td><td class="mono">${fmtDate(o.created_at)}</td></tr>`).join('') || `<tr><td colspan="5" class="empty-state"><div class="icon">${svg('empty')}</div>سفارشی نیست</td></tr>`}</tbody></table></div>
+
+    <h4 class="ud-section-title">شارژهای کیف پول</h4>
+    <div class="table-wrap"><table><thead><tr><th>#</th><th>مبلغ</th><th>وضعیت</th><th>تاریخ</th></tr></thead>
+    <tbody>${(d.topups || []).slice(0, 10).map(t => `<tr><td class="mono">#${t.id}</td><td class="mono">${fmt(t.amount)}</td><td>${esc(t.status)}</td><td class="mono">${fmtDate(t.created_at)}</td></tr>`).join('') || `<tr><td colspan="4" class="empty-state"><div class="icon">${svg('empty')}</div>شارژی ثبت نشده</td></tr>`}</tbody></table></div>
   `, (body, close) => {
     const submitBtn = $('#wallet-submit', body);
     if (submitBtn) submitBtn.addEventListener('click', async () => {
@@ -1323,7 +1349,7 @@ async function showUserDetail(tgId) {
       try { await apiPost(`/users/${tgId}/wallet`, { delta }); toast('کیف پول به‌روزرسانی شد.'); close(); }
       catch (e) { handleErr(e); }
     });
-  });
+  }, { wide: true });
 }
 
 /* ============================================================ catalog === */
@@ -1415,13 +1441,26 @@ async function renderCatalog() {
 }
 
 async function showConfigBank(productId) {
-  const configs = await apiGet(`/products/${productId}/configs`);
+  const res = await apiGet(`/products/${productId}/configs`);
+  const configs = res.items || [];
+  const usedCount = res.used_count || 0;
   openModal('بانک کانفیگ', `
-    <textarea class="input" id="new-links" rows="4" placeholder="هر خط یک لینک کانفیگ..."></textarea>
+    <div class="cfg-stats">
+      <div class="cfg-stat"><span>لینک‌های آزاد</span><b class="mono">${fmt(configs.length)}</b></div>
+      <div class="cfg-stat"><span>تحویل‌شده</span><b class="mono">${fmt(usedCount)}</b></div>
+      <div class="cfg-stat"><span>مجموع</span><b class="mono">${fmt(configs.length + usedCount)}</b></div>
+    </div>
+    <label class="field" style="margin-top:16px">
+      <span>افزودن لینک جدید</span>
+      <textarea class="input" id="new-links" rows="6" placeholder="هر خط یک لینک کانفیگ..."></textarea>
+    </label>
     <button class="btn btn-primary btn-block" id="add-links" style="margin-top:10px">افزودن لینک‌ها</button>
-    <h4 style="font-size:13px;margin:16px 0 8px">لینک‌های آزاد (${configs.length})</h4>
-    <div class="table-wrap" style="max-height:220px;overflow-y:auto">
-      <table><tbody>${configs.map(c => `<tr><td style="font-size:11px;word-break:break-all">${esc(c.link)}</td><td><button class="btn btn-danger btn-sm" data-del-cfg="${c.id}">حذف</button></td></tr>`).join('') || '<tr><td class="empty-state">خالی است</td></tr>'}</tbody></table>
+    <h4 class="cfg-list-title">لینک‌های آزاد (${configs.length})</h4>
+    <div class="table-wrap cfg-table-wrap">
+      <table><tbody>${configs.map(c => `<tr>
+        <td class="mono cfg-link-cell">${esc(c.link)}</td>
+        <td class="cfg-actions"><button class="btn btn-ghost btn-sm" data-copy-cfg="${esc(c.link)}">کپی</button><button class="btn btn-danger btn-sm" data-del-cfg="${c.id}">حذف</button></td>
+      </tr>`).join('') || `<tr><td colspan="2" class="empty-state"><div class="icon">${svg('empty')}</div>خالی است</td></tr>`}</tbody></table>
     </div>
   `, (body, close) => {
     $('#add-links', body).addEventListener('click', async () => {
@@ -1433,10 +1472,13 @@ async function showConfigBank(productId) {
         close(); showConfigBank(productId);
       } catch (e) { handleErr(e); }
     });
+    $$('[data-copy-cfg]', body).forEach(b => b.addEventListener('click', () => {
+      navigator.clipboard?.writeText(b.dataset.copyCfg).then(() => toast('کپی شد.'));
+    }));
     $$('[data-del-cfg]', body).forEach(b => b.addEventListener('click', async () => {
       try { await apiDelete(`/configs/${b.dataset.delCfg}`); close(); showConfigBank(productId); } catch (e) { handleErr(e); }
     }));
-  });
+  }, { wide: true });
 }
 
 /* ========================================================== discounts === */

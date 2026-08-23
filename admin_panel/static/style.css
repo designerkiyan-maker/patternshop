@@ -332,15 +332,50 @@ tbody tr:hover{ background:var(--surface-hi); }
 @keyframes backdrop-in{ from{ opacity:0; } to{ opacity:1; } }
 .modal{
   background:var(--surface); border:1px solid var(--border-soft); border-radius:var(--radius);
-  padding:24px; width:100%; max-width:460px; max-height:85vh; overflow-y:auto; box-shadow:var(--shadow-pop);
+  padding:24px; width:100%; max-width:520px; max-height:85vh; overflow-y:auto; box-shadow:var(--shadow-pop);
   animation:modal-in .18s var(--ease);
 }
+.modal.modal-lg{ max-width:720px; }
 @keyframes modal-in{ from{ opacity:0; transform:translateY(8px); } to{ opacity:1; transform:translateY(0); } }
 .modal h3{ margin-bottom:16px; font-size:16px; font-weight:800; }
 .form-grid{ display:flex; flex-direction:column; gap:12px; }
 .form-row{ display:flex; gap:10px; }
 .form-row > *{ flex:1; }
 .modal-actions{ display:flex; gap:10px; margin-top:18px; }
+
+/* ---- بانک کانفیگ: خلاصه‌ی موجودی + لیست لینک‌ها ---------------------- */
+.cfg-stats{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.cfg-stat{
+  display:flex; flex-direction:column; gap:5px; padding:11px 12px; border-radius:var(--radius-sm);
+  background:var(--surface-2); border:1px solid var(--border-soft);
+}
+.cfg-stat span{ font-size:11px; color:var(--text-muted); }
+.cfg-stat b{ font-size:15px; }
+.cfg-list-title{ font-size:13px; margin:18px 0 8px; color:var(--text-muted); font-weight:700; }
+.cfg-table-wrap{ max-height:280px; overflow-y:auto; }
+.cfg-link-cell{ font-size:11px; word-break:break-all; max-width:1px; }
+.cfg-actions{ display:flex; gap:6px; white-space:nowrap; }
+
+/* ---- کارت جزئیات کاربر ------------------------------------------------ */
+.ud-head{ display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+.ud-avatar{
+  width:44px; height:44px; border-radius:12px; background:var(--primary); color:var(--primary-ink, #fff);
+  display:flex; align-items:center; justify-content:center; font-weight:800; font-family:var(--font-mono);
+  font-size:16px; flex-shrink:0;
+}
+.ud-id{ display:flex; flex-direction:column; gap:3px; min-width:0; }
+.ud-id strong{ font-size:14.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ud-id span{ font-size:11.5px; color:var(--text-muted); }
+.ud-head .badge{ margin-inline-start:auto; }
+.ud-stats{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.ud-stat{
+  display:flex; flex-direction:column; gap:5px; padding:11px 12px; border-radius:var(--radius-sm);
+  background:var(--surface-2); border:1px solid var(--border-soft);
+}
+.ud-stat span{ font-size:11px; color:var(--text-muted); }
+.ud-stat b{ font-size:13.5px; }
+.ud-section-title{ font-size:13px; margin:18px 0 8px; color:var(--text-muted); font-weight:700; }
+@media (max-width:520px){ .cfg-stats, .ud-stats{ grid-template-columns:repeat(2,1fr); } }
 
 .toast-root{ position:fixed; bottom:20px; left:20px; z-index:100; display:flex; flex-direction:column; gap:8px; }
 .toast{
@@ -482,7 +517,7 @@ body{ transition: background .2s ease, color .2s ease; }
   .tabs{ gap:6px; }
   .tab-btn{ padding:7px 12px; font-size:12px; }
 
-  .modal{ padding:20px; max-width:94vw; }
+  .modal, .modal.modal-lg{ padding:20px; max-width:94vw; }
   .form-row{ flex-direction:column; }
   .modal-actions{ flex-direction:column; }
   .modal-actions .btn{ width:100%; }
