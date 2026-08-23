@@ -769,6 +769,8 @@ function renderDashboardGlass(s, sys) {
       <div class="card-head"><h3>پرفروش‌ترین محصولات</h3></div>
       ${prodRows}
     </div>
+
+    <div style="margin-top:16px">${serverMapCardHtml()}</div>
   `);
 
   const root = content();
@@ -781,6 +783,7 @@ function renderDashboardGlass(s, sys) {
       seg.style.strokeDashoffset = seg.dataset.final;
     });
   }, 60));
+  mountServerMap();
 }
 
 /* --------------------------------------------- dashboard: cyberpunk --- */
@@ -947,6 +950,8 @@ function renderDashboardCyberpunk(s, sys) {
     </div>
 
     ${resHtml}
+
+    <div style="margin-top:16px">${serverMapCardHtml()}</div>
   `);
 
   const root = content();
@@ -958,6 +963,7 @@ function renderDashboardCyberpunk(s, sys) {
     });
     $$('.cp-res-fill[data-w], .cp-bar-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
   }, 60));
+  mountServerMap();
 }
 
 /* ------------------------------------------------ dashboard: brutalist --- */
@@ -1069,6 +1075,8 @@ function renderDashboardBrutalist(s, sys) {
       <div class="bru-panel-head">پرفروش‌ترین محصولات</div>
       ${prodList}
     </div>
+
+    <div style="margin-top:16px">${serverMapCardHtml()}</div>
   `);
 
   const root = content();
@@ -1078,6 +1086,7 @@ function renderDashboardBrutalist(s, sys) {
     $$('.bru-metric-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
     $$('.bru-res-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
   }, 60));
+  mountServerMap();
 }
 
 /* ---------------------------------------------------- dashboard: bento --- */
@@ -1200,6 +1209,8 @@ function renderDashboardBento(s, sys) {
       </div>
       ${resWidgets}
     </div>
+
+    ${serverMapCardHtml()}
   `);
 
   const root = content();
@@ -1211,6 +1222,7 @@ function renderDashboardBento(s, sys) {
     });
     $$('.bw-res-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
   }, 60));
+  mountServerMap();
 }
 
 /* ----------------------------------------------------- dashboard: flat --- */
@@ -1344,6 +1356,8 @@ async function renderDashboardFlat(s, sys) {
         ${prodBars}
       </div>
     </div>
+
+    ${serverMapCardHtml()}
   `);
 
   const root = content();
@@ -1354,6 +1368,228 @@ async function renderDashboardFlat(s, sys) {
   drawRadar(root, radarAxes, radarValues, '#8B5CF6');
   if (sys) activateGauge(root, healthPct);
   drawHeroNet($('#hero-net-canvas', root));
+  mountServerMap();
+}
+
+/* ====================================================== world map === */
+// ویجت مشترک «نقشه‌ی جهانی سرورها» — در هر ۵ تم از طریق کلاس عمومی .card
+// (که هرکدام از تم‌ها استایل خودش را رویش اعمال می‌کند) و متغیرهای CSS
+// رنگ تم فعلی (--primary/--emerald/--rose/...) نمایش داده می‌شود؛ یعنی
+// یک پیاده‌سازی، هم‌رنگ با هر پنج تم.
+
+// چند نقطه‌ی «بلاب» نرم و محو، صرفاً تزئینی برای حس نقشه‌ی جهان (نه مرز
+// دقیق کشورها) — روی گرید مختصاتی lon/lat پروجکت‌شده.
+const SV_MAP_BLOBS = [
+  [-100, 45, 90], [-60, -15, 70], [15, 50, 55],
+  [20, 3, 85], [90, 45, 140], [135, -25, 55],
+];
+
+function svProject(lat, lon) {
+  const x = (Number(lon) + 180) / 360 * 1000;
+  const y = (90 - Number(lat)) / 180 * 500;
+  return [x, y];
+}
+
+function svMapGraticule() {
+  let out = '';
+  for (let x = 0; x <= 1000; x += 100) out += `<line x1="${x}" y1="0" x2="${x}" y2="500" class="${x === 500 ? 'sv-map-meridian' : ''}"></line>`;
+  for (let y = 0; y <= 500; y += 62.5) out += `<line x1="0" y1="${y.toFixed(1)}" x2="1000" y2="${y.toFixed(1)}" class="${Math.abs(y - 250) < 1 ? 'sv-map-equator' : ''}"></line>`;
+  return out;
+}
+
+function svFlagEmoji(cc) {
+  if (!cc || cc.length !== 2) return '🌐';
+  try { return String.fromCodePoint(...[...cc.toUpperCase()].map(c => 127397 + c.charCodeAt(0))); }
+  catch (e) { return '🌐'; }
+}
+
+const SV_STATUS_LABEL = { online: 'آنلاین', offline: 'آفلاین', unknown: 'نامشخص' };
+
+function serverMapCardHtml() {
+  const blobs = SV_MAP_BLOBS.map(([lon, lat, r]) => {
+    const [x, y] = svProject(lat, lon);
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="url(#sv-map-blob-g)"></circle>`;
+  }).join('');
+  return `
+  <div class="card sv-map-card">
+    <div class="card-head sv-map-head">
+      <h3>🗺️ نقشه‌ی جهانی سرورها</h3>
+      <div class="sv-map-actions">
+        <span class="sv-map-updated" id="sv-map-updated"></span>
+        <button class="btn btn-sm" id="sv-map-refresh-btn" hidden>↻ اسکن مجدد</button>
+      </div>
+    </div>
+    <p class="card-sub">لینک ساب مادر را وارد کن تا کانفیگ‌هایش بر اساس IP سرور روی نقشه مشخص شوند.</p>
+    <div class="sv-map-linkrow">
+      <input type="text" id="sv-map-link-input" class="input" dir="ltr" placeholder="https://example.com/sub/xxxxx">
+      <button class="btn btn-primary btn-sm" id="sv-map-scan-btn">بررسی و رسم نقشه</button>
+    </div>
+    <div class="sv-map-stats" id="sv-map-stats"></div>
+    <div class="sv-map-wrap" id="sv-map-wrap">
+      <svg id="sv-map-svg" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <radialGradient id="sv-map-blob-g" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="var(--primary)" stop-opacity=".5"/>
+            <stop offset="100%" stop-color="var(--primary)" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <g class="sv-map-blobs">${blobs}</g>
+        <g class="sv-map-grid">${svMapGraticule()}</g>
+        <g class="sv-map-markers" id="sv-map-markers"></g>
+      </svg>
+      <div class="sv-map-tooltip" id="sv-map-tooltip" hidden></div>
+      <div class="sv-map-empty" id="sv-map-empty" hidden>هنوز لینک ساب مادری ثبت نشده — یکی وارد کن و «بررسی و رسم نقشه» را بزن.</div>
+      <div class="sv-map-loading" id="sv-map-loading" hidden><span class="sv-map-spinner"></span>در حال دریافت و جئولوکیت کانفیگ‌ها…</div>
+    </div>
+    <div class="sv-map-legend">
+      <span><i class="dot online"></i>آنلاین</span>
+      <span><i class="dot offline"></i>آفلاین</span>
+      <span><i class="dot unknown"></i>نامشخص</span>
+    </div>
+    <div class="sv-map-list" id="sv-map-list"></div>
+  </div>`;
+}
+
+function svTooltipHtml(s) {
+  const protoBadges = (s.protocols || []).map(p => `<span class="chip">${esc(p.name)} × ${fmt(p.count)}</span>`).join(' ');
+  return `
+    <div class="sv-tt-head">${svFlagEmoji(s.country_code)} <b>${esc(s.city || s.country || '—')}</b><span class="sv-tt-country">${esc(s.country || '')}</span></div>
+    <div class="sv-tt-ip mono">${esc(s.ip)}</div>
+    <div class="sv-tt-row">وضعیت: <b class="sv-tt-status-${s.status}">${SV_STATUS_LABEL[s.status] || 'نامشخص'}</b> · ${fmt(s.configs_count)} کانفیگ</div>
+    <div class="sv-tt-protocols">${protoBadges}</div>`;
+}
+
+function svShowTooltip(s) {
+  const root = content();
+  const wrap = $('#sv-map-wrap', root);
+  const tip = $('#sv-map-tooltip', root);
+  const svgEl = $('#sv-map-svg', root);
+  if (!wrap || !tip || !svgEl || s.lat == null || s.lon == null) return;
+  const [vx, vy] = svProject(s.lat, s.lon);
+  const svgRect = svgEl.getBoundingClientRect();
+  const wrapRect = wrap.getBoundingClientRect();
+  const px = (svgRect.left - wrapRect.left) + vx * (svgRect.width / 1000);
+  const py = (svgRect.top - wrapRect.top) + vy * (svgRect.height / 500);
+  tip.innerHTML = svTooltipHtml(s);
+  tip.hidden = false;
+  tip.style.left = Math.max(4, Math.min(px + 14, wrapRect.width - 236)) + 'px';
+  tip.style.top = Math.max(4, Math.min(py + 14, wrapRect.height - 110)) + 'px';
+}
+function svHideTooltip() {
+  const tip = $('#sv-map-tooltip', content());
+  if (tip) tip.hidden = true;
+}
+
+function svRenderMarkers(servers) {
+  const root = content();
+  const g = $('#sv-map-markers', root);
+  if (!g) return;
+  const maxCount = Math.max(...servers.map(s => s.configs_count || 1), 1);
+  g.innerHTML = servers.map((s, i) => {
+    if (s.lat == null || s.lon == null) return '';
+    const [x, y] = svProject(s.lat, s.lon);
+    const r = 4.5 + Math.min(Math.sqrt((s.configs_count || 1) / maxCount) * 9, 9);
+    const st = SV_STATUS_LABEL[s.status] ? s.status : 'unknown';
+    return `<g class="sv-map-pin ${st}" data-idx="${i}" tabindex="0">
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(r + 7).toFixed(1)}" class="sv-map-pulse"></circle>
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" class="sv-map-dot"></circle>
+    </g>`;
+  }).join('');
+  $$('.sv-map-pin', g).forEach(el => {
+    const s = servers[+el.dataset.idx];
+    el.addEventListener('mouseenter', () => svShowTooltip(s));
+    el.addEventListener('click', () => svShowTooltip(s));
+    el.addEventListener('mouseleave', svHideTooltip);
+  });
+}
+
+function svStatsHtml(data) {
+  return `
+    <span class="chip">🖥️ ${fmt(data.total_servers)} سرور</span>
+    <span class="chip">🌍 ${fmt(data.total_countries)} کشور</span>
+    <span class="chip">⚙️ ${fmt(data.total_configs)} کانفیگ</span>`;
+}
+
+function svServerListHtml(servers) {
+  return servers.slice(0, 40).map((s, i) => `
+    <div class="sv-map-list-row" data-idx="${i}">
+      <i class="dot ${SV_STATUS_LABEL[s.status] ? s.status : 'unknown'}"></i>
+      <span class="sv-ml-flag">${svFlagEmoji(s.country_code)}</span>
+      <span class="sv-ml-name">${esc(s.city || '—')}<small>${esc(s.country || '')}</small></span>
+      <span class="sv-ml-ip mono">${esc(s.ip)}</span>
+      <span class="sv-ml-count mono">${fmt(s.configs_count)} کانفیگ</span>
+    </div>`).join('');
+}
+
+function svFmtTime(ts) {
+  if (!ts) return '';
+  try { return 'آخرین اسکن: ' + new Date(ts * 1000).toLocaleString('fa-IR'); } catch (e) { return ''; }
+}
+
+async function mountServerMap() {
+  const root = content();
+  const card = $('.sv-map-card', root);
+  if (!card) return;
+
+  const input = $('#sv-map-link-input', root);
+  const scanBtn = $('#sv-map-scan-btn', root);
+  const refreshBtn = $('#sv-map-refresh-btn', root);
+  const loadingEl = $('#sv-map-loading', root);
+  const emptyEl = $('#sv-map-empty', root);
+  const updatedEl = $('#sv-map-updated', root);
+  let currentServers = [];
+
+  const paint = (data) => {
+    if (!$('.sv-map-card', content())) return; // کاربر به تب دیگری رفته
+    if (!data || !data.ok) {
+      $('#sv-map-stats', root).innerHTML = '';
+      svRenderMarkers([]);
+      $('#sv-map-list', root).innerHTML = '';
+      if (data && data.error === 'no_link') { if (emptyEl) emptyEl.hidden = false; }
+      else if (data && data.error) toast(data.error, true);
+      return;
+    }
+    currentServers = data.servers || [];
+    if (emptyEl) emptyEl.hidden = true;
+    $('#sv-map-stats', root).innerHTML = svStatsHtml(data);
+    svRenderMarkers(currentServers);
+    $('#sv-map-list', root).innerHTML = svServerListHtml(currentServers);
+    $$('.sv-map-list-row', root).forEach(row => row.addEventListener('click', () => svShowTooltip(currentServers[+row.dataset.idx])));
+    if (updatedEl) updatedEl.textContent = svFmtTime(data.generated_at);
+    if (refreshBtn) refreshBtn.hidden = false;
+  };
+
+  const doScan = async (refresh) => {
+    if (loadingEl) loadingEl.hidden = false;
+    if (emptyEl) emptyEl.hidden = true;
+    try {
+      const data = await apiGet(`/dashboard/servers-map${refresh ? '?refresh=1' : ''}`);
+      paint(data);
+    } catch (e) { handleErr(e); }
+    finally { if (loadingEl) loadingEl.hidden = true; }
+  };
+
+  try {
+    const s = await apiGet('/settings/master-sub');
+    if (!$('.sv-map-card', content())) return;
+    if (input) input.value = s.link || '';
+    if (s.link) { if (refreshBtn) refreshBtn.hidden = false; await doScan(false); }
+    else if (emptyEl) emptyEl.hidden = false;
+  } catch (e) { /* بی‌اهمیت — کاربر می‌تواند دستی لینک بدهد */ }
+
+  if (scanBtn) scanBtn.addEventListener('click', async () => {
+    const link = (input.value || '').trim();
+    if (!link) { toast('لینک ساب را وارد کن', true); return; }
+    scanBtn.disabled = true;
+    try {
+      await apiPost('/settings/master-sub', { link });
+      await doScan(true);
+      toast('نقشه به‌روزرسانی شد.');
+    } catch (e) { handleErr(e); }
+    finally { scanBtn.disabled = false; }
+  });
+
+  if (refreshBtn) refreshBtn.addEventListener('click', () => doScan(true));
 }
 
 /* ============================================================ orders === */
