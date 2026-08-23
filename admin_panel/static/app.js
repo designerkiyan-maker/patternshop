@@ -1442,11 +1442,15 @@ async function renderDashboardFlat(s, sys) {
 // یک پیاده‌سازی، هم‌رنگ با هر پنج تم.
 
 // نسخه‌ی واقعی نقشه (خطوط ساحلی دقیق Natural Earth) به‌صورت lazy از CDN
-// بارگذاری می‌شود — چون خودِ پنل روی سرور واقعی با اینترنت اجرا می‌شود
-// (برخلاف محیط توسعه). تا وقتی لود نشده، همان چندضلعی‌های تقریبی/گرید
-// دستی بالا را نشان می‌دهیم؛ به‌محض آماده‌شدن، جای‌گزین دقیق می‌شود.
+// بارگذاری می‌شود. برای مقاومت در برابر اینترنت کند/فیلترشده: چند mirror
+// به‌ترتیب امتحان می‌شوند، timeout بالاتر است، و نتیجه‌ی موفق در
+// localStorage کش می‌شود تا در بازدیدهای بعدی اصلاً نیازی به دانلود مجدد
+// نباشد. تا وقتی لود نشده، فقط گرید ساده (بدون چندضلعیِ تقریبیِ ناهنجار)
+// نشان داده می‌شود.
+const SV_MAP_CACHE_KEY = 'sv_map_real_v1';
 let SV_REAL = null;
 let SV_REAL_PROMISE = null;
+
 function svLoadScript(src) {
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
@@ -1456,37 +1460,79 @@ function svLoadScript(src) {
     document.head.appendChild(s);
   });
 }
+
+function svTimeout(p, ms) {
+  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+}
+
+async function svLoadFromMirrors(urls, isScript) {
+  let lastErr;
+  for (const url of urls) {
+    try {
+      if (isScript) {
+        await svTimeout(svLoadScript(url), 15000);
+        return true;
+      } else {
+        const res = await svTimeout(fetch(url), 15000);
+        if (!res.ok) throw new Error('bad status ' + res.status);
+        return await res.json();
+      }
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error('all mirrors failed');
+}
+
 async function svEnsureRealMap() {
   if (SV_REAL) return SV_REAL;
   if (SV_REAL_PROMISE) return SV_REAL_PROMISE;
   SV_REAL_PROMISE = (async () => {
+    // اول کش محلی را امتحان کن — سریع و بدون نیاز به اینترنت
     try {
-      const timeout = (p) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 7000))]);
-      if (!window.d3 || !window.d3.geoPath) await timeout(svLoadScript('https://cdn.jsdelivr.net/npm/d3-geo@3/dist/d3-geo.min.js'));
-      if (!window.topojson) await timeout(svLoadScript('https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js'));
-      const res = await timeout(fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json'));
-      const world = await res.json();
+      const cached = localStorage.getItem(SV_MAP_CACHE_KEY);
+      if (cached) {
+        SV_REAL = JSON.parse(cached);
+        return SV_REAL;
+      }
+    } catch (e) { /* کش خراب/در دسترس نیست — بی‌اهمیت */ }
+
+    try {
+      if (!window.d3 || !window.d3.geoPath) {
+        await svLoadFromMirrors([
+          'https://cdn.jsdelivr.net/npm/d3-geo@3/dist/d3-geo.min.js',
+          'https://unpkg.com/d3-geo@3/dist/d3-geo.min.js',
+          'https://cdnjs.cloudflare.com/ajax/libs/d3-geo/3.1.0/d3-geo.min.js',
+        ], true);
+      }
+      if (!window.topojson) {
+        await svLoadFromMirrors([
+          'https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js',
+          'https://unpkg.com/topojson-client@3/dist/topojson-client.min.js',
+        ], true);
+      }
+      const world = await svLoadFromMirrors([
+        'https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json',
+        'https://unpkg.com/world-atlas@2/land-110m.json',
+      ], false);
       const land = window.topojson.feature(world, world.objects.land);
       const projection = d3.geoEquirectangular().fitSize([1000, 500], { type: 'Sphere' });
       const path = d3.geoPath(projection);
       SV_REAL = {
-        projection,
         landPathD: path(land),
         graticuleD: path(d3.geoGraticule10()),
       };
+      try { localStorage.setItem(SV_MAP_CACHE_KEY, JSON.stringify(SV_REAL)); } catch (e) { /* بی‌اهمیت */ }
       return SV_REAL;
     } catch (e) {
-      return null; // بی‌اهمیت — همان نسخه‌ی تقریبی/آفلاین باقی می‌ماند
+      return null; // اتصال ناموفق بود — همان نمای گرید ساده باقی می‌ماند
     }
   })();
   return SV_REAL_PROMISE;
 }
 
+// معادل خطیِ d3.geoEquirectangular().fitSize([1000, 500], {type:'Sphere'})
+// است، پس چه نقشه‌ی دقیق لود شده باشد چه نه، پین‌ها دقیقاً روی همان
+// تصویربرداری خطوط ساحلی می‌افتند.
 function svProject(lat, lon) {
-  if (SV_REAL && SV_REAL.projection) {
-    const p = SV_REAL.projection([Number(lon), Number(lat)]);
-    if (p) return p;
-  }
   const x = (Number(lon) + 180) / 360 * 1000;
   const y = (90 - Number(lat)) / 180 * 500;
   return [x, y];
@@ -1499,28 +1545,11 @@ function svMapGraticule() {
   return out;
 }
 
-// خطوط ساده‌شده‌ی سواحل قاره‌ها (چند ده نقطه lon/lat تقریبی، نه داده‌ی دقیق
-// کارتوگرافیک) که با همان svProject روی نقشه پروجکت می‌شوند — فقط برای
-// اینکه پس‌زمینه واقعاً «شبیه نقشه‌ی جهان» باشد، نه یک گرید خالی.
-const SV_MAP_LAND = [
-  [[-165, 68], [-140, 70], [-95, 73], [-70, 60], [-52, 47], [-65, 45], [-75, 35], [-80, 25], [-97, 26], [-90, 20], [-84, 9], [-92, 15], [-105, 20], [-115, 30], [-124, 40], [-124, 49], [-130, 55], [-140, 60], [-165, 60]],
-  [[-45, 60], [-20, 70], [-25, 83], [-55, 82], [-73, 78], [-65, 65], [-45, 60]],
-  [[-77, 8], [-60, 10], [-51, 0], [-35, -5], [-40, -20], [-48, -25], [-58, -35], [-65, -55], [-72, -52], [-70, -30], [-70, -18], [-80, -5]],
-  [[-17, 15], [-10, 5], [9, 4], [9, -5], [12, -18], [18, -34], [32, -28], [40, -15], [43, -3], [51, 10], [43, 12], [37, 15], [33, 31], [10, 37], [-6, 35], [-17, 21]],
-  [[-9, 43], [-5, 36], [15, 37], [23, 35], [28, 41], [40, 45], [30, 46], [30, 60], [25, 70], [5, 62], [5, 51], [-5, 50]],
-  [[28, 41], [35, 45], [48, 42], [60, 42], [70, 40], [80, 50], [110, 52], [135, 55], [145, 60], [140, 45], [130, 35], [122, 31], [110, 20], [100, 10], [95, 15], [98, 25], [89, 22], [80, 8], [72, 21], [68, 24], [60, 25], [48, 30], [35, 32]],
-  [[95, 5], [105, -3], [115, -8], [125, -3], [135, -5], [130, 2], [118, 4], [105, 2]],
-  [[130, 33], [140, 36], [142, 40], [141, 45], [132, 34]],
-  [[-8, 51], [-2, 50], [1, 52], [-3, 58], [-6, 55], [-10, 53]],
-  [[43, -25], [47, -18], [50, -15], [47, -25]],
-  [[113, -22], [122, -14], [136, -12], [145, -16], [153, -27], [150, -37], [140, -38], [131, -32], [115, -34]],
-  [[166, -46], [174, -41], [178, -38], [172, -34]],
-];
+// تا وقتی نقشه‌ی دقیق (از CDN یا کش) لود نشده، بک‌گراند فقط همان گرید
+// عرض/طول جغرافیایی (svMapGraticule) است — بدون هیچ چندضلعی تقریبی؛ به
+// محض آماده‌شدن svEnsureRealMap، خطوط ساحلی واقعی جای‌گزین می‌شوند.
 function svMapLandPaths() {
-  return SV_MAP_LAND.map(poly => {
-    const pts = poly.map(([lon, lat]) => svProject(lat, lon).map(n => n.toFixed(1)).join(',')).join(' ');
-    return `<polygon points="${pts}" class="sv-map-land-poly"></polygon>`;
-  }).join('');
+  return '';
 }
 
 function svFlagEmoji(cc) {
@@ -1569,7 +1598,11 @@ function serverMapCardHtml() {
 function svTooltipHtml(s) {
   const protoBadges = (s.protocols || []).map(p => `<span class="chip">${esc(p.name)} × ${fmt(p.count)}</span>`).join(' ');
   const ipLine = s.ip ? esc(s.ip) + (s.ip_count > 1 ? ` + ${fmt(s.ip_count - 1)} مورد دیگر` : '') : 'نامشخص';
-  const srcNote = s.source === 'label' ? '🏷️ بر اساس نام کانفیگ (سرور پشت CDN است)' : '📡 بر اساس موقعیت واقعی IP';
+  const srcNote = s.source === 'label+geoip'
+    ? '🏷️📡 نام کانفیگ + موقعیت دقیق IP (هر دو هم‌راستا)'
+    : s.source === 'label'
+      ? '🏷️ بر اساس نام کانفیگ (سرور پشت CDN است، مختصات تقریبی مرکز کشور)'
+      : '📡 بر اساس موقعیت واقعی IP';
   return `
     <div class="sv-tt-head">${svFlagEmoji(s.country_code)} <b>${esc(s.city || s.country || '—')}</b><span class="sv-tt-country">${esc(s.country || '')}</span></div>
     <div class="sv-tt-ip mono">${ipLine}</div>
