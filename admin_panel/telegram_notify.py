@@ -25,6 +25,46 @@ async def send_message(bot_token: str, chat_id: int, text: str) -> bool:
         return False
 
 
+_RECEIPT_CONTENT_TYPES = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+    "webp": "image/webp", "gif": "image/gif", "pdf": "application/pdf",
+}
+
+
+async def fetch_telegram_file(bot_token: str, file_id: str):
+    """دریافت بایت‌های یک فایل تلگرامی (رسید پرداخت کارت‌به‌کارت) با file_id، برای
+    نمایش داخل پنل وب مستقل (که خودش نمونه‌ی Bot در اختیار ندارد).
+    خروجی: تاپل (bytes, content_type) یا None در صورت هر خطایی."""
+    if not bot_token or not file_id:
+        return None
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://api.telegram.org/bot{bot_token}/getFile",
+                params={"file_id": file_id},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                data = await resp.json()
+            if not data.get("ok"):
+                return None
+            file_path = data["result"]["file_path"]
+
+            async with session.get(
+                f"https://api.telegram.org/file/bot{bot_token}/{file_path}",
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                content = await resp.read()
+
+        ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ""
+        content_type = _RECEIPT_CONTENT_TYPES.get(ext, "application/octet-stream")
+        return content, content_type
+    except Exception:
+        logger.exception("دریافت فایل رسید از تلگرام ناموفق بود (file_id=%s)", file_id)
+        return None
+
+
 async def send_document(bot_token: str, chat_id: int, file_path: str, caption: str = "") -> bool:
     """ارسال فایل (مثلاً بکاپ دیتابیس) به یک ادمین تلگرامی، بدون وابستگی به aiogram
     (پنل وب یک نمونه‌ی Bot در دسترس ندارد، پس مستقیم با Bot API خام کار می‌کند)."""

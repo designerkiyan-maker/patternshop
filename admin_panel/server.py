@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET
 from database import Database, WEB_ADMIN_PERMISSIONS, MENU_BUTTON_META
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
-from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document
+from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document, fetch_telegram_file
 from reseller_auto_provision import provision_auto_config, ProvisionError
 from stock_alerts import check_and_notify_low_stock
 from panel_providers import get_provider, PanelError, PANEL_TYPE_LABELS
@@ -286,6 +286,18 @@ def api_orders(status: str = "pending", admin=Depends(get_current_admin)):
     return out
 
 
+@app.get("/api/orders/{order_id}/receipt")
+async def api_order_receipt(order_id: int, admin=Depends(get_current_admin)):
+    order = db.get_order(order_id)
+    if not order or not order["receipt_file_id"]:
+        raise HTTPException(404, "رسیدی برای این سفارش ثبت نشده است.")
+    result = await fetch_telegram_file(BOT_TOKEN, order["receipt_file_id"])
+    if not result:
+        raise HTTPException(502, "دریافت رسید از تلگرام ناموفق بود.")
+    content, content_type = result
+    return Response(content=content, media_type=content_type)
+
+
 @app.post("/api/orders/{order_id}/approve")
 async def api_approve_order(order_id: int, admin=Depends(require_permission("orders"))):
     order = db.get_order(order_id)
@@ -356,6 +368,18 @@ def api_topups(status: str = "pending", admin=Depends(get_current_admin)):
         t["username"] = user["username"] if user else None
         out.append(t)
     return out
+
+
+@app.get("/api/topups/{topup_id}/receipt")
+async def api_topup_receipt(topup_id: int, admin=Depends(get_current_admin)):
+    topup = db.get_topup(topup_id)
+    if not topup or not topup["receipt_file_id"]:
+        raise HTTPException(404, "رسیدی برای این شارژ ثبت نشده است.")
+    result = await fetch_telegram_file(BOT_TOKEN, topup["receipt_file_id"])
+    if not result:
+        raise HTTPException(502, "دریافت رسید از تلگرام ناموفق بود.")
+    content, content_type = result
+    return Response(content=content, media_type=content_type)
 
 
 @app.post("/api/topups/{topup_id}/approve")
