@@ -320,6 +320,7 @@ def api_orders(auth=Depends(get_verified_user)):
         cfg = db.get_config_by_id(o["config_id"]) if o["config_id"] else None
         configs = db.get_order_configs(o["id"]) if o["status"] == "approved" else []
         links = [c["link"] for c in configs] if configs else ([cfg["link"]] if cfg else [])
+        config_ids = [c["id"] for c in configs] if configs else ([cfg["id"]] if cfg else [])
         result.append({
             "id": o["id"],
             "product_name": product["name"] if product else "نامشخص",
@@ -329,9 +330,23 @@ def api_orders(auth=Depends(get_verified_user)):
             "expires_at": cfg["expires_at"] if cfg else None,
             "link": cfg["link"] if cfg else None,
             "links": links,
+            "config_ids": config_ids,
             "is_custom_config": False,
         })
     return result
+
+
+@app.delete("/api/orders/configs/{config_id}")
+def api_delete_order_config(config_id: int, auth=Depends(get_verified_user)):
+    """حذف کامل و برگشت‌ناپذیر یک کانفیگ محصول متعلق به خود کاربر. اگر با این
+    حذف، سفارش دیگر هیچ کانفیگی نداشته باشد، آن سفارش هم از لیست کاربر مخفی
+    می‌شود (این حذف در بات اصلی هم همزمان اعمال می‌شود چون هر دو از یک
+    دیتابیس می‌خوانند)."""
+    tg_id, db, _ = auth
+    removed = db.delete_owned_config(config_id, tg_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="کانفیگ یافت نشد یا متعلق به شما نیست.")
+    return {"status": "ok"}
 
 
 @app.get("/api/custom-configs")
@@ -352,6 +367,31 @@ def api_custom_configs(auth=Depends(get_verified_user)):
         for c in configs
         if c["source"] != "test"
     ]
+
+
+@app.delete("/api/custom-configs/{custom_config_id}")
+async def api_delete_custom_config(custom_config_id: int, auth=Depends(get_verified_user)):
+    """حذف کامل و برگشت‌ناپذیر یک کانفیگ شخصی متعلق به خود کاربر؛ قبل از حذف از
+    دیتابیس، تلاش می‌شود کاربر از روی پنل VPN هم حذف شود (best-effort - در
+    صورت خطا در ارتباط با پنل، رکورد همچنان از لیست کاربر حذف می‌شود)."""
+    tg_id, db, _ = auth
+    rows = db.get_custom_configs_for_user(tg_id)
+    cc_row = next((c for c in rows if c["id"] == custom_config_id), None)
+    if not cc_row:
+        raise HTTPException(status_code=404, detail="کانفیگ یافت نشد یا متعلق به شما نیست.")
+    if cc_row["panel_server_id"]:
+        server = db.get_panel_server(cc_row["panel_server_id"])
+        if server:
+            try:
+                provider = get_provider(server)
+                await provider.delete_user(cc_row["username"])
+            except Exception:
+                logging.getLogger("miniapp").exception(
+                    "حذف کاربر «%s» از پنل سرور #%s ناموفق بود؛ در هر صورت از لیست کاربر حذف می‌شود.",
+                    cc_row["username"], cc_row["panel_server_id"],
+                )
+    db.delete_owned_custom_config(custom_config_id, tg_id)
+    return {"status": "ok"}
 
 
 @app.get("/api/catalog")
