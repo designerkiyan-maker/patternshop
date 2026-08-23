@@ -584,6 +584,17 @@ class Database:
                     last_login TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_web_admins_username ON web_admins(username);
+
+                CREATE TABLE IF NOT EXISTS web_push_subscriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    admin_id INTEGER NOT NULL,
+                    endpoint TEXT UNIQUE NOT NULL,
+                    p256dh TEXT NOT NULL,
+                    auth TEXT NOT NULL,
+                    user_agent TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_push_subs_admin ON web_push_subscriptions(admin_id);
                 """
             )
 
@@ -1182,6 +1193,61 @@ class Database:
 
     def is_full_web_admin(self, role: str) -> bool:
         return role in ("owner", "admin", "mid")
+
+    # ---------------------------------------------------- web push subs --
+
+    def save_push_subscription(self, admin_id: int, endpoint: str, p256dh: str, auth: str, user_agent: str = None):
+        """ذخیره یا به‌روزرسانی subscription پوش مرورگر یک ادمین (هر endpoint یکتاست؛
+        اگر همان مرورگر قبلاً subscribe کرده بود، رکورد قبلی به‌روز می‌شود)."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO web_push_subscriptions (admin_id, endpoint, p256dh, auth, user_agent, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(endpoint) DO UPDATE SET "
+                "admin_id=excluded.admin_id, p256dh=excluded.p256dh, auth=excluded.auth, user_agent=excluded.user_agent",
+                (admin_id, endpoint, p256dh, auth, user_agent, datetime.utcnow().isoformat()),
+            )
+
+    def delete_push_subscription_by_endpoint(self, endpoint: str):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM web_push_subscriptions WHERE endpoint=?", (endpoint,))
+
+    def delete_push_subscriptions_by_endpoints(self, endpoints):
+        endpoints = list(endpoints or [])
+        if not endpoints:
+            return
+        with self._get_conn() as conn:
+            conn.executemany("DELETE FROM web_push_subscriptions WHERE endpoint=?", [(e,) for e in endpoints])
+
+    def list_push_subscriptions_for_admin(self, admin_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM web_push_subscriptions WHERE admin_id=? ORDER BY id DESC", (admin_id,)
+            ).fetchall()
+
+    def list_push_subscriptions_for_permission(self, permission: str):
+        """همه‌ی subscription های مرورگری ادمین‌های فعالی که مالک هستند یا مجوز
+        داده‌شده را دارند؛ برای فرستادن پوش سراسری (سفارش/شارژ/تیکت جدید) استفاده می‌شود."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT s.*, a.role AS admin_role, a.permissions AS admin_permissions, a.is_active AS admin_active "
+                "FROM web_push_subscriptions s JOIN web_admins a ON a.id = s.admin_id"
+            ).fetchall()
+        out = []
+        for r in rows:
+            if not r["admin_active"]:
+                continue
+            if r["admin_role"] == "owner":
+                out.append(r)
+                continue
+            try:
+                perms = json.loads(r["admin_permissions"] or "[]")
+            except (ValueError, TypeError):
+                perms = []
+            if permission in perms:
+                out.append(r)
+        return out
+
 
     def is_senior_web_admin(self, role: str) -> bool:
         return role in ("owner", "admin")

@@ -78,3 +78,11 @@ ADMIN_PANEL_SECRET = os.getenv("ADMIN_PANEL_SECRET", "")
 if not ADMIN_PANEL_SECRET:
     import secrets as _secrets
     ADMIN_PANEL_SECRET = _secrets.token_hex(32)
+
+# کلیدهای VAPID برای اعلان‌های Push پنل وب (کار می‌کنند حتی وقتی مرورگر ادمین
+# کاملاً بسته باشد، چون از سرویس Push خودِ مرورگر عبور می‌کنند). با دستور زیر
+# یک‌بار بساز و داخل .env بگذار: python -m admin_panel.generate_vapid_keys
+# اگر خالی بمانند، فقط قابلیت اعلان Push غیرفعال می‌ماند؛ بقیه‌ی پنل وب طبق معمول کار می‌کند.
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "")
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "")
+VAPID_CLAIM_EMAIL = os.getenv("VAPID_CLAIM_EMAIL", "admin@example.com")
