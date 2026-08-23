@@ -869,6 +869,7 @@ async function renderServices() {
     ]);
     const customCards = customConfigs.map((c) => ({
       id: `cc-${c.id}`,
+      custom_config_id: c.id,
       product_name: `🛠 کانفیگ شخصی «${c.username}» (${c.volume_gb} گیگ / ${c.duration_days} روز)`,
       quantity: 1,
       status: "approved",
@@ -900,7 +901,7 @@ async function renderServices() {
       <div id="services-list">
         ${filtered.length === 0
           ? `<div class="state-msg"><span class="ic">◌</span>سرویسی یافت نشد.</div>`
-          : `<div class="card">${filtered.map((o) => serviceStatusKey(o) === "active" ? orderCard(o) : serviceInactiveRow(o)).join("")}</div>`}
+          : `<div class="card">${filtered.map((o) => serviceStatusKey(o) === "active" ? orderCard(o, { deletable: true }) : serviceInactiveRow(o)).join("")}</div>`}
       </div>
     `;
 
@@ -917,9 +918,33 @@ async function renderServices() {
       links.forEach((link, idx) => loadSubInfo(`${o.id}-${idx}`, link));
     });
     wireAddToAppButtons(content);
+    wireDeleteConfigButtons(content, renderServices);
   } catch (e) {
     content.innerHTML = errorState(e.message);
   }
+}
+
+// حذف کامل و برگشت‌ناپذیر یک کانفیگ (محصول یا شخصی) توسط خود کاربر؛ همان
+// عملیاتی که در بات اصلی هم از طریق منوی «سفارش‌های من» در دسترس است - هر دو
+// از یک دیتابیس حذف می‌کنند، پس نتیجه همه‌جا یکسان و همزمان اعمال می‌شود.
+function wireDeleteConfigButtons(root, onDeleted) {
+  root.querySelectorAll("[data-del-kind]").forEach((el) => {
+    el.onclick = async () => {
+      if (!confirm("⚠️ این عملیات غیرقابل بازگشت است.\nاطلاعات و لینک این کانفیگ برای همیشه از سیستم پاک می‌شود. ادامه می‌دهید؟")) return;
+      const kind = el.dataset.delKind;
+      const id = el.dataset.delId;
+      const path = kind === "custom" ? `/api/custom-configs/${id}` : `/api/orders/configs/${id}`;
+      el.disabled = true;
+      try {
+        await api(path, { method: "DELETE" });
+        if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+        if (onDeleted) onDeleted();
+      } catch (e2) {
+        el.disabled = false;
+        notify(e2.message);
+      }
+    };
+  });
 }
 
 function serviceInactiveRow(o) {
@@ -937,22 +962,28 @@ function serviceInactiveRow(o) {
   `;
 }
 
-function orderCard(o) {
+function orderCard(o, opts = {}) {
+  const deletable = !!opts.deletable;
   const exp = o.expires_at ? toJalaliStr(o.expires_at) : "نامحدود";
   const links = (o.links && o.links.length) ? o.links : (o.link ? [o.link] : []);
   return `
     <div class="order-block">
       <div class="stat-row"><span>${o.product_name}${o.quantity > 1 ? ` × ${o.quantity}` : ""}</span><span class="badge approved">فعال تا ${exp}</span></div>
-      ${links.map((link, idx) => `
+      ${links.map((link, idx) => {
+        const delKind = o.is_custom_config ? "custom" : "order";
+        const delId = o.is_custom_config ? o.custom_config_id : (o.config_ids && o.config_ids[idx]);
+        return `
       ${links.length > 1 ? `<div class="hint-text" style="margin:8px 0 4px">🔢 کانفیگ ${idx + 1} از ${links.length}</div>` : ""}
       <div class="sub-info" id="sub-info-${o.id}-${idx}"><div class="sub-info-loading">در حال دریافت اطلاعات مصرف...</div></div>
       <div class="link-box">${link}</div>
       <div class="qr-row">
         <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(link)}" width="96" height="96" alt="QR" />
         <button class="btn small outline" onclick="navigator.clipboard.writeText('${link}');tg.HapticFeedback.notificationOccurred('success')">📋 کپی لینک</button>
+        ${deletable && delId ? `<button class="btn small outline danger" data-del-kind="${delKind}" data-del-id="${delId}">🗑 حذف کامل</button>` : ""}
       </div>
       ${renderAddToAppBlock(`${o.id}-${idx}`, link, o.product_name)}
-      `).join("")}
+      `;
+      }).join("")}
     </div>
   `;
 }
