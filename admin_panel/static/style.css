@@ -1192,7 +1192,7 @@ html[data-theme="cyberpunk"] .live-dot{ background:var(--primary); box-shadow:0 
 .sv-map-graticule-path{ fill:none; stroke:var(--border); stroke-width:1; opacity:.5; vector-effect:non-scaling-stroke; }
 .sv-map-land-poly{
   fill:var(--primary); fill-opacity:.16; stroke:var(--primary); stroke-opacity:.5; stroke-width:1.2;
-  stroke-linejoin:round; vector-effect:non-scaling-stroke;
+  stroke-linejoin:round; vector-effect:non-scaling-stroke; fill-rule:evenodd;
 }
 
 .sv-map-pin{ cursor:pointer; color:var(--text-dim); }
@@ -1218,6 +1218,7 @@ html[data-theme="cyberpunk"] .live-dot{ background:var(--primary); box-shadow:0 
 .sv-tt-head{ display:flex; align-items:center; gap:6px; margin-bottom:6px; font-size:13px; }
 .sv-tt-head b{ color:var(--text); }
 .sv-tt-country{ color:var(--text-muted); font-size:11px; }
+.sv-tt-name{ color:var(--text); font-size:12px; margin-bottom:4px; word-break:break-word; }
 .sv-tt-ip{ color:var(--text-muted); margin-bottom:4px; font-size:11.5px; }
 .sv-tt-row{ margin-bottom:6px; color:var(--text-muted); }
 .sv-tt-status-online{ color:var(--emerald); }

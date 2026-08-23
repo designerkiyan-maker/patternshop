@@ -1441,52 +1441,22 @@ async function renderDashboardFlat(s, sys) {
 // رنگ تم فعلی (--primary/--emerald/--rose/...) نمایش داده می‌شود؛ یعنی
 // یک پیاده‌سازی، هم‌رنگ با هر پنج تم.
 
-// نسخه‌ی واقعی نقشه (خطوط ساحلی دقیق Natural Earth) به‌صورت lazy از CDN
-// بارگذاری می‌شود. برای مقاومت در برابر اینترنت کند/فیلترشده: چند mirror
-// به‌ترتیب امتحان می‌شوند، timeout بالاتر است، و نتیجه‌ی موفق در
-// localStorage کش می‌شود تا در بازدیدهای بعدی اصلاً نیازی به دانلود مجدد
-// نباشد. تا وقتی لود نشده، فقط گرید ساده (بدون چندضلعیِ تقریبیِ ناهنجار)
-// نشان داده می‌شود.
-const SV_MAP_CACHE_KEY = 'sv_map_real_v1';
+// نسخه‌ی واقعی نقشه (خطوط ساحلی) دیگر مستقیماً از CDNهای خارجی گرفته
+// نمی‌شود — چون اگر مرورگر ادمین به آن دامنه‌ها دسترسی نداشته باشد (فیلتر/
+// قطعی)، دانلود ساکت fail می‌شد و فقط گرید خالی می‌ماند. حالا خودِ سرور
+// پنل یک‌بار این کار را می‌کند (و روی دیسک cache می‌کند) و ما فقط از
+// endpoint خودمان (هم‌مبدأ، بدون نیاز به هیچ CDN) می‌خوانیم. نتیجه هم در
+// localStorage کش می‌شود تا در بازدیدهای بعدی اصلاً نیازی به فراخوانی
+// مجدد نباشد.
+const SV_MAP_CACHE_KEY = 'sv_map_real_v2';
 let SV_REAL = null;
 let SV_REAL_PROMISE = null;
-
-function svLoadScript(src) {
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = resolve;
-    s.onerror = () => reject(new Error('load failed: ' + src));
-    document.head.appendChild(s);
-  });
-}
-
-function svTimeout(p, ms) {
-  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
-}
-
-async function svLoadFromMirrors(urls, isScript) {
-  let lastErr;
-  for (const url of urls) {
-    try {
-      if (isScript) {
-        await svTimeout(svLoadScript(url), 15000);
-        return true;
-      } else {
-        const res = await svTimeout(fetch(url), 15000);
-        if (!res.ok) throw new Error('bad status ' + res.status);
-        return await res.json();
-      }
-    } catch (e) { lastErr = e; }
-  }
-  throw lastErr || new Error('all mirrors failed');
-}
 
 async function svEnsureRealMap() {
   if (SV_REAL) return SV_REAL;
   if (SV_REAL_PROMISE) return SV_REAL_PROMISE;
   SV_REAL_PROMISE = (async () => {
-    // اول کش محلی را امتحان کن — سریع و بدون نیاز به اینترنت
+    // اول کش محلی را امتحان کن — سریع و بدون نیاز به درخواست جدید
     try {
       const cached = localStorage.getItem(SV_MAP_CACHE_KEY);
       if (cached) {
@@ -1496,34 +1466,13 @@ async function svEnsureRealMap() {
     } catch (e) { /* کش خراب/در دسترس نیست — بی‌اهمیت */ }
 
     try {
-      if (!window.d3 || !window.d3.geoPath) {
-        await svLoadFromMirrors([
-          'https://cdn.jsdelivr.net/npm/d3-geo@3/dist/d3-geo.min.js',
-          'https://unpkg.com/d3-geo@3/dist/d3-geo.min.js',
-          'https://cdnjs.cloudflare.com/ajax/libs/d3-geo/3.1.0/d3-geo.min.js',
-        ], true);
-      }
-      if (!window.topojson) {
-        await svLoadFromMirrors([
-          'https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js',
-          'https://unpkg.com/topojson-client@3/dist/topojson-client.min.js',
-        ], true);
-      }
-      const world = await svLoadFromMirrors([
-        'https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json',
-        'https://unpkg.com/world-atlas@2/land-110m.json',
-      ], false);
-      const land = window.topojson.feature(world, world.objects.land);
-      const projection = d3.geoEquirectangular().fitSize([1000, 500], { type: 'Sphere' });
-      const path = d3.geoPath(projection);
-      SV_REAL = {
-        landPathD: path(land),
-        graticuleD: path(d3.geoGraticule10()),
-      };
+      const data = await apiGet('/dashboard/world-map');
+      if (!data || !data.ok || !data.land_path) return null;
+      SV_REAL = { landPathD: data.land_path };
       try { localStorage.setItem(SV_MAP_CACHE_KEY, JSON.stringify(SV_REAL)); } catch (e) { /* بی‌اهمیت */ }
       return SV_REAL;
     } catch (e) {
-      return null; // اتصال ناموفق بود — همان نمای گرید ساده باقی می‌ماند
+      return null; // اتصال به پنل خودمان هم ناموفق بود — همان گرید ساده باقی می‌ماند
     }
   })();
   return SV_REAL_PROMISE;
@@ -1596,8 +1545,8 @@ function serverMapCardHtml() {
 }
 
 function svTooltipHtml(s) {
-  const protoBadges = (s.protocols || []).map(p => `<span class="chip">${esc(p.name)} × ${fmt(p.count)}</span>`).join(' ');
-  const ipLine = s.ip ? esc(s.ip) + (s.ip_count > 1 ? ` + ${fmt(s.ip_count - 1)} مورد دیگر` : '') : 'نامشخص';
+  const protoBadges = (s.protocols || []).map(p => `<span class="chip">${esc(p.name)}</span>`).join(' ');
+  const ipLine = s.ip || 'نامشخص';
   const srcNote = s.source === 'label+geoip'
     ? '🏷️📡 نام کانفیگ + موقعیت دقیق IP (هر دو هم‌راستا)'
     : s.source === 'label'
@@ -1605,8 +1554,9 @@ function svTooltipHtml(s) {
       : '📡 بر اساس موقعیت واقعی IP';
   return `
     <div class="sv-tt-head">${svFlagEmoji(s.country_code)} <b>${esc(s.city || s.country || '—')}</b><span class="sv-tt-country">${esc(s.country || '')}</span></div>
-    <div class="sv-tt-ip mono">${ipLine}</div>
-    <div class="sv-tt-row">وضعیت: <b class="sv-tt-status-${s.status}">${SV_STATUS_LABEL[s.status] || 'نامشخص'}</b> · ${fmt(s.configs_count)} کانفیگ</div>
+    <div class="sv-tt-name">${esc(s.remark || '—')}</div>
+    <div class="sv-tt-ip mono">${esc(ipLine)}</div>
+    <div class="sv-tt-row">وضعیت: <b class="sv-tt-status-${s.status}">${SV_STATUS_LABEL[s.status] || 'نامشخص'}</b></div>
     <div class="sv-tt-protocols">${protoBadges}</div>
     <div class="sv-tt-source">${srcNote}</div>`;
 }
@@ -1632,18 +1582,43 @@ function svHideTooltip() {
   if (tip) tip.hidden = true;
 }
 
+// چون هر کانفیگ حالا پین جدای خودش را دارد، ممکن است چند کانفیگ دقیقاً
+// روی یک سرور (همان lat/lon) باشند — بدون این تابع دقیقاً روی هم می‌افتند
+// و فقط بالایی‌شان قابل کلیک می‌ماند. این تابع پین‌های هم‌مکان را به‌صورت
+// یک دایره‌ی کوچک دور نقطه‌ی اصلی پخش می‌کند تا همه جدا و کلیک‌پذیر بمانند.
+function svSpreadOverlapping(points) {
+  const buckets = new Map();
+  points.forEach((p, i) => {
+    const key = p.x.toFixed(1) + ',' + p.y.toFixed(1);
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(i);
+  });
+  const out = points.map(p => ({ x: p.x, y: p.y }));
+  buckets.forEach(idxs => {
+    if (idxs.length < 2) return;
+    const spread = Math.min(3 + idxs.length * 0.6, 9);
+    idxs.forEach((idx, j) => {
+      const angle = (2 * Math.PI * j) / idxs.length;
+      out[idx].x += Math.cos(angle) * spread;
+      out[idx].y += Math.sin(angle) * spread;
+    });
+  });
+  return out;
+}
+
 function svRenderMarkers(servers) {
   const root = content();
   const g = $('#sv-map-markers', root);
   if (!g) return;
-  const maxCount = Math.max(...servers.map(s => s.configs_count || 1), 1);
+  const positions = servers.map(s => (s.lat != null && s.lon != null) ? (([x, y]) => ({ x, y }))(svProject(s.lat, s.lon)) : null);
+  const spread = svSpreadOverlapping(positions.map(p => p || { x: -9999, y: -9999 }));
+  const r = 6; // چون هر پین حالا دقیقاً یک کانفیگ است، اندازه‌ی ثابت (بدون وزن‌دهی به تعداد) واضح‌تر است
   g.innerHTML = servers.map((s, i) => {
-    if (s.lat == null || s.lon == null) return '';
-    const [x, y] = svProject(s.lat, s.lon);
-    const r = 4.5 + Math.min(Math.sqrt((s.configs_count || 1) / maxCount) * 9, 9);
+    if (!positions[i]) return '';
+    const { x, y } = spread[i];
     const st = SV_STATUS_LABEL[s.status] ? s.status : 'unknown';
     return `<g class="sv-map-pin ${st}" data-idx="${i}" tabindex="0">
-      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(r + 7).toFixed(1)}" class="sv-map-pulse"></circle>
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(r + 6).toFixed(1)}" class="sv-map-pulse"></circle>
       <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" class="sv-map-dot"></circle>
     </g>`;
   }).join('');
@@ -1663,13 +1638,13 @@ function svStatsHtml(data) {
 }
 
 function svServerListHtml(servers) {
-  return servers.slice(0, 40).map((s, i) => `
+  return servers.map((s, i) => `
     <div class="sv-map-list-row" data-idx="${i}">
       <i class="dot ${SV_STATUS_LABEL[s.status] ? s.status : 'unknown'}"></i>
       <span class="sv-ml-flag">${svFlagEmoji(s.country_code)}</span>
-      <span class="sv-ml-name">${esc(s.city || s.country || '—')}<small>${esc(s.city ? s.country : (s.ip_count > 1 ? fmt(s.ip_count) + ' سرور' : ''))}</small></span>
+      <span class="sv-ml-name">${esc(s.remark || s.city || s.country || '—')}<small>${esc(s.country || '')}</small></span>
       <span class="sv-ml-ip mono">${esc(s.ip || '—')}</span>
-      <span class="sv-ml-count mono">${fmt(s.configs_count)} کانفیگ</span>
+      <span class="sv-ml-count mono">${esc((s.protocols && s.protocols[0] && s.protocols[0].name) || '')}</span>
     </div>`).join('');
 }
 
@@ -1699,8 +1674,6 @@ async function mountServerMap() {
     if (!$('.sv-map-card', r)) return; // کاربر جابه‌جا شده
     const landG = $('#sv-map-wrap .sv-map-land', r);
     if (landG) landG.innerHTML = `<path d="${real.landPathD}" class="sv-map-land-poly"></path>`;
-    const gridG = $('#sv-map-wrap .sv-map-grid', r);
-    if (gridG) gridG.innerHTML = `<path d="${real.graticuleD}" class="sv-map-graticule-path"></path>`;
     if (currentServers.length) svRenderMarkers(currentServers);
   });
 
