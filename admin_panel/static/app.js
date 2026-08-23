@@ -1377,13 +1377,6 @@ async function renderDashboardFlat(s, sys) {
 // رنگ تم فعلی (--primary/--emerald/--rose/...) نمایش داده می‌شود؛ یعنی
 // یک پیاده‌سازی، هم‌رنگ با هر پنج تم.
 
-// چند نقطه‌ی «بلاب» نرم و محو، صرفاً تزئینی برای حس نقشه‌ی جهان (نه مرز
-// دقیق کشورها) — روی گرید مختصاتی lon/lat پروجکت‌شده.
-const SV_MAP_BLOBS = [
-  [-100, 45, 90], [-60, -15, 70], [15, 50, 55],
-  [20, 3, 85], [90, 45, 140], [135, -25, 55],
-];
-
 function svProject(lat, lon) {
   const x = (Number(lon) + 180) / 360 * 1000;
   const y = (90 - Number(lat)) / 180 * 500;
@@ -1397,6 +1390,30 @@ function svMapGraticule() {
   return out;
 }
 
+// خطوط ساده‌شده‌ی سواحل قاره‌ها (چند ده نقطه lon/lat تقریبی، نه داده‌ی دقیق
+// کارتوگرافیک) که با همان svProject روی نقشه پروجکت می‌شوند — فقط برای
+// اینکه پس‌زمینه واقعاً «شبیه نقشه‌ی جهان» باشد، نه یک گرید خالی.
+const SV_MAP_LAND = [
+  [[-165, 68], [-140, 70], [-95, 73], [-70, 60], [-52, 47], [-65, 45], [-75, 35], [-80, 25], [-97, 26], [-90, 20], [-84, 9], [-92, 15], [-105, 20], [-115, 30], [-124, 40], [-124, 49], [-130, 55], [-140, 60], [-165, 60]],
+  [[-45, 60], [-20, 70], [-25, 83], [-55, 82], [-73, 78], [-65, 65], [-45, 60]],
+  [[-77, 8], [-60, 10], [-51, 0], [-35, -5], [-40, -20], [-48, -25], [-58, -35], [-65, -55], [-72, -52], [-70, -30], [-70, -18], [-80, -5]],
+  [[-17, 15], [-10, 5], [9, 4], [9, -5], [12, -18], [18, -34], [32, -28], [40, -15], [43, -3], [51, 10], [43, 12], [37, 15], [33, 31], [10, 37], [-6, 35], [-17, 21]],
+  [[-9, 43], [-5, 36], [15, 37], [23, 35], [28, 41], [40, 45], [30, 46], [30, 60], [25, 70], [5, 62], [5, 51], [-5, 50]],
+  [[28, 41], [35, 45], [48, 42], [60, 42], [70, 40], [80, 50], [110, 52], [135, 55], [145, 60], [140, 45], [130, 35], [122, 31], [110, 20], [100, 10], [95, 15], [98, 25], [89, 22], [80, 8], [72, 21], [68, 24], [60, 25], [48, 30], [35, 32]],
+  [[95, 5], [105, -3], [115, -8], [125, -3], [135, -5], [130, 2], [118, 4], [105, 2]],
+  [[130, 33], [140, 36], [142, 40], [141, 45], [132, 34]],
+  [[-8, 51], [-2, 50], [1, 52], [-3, 58], [-6, 55], [-10, 53]],
+  [[43, -25], [47, -18], [50, -15], [47, -25]],
+  [[113, -22], [122, -14], [136, -12], [145, -16], [153, -27], [150, -37], [140, -38], [131, -32], [115, -34]],
+  [[166, -46], [174, -41], [178, -38], [172, -34]],
+];
+function svMapLandPaths() {
+  return SV_MAP_LAND.map(poly => {
+    const pts = poly.map(([lon, lat]) => svProject(lat, lon).map(n => n.toFixed(1)).join(',')).join(' ');
+    return `<polygon points="${pts}" class="sv-map-land-poly"></polygon>`;
+  }).join('');
+}
+
 function svFlagEmoji(cc) {
   if (!cc || cc.length !== 2) return '🌐';
   try { return String.fromCodePoint(...[...cc.toUpperCase()].map(c => 127397 + c.charCodeAt(0))); }
@@ -1406,10 +1423,6 @@ function svFlagEmoji(cc) {
 const SV_STATUS_LABEL = { online: 'آنلاین', offline: 'آفلاین', unknown: 'نامشخص' };
 
 function serverMapCardHtml() {
-  const blobs = SV_MAP_BLOBS.map(([lon, lat, r]) => {
-    const [x, y] = svProject(lat, lon);
-    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="url(#sv-map-blob-g)"></circle>`;
-  }).join('');
   return `
   <div class="card sv-map-card">
     <div class="card-head sv-map-head">
@@ -1427,14 +1440,8 @@ function serverMapCardHtml() {
     <div class="sv-map-stats" id="sv-map-stats"></div>
     <div class="sv-map-wrap" id="sv-map-wrap">
       <svg id="sv-map-svg" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet">
-        <defs>
-          <radialGradient id="sv-map-blob-g" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stop-color="var(--primary)" stop-opacity=".5"/>
-            <stop offset="100%" stop-color="var(--primary)" stop-opacity="0"/>
-          </radialGradient>
-        </defs>
-        <g class="sv-map-blobs">${blobs}</g>
         <g class="sv-map-grid">${svMapGraticule()}</g>
+        <g class="sv-map-land">${svMapLandPaths()}</g>
         <g class="sv-map-markers" id="sv-map-markers"></g>
       </svg>
       <div class="sv-map-tooltip" id="sv-map-tooltip" hidden></div>
