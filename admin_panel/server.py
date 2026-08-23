@@ -13,6 +13,7 @@ import contextvars
 import hmac
 import logging
 import os
+import time
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -1571,10 +1572,30 @@ def serve_service_worker():
     return FileResponse(os.path.join(STATIC_DIR, "sw.js"), media_type="application/javascript")
 
 
+def _asset_version(filename: str) -> int:
+    try:
+        return int(os.path.getmtime(os.path.join(STATIC_DIR, filename)))
+    except OSError:
+        return int(time.time())
+
+
+def _bust_asset_cache(html: str) -> str:
+    # کش‌شکن خودکار: هر بار app.js یا style.css عوض شود mtime‌شان هم عوض
+    # می‌شود، پس مرورگر دیگر نسخه‌ی قدیمیِ کش‌شده را اجرا نمی‌کند — بدون
+    # نیاز به دستی زیاد کردن شماره‌ی ورژن در هر دیپلوی.
+    html = html.replace('src="/assets/app.js"', f'src="/assets/app.js?v={_asset_version("app.js")}"')
+    html = html.replace('href="/assets/style.css"', f'href="/assets/style.css?v={_asset_version("style.css")}"')
+    return html
+
+
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
     with open(os.path.join(STATIC_DIR, "index.html"), "r", encoding="utf-8") as f:
-        return f.read()
+        html = f.read()
+    # کش‌شکن خودکار: هر بار app.js عوض شود mtime آن هم عوض می‌شود، پس
+    # مرورگر دیگر نسخه‌ی قدیمیِ کش‌شده را اجرا نمی‌کند و مجبور به دانلود
+    # مجدد است — بدون نیاز به دستی زیاد کردن شماره‌ی ورژن در هر دیپلوی.
+    return _bust_asset_cache(html)
 
 
 @app.get("/setup", response_class=HTMLResponse)
@@ -1582,4 +1603,6 @@ def serve_setup_page():
     """همان SPA سرو می‌شود؛ خود فرانت مسیر /setup را تشخیص داده و فرم راه‌اندازی
     اولیه‌ی پنل نماینده را نشان می‌دهد."""
     with open(os.path.join(STATIC_DIR, "index.html"), "r", encoding="utf-8") as f:
-        return f.read()
+        html = f.read()
+    return _bust_asset_cache(html)
+
