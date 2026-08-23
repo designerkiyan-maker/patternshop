@@ -938,3 +938,198 @@ html[data-theme="glass"] .hero-orbit, html[data-theme="glass"] .hero-net{ displa
 .bru-res-track{ height:14px; border:2px solid #000; background:#fff; overflow:hidden; }
 .bru-res-fill{ display:block; height:100%; width:0; transition:width 1s cubic-bezier(.16,1,.3,1); }
 .bru-res-sub{ font-size:11px; font-weight:700; color:var(--text-muted); }
+
+/* ================================================== theme: cyberpunk === */
+html[data-theme="cyberpunk"]{
+  --bg: #050806;
+  --bg-2: #030504;
+  --surface: #0A1512;
+  --surface-2: #0F1E19;
+  --surface-hi: rgba(0,255,156,.06);
+  --border: rgba(0,255,156,.28);
+  --border-soft: rgba(0,255,156,.14);
+
+  --text: #D8FFEF;
+  --text-muted: #6FA890;
+  --text-dim: #3B5A4E;
+
+  --primary: #00FF9C;
+  --primary-ink: #04120C;
+  --cyan: #00E5FF;
+  --amber: #C6FF00;
+  --emerald: #00E58A;
+  --rose: #FF2E5B;
+  --violet: #FF2E9A;
+  --fuchsia: #FF2E9A;
+
+  --font-body: "Vazirmatn", -apple-system, Tahoma, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Vazirmatn", monospace;
+
+  --radius: 4px;
+  --radius-sm: 3px;
+  --radius-xs: 2px;
+
+  --shadow-card: 0 0 0 1px rgba(0,255,156,.06), 0 8px 24px rgba(0,0,0,.55);
+  --shadow-pop: 0 0 40px rgba(0,255,156,.15), 0 24px 60px rgba(0,0,0,.6);
+  --shadow-btn: 0 0 12px rgba(0,255,156,.25);
+
+  --focus-ring: 0 0 0 3px rgba(0,255,156,.35);
+}
+html[data-theme="cyberpunk"] body{
+  background:
+    repeating-linear-gradient(180deg, rgba(0,255,156,.035) 0px, rgba(0,255,156,.035) 1px, transparent 1px, transparent 3px),
+    radial-gradient(circle at 12% 8%, rgba(0,255,156,.10), transparent 42%),
+    radial-gradient(circle at 88% 14%, rgba(255,46,154,.10), transparent 40%),
+    linear-gradient(180deg, #060a08, var(--bg) 40%);
+}
+html[data-theme="cyberpunk"] .bg-blobs{
+  display:block; position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden;
+  background-image:
+    linear-gradient(rgba(0,255,156,.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,156,.05) 1px, transparent 1px);
+  background-size:34px 34px;
+  mask-image:radial-gradient(circle at 50% 20%, #000 0%, transparent 75%);
+}
+html[data-theme="cyberpunk"] .bg-blobs i{ display:none; }
+html[data-theme="cyberpunk"] ::selection{ background:rgba(0,255,156,.3); color:#03120c; }
+html[data-theme="cyberpunk"] ::-webkit-scrollbar-thumb{ background:rgba(0,255,156,.22); }
+html[data-theme="cyberpunk"] h1, html[data-theme="cyberpunk"] h2, html[data-theme="cyberpunk"] h3, html[data-theme="cyberpunk"] h4{
+  font-family:var(--font-mono); letter-spacing:-.01em;
+}
+
+html[data-theme="cyberpunk"] .card,
+html[data-theme="cyberpunk"] .login-card,
+html[data-theme="cyberpunk"] .modal{
+  background:linear-gradient(180deg, rgba(0,255,156,.03), transparent 40%), var(--surface);
+  border:1px solid var(--border); position:relative;
+  clip-path:polygon(0 10px, 10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%);
+}
+html[data-theme="cyberpunk"] .card::before,
+html[data-theme="cyberpunk"] .login-card::before{
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(115deg, transparent 40%, rgba(0,255,156,.05) 50%, transparent 60%);
+}
+html[data-theme="cyberpunk"] .btn{
+  border-radius:var(--radius-sm); border:1px solid var(--border);
+  clip-path:polygon(0 6px, 6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%);
+  text-transform:uppercase; font-family:var(--font-mono); font-size:12px; letter-spacing:.04em;
+}
+html[data-theme="cyberpunk"] .btn-primary{
+  background:var(--primary); color:var(--primary-ink); box-shadow:0 0 16px rgba(0,255,156,.45);
+}
+html[data-theme="cyberpunk"] .btn-primary:hover{ filter:brightness(1.1); box-shadow:0 0 22px rgba(0,255,156,.65); }
+html[data-theme="cyberpunk"] .input, html[data-theme="cyberpunk"] .field input{
+  background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-xs);
+  font-family:var(--font-mono); color:var(--primary);
+}
+html[data-theme="cyberpunk"] .field input:focus{ box-shadow:0 0 0 3px rgba(0,255,156,.18); border-color:var(--primary); }
+html[data-theme="cyberpunk"] .field span{ text-transform:uppercase; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; }
+html[data-theme="cyberpunk"] .badge{ border:1px solid currentColor; border-radius:2px; font-family:var(--font-mono); }
+html[data-theme="cyberpunk"] table{ border:1px solid var(--border); }
+html[data-theme="cyberpunk"] thead th{ border-bottom:1px solid var(--border); font-family:var(--font-mono); text-transform:uppercase; font-size:10.5px; color:var(--primary); }
+html[data-theme="cyberpunk"] .login-logo{ border-radius:var(--radius-xs); box-shadow:0 0 20px rgba(0,255,156,.5); }
+
+html[data-theme="cyberpunk"] .sidebar{
+  background:linear-gradient(180deg, #061009, #030503); border-left:1px solid var(--border-soft);
+}
+html[data-theme="cyberpunk"] .brand-mark{
+  border-radius:var(--radius-xs); box-shadow:0 0 18px rgba(0,255,156,.55);
+}
+html[data-theme="cyberpunk"] .brand-text strong{ font-family:var(--font-mono); }
+html[data-theme="cyberpunk"] .nav-item{ border-radius:2px; }
+html[data-theme="cyberpunk"] .nav-item:hover{ background:rgba(0,255,156,.08); color:var(--primary); }
+html[data-theme="cyberpunk"] .nav-icon{ border-radius:2px; }
+html[data-theme="cyberpunk"] .nav-item.active{
+  background:rgba(0,255,156,.1); color:var(--primary); box-shadow:inset 3px 0 0 var(--primary), 0 0 14px rgba(0,255,156,.2);
+}
+html[data-theme="cyberpunk"] .nav-item.active .nav-icon{ color:var(--primary); }
+html[data-theme="cyberpunk"] .nav-item.active .dot-count{ background:rgba(255,46,154,.25); color:#FF2E9A; }
+html[data-theme="cyberpunk"] .me-avatar{ border-radius:2px; }
+html[data-theme="cyberpunk"] #logout-btn{ color:#FF2E5B; border-color:rgba(255,46,91,.35); }
+html[data-theme="cyberpunk"] .topbar{ background:rgba(5,10,8,.7); backdrop-filter:blur(6px); }
+html[data-theme="cyberpunk"] .topbar-clock{ font-family:var(--font-mono); border:1px solid var(--border); color:var(--primary); }
+html[data-theme="cyberpunk"] .live-dot{ background:var(--primary); box-shadow:0 0 8px var(--primary); animation:cpPulseDot 1.4s ease-in-out infinite; }
+@keyframes cpPulseDot{ 0%,100%{ opacity:1; } 50%{ opacity:.35; } }
+
+/* ------------------------------------------------- cyberpunk dashboard --- */
+.cp-hero{
+  position:relative; overflow:hidden; border-radius:var(--radius); padding:22px 24px;
+  background:var(--surface); border:1px solid var(--border-soft); margin-bottom:16px;
+  display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap;
+}
+.cp-tag{ font-family:var(--font-mono); font-size:11px; color:var(--primary); letter-spacing:.03em; }
+.cp-glitch{ position:relative; font-size:20px; font-weight:700; margin-top:6px; color:var(--text); }
+.cp-glitch::before, .cp-glitch::after{
+  content:attr(data-text); position:absolute; inset:0; overflow:hidden; opacity:.75;
+}
+.cp-glitch::before{ color:#FF2E9A; animation:cpGlitch1 3.4s infinite linear; clip-path:inset(0 0 60% 0); }
+.cp-glitch::after{ color:#00E5FF; animation:cpGlitch2 4.1s infinite linear; clip-path:inset(60% 0 0 0); }
+@keyframes cpGlitch1{ 0%,92%,100%{ transform:translate(0,0); } 93%{ transform:translate(-2px,-1px); } 95%{ transform:translate(2px,1px); } }
+@keyframes cpGlitch2{ 0%,90%,100%{ transform:translate(0,0); } 91%{ transform:translate(2px,1px); } 94%{ transform:translate(-2px,0); } }
+.cp-hero-text p{ color:var(--text-muted); font-size:12.5px; margin-top:8px; font-family:var(--font-mono); }
+.cp-radar{ position:relative; width:110px; height:110px; flex-shrink:0; }
+.cp-radar svg{ width:100%; height:100%; }
+.cp-radar-ring{ fill:none; stroke:rgba(0,255,156,.28); stroke-width:1; }
+.cp-radar-cross{ stroke:rgba(0,255,156,.16); stroke-width:1; }
+.cp-radar-sweep{ stroke:var(--primary); stroke-width:2; transform-origin:60px 60px; animation:cpRadarSpin 3s linear infinite; filter:drop-shadow(0 0 6px var(--primary)); }
+@keyframes cpRadarSpin{ from{ transform:rotate(0deg);} to{ transform:rotate(360deg);} }
+.cp-radar-blip{ fill:#FF2E9A; animation:cpBlip 2.4s ease-in-out infinite; filter:drop-shadow(0 0 4px #FF2E9A); }
+@keyframes cpBlip{ 0%,100%{ opacity:.15;} 50%{ opacity:1;} }
+.cp-radar-label{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-family:var(--font-mono); font-size:10px; color:var(--text-dim); letter-spacing:.08em;
+}
+
+.cp-panel{ background:var(--surface); border:1px solid var(--border-soft); border-radius:var(--radius); padding:16px 18px; }
+.cp-panel-head{
+  display:flex; align-items:center; gap:6px; margin-bottom:12px; font-family:var(--font-mono);
+  font-size:12.5px; color:var(--primary); text-transform:uppercase; letter-spacing:.03em;
+}
+.cp-cursor{ width:7px; height:13px; background:var(--primary); animation:cpBlinkCursor 1s step-end infinite; box-shadow:0 0 6px var(--primary); }
+@keyframes cpBlinkCursor{ 0%,49%{ opacity:1;} 50%,100%{ opacity:0;} }
+
+.cp-stat{ display:flex; flex-direction:column; gap:8px; }
+.cp-stat-label{ font-family:var(--font-mono); font-size:11px; color:var(--text-muted); }
+.cp-stat-val{ font-size:24px; font-weight:700; color:var(--text); }
+.cp-stat-tag{ width:fit-content; font-family:var(--font-mono); font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:2px; }
+.cp-stat-tag.up{ color:#00FF9C; background:rgba(0,255,156,.12); border:1px solid rgba(0,255,156,.3); }
+.cp-stat-tag.down{ color:#FF2E5B; background:rgba(255,46,91,.12); border:1px solid rgba(255,46,91,.3); }
+
+.cp-chart-wrap{ position:relative; height:150px; }
+.cp-fog-svg{ width:100%; height:100%; }
+.cp-scanline{
+  position:absolute; left:0; right:0; height:2px; background:linear-gradient(90deg, transparent, rgba(0,255,156,.7), transparent);
+  animation:cpScan 3.2s linear infinite; pointer-events:none;
+}
+@keyframes cpScan{ 0%{ top:0; opacity:0;} 10%{ opacity:1;} 90%{ opacity:1;} 100%{ top:100%; opacity:0;} }
+
+.cp-gauges{ display:flex; justify-content:space-around; gap:10px; flex-wrap:wrap; padding-top:4px; }
+.cp-gauge{ display:flex; flex-direction:column; align-items:center; gap:6px; position:relative; }
+.cp-gauge svg{ width:82px; height:82px; }
+.cp-gauge-val{ position:absolute; top:0; width:82px; height:82px; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; color:var(--text); }
+.cp-gauge-val small{ font-size:9px; margin-inline-start:1px; }
+.cp-gauge-label{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-muted); text-transform:uppercase; }
+
+.cp-bars{ display:flex; flex-direction:column; gap:10px; }
+.cp-bar-row{ display:flex; align-items:center; gap:10px; }
+.cp-bar-name{ flex:0 0 90px; font-size:12px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cp-bar-track{ flex:1; height:8px; background:rgba(0,255,156,.08); border:1px solid var(--border-soft); border-radius:2px; overflow:hidden; }
+.cp-bar-fill{ display:block; height:100%; width:0; background:var(--c,#00FF9C); box-shadow:0 0 8px var(--c,#00FF9C); transition:width 1s cubic-bezier(.16,1,.3,1); }
+.cp-bar-val{ flex:0 0 auto; font-size:11.5px; color:var(--text); }
+
+.cp-log{ display:flex; flex-direction:column; }
+.cp-log-row{
+  display:flex; align-items:center; gap:12px; padding:9px 0; border-bottom:1px dashed var(--border-soft);
+  font-family:var(--font-mono); font-size:12.5px;
+}
+.cp-log-row:last-child{ border-bottom:none; }
+.cp-log-idx{ color:var(--primary); }
+.cp-log-name{ flex:1; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cp-log-val{ color:var(--text-muted); }
+
+.cp-res-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+.cp-res-item{ display:flex; flex-direction:column; gap:6px; font-family:var(--font-mono); font-size:11px; color:var(--text-muted); }
+.cp-res-track{ height:8px; background:rgba(0,255,156,.08); border:1px solid var(--border-soft); border-radius:2px; overflow:hidden; }
+.cp-res-fill{ display:block; height:100%; width:0; transition:width 1s cubic-bezier(.16,1,.3,1); }
+.cp-res-item b{ color:var(--text); font-size:13px; }
+@media (max-width:640px){ .cp-res-grid{ grid-template-columns:1fr; } }

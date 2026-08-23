@@ -43,6 +43,14 @@ const THEMES = [
     supportsMode: false,
     swatch: ['#8A9BFF', '#22D3EE', '#0B1020'],
   },
+  {
+    id: 'cyberpunk',
+    name: 'Cyberpunk',
+    desc: 'ترمینال هک، اسکن‌لاین، رادار تهدید، نمودار مه‌آلود نئون',
+    ready: true,
+    supportsMode: false,
+    swatch: ['#00FF9C', '#FF2E9A', '#050a08'],
+  },
 ];
 const DEFAULT_THEME = 'flat';
 
@@ -464,6 +472,7 @@ async function renderDashboard() {
   if (theme === 'bento') return renderDashboardBento(s, sys);
   if (theme === 'brutalist') return renderDashboardBrutalist(s, sys);
   if (theme === 'glass') return renderDashboardGlass(s, sys);
+  if (theme === 'cyberpunk') return renderDashboardCyberpunk(s, sys);
   return renderDashboardFlat(s, sys);
 }
 
@@ -596,6 +605,183 @@ function renderDashboardGlass(s, sys) {
       seg.style.transition = 'stroke-dashoffset 1.2s cubic-bezier(.16,1,.3,1)';
       seg.style.strokeDashoffset = seg.dataset.final;
     });
+  }, 60));
+}
+
+/* --------------------------------------------- dashboard: cyberpunk --- */
+function cyberSmoothPath(values, w, h, pad = 6) {
+  const max = Math.max(...values, 1), min = Math.min(...values, 0);
+  const range = (max - min) || 1;
+  const step = (w - pad * 2) / Math.max(values.length - 1, 1);
+  const pts = values.map((v, i) => [pad + i * step, h - pad - ((v - min) / range) * (h - pad * 2)]);
+  if (pts.length < 2) {
+    const p = pts[0] || [pad, h - pad];
+    return { line: `M${p[0]},${p[1]}`, area: `M${p[0]},${p[1]} L${p[0]},${h} Z`, last: p };
+  }
+  let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)} `;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += `C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)} `;
+  }
+  const last = pts[pts.length - 1];
+  const area = d + `L${last[0].toFixed(1)},${h} L${pts[0][0].toFixed(1)},${h} Z`;
+  return { line: d.trim(), area, last };
+}
+function cyberArc(cx, cy, r, pct, color, width) {
+  const c = 2 * Math.PI * r;
+  const off = c - Math.max(0, Math.min(100, pct)) / 100 * c;
+  return `
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(0,255,156,.12)" stroke-width="${width}"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="butt"
+      stroke-dasharray="${c}" stroke-dashoffset="${c}" data-final="${off}" transform="rotate(-90 ${cx} ${cy})"
+      class="cp-gauge-seg" style="filter:drop-shadow(0 0 6px ${color})"/>`;
+}
+function renderDashboardCyberpunk(s, sys) {
+  const cpColors = ['#00FF9C', '#FF2E9A', '#39FF14', '#00E5FF', '#FF5F5F'];
+  const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
+  const trend = cyberSmoothPath(s.daily_series.map(d => d.revenue), 300, 110, 8);
+
+  const blips = Array.from({ length: 6 }, (_, i) => {
+    const ang = (i / 6) * Math.PI * 2 + 0.4;
+    const rr = 30 + (i % 3) * 10;
+    return `<circle class="cp-radar-blip" cx="${60 + Math.cos(ang) * rr}" cy="${60 + Math.sin(ang) * rr}" r="2" style="animation-delay:${i * .4}s"/>`;
+  }).join('');
+
+  const resHtml = sys ? `
+    <div class="cp-panel" style="margin-top:16px">
+      <div class="cp-panel-head"><span>&gt; منابع سرور</span><span class="cp-cursor"></span></div>
+      <div class="cp-res-grid">
+        <div class="cp-res-item"><span>CPU</span><div class="cp-res-track"><span class="cp-res-fill" data-w="${sys.cpu.percent}" style="background:#00FF9C;box-shadow:0 0 8px #00FF9C"></span></div><b class="mono">${sys.cpu.percent}٪</b></div>
+        <div class="cp-res-item"><span>RAM</span><div class="cp-res-track"><span class="cp-res-fill" data-w="${sys.ram.percent}" style="background:#FF2E9A;box-shadow:0 0 8px #FF2E9A"></span></div><b class="mono">${sys.ram.percent}٪</b></div>
+        <div class="cp-res-item"><span>DISK</span><div class="cp-res-track"><span class="cp-res-fill" data-w="${sys.disk.percent}" style="background:#00E5FF;box-shadow:0 0 8px #00E5FF"></span></div><b class="mono">${sys.disk.percent}٪</b></div>
+      </div>
+    </div>` : '';
+
+  const gauges = [
+    { label: 'نرخ تبدیل', pct: s.conversion_rate, color: '#00FF9C' },
+    { label: 'سلامت سرور', pct: sys ? Math.max(0, 100 - (sys.cpu.percent + sys.ram.percent + sys.disk.percent) / 3) : 80, color: '#00E5FF' },
+    { label: 'ریسک تیکت', pct: s.active_configs ? Math.min(Math.round((s.open_tickets / s.active_configs) * 100), 100) : 0, color: '#FF2E9A' },
+  ];
+  const gaugeHtml = gauges.map(g => `
+    <div class="cp-gauge">
+      <svg viewBox="0 0 100 100">${cyberArc(50, 50, 40, g.pct, g.color, 7)}</svg>
+      <div class="cp-gauge-val mono">${fmt(Math.round(g.pct))}<small>٪</small></div>
+      <span class="cp-gauge-label">${g.label}</span>
+    </div>`).join('');
+
+  const maxCat = Math.max(...s.category_breakdown.map(c => c.revenue), 1);
+  const barsHtml = s.category_breakdown.map((c, i) => `
+    <div class="cp-bar-row">
+      <span class="cp-bar-name">${esc(c.name)}</span>
+      <div class="cp-bar-track"><span class="cp-bar-fill" data-w="${(c.revenue / maxCat) * 100}" style="--c:${cpColors[i % cpColors.length]}"></span></div>
+      <b class="mono cp-bar-val">${fmt(c.revenue)}</b>
+    </div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+
+  const logHtml = s.top_products.map((p, i) => `
+    <div class="cp-log-row">
+      <span class="mono cp-log-idx">[${String(i + 1).padStart(2, '0')}]</span>
+      <span class="cp-log-name">${esc(p.name)}</span>
+      <span class="mono cp-log-val">${fmt(p.orders)} فروش</span>
+    </div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+
+  setContent(`
+    <div class="cp-hero">
+      <div class="cp-hero-text">
+        <span class="cp-tag">// SYSTEM_ONLINE :: ${s.start_date} → ${s.end_date}</span>
+        <h2 class="cp-glitch" data-text="${greetingByHour()}، ${esc(ME.username)}">${greetingByHour()}، ${esc(ME.username)}</h2>
+        <p>وضعیت شبکه فروش تحت پایش قرار دارد</p>
+      </div>
+      <div class="cp-radar">
+        <svg viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="52" class="cp-radar-ring"/>
+          <circle cx="60" cy="60" r="34" class="cp-radar-ring"/>
+          <circle cx="60" cy="60" r="16" class="cp-radar-ring"/>
+          <line x1="60" y1="8" x2="60" y2="112" class="cp-radar-cross"/>
+          <line x1="8" y1="60" x2="112" y2="60" class="cp-radar-cross"/>
+          ${blips}
+          <line x1="60" y1="60" x2="60" y2="8" class="cp-radar-sweep"/>
+        </svg>
+        <span class="cp-radar-label">SCAN</span>
+      </div>
+    </div>
+
+    <div class="grid grid-4">
+      <div class="cp-panel cp-stat">
+        <span class="cp-stat-label">&gt; درآمد (۱۴ روز)</span>
+        <span class="cp-stat-val mono" data-count="${s.revenue}">۰</span>
+        <span class="cp-stat-tag ${deltaUp ? 'up' : 'down'}">${deltaUp ? '▲' : '▼'} ${Math.abs(s.revenue_change_pct ?? 0)}٪</span>
+      </div>
+      <div class="cp-panel cp-stat">
+        <span class="cp-stat-label">&gt; سفارش تایید شده</span>
+        <span class="cp-stat-val mono" data-count="${s.approved}">۰</span>
+      </div>
+      <div class="cp-panel cp-stat">
+        <span class="cp-stat-label">&gt; کاربران کل</span>
+        <span class="cp-stat-val mono" data-count="${s.total_users}">۰</span>
+      </div>
+      <div class="cp-panel cp-stat">
+        <span class="cp-stat-label">&gt; کانفیگ فعال</span>
+        <span class="cp-stat-val mono" data-count="${s.active_configs}">۰</span>
+      </div>
+    </div>
+
+    <div class="cp-panel cp-chart-panel" style="margin-top:16px">
+      <div class="cp-panel-head"><span>&gt; روند فروش روزانه</span><span class="cp-cursor"></span></div>
+      <div class="cp-chart-wrap">
+        <svg viewBox="0 0 300 110" preserveAspectRatio="none" class="cp-fog-svg">
+          <defs>
+            <filter id="cpFog1" x="-30%" y="-60%" width="160%" height="220%">
+              <feGaussianBlur stdDeviation="7"/>
+            </filter>
+            <filter id="cpFog2" x="-30%" y="-60%" width="160%" height="220%">
+              <feGaussianBlur stdDeviation="14"/>
+            </filter>
+            <linearGradient id="cpFogFillG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#00FF9C" stop-opacity=".55"/>
+              <stop offset="100%" stop-color="#00FF9C" stop-opacity="0"/>
+            </linearGradient>
+            <linearGradient id="cpFogFillP" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#FF2E9A" stop-opacity=".4"/>
+              <stop offset="100%" stop-color="#FF2E9A" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path d="${trend.area}" fill="url(#cpFogFillP)" filter="url(#cpFog2)" transform="translate(0,4)"/>
+          <path d="${trend.area}" fill="url(#cpFogFillG)" filter="url(#cpFog1)"/>
+          <path d="${trend.line}" fill="none" stroke="#00FF9C" stroke-width="1.6" style="filter:drop-shadow(0 0 6px #00FF9C)"/>
+        </svg>
+        <div class="cp-scanline"></div>
+      </div>
+    </div>
+
+    <div class="grid grid-2" style="margin-top:16px; align-items:stretch">
+      <div class="cp-panel">
+        <div class="cp-panel-head"><span>&gt; شاخص‌های کلیدی</span><span class="cp-cursor"></span></div>
+        <div class="cp-gauges">${gaugeHtml}</div>
+      </div>
+      <div class="cp-panel">
+        <div class="cp-panel-head"><span>&gt; تفکیک درآمد</span><span class="cp-cursor"></span></div>
+        <div class="cp-bars">${barsHtml}</div>
+      </div>
+    </div>
+
+    <div class="cp-panel" style="margin-top:16px">
+      <div class="cp-panel-head"><span>&gt; پرفروش‌ترین محصولات</span><span class="cp-cursor"></span></div>
+      <div class="cp-log">${logHtml}</div>
+    </div>
+
+    ${resHtml}
+  `);
+
+  const root = content();
+  $$('.cp-stat-val[data-count]', root).forEach(el => animateCount(el, Number(el.dataset.count)));
+  requestAnimationFrame(() => setTimeout(() => {
+    $$('.cp-gauge-seg', root).forEach(seg => {
+      seg.style.transition = 'stroke-dashoffset 1.1s cubic-bezier(.16,1,.3,1)';
+      seg.style.strokeDashoffset = seg.dataset.final;
+    });
+    $$('.cp-res-fill[data-w], .cp-bar-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
   }, 60));
 }
 
