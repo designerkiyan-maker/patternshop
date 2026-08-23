@@ -342,8 +342,7 @@ document.addEventListener('click', e => {
   const btn = e.target.closest('[data-history]');
   if (!btn) return;
   const [recordType, recordId] = btn.dataset.history.split(':');
-  $$('.modal-backdrop').forEach(m => m.remove());
-  goToLogsFor(recordType, recordId);
+  showRecordHistory(recordType, recordId);
 });
 
 /* ============================================================= boot === */
@@ -2289,6 +2288,33 @@ const RECORD_TYPE_LABEL = {
   config: 'کانفیگ', discount: 'کد تخفیف', ticket: 'تیکت', reseller: 'نماینده', panel: 'پنل VPN',
   setting: 'تنظیم', webadmin: 'ادمین پنل',
 };
+const ACTION_LABEL = {
+  admin_add: 'افزودن ادمین', admin_remove: 'حذف ادمین', admin_role_change: 'تغییر نقش ادمین',
+  backup_create: 'ساخت بکاپ', backup_restore: 'بازیابی بکاپ', broadcast: 'پیام همگانی',
+  card_change: 'تغییر شماره کارت', category_add: 'افزودن دسته‌بندی', category_delete: 'حذف دسته‌بندی',
+  category_edit: 'ویرایش دسته‌بندی', category_toggle: 'فعال/غیرفعال کردن دسته‌بندی',
+  config_delete: 'حذف کانفیگ', configs_add: 'افزودن کانفیگ', custom_config_approve: 'تایید کانفیگ سفارشی',
+  custom_config_toggle: 'فعال/غیرفعال کردن کانفیگ سفارشی', discount_add: 'افزودن کد تخفیف',
+  discount_delete: 'حذف کد تخفیف', discount_toggle: 'فعال/غیرفعال کردن کد تخفیف',
+  exchange_rate_refresh: 'بروزرسانی نرخ ارز', menu_order_change: 'تغییر ترتیب منو',
+  order_approve: 'تایید سفارش', order_reject: 'رد سفارش', orphan_db_file_delete: 'حذف فایل بلااستفاده',
+  panel_add: 'افزودن پنل VPN', panel_delete: 'حذف پنل VPN', panel_server_add: 'افزودن سرور پنل',
+  panel_server_delete: 'حذف سرور پنل', panel_server_template_update: 'ویرایش قالب سرور پنل',
+  panel_server_usage_toggle: 'فعال/غیرفعال کردن مصرف سرور', plisio_key_change: 'تغییر کلید Plisio',
+  pricing_tier_add: 'افزودن رده قیمتی', pricing_tier_delete: 'حذف رده قیمتی', product_add: 'افزودن محصول',
+  product_delete: 'حذف محصول', product_edit: 'ویرایش محصول', product_price_edit: 'ویرایش قیمت محصول',
+  product_toggle: 'فعال/غیرفعال کردن محصول', reseller_credit_adjust: 'تغییر اعتبار نماینده',
+  reseller_credit_toggle: 'فعال/غیرفعال کردن اعتبار نماینده', reseller_orphan_purge: 'پاکسازی نمایندگان بلااستفاده',
+  reseller_panel_set: 'تنظیم پنل نماینده', reseller_request_admin_cancel: 'لغو درخواست نمایندگی',
+  reseller_request_payment_approve: 'تایید پرداخت نمایندگی', reseller_request_quote: 'ثبت مبلغ درخواست نمایندگی',
+  reseller_request_reject: 'رد درخواست نمایندگی', reseller_status_toggle: 'فعال/غیرفعال کردن نماینده',
+  reset_test_configs: 'ریست کانفیگ‌های تست', setting_change: 'تغییر تنظیمات', support_reply: 'پاسخ پشتیبانی',
+  ticket_close: 'بستن تیکت', ticket_reply: 'پاسخ تیکت', topup_approve: 'تایید شارژ کیف پول',
+  topup_reject: 'رد شارژ کیف پول', user_block: 'مسدودسازی کاربر', user_unblock: 'رفع مسدودی کاربر',
+  wallet_adjust: 'تغییر موجودی کیف پول', web_admin_active: 'فعال/غیرفعال کردن ادمین پنل',
+  web_admin_add: 'افزودن ادمین پنل', web_admin_delete: 'حذف ادمین پنل', web_admin_permissions: 'تغییر دسترسی‌های ادمین پنل',
+};
+function actionLabel(a) { return ACTION_LABEL[a] || esc(a); }
 function goToLogsFor(recordType, recordId) {
   logsFilter = { action: '', record_type: recordType, record_id: String(recordId) };
   logsPage = 1;
@@ -2297,6 +2323,22 @@ function goToLogsFor(recordType, recordId) {
 function historyBtn(recordType, recordId) {
   return hasPerm('system')
     ? `<button class="btn btn-ghost btn-sm" data-history="${recordType}:${recordId}" title="تاریخچه">تاریخچه</button>` : '';
+}
+async function showRecordHistory(recordType, recordId) {
+  const qs = new URLSearchParams({ page: 1, record_type: recordType, record_id: String(recordId) });
+  const res = await apiGet(`/admin-logs?${qs.toString()}`);
+  openModal(`تاریخچه ${RECORD_TYPE_LABEL[recordType] || esc(recordType)} #${esc(recordId)}`, `
+    <div class="table-wrap" style="max-height:60vh;overflow-y:auto">
+      <table><thead><tr><th>ادمین</th><th>عملیات</th><th>جزئیات</th><th>تاریخ</th></tr></thead>
+      <tbody>${res.items.map(l => `<tr>
+        <td class="mono">${l.admin_id}</td><td>${actionLabel(l.action)}</td>
+        <td>${esc(l.details)}</td><td class="mono">${fmtDate(l.created_at)}</td>
+      </tr>`).join('') || `<tr><td colspan="4" class="empty-state"><div class="icon">${svg('empty')}</div>لاگی ثبت نشده</td></tr>`}</tbody></table>
+    </div>
+    <button class="btn btn-block" id="rh-full-log" style="margin-top:14px">مشاهده کامل در لاگ سیستم</button>
+  `, (body, close) => {
+    $('#rh-full-log', body).addEventListener('click', () => { close(); goToLogsFor(recordType, recordId); });
+  }, { wide: true });
 }
 async function renderLogs() {
   const actionsRes = await apiGet('/admin-logs/actions');
@@ -2311,7 +2353,7 @@ async function renderLogs() {
       <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
         <select class="input" id="lf-action">
           <option value="">همه‌ی عملیات</option>
-          ${actionsRes.actions.map(a => `<option value="${a}" ${a === logsFilter.action ? 'selected' : ''}>${esc(a)}</option>`).join('')}
+          ${actionsRes.actions.map(a => `<option value="${a}" ${a === logsFilter.action ? 'selected' : ''}>${actionLabel(a)}</option>`).join('')}
         </select>
         <select class="input" id="lf-type">
           <option value="">همه‌ی رکوردها</option>
@@ -2325,7 +2367,7 @@ async function renderLogs() {
     <div class="card"><div class="table-wrap"><table>
       <thead><tr><th>ادمین</th><th>عملیات</th><th>رکورد</th><th>جزئیات</th><th>تاریخ</th></tr></thead>
       <tbody>${res.items.map(l => `<tr>
-        <td class="mono">${l.admin_id}</td><td>${esc(l.action)}</td>
+        <td class="mono">${l.admin_id}</td><td>${actionLabel(l.action)}</td>
         <td>${l.record_type ? `<span class="chip">${RECORD_TYPE_LABEL[l.record_type] || esc(l.record_type)} #${esc(l.record_id)}</span>` : '—'}</td>
         <td>${esc(l.details)}</td><td class="mono">${fmtDate(l.created_at)}</td>
       </tr>`).join('') || '<tr><td colspan="5" class="empty-state">لاگی ثبت نشده</td></tr>'}</tbody>
