@@ -19,9 +19,12 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET
+from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET, ADMIN_PANEL_COOKIE_SECURE
 from database import Database, WEB_ADMIN_PERMISSIONS, MENU_BUTTON_META
-from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
+from admin_panel.security import (
+    hash_password, verify_password, create_session_token, verify_session_token,
+    DUMMY_PASSWORD_HASH, check_login_throttle, register_login_failure, register_login_success,
+)
 from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document
 from reseller_auto_provision import provision_auto_config, ProvisionError
 from stock_alerts import check_and_notify_low_stock
@@ -36,6 +39,21 @@ COOKIE_NAME = "panel_session"
 app = FastAPI(title="ShopVPN Admin Panel")
 db = Database(DB_PATH)
 db.init_db(owner_id=OWNER_ID)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """هدرهای امنیتی پایه روی همه‌ی پاسخ‌ها؛ جلوگیری از embed شدن پنل در iframe
+    سایت‌های دیگر (clickjacking)، sniff نشدن نوع فایل توسط مرورگر، و نشتی
+    آدرس‌ها به سایت‌های دیگر از طریق Referer."""
+    response = await call_next(request)
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+    if ADMIN_PANEL_COOKIE_SECURE:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 # ------------------------------------------------------------------ auth --
 
@@ -76,15 +94,36 @@ def require_owner(admin=Depends(get_current_admin)):
 
 
 @app.post("/api/login")
-def api_login(body: LoginBody, response: Response):
+def api_login(body: LoginBody, request: Request, response: Response):
+    username_norm = body.username.strip().lower()
+    username_key = f"u:{username_norm}"
+    ip = request.client.host if request.client else "unknown"
+    ip_key = f"ip:{ip}"
+
+    wait = check_login_throttle(username_key, ip_key)
+    if wait:
+        minutes = wait // 60 + 1
+        raise HTTPException(429, f"تلاش ناموفق زیاد بود. {minutes} دقیقه‌ی دیگر دوباره امتحان کن.")
+
     admin = db.get_web_admin_by_username(body.username)
-    if not admin or not admin["is_active"] or not verify_password(body.password, admin["password_hash"]):
+    # حتی وقتی یوزرنیم اصلاً وجود ندارد هم verify_password روی یک هش کاذب
+    # اجرا می‌شود، تا زمان پاسخ برای «یوزرنیم غلط» و «پسورد غلط» یکسان باشد
+    # و از روی تایمینگ نشود فهمید کدام یوزرنیم‌ها واقعاً ثبت شده‌اند.
+    stored_hash = admin["password_hash"] if admin else DUMMY_PASSWORD_HASH
+    password_ok = verify_password(body.password, stored_hash)
+
+    if not admin or not admin["is_active"] or not password_ok:
+        register_login_failure(username_key, ip_key)
         raise HTTPException(401, "یوزرنیم یا پسورد اشتباه است.")
+
+    register_login_success(username_key, ip_key)
     token = create_session_token(ADMIN_PANEL_SECRET, admin["id"], admin["username"], admin["role"])
     db.touch_web_admin_login(admin["id"])
     response.set_cookie(
         COOKIE_NAME, token, httponly=True, samesite="lax", max_age=12 * 3600, path="/",
+        secure=ADMIN_PANEL_COOKIE_SECURE,
     )
+    db.log_admin_action(admin["id"], "web_login", f"{admin['username']} از IP {ip}", "webadmin", admin["id"])
     return {"id": admin["id"], "username": admin["username"], "role": admin["role"]}
 
 
@@ -237,11 +276,26 @@ async def api_backup_restore(
     if not file.filename or not file.filename.lower().endswith((".db", ".sqlite", ".sqlite3")):
         raise HTTPException(400, "فایل باید پسوند .db یا .sqlite داشته باشد.")
 
+    MAX_RESTORE_SIZE = 300 * 1024 * 1024  # 300MB — یک دیتابیس بات معمولاً چند مگابایته
     tmp_dir = tempfile.mkdtemp(prefix="restore_")
     tmp_path = os.path.join(tmp_dir, "uploaded.db")
-    content = await file.read()
-    with open(tmp_path, "wb") as f:
-        f.write(content)
+    size = 0
+    try:
+        with open(tmp_path, "wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_RESTORE_SIZE:
+                    raise HTTPException(413, "حجم فایل بیش از حد مجاز (۳۰۰ مگابایت) است.")
+                f.write(chunk)
+    except HTTPException:
+        try:
+            os.remove(tmp_path); os.rmdir(tmp_dir)
+        except OSError:
+            pass
+        raise
 
     if not is_valid_sqlite_db(tmp_path):
         os.remove(tmp_path)
