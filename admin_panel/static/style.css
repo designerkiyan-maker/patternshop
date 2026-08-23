@@ -921,3 +921,20 @@ html[data-theme="glass"] .hero-orbit, html[data-theme="glass"] .hero-net{ displa
 }
 .glass-row-name{ flex:1; font-size:13px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .glass-row-val{ font-size:12px; color:var(--text-muted); }
+
+/* ---------------------------------------------- server resources: bento --- */
+.bw-res-grid{ display:flex; flex-direction:column; gap:12px; }
+.bw-res-top{ display:flex; align-items:center; justify-content:space-between; font-size:12px; color:var(--text-muted); margin-bottom:5px; }
+.bw-res-top b{ color:var(--text); font-size:12.5px; }
+.bw-res-track{ display:block; height:8px; border-radius:20px; background:var(--surface-2); overflow:hidden; }
+.bw-res-fill{ display:block; height:100%; width:0; border-radius:20px; transition:width 1s cubic-bezier(.16,1,.3,1); }
+
+/* ----------------------------------------- server resources: brutalist --- */
+.bru-res-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:16px; }
+@media (max-width:900px){ .bru-res-grid{ grid-template-columns:1fr; } }
+.bru-res-card{ border:3px solid #000; background:#fff; box-shadow:5px 5px 0 #000; padding:14px 16px; display:flex; flex-direction:column; gap:8px; }
+.bru-res-label{ font-size:11px; font-weight:800; text-transform:uppercase; }
+.bru-res-val{ font-size:22px; font-weight:900; }
+.bru-res-track{ height:14px; border:2px solid #000; background:#fff; overflow:hidden; }
+.bru-res-fill{ display:block; height:100%; width:0; transition:width 1s cubic-bezier(.16,1,.3,1); }
+.bru-res-sub{ font-size:11px; font-weight:700; color:var(--text-muted); }

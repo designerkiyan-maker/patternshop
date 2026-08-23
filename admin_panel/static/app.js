@@ -485,6 +485,12 @@ function donutSegments(cx, cy, r, data, colors, strokeWidth) {
 }
 function renderDashboardGlass(s, sys) {
   const glassColors = ['#8B5CF6', '#22D3EE', '#34D399', '#FBBF24', '#FB7185', '#EC4899'];
+  const resHtml = sys ? `
+    <div class="res-grid">
+      ${resRingHtml(sys.cpu.percent, 'var(--violet)', 'پردازنده (CPU)', `${sys.cpu.cores} هسته`)}
+      ${resRingHtml(sys.ram.percent, 'var(--amber)', 'حافظه رم (RAM)', `${sys.ram.used_gb} از ${sys.ram.total_gb} گیگابایت`)}
+      ${resRingHtml(sys.disk.percent, 'var(--cyan)', 'فضای دیسک', `${sys.disk.used_gb} از ${sys.disk.total_gb} گیگابایت`)}
+    </div>` : '';
   const eqBars = s.daily_series.map((d, i) => {
     const max = Math.max(...s.daily_series.map(x => x.revenue), 1);
     return `<i data-h="${Math.max((d.revenue / max) * 100, 6)}" title="${d.date}: ${fmt(d.revenue)} تومان" style="--c:${glassColors[i % glassColors.length]}"></i>`;
@@ -534,6 +540,7 @@ function renderDashboardGlass(s, sys) {
       <div class="hero-net"><canvas id="hero-net-canvas"></canvas></div>
     </div>
 
+    ${resHtml}
     <div class="grid grid-4">
       <div class="card glass-stat">
         <span class="glass-stat-label">درآمد (۱۴ روز)</span>
@@ -596,6 +603,27 @@ function renderDashboardGlass(s, sys) {
 function renderDashboardBrutalist(s, sys) {
   const maxRev = Math.max(...s.daily_series.map(d => d.revenue), 1);
   const bruColors = ['#FFE600', '#2B6CFF', '#00C853', '#FF3B3B', '#FF3EA5'];
+  const resHtml = sys ? `
+    <div class="bru-res-grid">
+      <div class="bru-res-card">
+        <span class="bru-res-label">پردازنده CPU</span>
+        <span class="bru-res-val mono">${sys.cpu.percent}٪</span>
+        <span class="bru-res-track"><span class="bru-res-fill" data-w="${sys.cpu.percent}" style="background:#2B6CFF"></span></span>
+        <span class="bru-res-sub">${sys.cpu.cores} هسته</span>
+      </div>
+      <div class="bru-res-card">
+        <span class="bru-res-label">حافظه RAM</span>
+        <span class="bru-res-val mono">${sys.ram.percent}٪</span>
+        <span class="bru-res-track"><span class="bru-res-fill" data-w="${sys.ram.percent}" style="background:#FF8A00"></span></span>
+        <span class="bru-res-sub">${sys.ram.used_gb} از ${sys.ram.total_gb} گیگ</span>
+      </div>
+      <div class="bru-res-card">
+        <span class="bru-res-label">فضای دیسک</span>
+        <span class="bru-res-val mono">${sys.disk.percent}٪</span>
+        <span class="bru-res-track"><span class="bru-res-fill" data-w="${sys.disk.percent}" style="background:#00C853"></span></span>
+        <span class="bru-res-sub">${sys.disk.used_gb} از ${sys.disk.total_gb} گیگ</span>
+      </div>
+    </div>` : '';
   const bars = s.daily_series.map((d, i) => `
     <div class="bru-bar-col" title="${d.date}: ${fmt(d.revenue)} تومان">
       <span class="bru-bar-val mono">${fmt(d.revenue)}</span>
@@ -637,6 +665,7 @@ function renderDashboardBrutalist(s, sys) {
       <p>${s.start_date} تا ${s.end_date}</p>
     </div>
 
+    ${resHtml}
     <div class="bru-grid-4">
       <div class="bru-block bru-yellow">
         <span class="bru-block-label">درآمد ۱۴ روز</span>
@@ -686,6 +715,7 @@ function renderDashboardBrutalist(s, sys) {
   requestAnimationFrame(() => setTimeout(() => {
     $$('.bru-bar[data-h]', root).forEach(b => { b.style.height = b.dataset.h + '%'; });
     $$('.bru-metric-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
+    $$('.bru-res-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
   }, 60));
 }
 
@@ -712,6 +742,24 @@ function renderDashboardBento(s, sys) {
   const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
   const maxCatRev = Math.max(...s.category_breakdown.map(c => c.revenue), 1);
   const widgetColors = ['w-blue', 'w-green', 'w-orange', 'w-pink', 'w-purple'];
+  const resWidgets = sys ? `
+    <div class="bw w-white span-2">
+      <div class="bw-head"><span class="bw-label" style="color:var(--text-muted)">منابع سرور</span></div>
+      <div class="bw-res-grid">
+        <div class="bw-res-item">
+          <div class="bw-res-top"><span>CPU</span><b class="mono">${sys.cpu.percent}٪</b></div>
+          <span class="bw-res-track"><span class="bw-res-fill" data-w="${sys.cpu.percent}" style="background:#0A84FF"></span></span>
+        </div>
+        <div class="bw-res-item">
+          <div class="bw-res-top"><span>RAM</span><b class="mono">${sys.ram.percent}٪</b></div>
+          <span class="bw-res-track"><span class="bw-res-fill" data-w="${sys.ram.percent}" style="background:#FF9F0A"></span></span>
+        </div>
+        <div class="bw-res-item">
+          <div class="bw-res-top"><span>دیسک</span><b class="mono">${sys.disk.percent}٪</b></div>
+          <span class="bw-res-track"><span class="bw-res-fill" data-w="${sys.disk.percent}" style="background:#30D158"></span></span>
+        </div>
+      </div>
+    </div>` : '';
   const catBento = s.category_breakdown.slice(0, 4).map((c, i) => `
     <div class="bw-mini ${widgetColors[i % widgetColors.length]}">
       <span class="bw-mini-name">${esc(c.name)}</span>
@@ -789,6 +837,7 @@ function renderDashboardBento(s, sys) {
         <div class="bw-head"><span class="bw-label" style="color:var(--text-muted)">پرفروش‌ترین محصولات</span></div>
         ${prodBento}
       </div>
+      ${resWidgets}
     </div>
   `);
 
@@ -799,6 +848,7 @@ function renderDashboardBento(s, sys) {
       seg.style.transition = 'stroke-dashoffset 1.1s cubic-bezier(.16,1,.3,1)';
       seg.style.strokeDashoffset = seg.dataset.final;
     });
+    $$('.bw-res-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
   }, 60));
 }
 
