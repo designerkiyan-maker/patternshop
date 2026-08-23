@@ -68,6 +68,7 @@ async def _notifier_loop():
     last_order_id = max((o["id"] for o in db.get_pending_orders()), default=0)
     last_topup_id = max((t["id"] for t in db.get_pending_topups()), default=0)
     last_ticket_id = max((t["id"] for t in db.get_all_tickets("open")), default=0)
+    last_support_id = db.get_latest_user_support_message_id()
     while True:
         try:
             orders = [o for o in db.get_pending_orders() if o["id"] > last_order_id]
@@ -103,6 +104,20 @@ async def _notifier_loop():
                 })
             if tickets:
                 last_ticket_id = max(tk["id"] for tk in tickets)
+
+            latest_support_id = db.get_latest_user_support_message_id()
+            if latest_support_id > last_support_id:
+                new_msgs = db.get_new_support_messages_since(last_support_id)
+                for m in new_msgs:
+                    user = db.get_user(m["user_id"])
+                    uname = (user["username"] if user else None) or (user["first_name"] if user else None) or m["user_id"]
+                    preview = (m["message"] or "")[:120]
+                    await _notify_admins("tickets", {
+                        "title": "💬 پیام جدید در چت زنده",
+                        "body": f"{uname}: {preview}",
+                        "tag": "support",
+                    })
+                last_support_id = latest_support_id
         except Exception:
             logger.exception("خطا در حلقه‌ی اعلان زنده‌ی پنل وب")
         await asyncio.sleep(NOTIFY_POLL_SECONDS)
@@ -177,13 +192,16 @@ def api_me(admin=Depends(get_current_admin)):
 
 @app.get("/api/notifications/summary")
 def api_notifications_summary(admin=Depends(get_current_admin)):
-    """شمارش موارد در انتظار برای بج‌های زنده‌ی منو (سفارش/شارژ/تیکت)."""
+    """شمارش موارد در انتظار برای بج‌های زنده‌ی منو (سفارش/شارژ/تیکت/چت زنده).
+    چت زنده مثل تب خودش (role: 'any' در NAV) برای هر ادمین لاگین‌کرده‌ای نمایش
+    داده می‌شود، چون خودِ endpointهای /api/support هم به مجوز خاصی گیر نخورده‌اند."""
     out = {}
     if admin["role"] == "owner" or "orders" in admin["permissions"]:
         out["orders"] = len(db.get_pending_orders())
         out["topups"] = len(db.get_pending_topups())
     if admin["role"] == "owner" or "tickets" in admin["permissions"]:
         out["tickets"] = len(db.get_all_tickets("open"))
+    out["support"] = db.count_unread_support_conversations()
     return out
 
 
