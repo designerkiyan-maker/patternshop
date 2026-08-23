@@ -640,6 +640,9 @@ class Database:
             ("configs", "order_id", "INTEGER"),
             ("reseller_bots", "link_slug", "TEXT"),
             ("reseller_bots", "reseller_level", "INTEGER DEFAULT 2"),
+            ("reseller_bots", "web_panel_enabled", "INTEGER DEFAULT 0"),
+            ("reseller_bots", "web_panel_setup_token", "TEXT"),
+            ("reseller_bots", "web_panel_setup_token_created_at", "TEXT"),
             ("crypto_invoices", "expires_at", "TEXT"),
             # ساخت کانفیگ شخصی: سفارش‌های این نوع از همان جدول orders رد می‌شوند
             # (تا کارت‌به‌کارت/کیف‌پول/کریپتو بدون تغییر کار کنند) و product_id
@@ -2268,6 +2271,47 @@ class Database:
     def delete_reseller_bot(self, bot_id: int):
         with self._get_conn() as conn:
             conn.execute("DELETE FROM reseller_bots WHERE id=?", (bot_id,))
+
+    # ---------------------------------------------------- web panel (reseller) --
+
+    def enable_reseller_web_panel(self, bot_id: int) -> str:
+        """پنل وب این نماینده را فعال و یک توکن یک‌بارمصرف راه‌اندازی می‌سازد
+        (برای اولین بار که نماینده یوزر/پس خودش را تنظیم می‌کند). توکن را برمی‌گرداند."""
+        import secrets as _secrets
+        token = _secrets.token_urlsafe(24)
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE reseller_bots SET web_panel_enabled=1, web_panel_setup_token=?, "
+                "web_panel_setup_token_created_at=? WHERE id=?",
+                (token, datetime.utcnow().isoformat(), bot_id),
+            )
+        return token
+
+    def disable_reseller_web_panel(self, bot_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE reseller_bots SET web_panel_enabled=0, web_panel_setup_token=NULL, "
+                "web_panel_setup_token_created_at=NULL WHERE id=?", (bot_id,)
+            )
+
+    def regenerate_reseller_web_panel_token(self, bot_id: int) -> str:
+        """لینک راه‌اندازی جدید (مثلاً چون قبلی لو رفته یا نماینده گم کرده)."""
+        import secrets as _secrets
+        token = _secrets.token_urlsafe(24)
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE reseller_bots SET web_panel_setup_token=?, web_panel_setup_token_created_at=? WHERE id=?",
+                (token, datetime.utcnow().isoformat(), bot_id),
+            )
+        return token
+
+    def consume_reseller_web_panel_setup_token(self, bot_id: int):
+        """بعد از اینکه نماینده اولین یوزر/پس را ست کرد، توکن راه‌اندازی باطل می‌شود."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE reseller_bots SET web_panel_setup_token=NULL, web_panel_setup_token_created_at=NULL "
+                "WHERE id=?", (bot_id,)
+            )
 
     # -------------------------------------------------------------------
     # پاکسازی داده‌های باقی‌مانده از نمایندگی‌های حذف‌شده

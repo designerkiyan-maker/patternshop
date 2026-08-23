@@ -20,7 +20,7 @@ from aiogram.exceptions import TelegramBadRequest
 
 import keyboards as kb
 from database import Database
-from config import RESELLER_DBS_DIR, resolve_db_path
+from config import RESELLER_DBS_DIR, resolve_db_path, ADMIN_PANEL_URL
 from config_delivery import deliver_config_to_user
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
@@ -2177,6 +2177,106 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             level_label = "کامل" if new_level == 1 else "سطح ۲ (محدود)"
             await safe_edit(call, f"🏪 مدیریت بات‌های نمایندگی:", reply_markup=kb.resellers_kb(bots))
             await call.answer(f"سطح این نمایندگی به «{level_label}» تغییر کرد.")
+
+        @router.callback_query(F.data.startswith("adm_resbot_webpanel:"))
+        async def cb_admin_resbot_webpanel(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            bot_id = callback_id(call.data, "adm_resbot_webpanel")
+            if bot_id is None:
+                await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+                return
+            reseller_bot = db.get_reseller_bot(bot_id)
+            if not reseller_bot:
+                return await call.answer("یافت نشد.", show_alert=True)
+
+            level = reseller_bot["reseller_level"] if "reseller_level" in reseller_bot.keys() else 2
+            if level != 1:
+                return await call.answer("پنل وب فقط برای نمایندگی «کامل» قابل فعال‌سازی است.", show_alert=True)
+
+            already_enabled = bool(reseller_bot["web_panel_enabled"]) if "web_panel_enabled" in reseller_bot.keys() else False
+            if already_enabled:
+                await replace_admin_view(
+                    call,
+                    "🌐 پنل وب این نماینده فعال است.\n\n"
+                    "اگر لینک راه‌اندازی را گم کرده یا نیاز به لینک جدید دارید، از دکمه‌ی زیر استفاده کنید.",
+                    reply_markup=kb.resbot_webpanel_kb(bot_id),
+                )
+                return await call.answer()
+
+            token = db.enable_reseller_web_panel(bot_id)
+            if not reseller_bot["link_slug"]:
+                # اگر نماینده هنوز اسلاگ دلخواه ست نکرده، فعلاً از آیدی عددی به‌عنوان
+                # شناسه‌ی تننت استفاده می‌کنیم (دقیقاً مثل رفتار لینک مینی‌اپ).
+                b_value = str(bot_id)
+            else:
+                b_value = reseller_bot["link_slug"]
+
+            if ADMIN_PANEL_URL:
+                link = f"{ADMIN_PANEL_URL}/setup?b={b_value}&t={token}"
+            else:
+                link = f"<آدرس دامنه‌ی پنل ادمین>/setup?b={b_value}&t={token}"
+
+            text = (
+                "🌐 پنل وب برای این نماینده فعال شد.\n\n"
+                "این لینک یک‌بارمصرف است؛ نماینده با باز کردنش یک یوزرنیم/پسورد دلخواه "
+                "برای پنل وب خودش تنظیم می‌کند (مستقل از پنل بات اصلی، فقط روی دیتابیس خودش):\n\n"
+                f"{link}\n\n"
+                "این لینک همین الان برای نماینده در بات ارسال شد."
+            )
+            await replace_admin_view(call, text, reply_markup=kb.resbot_webpanel_kb(bot_id))
+            db.log_admin_action(
+                call.from_user.id, "reseller_webpanel_enable", f"نماینده #{bot_id} (@{reseller_bot['bot_username'] or ''})",
+            )
+            await call.answer("لینک ساخته شد.")
+
+            try:
+                await bot.send_message(
+                    reseller_bot["owner_telegram_id"],
+                    "🌐 پنل مدیریت وب برای نمایندگی شما فعال شد!\n\n"
+                    "با باز کردن لینک زیر، یک‌بار یوزرنیم و پسورد دلخواه برای پنل وب خودتان تنظیم کنید "
+                    "(این لینک فقط یک‌بار کار می‌کند):\n\n"
+                    f"{link}",
+                )
+            except Exception:
+                logger.warning("ارسال لینک راه‌اندازی پنل وب به مالک نماینده (%s) ناموفق بود.", reseller_bot["owner_telegram_id"])
+
+        @router.callback_query(F.data.startswith("adm_resbot_webpanel_regen:"))
+        async def cb_admin_resbot_webpanel_regen(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            bot_id = callback_id(call.data, "adm_resbot_webpanel_regen")
+            reseller_bot = db.get_reseller_bot(bot_id) if bot_id is not None else None
+            if not reseller_bot:
+                return await call.answer("یافت نشد.", show_alert=True)
+
+            token = db.regenerate_reseller_web_panel_token(bot_id)
+            b_value = reseller_bot["link_slug"] or str(bot_id)
+            link = f"{ADMIN_PANEL_URL}/setup?b={b_value}&t={token}" if ADMIN_PANEL_URL else f"<آدرس دامنه‌ی پنل ادمین>/setup?b={b_value}&t={token}"
+            await replace_admin_view(
+                call,
+                f"🔁 لینک راه‌اندازی جدید ساخته شد (لینک قبلی دیگر کار نمی‌کند):\n\n{link}\n\n"
+                "توجه: اگر نماینده قبلاً یک‌بار یوزر/پس ست کرده باشد، این لینک اثری ندارد "
+                "(فقط برای اولین راه‌اندازی است).",
+                reply_markup=kb.resbot_webpanel_kb(bot_id),
+            )
+            db.log_admin_action(call.from_user.id, "reseller_webpanel_regen", f"نماینده #{bot_id}")
+            await call.answer("لینک جدید ساخته شد.")
+
+        @router.callback_query(F.data.startswith("adm_resbot_webpanel_off:"))
+        async def cb_admin_resbot_webpanel_off(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            bot_id = callback_id(call.data, "adm_resbot_webpanel_off")
+            reseller_bot = db.get_reseller_bot(bot_id) if bot_id is not None else None
+            if not reseller_bot:
+                return await call.answer("یافت نشد.", show_alert=True)
+
+            db.disable_reseller_web_panel(bot_id)
+            db.log_admin_action(call.from_user.id, "reseller_webpanel_disable", f"نماینده #{bot_id}")
+            bots = db.list_reseller_bots()
+            await safe_edit(call, "⛔️ پنل وب این نماینده غیرفعال شد (نشست‌های فعلی هم دیگر کار نمی‌کنند).\n\n🏪 مدیریت بات‌های نمایندگی:", reply_markup=kb.resellers_kb(bots))
+            await call.answer("غیرفعال شد.")
 
         @router.callback_query(F.data.startswith("adm_resbot_del:"))
         async def cb_admin_resbot_del(call: CallbackQuery):

@@ -499,6 +499,15 @@ setup_admin_panel() {
         echo "ADMIN_PANEL_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')" >> "$INSTALL_DIR/.env"
     fi
 
+    # آدرس نهایی پنل (بعد از SSL روی https) را در .env ذخیره کن تا هم بات اصلی
+    # بتواند لینک راه‌اندازی پنل وب نماینده‌های کامل را بسازد و هم اگر این
+    # عملیات دوباره روی همین دامنه اجرا شد، مقدار قبلی تمیز جایگزین شود.
+    if grep -q "^ADMIN_PANEL_URL=" "$INSTALL_DIR/.env" 2>/dev/null; then
+        sudo sed -i "s#^ADMIN_PANEL_URL=.*#ADMIN_PANEL_URL=https://$DOMAIN#" "$INSTALL_DIR/.env"
+    else
+        echo "ADMIN_PANEL_URL=https://$DOMAIN" >> "$INSTALL_DIR/.env"
+    fi
+
     echo ""
     echo -e "${YELLOW}${BOLD}🔑 حساب مالک (owner) پنل را بساز:${RESET}"
     read -rp "یوزرنیم: " PANEL_USER
@@ -561,6 +570,9 @@ EOF
 
     echo -e "${GREEN}${BOLD}✅ پنل مدیریت آماده است: https://$DOMAIN${RESET}"
     echo -e "${GREEN}با یوزرنیم/پسوردی که ساختی وارد شو.${RESET}"
+
+    echo -e "${CYAN}🔁 ری‌استارت بات اصلی تا آدرس پنل (ADMIN_PANEL_URL) را بشناسد...${RESET}"
+    sudo systemctl restart "$SERVICE_NAME" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------

@@ -1095,10 +1095,26 @@ def resellers_kb(resellers) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🗑حذف", callback_data=f"adm_resbot_del:{r['id']}"),
             ]
         )
+        if level == 1:
+            web_panel_enabled = bool(r["web_panel_enabled"]) if "web_panel_enabled" in r.keys() else False
+            wp_label = "🌐 پنل وب: فعال (مدیریت)" if web_panel_enabled else "🌐 فعالسازی پنل وب"
+            rows.append(
+                [InlineKeyboardButton(text=wp_label, callback_data=f"adm_resbot_webpanel:{r['id']}")]
+            )
     rows.append([InlineKeyboardButton(text="➕ افزودن بات نمایندگی جدید", callback_data="adm_resbot_add")])
     rows.append([InlineKeyboardButton(text="🧹 پاکسازی داده‌های باقی‌مانده نمایندگی", callback_data="adm_reseller_orphans")])
     rows.append([InlineKeyboardButton(text="🗃 پاکسازی فایل‌های دیتابیس یتیم", callback_data="adm_orphan_db_files")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:resellers")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def resbot_webpanel_kb(bot_id) -> InlineKeyboardMarkup:
+    """منوی مدیریت پنل وب یک نماینده‌ی کامل: بعد از فعال‌سازی نشان داده می‌شود."""
+    rows = [
+        [InlineKeyboardButton(text="🔁 ساخت لینک راه‌اندازی جدید", callback_data=f"adm_resbot_webpanel_regen:{bot_id}")],
+        [InlineKeyboardButton(text="⛔️ غیرفعال‌سازی پنل وب", callback_data=f"adm_resbot_webpanel_off:{bot_id}")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_resellers_menu")],
+    ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
