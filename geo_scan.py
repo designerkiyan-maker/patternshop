@@ -404,7 +404,26 @@ async def scan_subscription(link: str, *, force_refresh: bool = False, check_sta
             if status_map.get(ip) != "online":
                 status_map[ip] = st
 
-    grouped = {}
+    servers = build_servers(configs, geo, status_map)
+
+    result = {
+        "ok": True,
+        "generated_at": int(time.time()),
+        "total_configs": len(configs),
+        "resolved_configs": sum(1 for c in configs if c.get("ip")),
+        "total_servers": _count_distinct_servers(servers),
+        "total_countries": len({s["country_code"] for s in servers if s["country_code"]}),
+        "servers": servers,
+    }
+    _cache[link] = {"at": now, "data": result}
+    return result
+
+
+def build_servers(configs: list, geo: dict, status_map: dict) -> list:
+    """هر کانفیگ یک entry/پین کاملاً جدای خودش می‌شود — حتی اگر چند کانفیگ
+    دقیقاً روی یک IP/سرور باشند، دیگر زیر یک عدد جمع نمی‌شوند (طبق خواسته:
+    «همه‌ی کانفیگ‌ها نمایش داده بشن، نه مثلاً ۲ سرور ۳ کانفیگ»)."""
+    servers = []
     for c in configs:
         ip = c["ip"]
         label_cc = detect_label_country(c.get("remark") or "")
@@ -427,41 +446,26 @@ async def scan_subscription(link: str, *, force_refresh: bool = False, check_sta
         else:
             continue  # نه در remark و نه با geoip چیزی معلوم نشد
 
-        key = cc or f"ip:{ip}"
-        entry = grouped.setdefault(key, {
+        status = status_map.get(ip, "unknown") if ip else "unknown"
+        remark = c.get("remark") or ""
+        servers.append({
             "country": country, "country_code": cc, "city": city,
-            "lat": lat, "lon": lon, "protocols": {}, "configs_count": 0,
-            "status": "unknown", "source": source, "ips": set(), "sample_remarks": [],
+            "lat": lat, "lon": lon,
+            "protocols": [{"name": c["protocol"], "count": 1}],
+            "configs_count": 1,
+            "status": status, "source": source,
+            "ip": ip or "", "ip_count": 1 if ip else 0,
+            "sample_remarks": [remark] if remark else [],
+            "remark": remark,
         })
-        entry["configs_count"] += 1
-        if ip:
-            entry["ips"].add(ip)
-            st = status_map.get(ip)
-            if st == "online":
-                entry["status"] = "online"
-            elif st == "offline" and entry["status"] != "online":
-                entry["status"] = "offline"
-        entry["protocols"][c["protocol"]] = entry["protocols"].get(c["protocol"], 0) + 1
-        if c.get("remark") and len(entry["sample_remarks"]) < 3 and c["remark"] not in entry["sample_remarks"]:
-            entry["sample_remarks"].append(c["remark"])
 
-    servers = []
-    for e in grouped.values():
-        e["protocols"] = [{"name": k, "count": v} for k, v in sorted(e["protocols"].items(), key=lambda x: -x[1])]
-        ips_sorted = sorted(e.pop("ips"))
-        e["ip"] = ips_sorted[0] if ips_sorted else ""
-        e["ip_count"] = len(ips_sorted)
-        servers.append(e)
-    servers.sort(key=lambda s: -s["configs_count"])
+    servers.sort(key=lambda s: (s["country"] or "", s["remark"]))
+    return servers
 
-    result = {
-        "ok": True,
-        "generated_at": int(time.time()),
-        "total_configs": len(configs),
-        "resolved_configs": sum(1 for c in configs if c.get("ip")),
-        "total_servers": len(servers),
-        "total_countries": len({s["country_code"] for s in servers if s["country_code"]}),
-        "servers": servers,
-    }
-    _cache[link] = {"at": now, "data": result}
-    return result
+
+def _count_distinct_servers(servers: list) -> int:
+    """«سرور» یعنی تعداد سرورهای فیزیکی متمایز (بر اساس IP)، نه تعداد پین‌های
+    روی نقشه — چون هر کانفیگ پین جدای خودش را دارد، حتی اگر چند کانفیگ
+    دقیقاً روی یک سرور باشند."""
+    ips_with_val = [s["ip"] for s in servers if s["ip"]]
+    return len(set(ips_with_val)) + sum(1 for s in servers if not s["ip"])
