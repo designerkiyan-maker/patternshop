@@ -37,6 +37,7 @@ from renewal_reminders import STATUS_KEY_LAST_RUN, STATUS_KEY_LAST_DATE_SENT, ST
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 import exchange_rate
 import geo_scan
+import world_map
 
 logger = logging.getLogger("admin_panel.server")
 
@@ -534,6 +535,13 @@ async def api_dashboard_servers_map(refresh: bool = False, admin=Depends(get_cur
     if not link:
         return {"ok": False, "error": "no_link"}
     return await geo_scan.scan_subscription(link, force_refresh=refresh)
+
+
+@app.get("/api/dashboard/world-map")
+async def api_dashboard_world_map(refresh: bool = False, admin=Depends(get_current_admin)):
+    """خطوط ساحلی زمین برای پس‌زمینه‌ی نقشه — از خودِ سرور پنل serve می‌شود
+    تا مرورگر ادمین دیگر لازم نباشد مستقیماً به CDNهای خارجی وصل شود."""
+    return await world_map.get_world_map(force_refresh=refresh)
 
 
 # ------------------------------------------------------------------ system --
