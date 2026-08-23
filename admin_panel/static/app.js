@@ -330,6 +330,9 @@ function canSee(navRole) {
 }
 const ROLE_LABEL = { owner: 'مالک', admin: 'مدیر کامل', mid: 'ادمین میانی', support: 'پشتیبان' };
 
+/* ==================================================== live notifications === */
+let NOTIF_COUNTS = {};
+
 function renderNav() {
   const el = $('#nav-tunnel');
   const CYCLE = ['nav-c1', 'nav-c2', 'nav-c3', 'nav-c4'];
@@ -341,9 +344,10 @@ function renderNav() {
       if (n.section) html += `<div class="nav-section">${n.section}</div>`;
       lastSection = n.section;
     }
+    const count = NOTIF_COUNTS[n.key] || 0;
     html += `
     <div class="nav-item ${CYCLE[i % 4]} ${n.key === CURRENT_TAB ? 'active' : ''}" data-tab="${n.key}">
-      <span class="nav-icon">${svg(n.icon)}</span><span>${n.label}</span>
+      <span class="nav-icon">${svg(n.icon)}</span><span>${n.label}</span>${count ? `<span class="dot-count">${count > 99 ? '99+' : count}</span>` : ''}
     </div>`;
   });
   el.innerHTML = html;
@@ -357,6 +361,49 @@ function goTo(tab) {
   renderNav();
   $('#page-title').textContent = NAV.find(n => n.key === tab)?.label || '';
   renderPage(tab);
+}
+
+/* ---- صدای هشدار برای موارد جدید (بدون فایل صوتی، سنتز با Web Audio) ---- */
+let NOTIF_AUDIO_CTX = null;
+function playNotifSound() {
+  try {
+    NOTIF_AUDIO_CTX = NOTIF_AUDIO_CTX || new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = NOTIF_AUDIO_CTX;
+    const now = ctx.currentTime;
+    [880, 1180].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, now + i * 0.14);
+      gain.gain.linearRampToValueAtTime(0.18, now + i * 0.14 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.14 + 0.22);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + i * 0.14);
+      osc.stop(now + i * 0.14 + 0.24);
+    });
+  } catch (e) { /* مرورگر صدای وب را پشتیبانی نمی‌کند */ }
+}
+
+/* ---- بج‌های زنده‌ی منو: هر چند ثانیه شمارش pending را می‌گیرد و اگر رشد
+   کرده بود صدا هم پخش می‌کند. این جدا از Push است و فقط وقتی تب باز باشد کار
+   می‌کند؛ برای اعلان وقتی مرورگر بسته است به بخش Push پایین‌تر نگاه کن. ---- */
+let NOTIF_POLL_STARTED = false;
+function startNotificationPolling() {
+  if (NOTIF_POLL_STARTED) return;
+  NOTIF_POLL_STARTED = true;
+  const poll = async () => {
+    try {
+      const summary = await apiGet('/notifications/summary');
+      let grew = false;
+      Object.keys(summary).forEach(key => { if (summary[key] > (NOTIF_COUNTS[key] || 0)) grew = true; });
+      NOTIF_COUNTS = summary;
+      renderNav();
+      if (grew) playNotifSound();
+    } catch (e) { /* silent */ }
+  };
+  poll();
+  setInterval(poll, 15000);
 }
 
 document.addEventListener('click', e => {
@@ -389,10 +436,111 @@ function showApp() {
   $('#me-avatar').textContent = ME.username.slice(0, 2).toUpperCase();
   tickClock();
   setInterval(tickClock, 1000);
+  startNotificationPolling();
+  const pushBtn = $('#push-toggle-btn');
+  if (pushBtn) pushBtn.addEventListener('click', openPushSettingsModal);
   let saved = null;
   try { saved = localStorage.getItem('admin_current_tab'); } catch (e) {}
   const savedValid = saved && NAV.find(n => n.key === saved && canSee(n.role));
   goTo(savedValid ? saved : 'dashboard');
+}
+
+/* ==================================================== web push (level 2) ===
+   اعلان مرورگر واقعی که حتی وقتی مرورگر کاملاً بسته است هم می‌رسد؛ از طریق
+   Service Worker + سرویس Push خودِ مرورگر. برخلاف بج‌های بالا، این یکی نیاز
+   به یک‌بار «فعال‌سازی» دستی توسط هر ادمین (روی هر دستگاه) دارد چون مرورگرها
+   بدون اجازه‌ی صریح کاربر Push را قبول نمی‌کنند. */
+const PUSH_SUPPORTED = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const arr = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) arr[i] = rawData.charCodeAt(i);
+  return arr;
+}
+
+async function pushStatus() {
+  if (!PUSH_SUPPORTED) return 'unsupported';
+  if (Notification.permission === 'denied') return 'denied';
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    return sub ? 'subscribed' : 'not-subscribed';
+  } catch (e) {
+    return 'not-subscribed';
+  }
+}
+
+async function enablePushNotifications() {
+  if (!PUSH_SUPPORTED) { toast('این مرورگر از اعلان Push پشتیبانی نمی‌کند.', true); return false; }
+  try {
+    const { publicKey, enabled } = await apiGet('/push/vapid-public-key');
+    if (!enabled) { toast('اعلان Push هنوز روی سرور تنظیم نشده (کلید VAPID غایب است).', true); return false; }
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') { toast('اجازه‌ی اعلان داده نشد.', true); return false; }
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+    }
+    const raw = sub.toJSON();
+    await apiPost('/push/subscribe', { endpoint: raw.endpoint, keys: raw.keys, user_agent: navigator.userAgent });
+    toast('اعلان مرورگر فعال شد — حتی وقتی مرورگر بسته باشد پیام می‌رسد.');
+    return true;
+  } catch (e) {
+    toast('فعال‌سازی اعلان ناموفق بود.', true);
+    return false;
+  }
+}
+
+async function disablePushNotifications() {
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    if (sub) {
+      await apiPost('/push/unsubscribe', { endpoint: sub.endpoint });
+      await sub.unsubscribe();
+    }
+    toast('اعلان مرورگر روی این دستگاه غیرفعال شد.');
+  } catch (e) { handleErr(e); }
+}
+
+function openPushSettingsModal() {
+  openModal('اعلان مرورگر (Push)', `<div id="push-modal-body"><p class="card-sub">در حال بررسی وضعیت...</p></div>`, (body) => {
+    const paint = async () => {
+      const status = await pushStatus();
+      const label = {
+        unsupported: 'این مرورگر از اعلان Push پشتیبانی نمی‌کند.',
+        denied: 'اجازه‌ی اعلان قبلاً رد شده؛ باید از تنظیمات خودِ مرورگر برای این سایت دوباره اجازه بدهی.',
+        subscribed: 'اعلان مرورگر روی این دستگاه فعال است — برای سفارش، شارژ کیف پول و تیکت جدید، حتی وقتی مرورگر کاملاً بسته باشد اعلان دریافت می‌کنی.',
+        'not-subscribed': 'اعلان مرورگر روی این دستگاه فعال نیست.',
+      }[status];
+      body.innerHTML = `
+        <p class="card-sub" style="margin-bottom:14px;line-height:1.9">${label}</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${status === 'not-subscribed' ? '<button class="btn btn-primary btn-sm" id="push-enable-btn">فعال‌سازی</button>' : ''}
+          ${status === 'subscribed' ? '<button class="btn btn-sm" id="push-test-btn">ارسال اعلان تست</button><button class="btn btn-danger btn-sm" id="push-disable-btn">غیرفعال‌سازی</button>' : ''}
+        </div>
+      `;
+      const enableBtn = $('#push-enable-btn', body);
+      const testBtn = $('#push-test-btn', body);
+      const disableBtn = $('#push-disable-btn', body);
+      if (enableBtn) enableBtn.addEventListener('click', async () => { enableBtn.disabled = true; await enablePushNotifications(); paint(); });
+      if (testBtn) testBtn.addEventListener('click', async () => {
+        testBtn.disabled = true;
+        try { await apiPost('/push/test'); toast('اعلان تست ارسال شد.'); } catch (e) { handleErr(e); }
+        testBtn.disabled = false;
+      });
+      if (disableBtn) disableBtn.addEventListener('click', async () => { await disablePushNotifications(); paint(); });
+    };
+    paint();
+  });
 }
 
 /* ===================================================== sidebar (mobile) === */
