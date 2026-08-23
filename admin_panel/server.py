@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import logging
 import os
 import tempfile
 from datetime import datetime
@@ -19,10 +20,11 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET
+from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET, VAPID_PUBLIC_KEY
 from database import Database, WEB_ADMIN_PERMISSIONS, MENU_BUTTON_META
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
 from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document, fetch_telegram_file
+from admin_panel.webpush import PUSH_ENABLED, send_push
 from reseller_auto_provision import provision_auto_config, ProvisionError
 from stock_alerts import check_and_notify_low_stock
 from panel_providers import get_provider, PanelError, PANEL_TYPE_LABELS
@@ -30,12 +32,85 @@ from renewal_reminders import STATUS_KEY_LAST_RUN, STATUS_KEY_LAST_DATE_SENT, ST
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 import exchange_rate
 
+logger = logging.getLogger("admin_panel.server")
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 COOKIE_NAME = "panel_session"
+NOTIFY_POLL_SECONDS = 15
 
 app = FastAPI(title="ShopVPN Admin Panel")
 db = Database(DB_PATH)
 db.init_db(owner_id=OWNER_ID)
+
+# ---------------------------------------------------- live push notifier --
+# یک تسک پس‌زمینه‌ی سبک که هر چند ثانیه دیتابیس را برای سفارش/شارژ/تیکت جدید
+# چک می‌کند و برای ادمین‌های مربوطه Push می‌فرستد؛ چون پنل وب مستقل است و
+# instance ای از بات در اختیار ندارد، این ساده‌ترین راه برای تشخیص «جدید بودن»
+# یک رکورد بدون دست‌کاری کد بات اصلی است. اگر کلیدهای VAPID تنظیم نشده باشند
+# (PUSH_ENABLED=False) این تسک اصلاً استارت نمی‌شود.
+
+
+async def _notify_admins(permission: str, payload: dict):
+    subs = db.list_push_subscriptions_for_permission(permission)
+    if not subs:
+        return
+    gone = []
+    for s in subs:
+        result = await send_push(s, payload)
+        if result == "gone":
+            gone.append(s["endpoint"])
+    if gone:
+        db.delete_push_subscriptions_by_endpoints(gone)
+
+
+async def _notifier_loop():
+    last_order_id = max((o["id"] for o in db.get_pending_orders()), default=0)
+    last_topup_id = max((t["id"] for t in db.get_pending_topups()), default=0)
+    last_ticket_id = max((t["id"] for t in db.get_all_tickets("open")), default=0)
+    while True:
+        try:
+            orders = [o for o in db.get_pending_orders() if o["id"] > last_order_id]
+            for o in orders:
+                user = db.get_user(o["user_id"])
+                uname = (user["username"] if user else None) or o["user_id"]
+                await _notify_admins("orders", {
+                    "title": "🛒 سفارش جدید",
+                    "body": f"سفارش #{o['id']} از {uname} در انتظار بررسی است.",
+                    "tag": "orders",
+                })
+            if orders:
+                last_order_id = max(o["id"] for o in orders)
+
+            topups = [t for t in db.get_pending_topups() if t["id"] > last_topup_id]
+            for t in topups:
+                user = db.get_user(t["user_id"])
+                uname = (user["username"] if user else None) or t["user_id"]
+                await _notify_admins("orders", {
+                    "title": "💳 درخواست شارژ جدید",
+                    "body": f"شارژ #{t['id']} از {uname} به مبلغ {t['amount']:,} تومان.",
+                    "tag": "topups",
+                })
+            if topups:
+                last_topup_id = max(t["id"] for t in topups)
+
+            tickets = [tk for tk in db.get_all_tickets("open") if tk["id"] > last_ticket_id]
+            for tk in tickets:
+                await _notify_admins("tickets", {
+                    "title": "🎫 تیکت جدید",
+                    "body": f"تیکت #{tk['id']}: {tk['subject']}",
+                    "tag": "tickets",
+                })
+            if tickets:
+                last_ticket_id = max(tk["id"] for tk in tickets)
+        except Exception:
+            logger.exception("خطا در حلقه‌ی اعلان زنده‌ی پنل وب")
+        await asyncio.sleep(NOTIFY_POLL_SECONDS)
+
+
+@app.on_event("startup")
+async def _start_notifier():
+    if PUSH_ENABLED:
+        asyncio.create_task(_notifier_loop())
 
 # ------------------------------------------------------------------ auth --
 
@@ -97,6 +172,79 @@ def api_logout(response: Response):
 @app.get("/api/me")
 def api_me(admin=Depends(get_current_admin)):
     return admin
+
+
+@app.get("/api/notifications/summary")
+def api_notifications_summary(admin=Depends(get_current_admin)):
+    """شمارش موارد در انتظار برای بج‌های زنده‌ی منو (سفارش/شارژ/تیکت)."""
+    out = {}
+    if admin["role"] == "owner" or "orders" in admin["permissions"]:
+        out["orders"] = len(db.get_pending_orders())
+        out["topups"] = len(db.get_pending_topups())
+    if admin["role"] == "owner" or "tickets" in admin["permissions"]:
+        out["tickets"] = len(db.get_all_tickets("open"))
+    return out
+
+
+# -------------------------------------------------------------- web push --
+
+
+class PushSubscribeBody(BaseModel):
+    endpoint: str
+    keys: dict
+    user_agent: Optional[str] = None
+
+
+class PushUnsubscribeBody(BaseModel):
+    endpoint: str
+
+
+@app.get("/api/push/vapid-public-key")
+def api_push_vapid_key(admin=Depends(get_current_admin)):
+    return {"publicKey": VAPID_PUBLIC_KEY, "enabled": PUSH_ENABLED}
+
+
+@app.post("/api/push/subscribe")
+def api_push_subscribe(body: PushSubscribeBody, admin=Depends(get_current_admin)):
+    if not PUSH_ENABLED:
+        raise HTTPException(400, "اعلان Push روی سرور تنظیم نشده است.")
+    p256dh = (body.keys or {}).get("p256dh")
+    auth = (body.keys or {}).get("auth")
+    if not p256dh or not auth:
+        raise HTTPException(400, "اطلاعات subscription ناقص است.")
+    db.save_push_subscription(admin["id"], body.endpoint, p256dh, auth, body.user_agent)
+    return {"ok": True}
+
+
+@app.post("/api/push/unsubscribe")
+def api_push_unsubscribe(body: PushUnsubscribeBody, admin=Depends(get_current_admin)):
+    db.delete_push_subscription_by_endpoint(body.endpoint)
+    return {"ok": True}
+
+
+@app.post("/api/push/test")
+async def api_push_test(admin=Depends(get_current_admin)):
+    if not PUSH_ENABLED:
+        raise HTTPException(400, "اعلان Push روی سرور تنظیم نشده است.")
+    subs = db.list_push_subscriptions_for_admin(admin["id"])
+    if not subs:
+        raise HTTPException(400, "هنوز روی این دستگاه اعلان را فعال نکرده‌ای.")
+    sent, gone = 0, []
+    for s in subs:
+        result = await send_push(s, {
+            "title": "🔔 اعلان تست",
+            "body": "این یک پیام آزمایشی از پنل مدیریت ShopVPN است.",
+            "tag": "test",
+        })
+        if result == "ok":
+            sent += 1
+        elif result == "gone":
+            gone.append(s["endpoint"])
+    if gone:
+        db.delete_push_subscriptions_by_endpoints(gone)
+    if not sent:
+        raise HTTPException(502, "ارسال اعلان تست ناموفق بود.")
+    return {"ok": True, "sent": sent}
 
 
 # --------------------------------------------------------------- helpers --
@@ -1106,6 +1254,13 @@ def api_change_my_password(body: MyPasswordBody, admin=Depends(get_current_admin
 
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
+
+
+@app.get("/sw.js")
+def serve_service_worker():
+    # عمداً روی ریشه‌ی دامنه سرو می‌شود (نه زیر /assets) تا scope پیش‌فرض
+    # Service Worker کل پنل را بگیرد و بتواند برای هر صفحه‌ای اعلان Push نشان دهد.
+    return FileResponse(os.path.join(STATIC_DIR, "sw.js"), media_type="application/javascript")
 
 
 @app.get("/", response_class=HTMLResponse)
