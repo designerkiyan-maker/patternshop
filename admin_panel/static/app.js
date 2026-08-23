@@ -7,15 +7,62 @@ let SUPPORT_POLL_TIMER = null;
 function stopSupportPoll() { if (SUPPORT_POLL_TIMER) { clearInterval(SUPPORT_POLL_TIMER); SUPPORT_POLL_TIMER = null; } }
 
 /* ============================================================= theme === */
+// هر آیتم یک تم کامل رو توصیف می‌کنه: نه فقط رنگ، بلکه چیدمان/کارت/نمودار.
+// وقتی تم جدیدی پیاده بشه، فقط کافیه یک آیتم اینجا با ready:true اضافه بشه
+// و بلوک CSS مربوطه با سلکتور html[data-theme="..."] در style.css اضافه بشه.
+const THEMES = [
+  {
+    id: 'flat',
+    name: 'Fintech Flat',
+    desc: 'سایدبار + کارت‌های تخت بنفش، نمودار رادار',
+    ready: true,
+    supportsMode: true, // این تم حالت روشن/تیره داره
+    swatch: ['#7367F0', '#23253A', '#1B1D2C'],
+  },
+  {
+    id: 'bento',
+    name: 'Bento Grid',
+    desc: 'کارت‌های نامنظم چندسایز مثل ویجت‌های اپل',
+    ready: true,
+    supportsMode: false,
+    swatch: ['#0A84FF', '#30D158', '#FF9F0A'],
+  },
+  {
+    id: 'brutalist',
+    name: 'Neo-brutalist',
+    desc: 'کادر ضخیم، بی‌سایه، تایپوگرافی بولد',
+    ready: false,
+    supportsMode: false,
+    swatch: ['#FFE600', '#000000', '#FFFFFF'],
+  },
+  {
+    id: 'glass',
+    name: 'Glassmorphism',
+    desc: 'شیشه‌ای، بلور، لایه‌ای',
+    ready: false,
+    supportsMode: false,
+    swatch: ['#8A9BFF', '#FFFFFF33', '#0B1020'],
+  },
+];
+const DEFAULT_THEME = 'flat';
+
 function loadTheme() {
-  try { return JSON.parse(localStorage.getItem('sv-theme')) || { mode: 'dark' }; }
-  catch (e) { return { mode: 'dark' }; }
+  try {
+    const t = JSON.parse(localStorage.getItem('sv-theme')) || {};
+    return { theme: t.theme || DEFAULT_THEME, mode: t.mode || 'dark' };
+  } catch (e) { return { theme: DEFAULT_THEME, mode: 'dark' }; }
 }
-function applyTheme(mode) {
-  document.documentElement.setAttribute('data-mode', mode);
-  localStorage.setItem('sv-theme', JSON.stringify({ mode }));
+function applyThemeChoice(themeId, mode) {
+  const meta = THEMES.find(t => t.id === themeId) || THEMES[0];
+  const finalTheme = meta.ready ? meta.id : DEFAULT_THEME;
+  const finalMode = mode || 'dark';
+  document.documentElement.setAttribute('data-theme', finalTheme);
+  document.documentElement.setAttribute('data-mode', finalMode);
+  localStorage.setItem('sv-theme', JSON.stringify({ theme: finalTheme, mode: finalMode }));
 }
-applyTheme(loadTheme().mode);
+// نگه‌داری سازگاری با کدهای قدیمی‌تر که فقط applyTheme(mode) صدا می‌زنن
+function applyTheme(mode) { applyThemeChoice(loadTheme().theme, mode); }
+{ const t0 = loadTheme(); applyThemeChoice(t0.theme, t0.mode); }
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -413,6 +460,125 @@ async function renderDashboard() {
   const s = await apiGet('/dashboard');
   let sys = null;
   try { sys = await apiGet('/system/stats'); } catch (e) { /* psutil ممکن است نصب نباشد */ }
+  if (loadTheme().theme === 'bento') return renderDashboardBento(s, sys);
+  return renderDashboardFlat(s, sys);
+}
+
+/* ---------------------------------------------------- dashboard: bento --- */
+function sparklinePath(values, w, h, pad = 4) {
+  const max = Math.max(...values, 1), min = Math.min(...values, 0);
+  const range = (max - min) || 1;
+  const step = (w - pad * 2) / Math.max(values.length - 1, 1);
+  const pts = values.map((v, i) => [pad + i * step, h - pad - ((v - min) / range) * (h - pad * 2)]);
+  const line = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+  const area = line + ` L${pts[pts.length - 1][0].toFixed(1)},${h} L${pts[0][0].toFixed(1)},${h} Z`;
+  return { line, area, last: pts[pts.length - 1] };
+}
+function ringSegment(cx, cy, r, pct, color, width) {
+  const c = 2 * Math.PI * r;
+  const off = c - Math.max(0, Math.min(100, pct)) / 100 * c;
+  return `
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--border)" stroke-width="${width}"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round"
+      stroke-dasharray="${c}" stroke-dashoffset="${c}" data-final="${off}" transform="rotate(-90 ${cx} ${cy})" class="bento-ring-seg"/>`;
+}
+function renderDashboardBento(s, sys) {
+  const trend = sparklinePath(s.daily_series.map(d => d.revenue), 100, 40);
+  const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
+  const maxCatRev = Math.max(...s.category_breakdown.map(c => c.revenue), 1);
+  const widgetColors = ['w-blue', 'w-green', 'w-orange', 'w-pink', 'w-purple'];
+  const catBento = s.category_breakdown.slice(0, 4).map((c, i) => `
+    <div class="bw-mini ${widgetColors[i % widgetColors.length]}">
+      <span class="bw-mini-name">${esc(c.name)}</span>
+      <span class="bw-mini-val mono">${fmt(c.revenue)}</span>
+    </div>`).join('') || `<span class="card-sub">داده‌ای نیست</span>`;
+  const prodBento = s.top_products.slice(0, 4).map((p, i) => `
+    <div class="bw-row">
+      <span class="bw-row-dot ${widgetColors[i % widgetColors.length]}"></span>
+      <span class="bw-row-name">${esc(p.name)}</span>
+      <span class="bw-row-val mono">${fmt(p.orders)}</span>
+    </div>`).join('') || `<span class="card-sub">داده‌ای نیست</span>`;
+
+  const ringsData = [
+    { pct: s.conversion_rate, color: 'var(--primary)', label: 'تبدیل' },
+    { pct: sys ? Math.max(0, 100 - (sys.cpu.percent + sys.ram.percent + sys.disk.percent) / 3) : 80, color: 'var(--emerald)', label: 'سلامت' },
+    { pct: s.active_configs ? Math.min(Math.round((s.open_tickets / s.active_configs) * 100), 100) : 0, color: 'var(--rose)', label: 'تیکت' },
+  ];
+
+  setContent(`
+    <div class="bento-grid">
+      <div class="bw w-blue span-2 rows-2">
+        <div class="bw-head">
+          <span class="bw-label">درآمد ۱۴ روز اخیر</span>
+          <span class="bw-badge ${deltaUp ? 'up' : 'down'}">${deltaUp ? '▲' : '▼'} ${Math.abs(s.revenue_change_pct ?? 0)}%</span>
+        </div>
+        <span class="bw-value mono" data-count="${s.revenue}">۰</span>
+        <svg class="bw-trend" viewBox="0 0 100 40" preserveAspectRatio="none">
+          <defs><linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#fff" stop-opacity=".55"/><stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+          </linearGradient></defs>
+          <path d="${trend.area}" fill="url(#trendFill)"/>
+          <path d="${trend.line}" fill="none" stroke="#fff" stroke-width="2"/>
+        </svg>
+      </div>
+
+      <div class="bw w-green">
+        <span class="bw-label">کاربران کل</span>
+        <span class="bw-value mono" data-count="${s.total_users}">۰</span>
+        <span class="bw-sub">${fmt(s.new_users)}+ جدید</span>
+      </div>
+      <div class="bw w-orange">
+        <span class="bw-label">سفارش تایید شده</span>
+        <span class="bw-value mono" data-count="${s.approved}">۰</span>
+        <span class="bw-sub">${s.conversion_rate}٪ نرخ تبدیل</span>
+      </div>
+
+      <div class="bw w-white rows-2 span-2 bento-rings-card">
+        <div class="bw-head"><span class="bw-label" style="color:var(--text-muted)">شاخص‌های کلیدی</span></div>
+        <div class="bento-rings">
+          <svg viewBox="0 0 120 120">
+            ${ringSegment(60, 60, 50, ringsData[0].pct, ringsData[0].color, 10)}
+            ${ringSegment(60, 60, 36, ringsData[1].pct, ringsData[1].color, 10)}
+            ${ringSegment(60, 60, 22, ringsData[2].pct, ringsData[2].color, 10)}
+          </svg>
+          <div class="bento-rings-legend">
+            ${ringsData.map(r => `<span><i style="background:${r.color}"></i>${r.label} · ${fmt(Math.round(r.pct))}٪</span>`).join('')}
+          </div>
+        </div>
+      </div>
+
+      <div class="bw w-pink">
+        <span class="bw-label">کانفیگ فعال</span>
+        <span class="bw-value mono" data-count="${s.active_configs}">۰</span>
+      </div>
+      <div class="bw w-purple">
+        <span class="bw-label">تیکت باز</span>
+        <span class="bw-value mono" data-count="${s.open_tickets}">۰</span>
+      </div>
+
+      <div class="bw w-white span-2">
+        <div class="bw-head"><span class="bw-label" style="color:var(--text-muted)">تفکیک درآمد</span></div>
+        <div class="bw-mini-grid">${catBento}</div>
+      </div>
+      <div class="bw w-white span-2">
+        <div class="bw-head"><span class="bw-label" style="color:var(--text-muted)">پرفروش‌ترین محصولات</span></div>
+        ${prodBento}
+      </div>
+    </div>
+  `);
+
+  const root = content();
+  $$('.bw-value[data-count]', root).forEach(el => animateCount(el, Number(el.dataset.count)));
+  requestAnimationFrame(() => setTimeout(() => {
+    $$('.bento-ring-seg', root).forEach(seg => {
+      seg.style.transition = 'stroke-dashoffset 1.1s cubic-bezier(.16,1,.3,1)';
+      seg.style.strokeDashoffset = seg.dataset.final;
+    });
+  }, 60));
+}
+
+/* ----------------------------------------------------- dashboard: flat --- */
+async function renderDashboardFlat(s, sys) {
   const maxRev = Math.max(...s.daily_series.map(d => d.revenue), 1);
   const spark = s.daily_series.map(d => `<i data-h="${Math.max((d.revenue / maxRev) * 100, 3)}" title="${d.date}: ${fmt(d.revenue)} تومان"></i>`).join('');
   const deltaCls = (s.revenue_change_pct ?? 0) >= 0 ? 'up' : 'down';
@@ -1911,17 +2077,37 @@ async function renderSystem() {
 }
 
 /* ============================================================= account === */
+function renderThemeCard(t, cur) {
+  const active = t.id === cur.theme;
+  const swatchHtml = t.swatch.map(c => `<span style="background:${c}"></span>`).join('');
+  return `
+    <div class="theme-card ${active ? 'active' : ''} ${t.ready ? '' : 'locked'}" data-theme-id="${t.id}">
+      <div class="theme-card-swatch">${swatchHtml}</div>
+      <div class="theme-card-body">
+        <strong>${esc(t.name)}</strong>
+        <span>${esc(t.desc)}</span>
+      </div>
+      ${active ? '<span class="theme-card-badge">فعال</span>' : (t.ready ? '' : '<span class="theme-card-badge locked">به‌زودی</span>')}
+    </div>`;
+}
+
 async function renderAccount() {
   const cur = loadTheme();
+  const activeMeta = THEMES.find(t => t.id === cur.theme) || THEMES[0];
   setContent(`
     <div class="card" style="margin-bottom:18px">
-      <div class="card-head">
-        <h3>ظاهر پنل</h3>
+      <div class="card-head"><h3>تم پنل</h3></div>
+      <div class="theme-grid" id="theme-grid">
+        ${THEMES.map(t => renderThemeCard(t, cur)).join('')}
+      </div>
+      ${activeMeta.supportsMode ? `
+      <div class="card-head" style="margin-top:16px">
+        <h3 style="font-size:13.5px">حالت نمایش</h3>
         <div class="mode-toggle" id="mode-toggle">
           <button data-mode="light" class="${cur.mode === 'light' ? 'active' : ''}">☀️ روشن</button>
           <button data-mode="dark" class="${cur.mode === 'dark' ? 'active' : ''}">🌙 تیره</button>
         </div>
-      </div>
+      </div>` : ''}
       <span class="card-sub">این یک ترجیح شخصیه و فقط برای همین مرورگر ذخیره می‌شود؛ روی نمایش پنل برای بقیه‌ی ادمین‌ها اثری ندارد.</span>
     </div>
 
@@ -1934,8 +2120,15 @@ async function renderAccount() {
       </div>
     </div>
   `);
+  $$('.theme-card', content()).forEach(card => card.addEventListener('click', () => {
+    const id = card.dataset.themeId;
+    const meta = THEMES.find(t => t.id === id);
+    if (!meta.ready) { toast('این تم هنوز آماده نیست — به‌زودی اضافه می‌شود.'); return; }
+    applyThemeChoice(id, loadTheme().mode);
+    renderAccount();
+  }));
   $$('#mode-toggle button', content()).forEach(btn => btn.addEventListener('click', () => {
-    applyTheme(btn.dataset.mode);
+    applyThemeChoice(loadTheme().theme, btn.dataset.mode);
     $$('#mode-toggle button', content()).forEach(b => b.classList.toggle('active', b === btn));
   }));
   $('#acc-save').addEventListener('click', async () => {

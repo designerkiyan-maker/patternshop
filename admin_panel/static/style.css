@@ -396,6 +396,28 @@ body{ transition: background .2s ease, color .2s ease; }
 .mode-toggle button{ border:none; background:none; padding:7px 16px; border-radius:16px; font-size:12.5px; color:var(--text-muted); cursor:pointer; font-family:inherit; font-weight:600; transition:background .15s, color .15s; }
 .mode-toggle button.active{ background:var(--primary); color:#fff; }
 
+/* ---------------------------------------------------------- theme picker --- */
+.theme-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); gap:12px; }
+.theme-card{
+  position:relative; display:flex; align-items:center; gap:12px; padding:12px;
+  border:1.5px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-2);
+  cursor:pointer; transition:border-color .15s var(--ease), transform .1s var(--ease);
+}
+.theme-card:hover{ border-color:var(--primary); }
+.theme-card.active{ border-color:var(--primary); box-shadow:0 0 0 1px var(--primary) inset; }
+.theme-card.locked{ opacity:.55; cursor:not-allowed; }
+.theme-card.locked:hover{ border-color:var(--border); }
+.theme-card-swatch{ display:flex; flex-shrink:0; border-radius:9px; overflow:hidden; width:38px; height:38px; }
+.theme-card-swatch span{ flex:1; }
+.theme-card-body{ display:flex; flex-direction:column; gap:3px; min-width:0; }
+.theme-card-body strong{ font-size:13.5px; color:var(--text); }
+.theme-card-body span{ font-size:11.5px; color:var(--text-muted); }
+.theme-card-badge{
+  position:absolute; top:8px; left:8px; font-size:10px; font-weight:700; padding:2px 8px;
+  border-radius:20px; background:var(--primary); color:#fff;
+}
+.theme-card-badge.locked{ background:var(--surface-hi); color:var(--text-dim); }
+
 /* ---- گیج‌های منابع سرور (صفحه‌ی خانه) ------------------------------- */
 .res-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:18px; }
 @media (max-width:900px){ .res-grid{ grid-template-columns:1fr; } }
@@ -546,3 +568,127 @@ body{ transition: background .2s ease, color .2s ease; }
 .menu-order-drag-handle:active{ cursor:grabbing; }
 .menu-order-label{ flex:1; font-size:13px; }
 .menu-order-arrows{ display:flex; gap:4px; }
+
+/* ===================================================================
+   تم Bento Grid — پالت روشن و رنگارنگ به سبک ویجت‌های iOS/اپل.
+   تعریف مجدد متغیرهای پایه یعنی خیلی از کامپوننت‌های عمومی (دکمه، فرم،
+   جدول، بج) خودکار رنگ عوض می‌کنن؛ علاوه بر اون چیدمان سایدبار و
+   داشبورد هم به‌صورت اختصاصی بازطراحی شده.
+=================================================================== */
+html[data-theme="bento"]{
+  --bg: #F2F2F7;
+  --bg-2: #E8E8ED;
+  --surface: #FFFFFF;
+  --surface-2: #F7F7FA;
+  --surface-hi: rgba(0,0,0,.035);
+  --border: rgba(0,0,0,.07);
+  --border-soft: rgba(0,0,0,.05);
+
+  --text: #1C1C1E;
+  --text-muted: #6E6E73;
+  --text-dim: #AEAEB2;
+
+  --primary: #0A84FF;
+  --primary-ink: #FFFFFF;
+  --cyan: #40C8E0;
+  --amber: #FF9F0A;
+  --emerald: #30D158;
+  --rose: #FF375F;
+  --violet: #BF5AF2;
+  --fuchsia: #FF2D78;
+
+  --accent-1: var(--primary);
+  --accent-2: var(--emerald);
+  --accent-3: var(--amber);
+  --accent-4: var(--rose);
+
+  --radius: 26px;
+  --radius-sm: 18px;
+  --radius-xs: 13px;
+
+  --shadow-card: 0 1px 3px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.05);
+  --shadow-pop: 0 20px 50px rgba(0,0,0,.14);
+  --shadow-btn: 0 2px 8px rgba(0,0,0,.08);
+
+  --focus-ring: 0 0 0 3px rgba(10,132,255,.3);
+}
+html[data-theme="bento"] body{ background:var(--bg); }
+html[data-theme="bento"] .bg-blobs{ display:none; }
+
+/* کارت‌ها: بدون بوردر، سایه‌ی نرم شناور */
+html[data-theme="bento"] .card,
+html[data-theme="bento"] .login-card,
+html[data-theme="bento"] .modal{
+  border:none; box-shadow:var(--shadow-card);
+}
+html[data-theme="bento"] .btn{ border-radius:16px; }
+html[data-theme="bento"] .input, html[data-theme="bento"] .field input{ border-radius:14px; }
+
+/* سایدبار به یک ریل آیکونی جمع‌وجور تبدیل می‌شه */
+html[data-theme="bento"] .sidebar{
+  width:80px; align-items:center; padding:20px 10px; background:transparent; border-left:none;
+}
+html[data-theme="bento"] .sidebar-brand{ padding:0 0 18px; justify-content:center; }
+html[data-theme="bento"] .brand-text{ display:none; }
+html[data-theme="bento"] .brand-mark{ border-radius:16px; width:42px; height:42px; box-shadow:var(--shadow-btn); }
+html[data-theme="bento"] .nav-tunnel{ width:100%; }
+html[data-theme="bento"] .nav-item{
+  flex-direction:column; gap:2px; padding:10px 4px; border-radius:16px; text-align:center;
+}
+html[data-theme="bento"] .nav-item span:last-child{ font-size:9px; white-space:normal; line-height:1.15; }
+html[data-theme="bento"] .nav-item.active{ background:var(--primary); box-shadow:var(--shadow-btn); }
+html[data-theme="bento"] .nav-section{ text-align:center; margin:14px 4px 6px; font-size:8.5px; }
+html[data-theme="bento"] .sidebar-footer{ width:100%; }
+html[data-theme="bento"] .me-card{ flex-direction:column; padding:6px 0 10px; text-align:center; }
+html[data-theme="bento"] .me-info{ display:none; }
+html[data-theme="bento"] .logout-btn, html[data-theme="bento"] #logout-btn{ font-size:0; padding:10px; border-radius:14px; }
+html[data-theme="bento"] #logout-btn .icon{ width:16px; height:16px; }
+
+/* تاپ‌بار: شناور و کپسولی */
+html[data-theme="bento"] .topbar{
+  margin:14px 14px 0; border-radius:20px; background:var(--surface); box-shadow:var(--shadow-card);
+  border-bottom:none; top:14px;
+}
+html[data-theme="bento"] .topbar-clock{ background:var(--surface-2); border:none; }
+
+/* -------------------------------------------------- bento widgets ---- */
+.bento-grid{ display:grid; grid-template-columns:repeat(6,1fr); grid-auto-rows:minmax(118px,auto); gap:14px; }
+.bento-grid .span-2{ grid-column:span 2; }
+.bento-grid .rows-2{ grid-row:span 2; }
+@media (max-width:900px){ .bento-grid{ grid-template-columns:repeat(2,1fr); } .bento-grid .span-2{ grid-column:span 2; } }
+
+.bw{
+  border-radius:26px; padding:18px; display:flex; flex-direction:column; gap:8px;
+  position:relative; overflow:hidden; color:#fff; min-width:0;
+}
+.bw-white{ background:var(--surface); color:var(--text); box-shadow:var(--shadow-card); }
+.bw-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.bw-label{ font-size:12.5px; font-weight:700; opacity:.92; }
+.bw-value{ font-size:26px; font-weight:800; letter-spacing:-.02em; }
+.bw-sub{ font-size:11px; opacity:.85; }
+.bw-badge{ font-size:11px; font-weight:800; background:rgba(255,255,255,.22); padding:3px 9px; border-radius:20px; }
+.bw-badge.down{ background:rgba(0,0,0,.18); }
+.bw-trend{ width:100%; height:44px; margin-top:auto; }
+
+.w-blue{ background:linear-gradient(155deg,#0A84FF,#0060DF); }
+.w-green{ background:linear-gradient(155deg,#30D158,#1E9E42); }
+.w-orange{ background:linear-gradient(155deg,#FF9F0A,#E07E00); }
+.w-pink{ background:linear-gradient(155deg,#FF375F,#D91E45); }
+.w-purple{ background:linear-gradient(155deg,#BF5AF2,#9433D6); }
+
+.bento-rings-card .bw-head{ margin-bottom:4px; }
+.bento-rings{ display:flex; align-items:center; gap:16px; flex:1; }
+.bento-rings svg{ width:112px; height:112px; flex-shrink:0; }
+.bento-rings-legend{ display:flex; flex-direction:column; gap:8px; font-size:12px; color:var(--text-muted); }
+.bento-rings-legend i{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-inline-end:6px; }
+
+.bw-mini-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.bw-mini{ border-radius:14px; padding:10px 12px; display:flex; flex-direction:column; gap:4px; color:#fff; }
+.bw-mini-name{ font-size:11px; opacity:.9; }
+.bw-mini-val{ font-size:14px; font-weight:800; }
+
+.bw-row{ display:flex; align-items:center; gap:9px; padding:7px 0; border-bottom:1px solid var(--border-soft); }
+.bw-row:last-child{ border-bottom:none; }
+.bw-row-dot{ width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.bw-row-name{ flex:1; font-size:12.5px; color:var(--text); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bw-row-val{ font-size:12px; color:var(--text-muted); }
