@@ -204,6 +204,15 @@ def api_push_vapid_key(admin=Depends(get_current_admin)):
     return {"publicKey": VAPID_PUBLIC_KEY, "enabled": PUSH_ENABLED}
 
 
+@app.get("/api/push/status")
+def api_push_status(endpoint: str, admin=Depends(get_current_admin)):
+    """بررسی می‌کند آیا این endpoint واقعاً برای همین ادمین در دیتابیس ذخیره شده یا نه
+    (برای تشخیص حالتی که subscription محلی مرورگر با دیتابیس سرور ناهماهنگ شده)."""
+    subs = db.list_push_subscriptions_for_admin(admin["id"])
+    registered = any(s["endpoint"] == endpoint for s in subs)
+    return {"registered": registered}
+
+
 @app.post("/api/push/subscribe")
 def api_push_subscribe(body: PushSubscribeBody, admin=Depends(get_current_admin)):
     if not PUSH_ENABLED:
