@@ -39,9 +39,9 @@ const THEMES = [
     id: 'glass',
     name: 'Glassmorphism',
     desc: 'شیشه‌ای، بلور، لایه‌ای',
-    ready: false,
+    ready: true,
     supportsMode: false,
-    swatch: ['#8A9BFF', '#FFFFFF33', '#0B1020'],
+    swatch: ['#8A9BFF', '#22D3EE', '#0B1020'],
   },
 ];
 const DEFAULT_THEME = 'flat';
@@ -463,7 +463,133 @@ async function renderDashboard() {
   const theme = loadTheme().theme;
   if (theme === 'bento') return renderDashboardBento(s, sys);
   if (theme === 'brutalist') return renderDashboardBrutalist(s, sys);
+  if (theme === 'glass') return renderDashboardGlass(s, sys);
   return renderDashboardFlat(s, sys);
+}
+
+/* ----------------------------------------------------- dashboard: glass --- */
+function donutSegments(cx, cy, r, data, colors, strokeWidth) {
+  const total = data.reduce((a, b) => a + b.value, 0) || 1;
+  const c = 2 * Math.PI * r;
+  let offset = 0;
+  return data.map((d, i) => {
+    const frac = d.value / total;
+    const seg = `
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${colors[i % colors.length]}" stroke-width="${strokeWidth}"
+        stroke-dasharray="${(frac * c).toFixed(2)} ${c.toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"
+        stroke-linecap="round" transform="rotate(-90 ${cx} ${cy})" class="glass-donut-seg"
+        style="filter:drop-shadow(0 0 5px ${colors[i % colors.length]}99)"/>`;
+    offset += frac * c;
+    return seg;
+  }).join('');
+}
+function renderDashboardGlass(s, sys) {
+  const glassColors = ['#8B5CF6', '#22D3EE', '#34D399', '#FBBF24', '#FB7185', '#EC4899'];
+  const eqBars = s.daily_series.map((d, i) => {
+    const max = Math.max(...s.daily_series.map(x => x.revenue), 1);
+    return `<i data-h="${Math.max((d.revenue / max) * 100, 6)}" title="${d.date}: ${fmt(d.revenue)} تومان" style="--c:${glassColors[i % glassColors.length]}"></i>`;
+  }).join('');
+
+  const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
+  const dials = [
+    { label: 'نرخ تبدیل', pct: s.conversion_rate, color: '#22D3EE' },
+    { label: 'سلامت سرور', pct: sys ? Math.max(0, 100 - (sys.cpu.percent + sys.ram.percent + sys.disk.percent) / 3) : 80, color: '#34D399' },
+    { label: 'نسبت تیکت', pct: s.active_configs ? Math.min(Math.round((s.open_tickets / s.active_configs) * 100), 100) : 0, color: '#FB7185' },
+  ];
+  const dialHtml = dials.map(d => {
+    const c = 2 * Math.PI * 40;
+    const off = c - Math.max(0, Math.min(100, d.pct)) / 100 * c;
+    return `
+    <div class="glass-dial">
+      <svg viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="8"/>
+        <circle cx="50" cy="50" r="40" fill="none" stroke="${d.color}" stroke-width="8" stroke-linecap="round"
+          stroke-dasharray="${c}" stroke-dashoffset="${c}" data-final="${off}" transform="rotate(-90 50 50)"
+          class="glass-dial-seg" style="filter:drop-shadow(0 0 6px ${d.color}aa)"/>
+      </svg>
+      <div class="glass-dial-center"><span class="mono">${fmt(Math.round(d.pct))}٪</span></div>
+      <span class="glass-dial-label">${d.label}</span>
+    </div>`;
+  }).join('');
+
+  const catData = s.category_breakdown.map(c => ({ label: c.name, value: c.revenue }));
+  const totalCat = catData.reduce((a, b) => a + b.value, 0);
+  const donut = donutSegments(90, 90, 68, catData, glassColors, 20);
+  const catLegend = s.category_breakdown.map((c, i) => `
+    <span class="glass-legend-item"><i style="background:${glassColors[i % glassColors.length]}"></i>${esc(c.name)}<b class="mono">${fmt(c.revenue)}</b></span>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+
+  const prodRows = s.top_products.map((p, i) => `
+    <div class="glass-row">
+      <span class="glass-row-badge" style="--c:${glassColors[i % glassColors.length]}">${i + 1}</span>
+      <span class="glass-row-name">${esc(p.name)}</span>
+      <span class="glass-row-val mono">${fmt(p.orders)} فروش</span>
+    </div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+
+  setContent(`
+    <div class="hero">
+      <div class="hero-text">
+        <h2>${greetingByHour()}، ${esc(ME.username)} ✨</h2>
+        <p>وضعیت فروشگاه در ${s.start_date} تا ${s.end_date}</p>
+      </div>
+      <div class="hero-net"><canvas id="hero-net-canvas"></canvas></div>
+    </div>
+
+    <div class="grid grid-4">
+      <div class="card glass-stat">
+        <span class="glass-stat-label">درآمد (۱۴ روز)</span>
+        <span class="value mono" data-count="${s.revenue}">۰</span>
+        <span class="glass-stat-tag ${deltaUp ? 'up' : 'down'}">${deltaUp ? '▲' : '▼'} ${Math.abs(s.revenue_change_pct ?? 0)}٪</span>
+      </div>
+      <div class="card glass-stat">
+        <span class="glass-stat-label">سفارش تایید شده</span>
+        <span class="value mono" data-count="${s.approved}">۰</span>
+      </div>
+      <div class="card glass-stat">
+        <span class="glass-stat-label">کاربران کل</span>
+        <span class="value mono" data-count="${s.total_users}">۰</span>
+      </div>
+      <div class="card glass-stat">
+        <span class="glass-stat-label">کانفیگ فعال</span>
+        <span class="value mono" data-count="${s.active_configs}">۰</span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="card-head"><h3>روند فروش روزانه</h3><span class="card-sub">${s.start_date} تا ${s.end_date}</span></div>
+      <div class="glass-eq">${eqBars}</div>
+    </div>
+
+    <div class="grid grid-2" style="margin-top:16px; align-items:stretch">
+      <div class="card">
+        <div class="card-head"><h3>شاخص‌های کلیدی</h3></div>
+        <div class="glass-dials">${dialHtml}</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>تفکیک درآمد</h3></div>
+        <div class="glass-donut-wrap">
+          <svg viewBox="0 0 180 180">${donut}</svg>
+          <div class="glass-donut-center"><span class="mono">${fmt(totalCat)}</span><small>مجموع</small></div>
+        </div>
+        <div class="glass-legend">${catLegend}</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="card-head"><h3>پرفروش‌ترین محصولات</h3></div>
+      ${prodRows}
+    </div>
+  `);
+
+  const root = content();
+  $$('.value[data-count]', root).forEach(el => animateCount(el, Number(el.dataset.count)));
+  drawHeroNet($('#hero-net-canvas', root));
+  requestAnimationFrame(() => setTimeout(() => {
+    $$('.glass-eq i[data-h]', root).forEach(b => { b.style.height = b.dataset.h + '%'; });
+    $$('.glass-dial-seg', root).forEach(seg => {
+      seg.style.transition = 'stroke-dashoffset 1.2s cubic-bezier(.16,1,.3,1)';
+      seg.style.strokeDashoffset = seg.dataset.final;
+    });
+  }, 60));
 }
 
 /* ------------------------------------------------ dashboard: brutalist --- */
