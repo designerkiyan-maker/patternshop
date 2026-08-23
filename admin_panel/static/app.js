@@ -1377,7 +1377,52 @@ async function renderDashboardFlat(s, sys) {
 // رنگ تم فعلی (--primary/--emerald/--rose/...) نمایش داده می‌شود؛ یعنی
 // یک پیاده‌سازی، هم‌رنگ با هر پنج تم.
 
+// نسخه‌ی واقعی نقشه (خطوط ساحلی دقیق Natural Earth) به‌صورت lazy از CDN
+// بارگذاری می‌شود — چون خودِ پنل روی سرور واقعی با اینترنت اجرا می‌شود
+// (برخلاف محیط توسعه). تا وقتی لود نشده، همان چندضلعی‌های تقریبی/گرید
+// دستی بالا را نشان می‌دهیم؛ به‌محض آماده‌شدن، جای‌گزین دقیق می‌شود.
+let SV_REAL = null;
+let SV_REAL_PROMISE = null;
+function svLoadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('load failed: ' + src));
+    document.head.appendChild(s);
+  });
+}
+async function svEnsureRealMap() {
+  if (SV_REAL) return SV_REAL;
+  if (SV_REAL_PROMISE) return SV_REAL_PROMISE;
+  SV_REAL_PROMISE = (async () => {
+    try {
+      const timeout = (p) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 7000))]);
+      if (!window.d3 || !window.d3.geoPath) await timeout(svLoadScript('https://cdn.jsdelivr.net/npm/d3-geo@3/dist/d3-geo.min.js'));
+      if (!window.topojson) await timeout(svLoadScript('https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js'));
+      const res = await timeout(fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json'));
+      const world = await res.json();
+      const land = window.topojson.feature(world, world.objects.land);
+      const projection = d3.geoEquirectangular().fitSize([1000, 500], { type: 'Sphere' });
+      const path = d3.geoPath(projection);
+      SV_REAL = {
+        projection,
+        landPathD: path(land),
+        graticuleD: path(d3.geoGraticule10()),
+      };
+      return SV_REAL;
+    } catch (e) {
+      return null; // بی‌اهمیت — همان نسخه‌ی تقریبی/آفلاین باقی می‌ماند
+    }
+  })();
+  return SV_REAL_PROMISE;
+}
+
 function svProject(lat, lon) {
+  if (SV_REAL && SV_REAL.projection) {
+    const p = SV_REAL.projection([Number(lon), Number(lat)]);
+    if (p) return p;
+  }
   const x = (Number(lon) + 180) / 360 * 1000;
   const y = (90 - Number(lat)) / 180 * 500;
   return [x, y];
@@ -1548,6 +1593,19 @@ async function mountServerMap() {
   const emptyEl = $('#sv-map-empty', root);
   const updatedEl = $('#sv-map-updated', root);
   let currentServers = [];
+
+  // نسخه‌ی دقیق نقشه را در پس‌زمینه بارگیری کن و به‌محض آماده‌شدن جای‌گزین
+  // خطوط تقریبی/گرید کن — بدون این‌که منتظرش بمانیم.
+  svEnsureRealMap().then(real => {
+    if (!real) return;
+    const r = content();
+    if (!$('.sv-map-card', r)) return; // کاربر جابه‌جا شده
+    const landG = $('#sv-map-wrap .sv-map-land', r);
+    if (landG) landG.innerHTML = `<path d="${real.landPathD}" class="sv-map-land-poly"></path>`;
+    const gridG = $('#sv-map-wrap .sv-map-grid', r);
+    if (gridG) gridG.innerHTML = `<path d="${real.graticuleD}" class="sv-map-graticule-path"></path>`;
+    if (currentServers.length) svRenderMarkers(currentServers);
+  });
 
   const paint = (data) => {
     if (!$('.sv-map-card', content())) return; // کاربر به تب دیگری رفته

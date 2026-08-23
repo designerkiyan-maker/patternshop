@@ -1189,6 +1189,7 @@ html[data-theme="cyberpunk"] .live-dot{ background:var(--primary); box-shadow:0 
 .sv-map-wrap svg{ width:100%; height:100%; display:block; }
 .sv-map-grid line{ stroke:var(--border); stroke-width:1; opacity:.55; vector-effect:non-scaling-stroke; }
 .sv-map-grid line.sv-map-meridian, .sv-map-grid line.sv-map-equator{ opacity:.9; stroke-width:1.3; }
+.sv-map-graticule-path{ fill:none; stroke:var(--border); stroke-width:1; opacity:.5; vector-effect:non-scaling-stroke; }
 .sv-map-land-poly{
   fill:var(--primary); fill-opacity:.16; stroke:var(--primary); stroke-opacity:.5; stroke-width:1.2;
   stroke-linejoin:round; vector-effect:non-scaling-stroke;
