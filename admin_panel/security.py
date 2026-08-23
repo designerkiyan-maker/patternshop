@@ -40,11 +40,13 @@ def _b64url_decode(data: str) -> bytes:
     return base64.urlsafe_b64decode(data + padding)
 
 
-def create_session_token(secret_key: str, admin_id: int, username: str, role: str, hours: int = 12) -> str:
+def create_session_token(secret_key: str, admin_id: int, username: str, role: str, hours: int = 12,
+                          tenant: str = "") -> str:
     payload = {
         "id": admin_id,
         "u": username,
         "r": role,
+        "b": tenant,  # شناسه/اسلاگ تننت (نماینده)؛ خالی یعنی بات اصلی. منبع اعتبار تننت همین payload است نه پارامتر URL.
         "exp": int(time.time()) + hours * 3600,
     }
     body = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))

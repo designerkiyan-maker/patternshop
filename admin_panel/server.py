@@ -9,9 +9,12 @@
 """
 
 import asyncio
+import contextvars
+import hmac
 import logging
 import os
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
@@ -20,7 +23,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET, VAPID_PUBLIC_KEY
+from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET, VAPID_PUBLIC_KEY, resolve_db_path
 from database import Database, WEB_ADMIN_PERMISSIONS, MENU_BUTTON_META
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
 from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document, fetch_telegram_file
@@ -41,8 +44,83 @@ COOKIE_NAME = "panel_session"
 NOTIFY_POLL_SECONDS = 15
 
 app = FastAPI(title="ShopVPN Admin Panel")
-db = Database(DB_PATH)
-db.init_db(owner_id=OWNER_ID)
+main_db = Database(DB_PATH)
+main_db.init_db(owner_id=OWNER_ID)
+
+# --------------------------------------------------------- multi-tenancy --
+# پنل وب یک instance واحد است که هم بات اصلی و هم نماینده‌های «کامل» را سرو
+# می‌کند. تننت جاری (دیتابیس + توکن بات + مسیر بکاپ) از payload توکن نشستِ
+# لاگین‌شده استخراج و در یک contextvar برای طول همان درخواست نگه داشته می‌شود؛
+# متغیرهای ماژول‌سطح db/BOT_TOKEN/BACKUP_DIR که کدِ قبلاً تک‌تننتی همه‌جا با
+# آن‌ها کار می‌کند، بدون تغییر باقی می‌مانند ولی حالا به این contextvar وصل‌اند
+# تا نیازی به بازنویسی تک‌تک endpointها نباشد.
+
+
+@dataclass
+class Tenant:
+    slug: str          # "" یعنی بات اصلی
+    bot_id: Optional[int]
+    db: Database
+    db_path: str
+    bot_token: str
+    backup_dir: str
+
+
+MAIN_TENANT = Tenant(
+    slug="", bot_id=None, db=main_db, db_path=DB_PATH, bot_token=BOT_TOKEN,
+    backup_dir=os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "backups"),
+)
+
+_current_tenant: contextvars.ContextVar[Tenant] = contextvars.ContextVar("current_tenant", default=MAIN_TENANT)
+
+
+class _TenantDBProxy:
+    """پروکسی شفاف که `db.xxx()` را به دیتابیسِ تننتِ جاریِ درخواست هدایت می‌کند."""
+
+    def __getattr__(self, name):
+        return getattr(_current_tenant.get().db, name)
+
+
+db = _TenantDBProxy()
+
+
+def _bot_token() -> str:
+    return _current_tenant.get().bot_token
+
+
+def _backup_dir() -> str:
+    return _current_tenant.get().backup_dir
+
+
+def _lookup_reseller_bot_row(b: str):
+    b = (b or "").strip()
+    if not b:
+        return None
+    return main_db.get_reseller_bot(int(b)) if b.isdigit() else main_db.get_reseller_bot_by_slug(b)
+
+
+def resolve_tenant_by_slug(slug: str) -> Optional[Tenant]:
+    """فقط نماینده‌های «سطح ۱ (کامل)» که پنل وبشان صریحاً فعال شده اجازه‌ی
+    ورود دارند؛ نماینده‌ی سطح ۲ یا غیرفعال، حتی با اسلاگ درست هم رد می‌شود.
+    مثل مینی‌اپ، هم اسلاگ دلخواه و هم آیدی عددی بات (وقتی هنوز اسلاگ ست نشده) قبول می‌شود."""
+    slug = (slug or "").strip()
+    if not slug:
+        return MAIN_TENANT
+    row = _lookup_reseller_bot_row(slug)
+    if not row:
+        return None
+    if not row["is_active"] or not row["web_panel_enabled"]:
+        return None
+    level = row["reseller_level"] if "reseller_level" in row.keys() else 2
+    if level != 1:
+        return None
+    resolved_path = resolve_db_path(row["db_path"])
+    if not os.path.exists(resolved_path):
+        return None
+    return Tenant(
+        slug=slug, bot_id=row["id"], db=Database(resolved_path), db_path=resolved_path,
+        bot_token=row["bot_token"], backup_dir=os.path.join(os.path.dirname(resolved_path), "backups"),
+    )
 
 # ---------------------------------------------------- live push notifier --
 # یک تسک پس‌زمینه‌ی سبک که هر چند ثانیه دیتابیس را برای سفارش/شارژ/تیکت جدید
@@ -128,6 +206,55 @@ async def _notifier_loop():
 async def _start_notifier():
     if PUSH_ENABLED:
         asyncio.create_task(_notifier_loop())
+        asyncio.create_task(_notifier_supervisor())
+
+
+# --------------------------------- اعلان زنده برای پنل نماینده‌های کامل --
+# چون پنل وب یک پروسه‌ی جدا (systemd سرویس دیگر) است، فعال/غیرفعال شدن پنل
+# یک نماینده از داخل بات بلافاصله به این پروسه اطلاع داده نمی‌شود؛ به‌جایش
+# این supervisor هر ۲ دقیقه لیست نماینده‌های «کامل و فعال با پنل وب روشن» را
+# از main_db می‌خواند و برای هرکدام یک تسک _notifier_loop مستقل (روی
+# دیتابیس خودشان) نگه می‌دارد؛ با غیرفعال‌شدن پنل، تسک مربوطه هم کنسل می‌شود.
+
+_tenant_notifier_tasks: dict[str, asyncio.Task] = {}
+
+
+async def _run_tenant_notifier_loop(tenant: "Tenant"):
+    _current_tenant.set(tenant)
+    await _notifier_loop()
+
+
+async def _notifier_supervisor():
+    while True:
+        try:
+            active_slugs = set()
+            for row in main_db.list_reseller_bots(active_only=True):
+                level = row["reseller_level"] if "reseller_level" in row.keys() else 2
+                enabled = bool(row["web_panel_enabled"]) if "web_panel_enabled" in row.keys() else False
+                if level != 1 or not enabled:
+                    continue
+                resolved_path = resolve_db_path(row["db_path"])
+                if not os.path.exists(resolved_path):
+                    continue
+                slug = row["link_slug"] or str(row["id"])
+                active_slugs.add(slug)
+                if slug in _tenant_notifier_tasks:
+                    continue
+                tenant = Tenant(
+                    slug=slug, bot_id=row["id"], db=Database(resolved_path), db_path=resolved_path,
+                    bot_token=row["bot_token"], backup_dir=os.path.join(os.path.dirname(resolved_path), "backups"),
+                )
+                _tenant_notifier_tasks[slug] = asyncio.create_task(_run_tenant_notifier_loop(tenant))
+                logger.info("اعلان زنده‌ی پنل وب برای نماینده‌ی %s فعال شد.", slug)
+
+            for slug in list(_tenant_notifier_tasks.keys()):
+                if slug not in active_slugs:
+                    _tenant_notifier_tasks.pop(slug).cancel()
+                    logger.info("اعلان زنده‌ی پنل وب برای نماینده‌ی %s متوقف شد.", slug)
+        except Exception:
+            logger.exception("خطا در supervisor اعلان زنده‌ی نماینده‌ها")
+        await asyncio.sleep(120)
+
 
 # ------------------------------------------------------------------ auth --
 
@@ -135,21 +262,32 @@ async def _start_notifier():
 class LoginBody(BaseModel):
     username: str
     password: str
+    b: Optional[str] = None  # اسلاگ نماینده؛ خالی/غایب یعنی بات اصلی
 
 
-def get_current_admin(request: Request):
+async def get_current_admin(request: Request):
     token = request.cookies.get(COOKIE_NAME)
     payload = verify_session_token(ADMIN_PANEL_SECRET, token) if token else None
     if not payload:
         raise HTTPException(401, "نشست منقضی شده یا نامعتبر است.")
-    admin = db.get_web_admin(payload["id"])
+
+    # تننت همیشه از خودِ توکن امضاشده خوانده می‌شود، نه از کوئری URL؛ وگرنه
+    # کسی با یک session کوکی معتبر می‌توانست با عوض‌کردن ?b= به دیتابیس تننت
+    # دیگری دسترسی بگیرد.
+    tenant = resolve_tenant_by_slug(payload.get("b", ""))
+    if not tenant:
+        raise HTTPException(401, "پنل وب این نماینده دیگر فعال نیست.")
+    _current_tenant.set(tenant)
+
+    admin = tenant.db.get_web_admin(payload["id"])
     if not admin or not admin["is_active"]:
         raise HTTPException(401, "حساب کاربری غیرفعال یا حذف شده است.")
     return {
         "id": admin["id"],
         "username": admin["username"],
         "role": admin["role"],
-        "permissions": db.get_web_admin_permissions(admin),
+        "permissions": tenant.db.get_web_admin_permissions(admin),
+        "tenant": tenant.slug,
     }
 
 
@@ -167,23 +305,91 @@ def require_owner(admin=Depends(get_current_admin)):
     return admin
 
 
+def require_main_tenant(admin=Depends(get_current_admin)):
+    """برای بخش‌هایی که حتی برای owner پنل نماینده هم معنی ندارند (مثلاً منابع سخت‌افزاری سرور)."""
+    if admin["tenant"]:
+        raise HTTPException(403, "این بخش فقط در پنل بات اصلی در دسترس است.")
+    return admin
+
+
 @app.post("/api/login")
 def api_login(body: LoginBody, response: Response):
-    admin = db.get_web_admin_by_username(body.username)
+    tenant = resolve_tenant_by_slug(body.b or "")
+    if not tenant:
+        raise HTTPException(401, "این پنل در دسترس نیست.")
+    admin = tenant.db.get_web_admin_by_username(body.username)
     if not admin or not admin["is_active"] or not verify_password(body.password, admin["password_hash"]):
         raise HTTPException(401, "یوزرنیم یا پسورد اشتباه است.")
-    token = create_session_token(ADMIN_PANEL_SECRET, admin["id"], admin["username"], admin["role"])
-    db.touch_web_admin_login(admin["id"])
+    token = create_session_token(
+        ADMIN_PANEL_SECRET, admin["id"], admin["username"], admin["role"], tenant=tenant.slug,
+    )
+    tenant.db.touch_web_admin_login(admin["id"])
     response.set_cookie(
         COOKIE_NAME, token, httponly=True, samesite="lax", max_age=12 * 3600, path="/",
     )
-    return {"id": admin["id"], "username": admin["username"], "role": admin["role"]}
+    return {"id": admin["id"], "username": admin["username"], "role": admin["role"], "tenant": tenant.slug}
 
 
 @app.post("/api/logout")
 def api_logout(response: Response):
     response.delete_cookie(COOKIE_NAME, path="/")
     return {"ok": True}
+
+
+# ------------------------------------------------------- reseller web panel setup --
+# مسیرِ یک‌بارمصرفی که نماینده‌ی «کامل» بعد از این‌که مدیر اصلی از داخل بات
+# «فعالسازی پنل وب» را زد، برای اولین‌بار یوزرنیم/پسورد خودش را ست می‌کند.
+# بعد از اولین حساب owner در دیتابیس همان نماینده، توکن باطل می‌شود.
+
+
+class SetupBody(BaseModel):
+    b: str
+    t: str
+    username: str
+    password: str
+
+
+@app.get("/api/setup/info")
+def api_setup_info(b: str, t: str):
+    row = _lookup_reseller_bot_row(b)
+    if not row or not row["web_panel_enabled"] or not row["web_panel_setup_token"]:
+        raise HTTPException(404, "لینک راه‌اندازی نامعتبر یا منقضی‌شده است.")
+    if not hmac.compare_digest(row["web_panel_setup_token"], t):
+        raise HTTPException(404, "لینک راه‌اندازی نامعتبر یا منقضی‌شده است.")
+    tenant_db = Database(resolve_db_path(row["db_path"]))
+    if tenant_db.count_web_admins() > 0:
+        raise HTTPException(400, "پنل این نماینده قبلاً راه‌اندازی شده؛ از صفحه‌ی ورود استفاده کن.")
+    return {"bot_username": row["bot_username"] or "", "owner_name": row["owner_name"] or ""}
+
+
+@app.post("/api/setup")
+def api_setup_submit(body: SetupBody, response: Response):
+    row = _lookup_reseller_bot_row(body.b)
+    if not row or not row["web_panel_enabled"] or not row["web_panel_setup_token"]:
+        raise HTTPException(404, "لینک راه‌اندازی نامعتبر یا منقضی‌شده است.")
+    if not hmac.compare_digest(row["web_panel_setup_token"], body.t):
+        raise HTTPException(404, "لینک راه‌اندازی نامعتبر یا منقضی‌شده است.")
+
+    username = (body.username or "").strip().lower()
+    if len(username) < 3:
+        raise HTTPException(400, "یوزرنیم باید حداقل ۳ کاراکتر باشد.")
+    if len(body.password or "") < 8:
+        raise HTTPException(400, "پسورد باید حداقل ۸ کاراکتر باشد.")
+
+    tenant_db = Database(resolve_db_path(row["db_path"]))
+    if tenant_db.count_web_admins() > 0:
+        raise HTTPException(400, "پنل این نماینده قبلاً راه‌اندازی شده؛ از صفحه‌ی ورود استفاده کن.")
+    if tenant_db.get_web_admin_by_username(username):
+        raise HTTPException(400, "این یوزرنیم قبلاً استفاده شده.")
+
+    admin_id = tenant_db.create_web_admin(username, hash_password(body.password), role="owner")
+    main_db.consume_reseller_web_panel_setup_token(row["id"])
+
+    tenant_slug = row["link_slug"] or str(row["id"])
+    token = create_session_token(ADMIN_PANEL_SECRET, admin_id, username, "owner", tenant=tenant_slug)
+    tenant_db.touch_web_admin_login(admin_id)
+    response.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=12 * 3600, path="/")
+    return {"id": admin_id, "username": username, "role": "owner", "tenant": tenant_slug}
 
 
 @app.get("/api/me")
@@ -288,7 +494,7 @@ def rows_to_list(rows):
 
 
 async def notify_user(chat_id: int, text: str):
-    asyncio.create_task(tg_send(BOT_TOKEN, chat_id, text))
+    asyncio.create_task(tg_send(_bot_token(), chat_id, text))
 
 
 # --------------------------------------------------------------- dashboard --
@@ -333,8 +539,10 @@ async def api_dashboard_servers_map(refresh: bool = False, admin=Depends(get_cur
 
 
 @app.get("/api/system/stats")
-def api_system_stats(admin=Depends(get_current_admin)):
-    """وضعیت لحظه‌ای منابع سرور (CPU / RAM / دیسک) برای نمایش در صفحه‌ی خانه."""
+def api_system_stats(admin=Depends(require_main_tenant)):
+    """وضعیت لحظه‌ای منابع سرور (CPU / RAM / دیسک) - چون این منابع بین همه‌ی
+    بات‌های میزبانی‌شده روی این سرور مشترک است، فقط در پنل بات اصلی نشان
+    داده می‌شود (نه به نماینده‌ها)."""
     try:
         import psutil
     except ImportError:
@@ -386,20 +594,18 @@ def api_system_jobs(admin=Depends(require_permission("system"))):
 
 # ------------------------------------------------------------------ backup --
 
-BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "backups")
-
-
 @app.get("/api/system/backup/status")
 def api_backup_status(admin=Depends(require_permission("system"))):
     """آخرین وضعیت بکاپ‌ها؛ فقط‌خواندنی، برای نمایش در پنل."""
-    if not os.path.isdir(BACKUP_DIR):
+    backup_dir = _backup_dir()
+    if not os.path.isdir(backup_dir):
         return {"last_backup_at": None, "last_backup_size_mb": None, "count": 0}
     files = sorted(
-        (f for f in os.listdir(BACKUP_DIR) if f.endswith(".db") and not f.startswith("pre_restore_")),
+        (f for f in os.listdir(backup_dir) if f.endswith(".db") and not f.startswith("pre_restore_")),
     )
     if not files:
         return {"last_backup_at": None, "last_backup_size_mb": None, "count": 0}
-    last_path = os.path.join(BACKUP_DIR, files[-1])
+    last_path = os.path.join(backup_dir, files[-1])
     return {
         "last_backup_at": db.get_setting("_job_backup_last_at", "") or None,
         "last_backup_size_mb": round(os.path.getsize(last_path) / (1024 * 1024), 1),
@@ -410,7 +616,8 @@ def api_backup_status(admin=Depends(require_permission("system"))):
 @app.post("/api/system/backup/create")
 async def api_backup_create(admin=Depends(require_permission("backup"))):
     """یک بکاپ فوری می‌سازد و به همه‌ی ادمین‌های تلگرامی همین بات ارسال می‌کند."""
-    backup_path = await asyncio.to_thread(create_backup, DB_PATH, BACKUP_DIR, 14)
+    tenant = _current_tenant.get()
+    backup_path = await asyncio.to_thread(create_backup, tenant.db_path, _backup_dir(), 14)
     if not backup_path:
         raise HTTPException(404, "فایل دیتابیس پیدا نشد.")
 
@@ -419,7 +626,7 @@ async def api_backup_create(admin=Depends(require_permission("backup"))):
 
     sent, failed = 0, 0
     for admin_tg_id in db.list_admins():
-        ok = await tg_send_document(BOT_TOKEN, admin_tg_id, backup_path, caption)
+        ok = await tg_send_document(_bot_token(), admin_tg_id, backup_path, caption)
         sent += 1 if ok else 0
         failed += 0 if ok else 1
 
@@ -456,7 +663,7 @@ async def api_backup_restore(
         raise HTTPException(400, "این فایل یک دیتابیس sqlite معتبر نیست.")
 
     try:
-        pre_restore_path = await asyncio.to_thread(restore_backup, db, DB_PATH, tmp_path)
+        pre_restore_path = await asyncio.to_thread(restore_backup, db, _current_tenant.get().db_path, tmp_path)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
@@ -498,7 +705,7 @@ async def api_order_receipt(order_id: int, admin=Depends(get_current_admin)):
     order = db.get_order(order_id)
     if not order or not order["receipt_file_id"]:
         raise HTTPException(404, "رسیدی برای این سفارش ثبت نشده است.")
-    result = await fetch_telegram_file(BOT_TOKEN, order["receipt_file_id"])
+    result = await fetch_telegram_file(_bot_token(), order["receipt_file_id"])
     if not result:
         raise HTTPException(502, "دریافت رسید از تلگرام ناموفق بود.")
     content, content_type = result
@@ -582,7 +789,7 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
         f"سفارش #{order_id} | کاربر {order['user_id']} | محصول «{product['name'] if product else '---'}» (پنل وب - {admin['username']})",
         "order", order_id,
     )
-    await check_and_notify_low_stock(lambda aid, text: tg_send(BOT_TOKEN, aid, text), db, order["product_id"])
+    await check_and_notify_low_stock(lambda aid, text: tg_send(_bot_token(), aid, text), db, order["product_id"])
     db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or (product["price"] if product else 0))
     links = [r["link"] for r in results]
     await notify_user(order["user_id"], "✅ خرید شما تایید شد!")
@@ -624,7 +831,7 @@ async def api_topup_receipt(topup_id: int, admin=Depends(get_current_admin)):
     topup = db.get_topup(topup_id)
     if not topup or not topup["receipt_file_id"]:
         raise HTTPException(404, "رسیدی برای این شارژ ثبت نشده است.")
-    result = await fetch_telegram_file(BOT_TOKEN, topup["receipt_file_id"])
+    result = await fetch_telegram_file(_bot_token(), topup["receipt_file_id"])
     if not result:
         raise HTTPException(502, "دریافت رسید از تلگرام ناموفق بود.")
     content, content_type = result
@@ -936,7 +1143,7 @@ async def api_broadcast(body: BroadcastBody, admin=Depends(require_permission("b
 
     async def _send(uid):
         async with sem:
-            ok = await tg_send(BOT_TOKEN, uid, text)
+            ok = await tg_send(_bot_token(), uid, text)
             counters["success" if ok else "failed"] += 1
 
     await asyncio.gather(*[_send(uid) for uid in user_ids])
@@ -1366,5 +1573,13 @@ def serve_service_worker():
 
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
+    with open(os.path.join(STATIC_DIR, "index.html"), "r", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.get("/setup", response_class=HTMLResponse)
+def serve_setup_page():
+    """همان SPA سرو می‌شود؛ خود فرانت مسیر /setup را تشخیص داده و فرم راه‌اندازی
+    اولیه‌ی پنل نماینده را نشان می‌دهد."""
     with open(os.path.join(STATIC_DIR, "index.html"), "r", encoding="utf-8") as f:
         return f.read()
