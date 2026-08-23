@@ -27,7 +27,7 @@ from admin_panel.telegram_notify import send_message as tg_send, send_document a
 from admin_panel.webpush import PUSH_ENABLED, send_push
 from reseller_auto_provision import provision_auto_config, ProvisionError
 from stock_alerts import check_and_notify_low_stock
-from panel_providers import get_provider, PanelError, PANEL_TYPE_LABELS
+from panel_providers import get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS
 from renewal_reminders import STATUS_KEY_LAST_RUN, STATUS_KEY_LAST_DATE_SENT, STATUS_KEY_LAST_VOLUME_SENT
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 import exchange_rate
@@ -453,9 +453,39 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
         raise HTTPException(400, "سفارش یافت نشد یا قبلاً بررسی شده.")
 
     if order["is_custom_config"]:
+        server = db.get_panel_server(order["custom_panel_server_id"])
+        if not server or not server["is_active"]:
+            raise HTTPException(400, "سرور پنل مربوطه یافت نشد یا غیرفعال است.")
+
+        try:
+            provider = get_provider(server)
+            result = await provider.create_user(
+                username=order["custom_username"],
+                volume_gb=order["custom_volume_gb"],
+                duration_days=db.get_custom_config_settings()["duration_days"],
+            )
+        except PanelUsernameTakenError:
+            raise HTTPException(400, "این نام کاربری روی پنل تکراری است؛ از کاربر بخواه نام دیگری انتخاب کند.")
+        except PanelError as e:
+            raise HTTPException(400, f"خطا در ارتباط با پنل: {e}")
+
         db.approve_custom_config_order(order_id)
-        db.log_admin_action(admin["id"], "order_approve", f"سفارش شخصی #{order_id} (پنل وب - {admin['username']})", "order", order_id)
-        await notify_user(order["user_id"], "✅ خرید شما تایید شد.")
+        db.add_custom_config(
+            user_id=order["user_id"],
+            panel_server_id=server["id"],
+            username=result.username,
+            volume_gb=order["custom_volume_gb"],
+            duration_days=db.get_custom_config_settings()["duration_days"],
+            subscription_url=result.subscription_url,
+            order_id=order_id,
+        )
+        db.log_admin_action(
+            admin["id"], "order_approve",
+            f"سفارش شخصی #{order_id} | کاربر {order['user_id']} | یوزرنیم «{result.username}» | "
+            f"{order['custom_volume_gb']} گیگ | مبلغ: {order['final_price']:,} (پنل وب - {admin['username']})",
+            "order", order_id,
+        )
+        await notify_user(order["user_id"], f"✅ کانفیگ شخصی شما ساخته شد!\n\n{result.subscription_url}")
         return {"ok": True}
 
     product = db.get_product(order["product_id"])
