@@ -2672,6 +2672,31 @@ class Database:
                 })
             return result
 
+    def count_unread_support_conversations(self) -> int:
+        """تعداد مکالمات چت زنده‌ای که حداقل یک پیام خوانده‌نشده از کاربر دارند
+        (برای بج زنده‌ی منو کنار «چت زنده»)."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT user_id) AS c FROM support_messages "
+                "WHERE sender='user' AND is_read_by_admin=0"
+            ).fetchone()
+            return row["c"] or 0
+
+    def get_latest_user_support_message_id(self) -> int:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT MAX(id) AS m FROM support_messages WHERE sender='user'"
+            ).fetchone()
+            return row["m"] or 0
+
+    def get_new_support_messages_since(self, since_id: int):
+        """پیام‌های جدید کاربر (نه ادمین) بعد از since_id، برای حلقه‌ی پوش زنده‌ی پنل وب."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM support_messages WHERE sender='user' AND id>? ORDER BY id",
+                (since_id,),
+            ).fetchall()
+
     # -----------------------------------------------------------------------
     # سیستم تیکت (مستقل از چت مستقیم بالا - یک راه ارتباطی جداگانه و رسمی‌تر
     # با موضوع مشخص و وضعیت باز/پاسخ‌داده‌شده/بسته)
