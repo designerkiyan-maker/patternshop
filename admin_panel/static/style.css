@@ -692,3 +692,126 @@ html[data-theme="bento"] .topbar-clock{ background:var(--surface-2); border:none
 .bw-row-dot{ width:9px; height:9px; border-radius:50%; flex-shrink:0; }
 .bw-row-name{ flex:1; font-size:12.5px; color:var(--text); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .bw-row-val{ font-size:12px; color:var(--text-muted); }
+
+/* ===================================================================
+   تم Neo-brutalist — بوردر ضخیم مشکی، سایه‌ی افست سخت (بدون بلور)،
+   بدون گردی گوشه، تایپوگرافی بولد، رنگ زرد/مشکی/سفید بی‌واسطه.
+=================================================================== */
+html[data-theme="brutalist"]{
+  --bg: #FDF6E3;
+  --bg-2: #F5EBC9;
+  --surface: #FFFFFF;
+  --surface-2: #FFFFFF;
+  --surface-hi: rgba(0,0,0,.05);
+  --border: #000000;
+  --border-soft: #000000;
+
+  --text: #000000;
+  --text-muted: #3A3A3A;
+  --text-dim: #6B6B6B;
+
+  --primary: #FFE600;
+  --primary-ink: #000000;
+  --cyan: #2B6CFF;
+  --amber: #FF8A00;
+  --emerald: #00C853;
+  --rose: #FF3B3B;
+  --violet: #7C3AED;
+  --fuchsia: #FF3EA5;
+
+  --font-body: "Vazirmatn", -apple-system, Tahoma, sans-serif;
+
+  --radius: 0px;
+  --radius-sm: 0px;
+  --radius-xs: 0px;
+
+  --shadow-card: 5px 5px 0 #000;
+  --shadow-pop: 9px 9px 0 #000;
+  --shadow-btn: 3px 3px 0 #000;
+
+  --focus-ring: 0 0 0 3px #000;
+}
+html[data-theme="brutalist"] body{ font-weight:600; }
+html[data-theme="brutalist"] h1, html[data-theme="brutalist"] h2, html[data-theme="brutalist"] h3, html[data-theme="brutalist"] h4{ font-weight:800; letter-spacing:-.01em; }
+
+html[data-theme="brutalist"] .card,
+html[data-theme="brutalist"] .login-card,
+html[data-theme="brutalist"] .modal{
+  border:3px solid #000; box-shadow:var(--shadow-card);
+}
+html[data-theme="brutalist"] .btn{
+  border:2.5px solid #000; box-shadow:var(--shadow-btn); font-weight:800;
+  transition:transform .08s, box-shadow .08s;
+}
+html[data-theme="brutalist"] .btn:active{ transform:translate(3px,3px); box-shadow:0 0 0 #000; }
+html[data-theme="brutalist"] .btn-primary{ background:var(--primary); color:#000; }
+html[data-theme="brutalist"] .input, html[data-theme="brutalist"] .field input{ border:2.5px solid #000; }
+html[data-theme="brutalist"] .badge{ border:1.5px solid currentColor; font-weight:800; }
+html[data-theme="brutalist"] table{ border:2.5px solid #000; }
+html[data-theme="brutalist"] thead th{ border-bottom:2.5px solid #000; text-transform:none; }
+
+html[data-theme="brutalist"] .sidebar{
+  background:#000; border-left:none;
+}
+html[data-theme="brutalist"] .brand-mark{ border-radius:0; background:var(--primary); color:#000; border:2.5px solid #000; }
+html[data-theme="brutalist"] .brand-text strong{ color:#fff; }
+html[data-theme="brutalist"] .brand-text span{ color:#aaa; }
+html[data-theme="brutalist"] .nav-item{ color:#ccc; border-radius:0; }
+html[data-theme="brutalist"] .nav-icon{ border-radius:0; }
+html[data-theme="brutalist"] .nav-item:hover{ background:#222; color:#fff; }
+html[data-theme="brutalist"] .nav-item.active{ background:var(--primary); color:#000; }
+html[data-theme="brutalist"] .nav-item.active .nav-icon{ color:#000; }
+html[data-theme="brutalist"] .nav-section{ color:#777; border-top-color:#333; }
+html[data-theme="brutalist"] .sidebar-footer{ border-top-color:#333; }
+html[data-theme="brutalist"] .me-avatar{ border-radius:0; border:2px solid #fff; color:#fff; background:#000; }
+html[data-theme="brutalist"] .me-info strong{ color:#fff; }
+html[data-theme="brutalist"] #logout-btn{ background:#fff; }
+
+html[data-theme="brutalist"] .topbar{ border-bottom:3px solid #000; background:var(--bg); }
+html[data-theme="brutalist"] .topbar-clock{ border-radius:0; border:2px solid #000; }
+
+/* -------------------------------------------------- brutalist dashboard --- */
+.bru-hero{ border:3px solid #000; background:#FFE600; padding:20px 22px; box-shadow:5px 5px 0 #000; margin-bottom:16px; }
+.bru-hero h2{ font-size:22px; font-weight:900; }
+.bru-hero p{ font-size:13px; margin-top:4px; font-weight:700; }
+
+.bru-grid-4{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+@media (max-width:900px){ .bru-grid-4{ grid-template-columns:repeat(2,1fr); } }
+.bru-block{ border:3px solid #000; box-shadow:5px 5px 0 #000; padding:16px; display:flex; flex-direction:column; gap:6px; }
+.bru-yellow{ background:#FFE600; }
+.bru-white{ background:#fff; }
+.bru-black{ background:#000; color:#fff; }
+.bru-block-label{ font-size:11.5px; font-weight:800; text-transform:uppercase; opacity:.75; }
+.bru-block-val{ font-size:25px; font-weight:900; }
+.bru-block-tag{ font-size:11px; font-weight:800; width:fit-content; padding:2px 8px; border:2px solid currentColor; }
+.bru-block-tag.neg{ color:#FF3B3B; }
+
+.bru-panel{ border:3px solid #000; background:#fff; box-shadow:5px 5px 0 #000; padding:16px 18px; }
+.bru-panel-head{ font-size:13px; font-weight:900; text-transform:uppercase; margin-bottom:14px; padding-bottom:8px; border-bottom:2.5px solid #000; }
+
+.bru-bars{ display:flex; align-items:flex-end; gap:6px; height:130px; }
+.bru-bar-col{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; gap:6px; min-width:0; }
+.bru-bar-val{ font-size:9px; font-weight:800; writing-mode:vertical-rl; opacity:.7; }
+.bru-bar{ width:100%; max-width:26px; height:4%; border:2px solid #000; transition:height 1s cubic-bezier(.16,1,.3,1); }
+
+.bru-cols{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+@media (max-width:900px){ .bru-cols{ grid-template-columns:1fr; } }
+
+.bru-metric-row{ display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.bru-metric-label{ width:110px; flex-shrink:0; font-size:11.5px; font-weight:700; }
+.bru-metric-track{ flex:1; height:16px; border:2px solid #000; background:#fff; overflow:hidden; }
+.bru-metric-fill{ display:block; height:100%; width:0; transition:width 1s cubic-bezier(.16,1,.3,1); }
+.bru-metric-val{ width:38px; text-align:left; font-size:11.5px; font-weight:800; flex-shrink:0; }
+
+.bru-stack{ display:flex; height:28px; border:2.5px solid #000; overflow:hidden; margin-bottom:12px; }
+.bru-stack-seg{ border-inline-end:2px solid #000; }
+.bru-stack-seg:last-child{ border-inline-end:none; }
+.bru-legend{ display:flex; flex-wrap:wrap; gap:8px 16px; }
+.bru-legend-item{ font-size:11.5px; font-weight:700; display:flex; align-items:center; }
+.bru-legend-item i{ display:inline-block; width:10px; height:10px; border:1.5px solid #000; margin-inline-end:6px; }
+
+.bru-prod-row{ display:flex; align-items:center; gap:12px; padding:9px 0; border-bottom:2px solid #000; }
+.bru-prod-row:last-child{ border-bottom:none; }
+.bru-prod-num{ font-size:12px; font-weight:900; width:26px; }
+.bru-prod-name{ flex:1; font-size:13px; font-weight:700; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bru-prod-val{ font-size:12.5px; font-weight:800; }

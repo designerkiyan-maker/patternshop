@@ -31,7 +31,7 @@ const THEMES = [
     id: 'brutalist',
     name: 'Neo-brutalist',
     desc: 'کادر ضخیم، بی‌سایه، تایپوگرافی بولد',
-    ready: false,
+    ready: true,
     supportsMode: false,
     swatch: ['#FFE600', '#000000', '#FFFFFF'],
   },
@@ -460,8 +460,107 @@ async function renderDashboard() {
   const s = await apiGet('/dashboard');
   let sys = null;
   try { sys = await apiGet('/system/stats'); } catch (e) { /* psutil ممکن است نصب نباشد */ }
-  if (loadTheme().theme === 'bento') return renderDashboardBento(s, sys);
+  const theme = loadTheme().theme;
+  if (theme === 'bento') return renderDashboardBento(s, sys);
+  if (theme === 'brutalist') return renderDashboardBrutalist(s, sys);
   return renderDashboardFlat(s, sys);
+}
+
+/* ------------------------------------------------ dashboard: brutalist --- */
+function renderDashboardBrutalist(s, sys) {
+  const maxRev = Math.max(...s.daily_series.map(d => d.revenue), 1);
+  const bruColors = ['#FFE600', '#2B6CFF', '#00C853', '#FF3B3B', '#FF3EA5'];
+  const bars = s.daily_series.map((d, i) => `
+    <div class="bru-bar-col" title="${d.date}: ${fmt(d.revenue)} تومان">
+      <span class="bru-bar-val mono">${fmt(d.revenue)}</span>
+      <div class="bru-bar" data-h="${Math.max((d.revenue / maxRev) * 100, 4)}" style="background:${bruColors[i % bruColors.length]}"></div>
+    </div>`).join('');
+
+  const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
+
+  const metrics = [
+    { label: 'نرخ تبدیل', pct: s.conversion_rate, color: '#2B6CFF' },
+    { label: 'سلامت سرور', pct: sys ? Math.max(0, 100 - (sys.cpu.percent + sys.ram.percent + sys.disk.percent) / 3) : 80, color: '#00C853' },
+    { label: 'نسبت تیکت باز', pct: s.active_configs ? Math.min(Math.round((s.open_tickets / s.active_configs) * 100), 100) : 0, color: '#FF3B3B' },
+    { label: 'ظرفیت کانفیگ', pct: Math.min(Math.round((s.active_configs / Math.max(s.total_users, 1)) * 100), 100), color: '#FF3EA5' },
+  ];
+  const metricBars = metrics.map(m => `
+    <div class="bru-metric-row">
+      <span class="bru-metric-label">${m.label}</span>
+      <span class="bru-metric-track"><span class="bru-metric-fill" data-w="${m.pct}" style="background:${m.color}"></span></span>
+      <span class="bru-metric-val mono">${fmt(Math.round(m.pct))}٪</span>
+    </div>`).join('');
+
+  const maxCatRev = Math.max(...s.category_breakdown.map(c => c.revenue), 1);
+  const catStack = s.category_breakdown.map((c, i) => `
+    <span class="bru-stack-seg" data-w="${(c.revenue / maxCatRev / s.category_breakdown.length) * 100 + (100 / s.category_breakdown.length) * 0}"
+      style="background:${bruColors[i % bruColors.length]}; flex:${c.revenue}" title="${esc(c.name)}: ${fmt(c.revenue)}"></span>`).join('');
+  const catLegend = s.category_breakdown.map((c, i) => `
+    <span class="bru-legend-item"><i style="background:${bruColors[i % bruColors.length]}"></i>${esc(c.name)} — ${fmt(c.revenue)}</span>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+
+  const prodList = s.top_products.map((p, i) => `
+    <div class="bru-prod-row">
+      <span class="bru-prod-num mono">${(i + 1).toString().padStart(2, '۰')}</span>
+      <span class="bru-prod-name">${esc(p.name)}</span>
+      <span class="bru-prod-val mono">${fmt(p.orders)}</span>
+    </div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+
+  setContent(`
+    <div class="bru-hero">
+      <h2>${greetingByHour()}، ${esc(ME.username).toUpperCase()}</h2>
+      <p>${s.start_date} تا ${s.end_date}</p>
+    </div>
+
+    <div class="bru-grid-4">
+      <div class="bru-block bru-yellow">
+        <span class="bru-block-label">درآمد ۱۴ روز</span>
+        <span class="bru-block-val mono" data-count="${s.revenue}">۰</span>
+        <span class="bru-block-tag ${deltaUp ? '' : 'neg'}">${deltaUp ? '▲' : '▼'} ${Math.abs(s.revenue_change_pct ?? 0)}٪</span>
+      </div>
+      <div class="bru-block bru-white">
+        <span class="bru-block-label">سفارش تایید شده</span>
+        <span class="bru-block-val mono" data-count="${s.approved}">۰</span>
+      </div>
+      <div class="bru-block bru-black">
+        <span class="bru-block-label">کاربران کل</span>
+        <span class="bru-block-val mono" data-count="${s.total_users}">۰</span>
+      </div>
+      <div class="bru-block bru-white">
+        <span class="bru-block-label">کانفیگ فعال / تیکت باز</span>
+        <span class="bru-block-val mono" data-count="${s.active_configs}">۰</span>
+        <span class="bru-block-tag">${fmt(s.open_tickets)} تیکت باز</span>
+      </div>
+    </div>
+
+    <div class="bru-panel" style="margin-top:16px">
+      <div class="bru-panel-head">روند فروش روزانه</div>
+      <div class="bru-bars">${bars}</div>
+    </div>
+
+    <div class="bru-cols" style="margin-top:16px">
+      <div class="bru-panel">
+        <div class="bru-panel-head">شاخص‌های عملکرد</div>
+        ${metricBars}
+      </div>
+      <div class="bru-panel">
+        <div class="bru-panel-head">تفکیک درآمد</div>
+        <div class="bru-stack">${catStack}</div>
+        <div class="bru-legend">${catLegend}</div>
+      </div>
+    </div>
+
+    <div class="bru-panel" style="margin-top:16px">
+      <div class="bru-panel-head">پرفروش‌ترین محصولات</div>
+      ${prodList}
+    </div>
+  `);
+
+  const root = content();
+  $$('.bru-block-val[data-count]', root).forEach(el => animateCount(el, Number(el.dataset.count)));
+  requestAnimationFrame(() => setTimeout(() => {
+    $$('.bru-bar[data-h]', root).forEach(b => { b.style.height = b.dataset.h + '%'; });
+    $$('.bru-metric-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
+  }, 60));
 }
 
 /* ---------------------------------------------------- dashboard: bento --- */
