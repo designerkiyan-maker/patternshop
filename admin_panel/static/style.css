@@ -1257,6 +1257,6 @@ html[data-theme="cyberpunk"] .live-dot{ background:var(--primary); box-shadow:0 
 .sv-ml-count{ color:var(--text); font-size:11.5px; flex-shrink:0; }
 
 @media (max-width:640px){
-  .sv-map-wrap{ aspect-ratio:4/3; }
+  .sv-map-wrap{ aspect-ratio:2/1; }
   .sv-ml-ip{ display:none; }
 }
