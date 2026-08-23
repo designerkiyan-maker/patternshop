@@ -11,11 +11,9 @@
 <script>
 (function(){
   try{
-    var t = JSON.parse(localStorage.getItem('sv-theme') || 'null') || { style:'6', mode:'dark' };
-    document.documentElement.setAttribute('data-style', t.style);
-    document.documentElement.setAttribute('data-mode', t.mode);
+    var t = JSON.parse(localStorage.getItem('sv-theme') || 'null') || { mode:'dark' };
+    document.documentElement.setAttribute('data-mode', t.mode || 'dark');
   }catch(e){
-    document.documentElement.setAttribute('data-style','6');
     document.documentElement.setAttribute('data-mode','dark');
   }
 })();
@@ -24,21 +22,13 @@
 <body>
 
 <div class="bg-blobs" aria-hidden="true"><i></i><i></i><i></i></div>
-<div class="cyber-overlay" aria-hidden="true">
-  <div class="cyber-grid"></div>
-  <div class="cyber-scan"></div>
-  <div class="cyber-vignette"></div>
-</div>
 
 <!-- ===================== صفحه‌ی ورود ===================== -->
 <div id="login-screen" class="login-screen">
-  <div class="login-signal" aria-hidden="true">
-    <span></span><span></span><span></span><span></span><span></span>
-  </div>
   <form id="login-form" class="login-card">
     <div class="login-brand">
       <div class="login-logo">SV</div>
-      <h1 class="glitch-txt" data-txt="پنل مدیریت ShopVPN">پنل مدیریت ShopVPN</h1>
+      <h1>پنل مدیریت ShopVPN</h1>
       <p>برای ورود، اطلاعات حساب پنل وب را وارد کن</p>
     </div>
     <label class="field">
@@ -60,7 +50,7 @@
     <div class="sidebar-brand">
       <div class="brand-mark">SV</div>
       <div class="brand-text">
-        <strong class="glitch-txt" data-txt="ShopVPN">ShopVPN</strong>
+        <strong>ShopVPN</strong>
         <span>پنل مدیریت</span>
       </div>
     </div>

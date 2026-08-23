@@ -7,24 +7,15 @@ let SUPPORT_POLL_TIMER = null;
 function stopSupportPoll() { if (SUPPORT_POLL_TIMER) { clearInterval(SUPPORT_POLL_TIMER); SUPPORT_POLL_TIMER = null; } }
 
 /* ============================================================= theme === */
-const THEMES = [
-  { id: '6', name: 'سایبرپانک // NEXUS', desc: 'پیش‌فرض جدید — رادار زنده، گلیچ، شبکه‌ی نئونی', colors: ['#ff2e88', '#21e6c1', '#ffb020'] },
-  { id: '1', name: 'فلت کورپوریت', desc: 'ساده، تمیز، اداری', colors: ['#0f6e5f', '#1f7ae0', '#c78a10'] },
-  { id: '2', name: 'نئون گلس', desc: 'طرح کلاسیک ShopVPN', colors: ['#8B5CF6', '#EC4899', '#22D3EE'] },
-  { id: '3', name: 'ترمینال عملیاتی', desc: 'مونوسپیس، حس اتاق سرور', colors: ['#3ddc84', '#ff6b52', '#e0b23c'] },
-  { id: '4', name: 'بنتوی نرم', desc: 'گرم، گرد، صمیمی', colors: ['#d97757', '#5b8a72', '#c99a3a'] },
-  { id: '5', name: 'پالس شبکه', desc: 'HUD تیره، درخشش نئونی، حس اتاق کنترل', colors: ['#00e5ff', '#7c5cff', '#ff4fd8'] },
-];
 function loadTheme() {
-  try { return JSON.parse(localStorage.getItem('sv-theme')) || { style: '6', mode: 'dark' }; }
-  catch (e) { return { style: '6', mode: 'dark' }; }
+  try { return JSON.parse(localStorage.getItem('sv-theme')) || { mode: 'dark' }; }
+  catch (e) { return { mode: 'dark' }; }
 }
-function applyTheme(style, mode) {
-  document.documentElement.setAttribute('data-style', style);
+function applyTheme(mode) {
   document.documentElement.setAttribute('data-mode', mode);
-  localStorage.setItem('sv-theme', JSON.stringify({ style, mode }));
+  localStorage.setItem('sv-theme', JSON.stringify({ mode }));
 }
-applyTheme(loadTheme().style, loadTheme().mode);
+applyTheme(loadTheme().mode);
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -1931,14 +1922,6 @@ async function renderAccount() {
           <button data-mode="dark" class="${cur.mode === 'dark' ? 'active' : ''}">🌙 تیره</button>
         </div>
       </div>
-      <div class="theme-grid" id="theme-grid">
-        ${THEMES.map(t => `
-          <div class="theme-opt ${cur.style === t.id ? 'active' : ''}" data-style="${t.id}">
-            <div class="swatch">${t.colors.map(c => `<i style="background:${c}"></i>`).join('')}</div>
-            <strong>${esc(t.name)}</strong>
-            <span>${esc(t.desc)}</span>
-          </div>`).join('')}
-      </div>
       <span class="card-sub">این یک ترجیح شخصیه و فقط برای همین مرورگر ذخیره می‌شود؛ روی نمایش پنل برای بقیه‌ی ادمین‌ها اثری ندارد.</span>
     </div>
 
@@ -1951,12 +1934,8 @@ async function renderAccount() {
       </div>
     </div>
   `);
-  $$('.theme-opt', content()).forEach(el => el.addEventListener('click', () => {
-    applyTheme(el.dataset.style, loadTheme().mode);
-    $$('.theme-opt', content()).forEach(o => o.classList.toggle('active', o === el));
-  }));
   $$('#mode-toggle button', content()).forEach(btn => btn.addEventListener('click', () => {
-    applyTheme(loadTheme().style, btn.dataset.mode);
+    applyTheme(btn.dataset.mode);
     $$('#mode-toggle button', content()).forEach(b => b.classList.toggle('active', b === btn));
   }));
   $('#acc-save').addEventListener('click', async () => {
