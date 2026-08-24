@@ -109,6 +109,12 @@ class AdminAddResellerBot(StatesGroup):
     waiting_level = State()
 
 
+class AdminSetPanelDomain(StatesGroup):
+    """آدرس دامنه‌ی پنل مدیریت وب مستقل (برای ساخت لینک راه‌اندازی پنل نماینده‌های
+    کامل). فقط داخل دیتابیس ذخیره می‌شود، نیازی به دست‌زدن به .env نیست."""
+    waiting_url = State()
+
+
 class AdminWheelSettings(StatesGroup):
     waiting_win_percent = State()
     waiting_prizes = State()

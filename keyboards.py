@@ -1102,6 +1102,7 @@ def resellers_kb(resellers) -> InlineKeyboardMarkup:
                 [InlineKeyboardButton(text=wp_label, callback_data=f"adm_resbot_webpanel:{r['id']}")]
             )
     rows.append([InlineKeyboardButton(text="➕ افزودن بات نمایندگی جدید", callback_data="adm_resbot_add")])
+    rows.append([InlineKeyboardButton(text="⚙️ آدرس پنل مدیریت وب", callback_data="adm_set_panel_domain")])
     rows.append([InlineKeyboardButton(text="🧹 پاکسازی داده‌های باقی‌مانده نمایندگی", callback_data="adm_reseller_orphans")])
     rows.append([InlineKeyboardButton(text="🗃 پاکسازی فایل‌های دیتابیس یتیم", callback_data="adm_orphan_db_files")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:resellers")])

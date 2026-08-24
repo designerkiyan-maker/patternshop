@@ -49,6 +49,7 @@ from states import (
     AdminCreateDiscount,
     AdminReferralPercent,
     AdminAddResellerBot,
+    AdminSetPanelDomain,
     AdminResellerCredit,
     AdminWheelSettings,
     AdminRenewalSettings,
@@ -81,6 +82,57 @@ async def _send_via_reseller_bot(bot_token: str, chat_id: int, text: str) -> boo
         return False
     finally:
         await temp_bot.session.close()
+
+
+def _get_admin_panel_url(db) -> str:
+    """آدرس دامنه‌ی پنل مدیریت وب مستقل - اول از تنظیمات داخل دیتابیس (که خودِ
+    ادمین از داخل بات وارد کرده)، اگر نبود از ADMIN_PANEL_URL توی .env (برای
+    سازگاری با نصب‌های قدیمی‌تر)."""
+    saved = db.get_setting("admin_panel_url", "")
+    return (saved or ADMIN_PANEL_URL or "").strip().rstrip("/")
+
+
+async def _deliver_webpanel_link(db, answerable, admin_id: int, bot_id: int) -> None:
+    """توکن راه‌اندازی از قبل روی ردیف نماینده ذخیره است (enable/regenerate قبلاً
+    صداش زده)؛ این تابع فقط لینک نهایی رو می‌سازه، به ادمین نشون می‌ده و از
+    طریق بات خودِ نماینده براش می‌فرسته. answerable هر چیزی با متد async
+    answer(text, reply_markup=None) است (call.message یا یک Message)."""
+    reseller_bot = db.get_reseller_bot(bot_id)
+    if not reseller_bot or not reseller_bot["web_panel_setup_token"]:
+        await answerable.answer("این نماینده یا توکن راه‌اندازی‌اش دیگر پیدا نشد؛ دوباره از منوی نمایندگی امتحان کن.")
+        return
+    panel_url = _get_admin_panel_url(db)
+    if not panel_url:
+        await answerable.answer("هنوز آدرس پنل مدیریت تنظیم نشده.")
+        return
+
+    b_value = reseller_bot["link_slug"] or str(bot_id)
+    link = f"{panel_url}/setup?b={b_value}&t={reseller_bot['web_panel_setup_token']}"
+
+    await answerable.answer(
+        "🌐 لینک راه‌اندازی پنل وب این نماینده:\n\n"
+        f"{link}\n\n"
+        "این لینک یک‌بارمصرف است؛ نماینده با باز کردنش یک یوزرنیم/پسورد دلخواه برای پنل وب "
+        "خودش تنظیم می‌کند (مستقل از پنل بات اصلی، فقط روی دیتابیس خودش).\n\n"
+        "این لینک همین الان از طریق بات خودِ نماینده براش ارسال شد.",
+        reply_markup=kb.resbot_webpanel_kb(bot_id),
+    )
+    db.log_admin_action(
+        admin_id, "reseller_webpanel_enable", f"نماینده #{bot_id} (@{reseller_bot['bot_username'] or ''})",
+    )
+
+    sent = await _send_via_reseller_bot(
+        reseller_bot["bot_token"],
+        reseller_bot["owner_telegram_id"],
+        "🌐 پنل مدیریت وب برای نمایندگی شما آماده است!\n\n"
+        "با باز کردن لینک زیر، یک‌بار یوزرنیم و پسورد دلخواه برای پنل وب خودتان تنظیم کنید "
+        "(این لینک فقط یک‌بار کار می‌کند):\n\n"
+        f"{link}",
+    )
+    if not sent:
+        await answerable.answer(
+            "⚠️ ارسال خودکار لینک به نماینده (از طریق بات خودش) ناموفق بود؛ لینک بالا را خودت برایش بفرست."
+        )
 
 
 def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Router:
@@ -2197,7 +2249,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer(f"سطح این نمایندگی به «{level_label}» تغییر کرد.")
 
         @router.callback_query(F.data.startswith("adm_resbot_webpanel:"))
-        async def cb_admin_resbot_webpanel(call: CallbackQuery):
+        async def cb_admin_resbot_webpanel(call: CallbackQuery, state: FSMContext):
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             bot_id = callback_id(call.data, "adm_resbot_webpanel")
@@ -2222,51 +2274,28 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 )
                 return await call.answer()
 
-            token = db.enable_reseller_web_panel(bot_id)
-            if not reseller_bot["link_slug"]:
-                # اگر نماینده هنوز اسلاگ دلخواه ست نکرده، فعلاً از آیدی عددی به‌عنوان
-                # شناسه‌ی تننت استفاده می‌کنیم (دقیقاً مثل رفتار لینک مینی‌اپ).
-                b_value = str(bot_id)
-            else:
-                b_value = reseller_bot["link_slug"]
-
-            if ADMIN_PANEL_URL:
-                link = f"{ADMIN_PANEL_URL}/setup?b={b_value}&t={token}"
-            else:
-                link = f"<آدرس دامنه‌ی پنل ادمین>/setup?b={b_value}&t={token}"
-
-            text = (
-                "🌐 پنل وب برای این نماینده فعال شد.\n\n"
-                "این لینک یک‌بارمصرف است؛ نماینده با باز کردنش یک یوزرنیم/پسورد دلخواه "
-                "برای پنل وب خودش تنظیم می‌کند (مستقل از پنل بات اصلی، فقط روی دیتابیس خودش):\n\n"
-                f"{link}\n\n"
-                "این لینک همین الان برای نماینده در بات ارسال شد."
-            )
-            await replace_admin_view(call, text, reply_markup=kb.resbot_webpanel_kb(bot_id))
+            db.enable_reseller_web_panel(bot_id)
             db.log_admin_action(
                 call.from_user.id, "reseller_webpanel_enable", f"نماینده #{bot_id} (@{reseller_bot['bot_username'] or ''})",
             )
-            await call.answer("لینک ساخته شد.")
+            await call.answer("پنل وب فعال شد.")
 
-            sent = await _send_via_reseller_bot(
-                reseller_bot["bot_token"],
-                reseller_bot["owner_telegram_id"],
-                "🌐 پنل مدیریت وب برای نمایندگی شما فعال شد!\n\n"
-                "با باز کردن لینک زیر، یک‌بار یوزرنیم و پسورد دلخواه برای پنل وب خودتان تنظیم کنید "
-                "(این لینک فقط یک‌بار کار می‌کند):\n\n"
-                f"{link}",
-            )
-            if not sent:
-                try:
-                    await call.message.answer(
-                        "⚠️ ارسال خودکار لینک به نماینده (از طریق بات خودش) ناموفق بود؛ "
-                        "لینک بالا را خودت برایش بفرست."
-                    )
-                except Exception:
-                    pass
+            if not _get_admin_panel_url(db):
+                await state.set_state(AdminSetPanelDomain.waiting_url)
+                await state.update_data(pending_webpanel_bot_id=bot_id)
+                await call.message.answer(
+                    "🌐 پنل وب این نماینده فعال شد، ولی هنوز آدرس پنل مدیریت وب رو بهم نگفتی.\n\n"
+                    "فقط همین یک‌بار، آدرس دامنه‌ی پنل مدیریتت رو بفرست (با https://)، مثلاً:\n"
+                    "https://panel.example.com\n\n"
+                    "بعدش خودم لینک راه‌اندازی رو می‌سازم و مستقیم برای نماینده می‌فرستم؛ "
+                    "دیگه لازم نیست هیچ‌جا دستی چیزی تنظیم کنی."
+                )
+                return
+
+            await _deliver_webpanel_link(db, call.message, call.from_user.id, bot_id)
 
         @router.callback_query(F.data.startswith("adm_resbot_webpanel_regen:"))
-        async def cb_admin_resbot_webpanel_regen(call: CallbackQuery):
+        async def cb_admin_resbot_webpanel_regen(call: CallbackQuery, state: FSMContext):
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             bot_id = callback_id(call.data, "adm_resbot_webpanel_regen")
@@ -2274,36 +2303,20 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if not reseller_bot:
                 return await call.answer("یافت نشد.", show_alert=True)
 
-            token = db.regenerate_reseller_web_panel_token(bot_id)
-            b_value = reseller_bot["link_slug"] or str(bot_id)
-            link = f"{ADMIN_PANEL_URL}/setup?b={b_value}&t={token}" if ADMIN_PANEL_URL else f"<آدرس دامنه‌ی پنل ادمین>/setup?b={b_value}&t={token}"
-            await replace_admin_view(
-                call,
-                f"🔁 لینک راه‌اندازی جدید ساخته شد (لینک قبلی دیگر کار نمی‌کند):\n\n{link}\n\n"
-                "توجه: اگر نماینده قبلاً یک‌بار یوزر/پس ست کرده باشد، این لینک اثری ندارد "
-                "(فقط برای اولین راه‌اندازی است).\n\n"
-                "این لینک همین الان برای نماینده در بات ارسال شد.",
-                reply_markup=kb.resbot_webpanel_kb(bot_id),
-            )
+            db.regenerate_reseller_web_panel_token(bot_id)
             db.log_admin_action(call.from_user.id, "reseller_webpanel_regen", f"نماینده #{bot_id}")
-            await call.answer("لینک جدید ساخته شد.")
+            await call.answer("توکن جدید ساخته شد.")
 
-            sent = await _send_via_reseller_bot(
-                reseller_bot["bot_token"],
-                reseller_bot["owner_telegram_id"],
-                "🔁 لینک راه‌اندازی جدید برای پنل وب نمایندگی شما ساخته شد!\n\n"
-                "با باز کردن لینک زیر، یک‌بار یوزرنیم و پسورد دلخواه برای پنل وب خودتان تنظیم کنید "
-                "(این لینک فقط یک‌بار کار می‌کند):\n\n"
-                f"{link}",
-            )
-            if not sent:
-                try:
-                    await call.message.answer(
-                        "⚠️ ارسال خودکار لینک به نماینده (از طریق بات خودش) ناموفق بود؛ "
-                        "لینک بالا را خودت برایش بفرست."
-                    )
-                except Exception:
-                    pass
+            if not _get_admin_panel_url(db):
+                await state.set_state(AdminSetPanelDomain.waiting_url)
+                await state.update_data(pending_webpanel_bot_id=bot_id)
+                await call.message.answer(
+                    "🔁 توکن راه‌اندازی جدید ساخته شد، ولی هنوز آدرس پنل مدیریت وب رو بهم نگفتی.\n\n"
+                    "آدرس دامنه‌ی پنل مدیریتت رو بفرست (با https://)، بعدش خودم لینک رو می‌سازم و می‌فرستم:"
+                )
+                return
+
+            await _deliver_webpanel_link(db, call.message, call.from_user.id, bot_id)
 
         @router.callback_query(F.data.startswith("adm_resbot_webpanel_off:"))
         async def cb_admin_resbot_webpanel_off(call: CallbackQuery):
@@ -2319,6 +2332,37 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             bots = db.list_reseller_bots()
             await safe_edit(call, "⛔️ پنل وب این نماینده غیرفعال شد (نشست‌های فعلی هم دیگر کار نمی‌کنند).\n\n🏪 مدیریت بات‌های نمایندگی:", reply_markup=kb.resellers_kb(bots))
             await call.answer("غیرفعال شد.")
+
+        @router.callback_query(F.data == "adm_set_panel_domain")
+        async def cb_admin_set_panel_domain(call: CallbackQuery, state: FSMContext):
+            """تنظیم/تغییر آدرس پنل مدیریت وب، مستقل از فعالسازی یک نماینده‌ی خاص -
+            هر وقت خودت بخوای می‌تونی از همین دکمه دامنه رو عوض کنی."""
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            await state.set_state(AdminSetPanelDomain.waiting_url)
+            await state.update_data(pending_webpanel_bot_id=None)
+            current = _get_admin_panel_url(db)
+            hint = f"\n\nآدرس فعلی: {current}" if current else "\n\nهنوز چیزی تنظیم نشده."
+            await call.answer()
+            await call.message.answer(
+                "آدرس دامنه‌ی پنل مدیریت وب رو بفرست (با https://)، مثلاً:\nhttps://panel.example.com" + hint
+            )
+
+        @router.message(AdminSetPanelDomain.waiting_url)
+        async def process_admin_panel_domain(message: Message, state: FSMContext):
+            url = (message.text or "").strip().rstrip("/")
+            if not url.startswith("http://") and not url.startswith("https://"):
+                await message.answer("آدرس باید با http:// یا https:// شروع بشه. دوباره بفرست:")
+                return
+
+            db.set_setting("admin_panel_url", url)
+            data = await state.get_data()
+            pending_bot_id = data.get("pending_webpanel_bot_id")
+            await state.clear()
+            await message.answer(f"✅ آدرس پنل مدیریت ذخیره شد: {url}\nهر وقت بخوای می‌تونی از همین‌جا («⚙️ آدرس پنل مدیریت») عوضش کنی.")
+
+            if pending_bot_id:
+                await _deliver_webpanel_link(db, message, message.from_user.id, pending_bot_id)
 
         @router.callback_query(F.data.startswith("adm_resbot_del:"))
         async def cb_admin_resbot_del(call: CallbackQuery):
