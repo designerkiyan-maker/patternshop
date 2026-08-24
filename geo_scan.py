@@ -444,8 +444,8 @@ async def _protocol_probe(cfg: dict, ip: str, timeout: float) -> Optional[str]:
         # سایتِ دکوی fallback می‌رود نه به خودِ سرویس پروکسی — این چک برای
         # reality قابل‌اعتماد نیست، پس صادقانه fallback به TCP می‌کنیم.
         return None
-    if network not in ("tcp", "ws"):
-        # grpc/httpupgrade/... فعلاً پیاده‌سازی نشده
+    if network not in ("tcp", "ws", "httpupgrade"):
+        # grpc/... فعلاً پیاده‌سازی نشده
         return None
     if protocol == "trojan" and security != "tls":
         # trojan بدون TLS عملاً استاندارد نیست/به‌ندرت پیش می‌آید
@@ -468,10 +468,10 @@ async def _protocol_probe(cfg: dict, ip: str, timeout: float) -> Optional[str]:
         else:
             reader, writer = await asyncio.wait_for(asyncio.open_connection(ip, port_i), timeout=timeout)
 
-        if network == "ws":
+        if network in ("ws", "httpupgrade"):
             ok = await _ws_upgrade(reader, writer, net.get("ws_host") or ip, net.get("ws_path") or "/")
             if not ok:
-                return None  # آپگرید وب‌سوکت خودش شکست خورد؛ نمی‌شود نتیجه گرفت
+                return None  # آپگرید (ws یا httpupgrade) خودش شکست خورد؛ نمی‌شود نتیجه گرفت
 
         if protocol == "vless":
             header = _vless_header(auth)
@@ -480,6 +480,9 @@ async def _protocol_probe(cfg: dict, ip: str, timeout: float) -> Optional[str]:
         else:
             header = _trojan_header(auth)
 
+        # httpupgrade هم از هندشیک HTTP/1.1 شبیه‌به‌ws استفاده می‌کند اما بعد
+        # از آپگرید، استریم را بدون فریم‌بندی WebSocket به‌صورت raw می‌فرستد
+        # (فقط GET/Upgrade مشترک است، نه فریم‌های باینری بعدی).
         payload = _ws_frame(header) if network == "ws" else header
         writer.write(payload)
         await writer.drain()
