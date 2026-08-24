@@ -1868,6 +1868,18 @@ async function mountServerMap() {
   });
 
   if (refreshBtn) refreshBtn.addEventListener('click', () => doScan(true));
+
+  // وضعیت آنلاین/آفلاین نباید تا زمان رفرش دستی صفحه ثابت بماند.
+  // هر ۶۰ ثانیه یک اسکن واقعی انجام می‌دهیم؛ فقط وقتی همین کارت در DOM
+  // وجود دارد، تا با جابه‌جایی تب‌ها درخواست اضافه ایجاد نشود.
+  const statusTimer = setInterval(() => {
+    const activeRoot = content();
+    if (!$('.sv-map-card', activeRoot)) {
+      clearInterval(statusTimer);
+      return;
+    }
+    doScan(true);
+  }, 60 * 1000);
 }
 
 /* ============================================================ orders === */
