@@ -293,8 +293,15 @@ async def get_current_admin(request: Request):
     }
 
 
+# مجوزهایی که حتی برای owner پنل یک نماینده هم معنی ندارند (مثلاً «نمایندگی‌ها»:
+# پنل وب نماینده‌ی سطح ۱ نباید بتواند نماینده‌های خودش را مدیریت کند).
+MAIN_TENANT_ONLY_PERMISSIONS = {"resellers"}
+
+
 def require_permission(permission: str):
     def _dep(admin=Depends(get_current_admin)):
+        if permission in MAIN_TENANT_ONLY_PERMISSIONS and admin["tenant"]:
+            raise HTTPException(403, "این بخش فقط در پنل بات اصلی در دسترس است.")
         if admin["role"] != "owner" and permission not in admin["permissions"]:
             raise HTTPException(403, "دسترسی کافی نیست.")
         return admin
@@ -1494,7 +1501,8 @@ def api_web_admins(admin=Depends(require_owner)):
 
 @app.get("/api/web-admins/permissions")
 def api_web_admin_permission_keys(admin=Depends(require_owner)):
-    return {"permissions": list(WEB_ADMIN_PERMISSIONS)}
+    perms = [p for p in WEB_ADMIN_PERMISSIONS if p not in MAIN_TENANT_ONLY_PERMISSIONS or not admin["tenant"]]
+    return {"permissions": perms}
 
 
 @app.post("/api/web-admins")
