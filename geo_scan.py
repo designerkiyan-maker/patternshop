@@ -42,11 +42,16 @@ from urllib.parse import urlparse, unquote, parse_qs
 import aiohttp
 
 _TIMEOUT = aiohttp.ClientTimeout(total=12)
-_TCP_TIMEOUT = 1.8  # چک زنده (کلیک «اسکن مجدد» در داشبورد) — سرعت مهم است
-TCP_TIMEOUT_BACKGROUND = 5.0  # چک پس‌زمینه‌ی دوره‌ای — false-positive مهم‌تر از سرعت است
+_TCP_TIMEOUT = 7.0  # چک واقعی تونل؛ نزدیک به timeout پیش‌فرض کلاینت‌های Xray/V2Box
+TCP_TIMEOUT_BACKGROUND = 7.0  # چک پس‌زمینه‌ی دوره‌ای — false-positive مهم‌تر از سرعت است
 _MAX_CONFIGS = 400
 _DNS_CONCURRENCY = 25
 _TCP_CONCURRENCY = 40
+# مقصد تست واقعی تونل؛ فقط باز بودن پورت کافی نیست. مشابه تست‌های Xray/libXray،
+# بعد از برقراری تونل یک HTTP request واقعی از داخل پروکسی عبور داده می‌شود.
+_PROBE_HOST = "www.gstatic.com"
+_PROBE_PORT = 80
+_PROBE_PATH = "/generate_204"
 _CACHE_TTL = 600  # ثانیه — ۱۰ دقیقه
 _GEOIP_BATCH_URL = "http://ip-api.com/batch?fields=status,country,countryCode,city,lat,lon,query"
 
@@ -366,19 +371,26 @@ async def _tcp_check(host: str, port: int, sem: asyncio.Semaphore, timeout: floa
             return "unknown"
 
 
-def _vless_header(uuid_str: str, dst_port: int = 80) -> Optional[bytes]:
+def _vless_header(uuid_str: str, dst_host: str, dst_port: int) -> Optional[bytes]:
+    """VLESS request header with a real domain destination.
+
+    Using a domain destination instead of the old hard-coded 1.1.1.1:80 makes
+    the health-check much closer to what an Xray/libXray client does: the
+    outbound is asked to open the same HTTP URL that we are about to probe.
+    """
     try:
         u = uuid_mod.UUID(uuid_str).bytes
-    except (ValueError, AttributeError):
+        host = dst_host.encode("idna")
+    except (ValueError, AttributeError, UnicodeError):
         return None
-    # مقصدِ ثابت 1.1.1.1:80 صرفاً برای اینکه سرور چیزی برای «تلاش به وصل شدن»
-    # داشته باشد؛ خودِ نتیجه‌ی این اتصال به ما مهم نیست، فقط رفتار سرور
-    # نسبت به هدر VLESS (رد کردن سریع UUID نامعتبر در برابر بازنگه‌داشتن
-    # کانکشن برای UUID معتبر) مهم است.
+    if not host or len(host) > 255 or not (1 <= int(dst_port) <= 65535):
+        return None
+    # VLESS: version + UUID + addons length + command + port + address type
+    # + domain length + domain. Address type 0x02 means domain name.
     return (
         b"\x00" + u + b"\x00" + b"\x01"
-        + struct.pack(">H", dst_port)
-        + b"\x01" + bytes([1, 1, 1, 1])
+        + struct.pack(">H", int(dst_port))
+        + b"\x02" + bytes([len(host)]) + host
     )
 
 
@@ -417,6 +429,54 @@ async def _ws_upgrade(reader, writer, host: str, path: str) -> bool:
     await writer.drain()
     resp = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=4.0)
     return b"101" in resp.split(b"\r\n", 1)[0]
+
+
+def _extract_ws_payloads(data: bytes) -> list[bytes]:
+    """فریم‌های WebSocket دریافتی را به payload تبدیل می‌کند.
+
+    برای health-check فقط فریم‌های text/binary را لازم داریم؛ ping/pong/close
+    نادیده گرفته می‌شوند. اگر یک فریم ناقص برسد، payload همان chunk را نمی‌توان
+    با اطمینان استخراج کرد، پس [] برمی‌گردانیم و در دور بعد داده‌ی جدید می‌گیریم.
+    این تابع برای چک سبک است و برای parser کامل WebSocket طراحی نشده.
+    """
+    out = []
+    i = 0
+    n = len(data)
+    while i + 2 <= n:
+        b1, b2 = data[i], data[i + 1]
+        fin = (b1 & 0x80) != 0
+        opcode = b1 & 0x0F
+        masked = (b2 & 0x80) != 0
+        length = b2 & 0x7F
+        j = i + 2
+        if length == 126:
+            if j + 2 > n: return out
+            length = struct.unpack(">H", data[j:j+2])[0]
+            j += 2
+        elif length == 127:
+            if j + 8 > n: return out
+            length = struct.unpack(">Q", data[j:j+8])[0]
+            j += 8
+        if length > 1024 * 1024:
+            return out
+        mask = None
+        if masked:
+            if j + 4 > n: return out
+            mask = data[j:j+4]
+            j += 4
+        if j + length > n:
+            return out
+        payload = data[j:j+length]
+        if masked and mask:
+            payload = bytes(v ^ mask[k % 4] for k, v in enumerate(payload))
+        if opcode in (0x1, 0x2, 0x0):
+            out.append(payload)
+        if not fin:
+            # Fragmentation برای health-check ضروری نیست؛ chunk ناقص را
+            # عمداً نادیده می‌گیریم تا false-positive ندهیم.
+            return out
+        i = j + length
+    return out
 
 
 async def _protocol_probe(cfg: dict, ip: str, timeout: float) -> Optional[str]:
@@ -483,25 +543,57 @@ async def _protocol_probe(cfg: dict, ip: str, timeout: float) -> Optional[str]:
                 return "offline"
 
         if protocol == "vless":
-            header = _vless_header(auth)
+            # مثل URL-Test کلاینت‌های Xray/libXray، مقصد واقعیِ تست را در خودِ
+            # VLESS destination می‌گذاریم؛ سپس یک HEAD از همان مقصد می‌فرستیم.
+            # این مهم است چون صرفاً نگه داشتن socket باز، سالم بودن outbound را
+            # ثابت نمی‌کند.
+            header = _vless_header(auth, _PROBE_HOST, _PROBE_PORT)
             if not header:
                 return None
         else:
-            header = _trojan_header(auth)
+            header = _trojan_header(auth, dst_port=_PROBE_PORT)
 
-        # httpupgrade هم از هندشیک HTTP/1.1 شبیه‌به‌ws استفاده می‌کند اما بعد
-        # از آپگرید، استریم را بدون فریم‌بندی WebSocket به‌صورت raw می‌فرستد
-        # (فقط GET/Upgrade مشترک است، نه فریم‌های باینری بعدی).
+        # تا اینجا فقط inbound/transport را تست کرده بودیم. حالا یک درخواست
+        # HTTP واقعی از داخل همان تونل عبور می‌دهیم؛ این همان بخش مهمی است که
+        # وضعیت «TCP باز ولی اینترنت/route خراب» را از ONLINE جدا می‌کند.
         payload = _ws_frame(header) if network == "ws" else header
         writer.write(payload)
         await writer.drain()
 
-        try:
-            chunk = await asyncio.wait_for(reader.read(1), timeout=timeout)
-            return "offline" if chunk == b"" else "online"
-        except asyncio.TimeoutError:
-            # کانکشن بسته نشد یعنی auth رد نشده — یعنی کانفیگ روی پنل فعاله
-            return "online"
+        # URL-test سبک: HEAD روی generate_204. هر پاسخ معتبر HTTP (حتی 4xx/5xx)
+        # نشان می‌دهد تونل تا مقصد رسیده؛ خطای socket/timeout یعنی OFFLINE.
+        http_req = (
+            f"HEAD {_PROBE_PATH} HTTP/1.1\r\n"
+            f"Host: {_PROBE_HOST}\r\n"
+            "Connection: close\r\n"
+            "User-Agent: ShopVPN-ConfigHealth/1.0\r\n\r\n"
+        ).encode("ascii")
+        writer.write(_ws_frame(http_req) if network == "ws" else http_req)
+        await writer.drain()
+
+        # در VLESS response header ممکن است قبل از HTTP response چند بایت
+        # پروتکلی بیاید؛ بنابراین صرفاً startswith("HTTP/") نکن و تا پیدا شدن
+        # status-line یا پایان مهلت، داده را جمع کن.
+        deadline = time.monotonic() + timeout
+        buf = b""
+        while time.monotonic() < deadline and len(buf) < 16384:
+            remaining = max(0.05, deadline - time.monotonic())
+            chunk = await asyncio.wait_for(reader.read(2048), timeout=remaining)
+            if not chunk:
+                return "offline"
+            if network == "ws":
+                # بعد از handshake، WebSocket framing فعال است؛ برای health
+                # check باید payload فریم‌های دریافتی را استخراج کنیم.
+                frames = _extract_ws_payloads(chunk)
+                if frames:
+                    buf += b"".join(frames)
+            else:
+                buf += chunk
+
+            if re.search(rb"HTTP/1\.[01]\s+[1-5][0-9][0-9](?:\s|\r|$)", buf):
+                return "online"
+
+        return "offline"
     except (asyncio.TimeoutError, OSError, ConnectionError, ssl.SSLError):
         return "offline"
     except Exception:
