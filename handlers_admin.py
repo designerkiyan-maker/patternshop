@@ -12,6 +12,8 @@ import tempfile
 import logging
 
 from aiogram import Router, F, Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.types import Message, CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
@@ -63,6 +65,22 @@ from states import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _send_via_reseller_bot(bot_token: str, chat_id: int, text: str) -> bool:
+    """پیام را از طریق خودِ بات نماینده می‌فرستد، نه بات اصلی.
+    چون نماینده معمولاً هیچ‌وقت به بات اصلی /start نزده، بات اصلی اصلاً اجازه‌ی
+    شروع مکالمه با او را ندارد (محدودیت خودِ تلگرام)؛ فقط بات خودش می‌تواند
+    برایش پیام بفرستد، چون او با همان بات کار می‌کند."""
+    temp_bot = Bot(token=bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    try:
+        await temp_bot.send_message(chat_id, text)
+        return True
+    except Exception:
+        logger.warning("ارسال پیام از طریق بات نماینده به %s ناموفق بود.", chat_id, exc_info=True)
+        return False
+    finally:
+        await temp_bot.session.close()
 
 
 def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Router:
@@ -2179,7 +2197,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer(f"سطح این نمایندگی به «{level_label}» تغییر کرد.")
 
         @router.callback_query(F.data.startswith("adm_resbot_webpanel:"))
-        async def cb_admin_resbot_webpanel(call: CallbackQuery, bot: Bot):
+        async def cb_admin_resbot_webpanel(call: CallbackQuery):
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             bot_id = callback_id(call.data, "adm_resbot_webpanel")
@@ -2230,19 +2248,25 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             )
             await call.answer("لینک ساخته شد.")
 
-            try:
-                await bot.send_message(
-                    reseller_bot["owner_telegram_id"],
-                    "🌐 پنل مدیریت وب برای نمایندگی شما فعال شد!\n\n"
-                    "با باز کردن لینک زیر، یک‌بار یوزرنیم و پسورد دلخواه برای پنل وب خودتان تنظیم کنید "
-                    "(این لینک فقط یک‌بار کار می‌کند):\n\n"
-                    f"{link}",
-                )
-            except Exception:
-                logger.warning("ارسال لینک راه‌اندازی پنل وب به مالک نماینده (%s) ناموفق بود.", reseller_bot["owner_telegram_id"])
+            sent = await _send_via_reseller_bot(
+                reseller_bot["bot_token"],
+                reseller_bot["owner_telegram_id"],
+                "🌐 پنل مدیریت وب برای نمایندگی شما فعال شد!\n\n"
+                "با باز کردن لینک زیر، یک‌بار یوزرنیم و پسورد دلخواه برای پنل وب خودتان تنظیم کنید "
+                "(این لینک فقط یک‌بار کار می‌کند):\n\n"
+                f"{link}",
+            )
+            if not sent:
+                try:
+                    await call.message.answer(
+                        "⚠️ ارسال خودکار لینک به نماینده (از طریق بات خودش) ناموفق بود؛ "
+                        "لینک بالا را خودت برایش بفرست."
+                    )
+                except Exception:
+                    pass
 
         @router.callback_query(F.data.startswith("adm_resbot_webpanel_regen:"))
-        async def cb_admin_resbot_webpanel_regen(call: CallbackQuery, bot: Bot):
+        async def cb_admin_resbot_webpanel_regen(call: CallbackQuery):
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             bot_id = callback_id(call.data, "adm_resbot_webpanel_regen")
@@ -2264,16 +2288,22 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             db.log_admin_action(call.from_user.id, "reseller_webpanel_regen", f"نماینده #{bot_id}")
             await call.answer("لینک جدید ساخته شد.")
 
-            try:
-                await bot.send_message(
-                    reseller_bot["owner_telegram_id"],
-                    "🔁 لینک راه‌اندازی جدید برای پنل وب نمایندگی شما ساخته شد!\n\n"
-                    "با باز کردن لینک زیر، یک‌بار یوزرنیم و پسورد دلخواه برای پنل وب خودتان تنظیم کنید "
-                    "(این لینک فقط یک‌بار کار می‌کند):\n\n"
-                    f"{link}",
-                )
-            except Exception:
-                logger.warning("ارسال لینک راه‌اندازی جدید پنل وب به مالک نماینده (%s) ناموفق بود.", reseller_bot["owner_telegram_id"])
+            sent = await _send_via_reseller_bot(
+                reseller_bot["bot_token"],
+                reseller_bot["owner_telegram_id"],
+                "🔁 لینک راه‌اندازی جدید برای پنل وب نمایندگی شما ساخته شد!\n\n"
+                "با باز کردن لینک زیر، یک‌بار یوزرنیم و پسورد دلخواه برای پنل وب خودتان تنظیم کنید "
+                "(این لینک فقط یک‌بار کار می‌کند):\n\n"
+                f"{link}",
+            )
+            if not sent:
+                try:
+                    await call.message.answer(
+                        "⚠️ ارسال خودکار لینک به نماینده (از طریق بات خودش) ناموفق بود؛ "
+                        "لینک بالا را خودت برایش بفرست."
+                    )
+                except Exception:
+                    pass
 
         @router.callback_query(F.data.startswith("adm_resbot_webpanel_off:"))
         async def cb_admin_resbot_webpanel_off(call: CallbackQuery):
