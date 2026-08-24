@@ -28,11 +28,16 @@ import re
 
 import base64
 import binascii
+import hashlib
 import ipaddress
 import json
+import os
+import ssl
+import struct
 import time
+import uuid as uuid_mod
 from typing import Optional
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, parse_qs
 
 import aiohttp
 
@@ -235,14 +240,31 @@ def _unquote_fully(s: str) -> str:
 
 
 def _parse_generic(uri: str, protocol: str) -> Optional[dict]:
-    """vless / trojan / hysteria2 / hy2 / hysteria / tuic — همه URI-shaped‌اند."""
+    """vless / trojan / hysteria2 / hy2 / hysteria / tuic — همه URI-shaped‌اند.
+
+    برای vless/trojan علاوه بر host/port، بخش userinfo (UUID یا پسورد) و
+    پارامترهای کوئری (security/type/sni/path/host/...) هم استخراج می‌شود
+    چون برای «چک واقعی سطح پروتکل» (نه فقط TCP خام) لازم‌اند — بدون این‌ها
+    فقط می‌شد فهمید پورت باز است یا نه، نه اینکه خودِ کانفیگ/کاربر همچنان
+    روی پنل فعال است یا غیرفعال شده."""
     try:
         p = urlparse(uri)
         host = p.hostname
         if not host:
             return None
         remark = _unquote_fully(p.fragment) if p.fragment else host
-        return {"protocol": protocol, "host": host, "port": str(p.port or ""), "remark": remark}
+        item = {"protocol": protocol, "host": host, "port": str(p.port or ""), "remark": remark}
+        if protocol in ("vless", "trojan"):
+            item["auth"] = unquote(p.username) if p.username else None
+            qs = {k: v[0] for k, v in parse_qs(p.query or "").items()}
+            item["net_params"] = {
+                "security": (qs.get("security") or "none").lower(),
+                "network": (qs.get("type") or "tcp").lower(),
+                "sni": qs.get("sni") or qs.get("host") or host,
+                "ws_path": qs.get("path") or "/",
+                "ws_host": qs.get("host") or host,
+            }
+        return item
     except Exception:
         return None
 
@@ -344,6 +366,142 @@ async def _tcp_check(host: str, port: int, sem: asyncio.Semaphore, timeout: floa
             return "unknown"
 
 
+def _vless_header(uuid_str: str, dst_port: int = 80) -> Optional[bytes]:
+    try:
+        u = uuid_mod.UUID(uuid_str).bytes
+    except (ValueError, AttributeError):
+        return None
+    # مقصدِ ثابت 1.1.1.1:80 صرفاً برای اینکه سرور چیزی برای «تلاش به وصل شدن»
+    # داشته باشد؛ خودِ نتیجه‌ی این اتصال به ما مهم نیست، فقط رفتار سرور
+    # نسبت به هدر VLESS (رد کردن سریع UUID نامعتبر در برابر بازنگه‌داشتن
+    # کانکشن برای UUID معتبر) مهم است.
+    return (
+        b"\x00" + u + b"\x00" + b"\x01"
+        + struct.pack(">H", dst_port)
+        + b"\x01" + bytes([1, 1, 1, 1])
+    )
+
+
+def _trojan_header(password: str, dst_port: int = 80) -> bytes:
+    pwd_hash = hashlib.sha224(password.encode("utf-8")).hexdigest().encode("ascii")
+    return (
+        pwd_hash + b"\r\n"
+        + b"\x01" + b"\x01" + bytes([1, 1, 1, 1]) + struct.pack(">H", dst_port)
+        + b"\r\n"
+    )
+
+
+def _ws_frame(payload: bytes) -> bytes:
+    """فریم WebSocket باینری از سمت کلاینت — طبق RFC باید masked باشد."""
+    mask = os.urandom(4)
+    masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+    length = len(payload)
+    if length < 126:
+        header = bytes([0x82, 0x80 | length])
+    elif length < 65536:
+        header = bytes([0x82, 0x80 | 126]) + struct.pack(">H", length)
+    else:
+        header = bytes([0x82, 0x80 | 127]) + struct.pack(">Q", length)
+    return header + mask + masked
+
+
+async def _ws_upgrade(reader, writer, host: str, path: str) -> bool:
+    key = base64.b64encode(os.urandom(16)).decode()
+    req = (
+        f"GET {path} HTTP/1.1\r\n"
+        f"Host: {host}\r\n"
+        f"Upgrade: websocket\r\nConnection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    ).encode()
+    writer.write(req)
+    await writer.drain()
+    resp = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=4.0)
+    return b"101" in resp.split(b"\r\n", 1)[0]
+
+
+async def _protocol_probe(cfg: dict, ip: str, timeout: float) -> Optional[str]:
+    """چک سطح پروتکل: آیا خودِ کانفیگ (UUID/پسورد) هنوز روی پنل فعال است —
+    نه صرفاً اینکه پورت باز است. برمی‌گرداند 'online' / 'offline' یا None
+    (یعنی برای این ترکیب پروتکل/امنیت/شبکه پشتیبانی نمی‌شود و باید از چک
+    TCP خام به‌عنوان fallback استفاده شود).
+
+    منطق: بعد از هندشیک TCP/TLS/WS، هدر پروتکل با UUID/پسورد واقعیِ کانفیگ
+    فرستاده می‌شود. روی Xray/Trojan-core، اگر UUID/پسورد نامعتبر باشد
+    (یعنی آن کاربر/کلاینت خاص از پنل حذف یا غیرفعال شده)، سرور معمولاً
+    خیلی سریع کانکشن را می‌بندد. اگر معتبر باشد، سرور کانکشن را باز نگه
+    می‌دارد (منتظر دیتای بعدی از کلاینت) — همین تفاوت رفتار signal ماست.
+    """
+    protocol = cfg.get("protocol")
+    auth = cfg.get("auth")
+    net = cfg.get("net_params") or {}
+    if protocol not in ("vless", "trojan") or not auth:
+        return None
+
+    security = net.get("security", "none")
+    network = net.get("network", "tcp")
+    if security == "reality":
+        # با reality، TLS ساده (بدون fingerprint واقعی کلاینت) معمولاً به
+        # سایتِ دکوی fallback می‌رود نه به خودِ سرویس پروکسی — این چک برای
+        # reality قابل‌اعتماد نیست، پس صادقانه fallback به TCP می‌کنیم.
+        return None
+    if network not in ("tcp", "ws"):
+        # grpc/httpupgrade/... فعلاً پیاده‌سازی نشده
+        return None
+    if protocol == "trojan" and security != "tls":
+        # trojan بدون TLS عملاً استاندارد نیست/به‌ندرت پیش می‌آید
+        return None
+
+    port_i = int(cfg["port"]) if str(cfg.get("port") or "").isdigit() else None
+    if not port_i:
+        return None
+
+    writer = None
+    try:
+        if security == "tls":
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(ip, port_i, ssl=ctx, server_hostname=net.get("sni") or ip),
+                timeout=timeout,
+            )
+        else:
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(ip, port_i), timeout=timeout)
+
+        if network == "ws":
+            ok = await _ws_upgrade(reader, writer, net.get("ws_host") or ip, net.get("ws_path") or "/")
+            if not ok:
+                return None  # آپگرید وب‌سوکت خودش شکست خورد؛ نمی‌شود نتیجه گرفت
+
+        if protocol == "vless":
+            header = _vless_header(auth)
+            if not header:
+                return None
+        else:
+            header = _trojan_header(auth)
+
+        payload = _ws_frame(header) if network == "ws" else header
+        writer.write(payload)
+        await writer.drain()
+
+        try:
+            chunk = await asyncio.wait_for(reader.read(1), timeout=timeout)
+            return "offline" if chunk == b"" else "online"
+        except asyncio.TimeoutError:
+            # کانکشن بسته نشد یعنی auth رد نشده — یعنی کانفیگ روی پنل فعاله
+            return "online"
+    except (asyncio.TimeoutError, OSError, ConnectionError, ssl.SSLError):
+        return "offline"
+    except Exception:
+        return None
+    finally:
+        if writer is not None:
+            try:
+                writer.close()
+            except Exception:
+                pass
+
+
 async def _geolocate(ips: list) -> dict:
     result = {}
     chunks = [ips[i:i + 100] for i in range(0, len(ips), 100)]
@@ -403,6 +561,7 @@ async def scan_subscription(
     geo = await _geolocate(ips) if ips else {}
 
     status_map = {}
+    proto_status_map = {}
     if check_status and ips:
         tcp_sem = asyncio.Semaphore(_TCP_CONCURRENCY)
         pairs = list({(c["ip"], int(c["port"])) for c in configs if c["ip"] and str(c["port"]).isdigit()})
@@ -414,7 +573,29 @@ async def scan_subscription(
             # اونی که پورتش واقعاً بسته‌ست.
             status_map[(ip, port)] = st
 
-    servers = build_servers(configs, geo, status_map)
+        # چک سطح پروتکل (نه فقط TCP): کلید (ip, port, auth) چون ممکنه چند
+        # کلاینت/کانفیگ مختلف روی همون inbound (همون ip+port) باشن — یکی
+        # روی پنل غیرفعال شده باشه و بقیه فعال؛ TCP به‌تنهایی این‌ها رو از
+        # هم تشخیص نمی‌ده چون پورت خودش هنوز بازه.
+        proto_keys = list({
+            (c["ip"], int(c["port"]), c.get("auth"))
+            for c in configs
+            if c["ip"] and str(c.get("port") or "").isdigit() and c.get("auth")
+            and status_map.get((c["ip"], int(c["port"]))) == "online"  # اگه پورت خودش بسته‌ست، چک پروتکل لازم نیست
+        })
+        proto_sem = asyncio.Semaphore(_TCP_CONCURRENCY)
+        proto_results = await asyncio.gather(*(
+            _protocol_probe(
+                next(c for c in configs if c["ip"] == ip and str(c["port"]) == str(port) and c.get("auth") == auth),
+                ip, timeout=tcp_timeout,
+            )
+            for ip, port, auth in proto_keys
+        ))
+        for (ip, port, auth), st in zip(proto_keys, proto_results):
+            if st is not None:
+                proto_status_map[(ip, port, auth)] = st
+
+    servers = build_servers(configs, geo, status_map, proto_status_map)
 
     result = {
         "ok": True,
@@ -429,10 +610,11 @@ async def scan_subscription(
     return result
 
 
-def build_servers(configs: list, geo: dict, status_map: dict) -> list:
+def build_servers(configs: list, geo: dict, status_map: dict, proto_status_map: Optional[dict] = None) -> list:
     """هر کانفیگ یک entry/پین کاملاً جدای خودش می‌شود — حتی اگر چند کانفیگ
     دقیقاً روی یک IP/سرور باشند، دیگر زیر یک عدد جمع نمی‌شوند (طبق خواسته:
     «همه‌ی کانفیگ‌ها نمایش داده بشن، نه مثلاً ۲ سرور ۳ کانفیگ»)."""
+    proto_status_map = proto_status_map or {}
     servers = []
     for c in configs:
         ip = c["ip"]
@@ -457,14 +639,24 @@ def build_servers(configs: list, geo: dict, status_map: dict) -> list:
             continue  # نه در remark و نه با geoip چیزی معلوم نشد
 
         port_i = int(c["port"]) if str(c.get("port") or "").isdigit() else None
-        status = status_map.get((ip, port_i), "unknown") if ip and port_i is not None else "unknown"
+        tcp_status = status_map.get((ip, port_i), "unknown") if ip and port_i is not None else "unknown"
+        check_method = "tcp"
+        status = tcp_status
+        if tcp_status == "online" and ip and port_i is not None and c.get("auth"):
+            proto_status = proto_status_map.get((ip, port_i, c.get("auth")))
+            if proto_status is not None:
+                # پورت باز است (TCP آنلاین) اما نتیجه‌ی نهایی از چک سطح
+                # پروتکل (auth واقعی همین کانفیگ) می‌آید — این همان چیزی‌ست
+                # که تشخیص می‌دهد «این کانفیگ خاص» روی پنل غیرفعال شده یا نه.
+                status = proto_status
+                check_method = "protocol"
         remark = c.get("remark") or ""
         servers.append({
             "country": country, "country_code": cc, "city": city,
             "lat": lat, "lon": lon,
             "protocols": [{"name": c["protocol"], "count": 1}],
             "configs_count": 1,
-            "status": status, "source": source,
+            "status": status, "source": source, "check_method": check_method,
             "ip": ip or "", "ip_count": 1 if ip else 0,
             "sample_remarks": [remark] if remark else [],
             "remark": remark,
