@@ -44,6 +44,7 @@ logger = logging.getLogger("admin_panel.server")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 COOKIE_NAME = "panel_session"
 NOTIFY_POLL_SECONDS = 15
+SERVER_CHECK_INTERVAL_SECONDS = 15 * 60  # هر ۱۵ دقیقه کانفیگ‌های لینک ساب مادر چک شوند
 
 app = FastAPI(title="ShopVPN Admin Panel")
 main_db = Database(DB_PATH)
@@ -204,11 +205,57 @@ async def _notifier_loop():
         await asyncio.sleep(NOTIFY_POLL_SECONDS)
 
 
+# ------------------------------------------------------ server status watch --
+# هر ۱۵ دقیقه کانفیگ‌های «لینک ساب مادر» را دوباره اسکن می‌کند (همان منطق
+# دکمه‌ی «اسکن مجدد» نقشه‌ی جهانی سرورها) و اگر کانفیگی که قبلاً آنلاین/نامشخص
+# بوده حالا آفلاین شده، یک Push می‌فرستد. برای جلوگیری از اسپم، هر کانفیگ فقط
+# یک‌بار در لحظه‌ی *تغییر* وضعیت به آفلاین اعلان می‌گیرد، نه هر بار که هنوز
+# آفلاین است؛ وقتی دوباره آنلاین شود هم یک اعلان بازیابی می‌فرستد.
+
+async def _server_status_loop():
+    last_status: dict[str, str] = {}
+    first_run = True
+    while True:
+        try:
+            link = db.get_setting("master_sub_link", "").strip()
+            if link:
+                result = await geo_scan.scan_subscription(link, force_refresh=True, check_status=True)
+                if result.get("ok"):
+                    current: dict[str, str] = {}
+                    for s in result.get("servers", []):
+                        key = s.get("remark") or s.get("ip") or ""
+                        if not key:
+                            continue
+                        current[key] = s.get("status", "unknown")
+
+                    if not first_run:
+                        for key, status in current.items():
+                            prev = last_status.get(key)
+                            if status == "offline" and prev != "offline":
+                                await _notify_admins("panels", {
+                                    "title": "🔴 قطعی کانفیگ",
+                                    "body": f"کانفیگ «{key}» آفلاین شده است.",
+                                    "tag": f"server-status-{key}",
+                                })
+                            elif status == "online" and prev == "offline":
+                                await _notify_admins("panels", {
+                                    "title": "🟢 اتصال مجدد کانفیگ",
+                                    "body": f"کانفیگ «{key}» دوباره آنلاین شد.",
+                                    "tag": f"server-status-{key}",
+                                })
+                    last_status = current
+                    first_run = False
+        except Exception:
+            logger.exception("خطا در حلقه‌ی بررسی وضعیت سرورها")
+        await asyncio.sleep(SERVER_CHECK_INTERVAL_SECONDS)
+
+
 @app.on_event("startup")
 async def _start_notifier():
     if PUSH_ENABLED:
         asyncio.create_task(_notifier_loop())
         asyncio.create_task(_notifier_supervisor())
+        asyncio.create_task(_server_status_loop())
 
 
 # --------------------------------- اعلان زنده برای پنل نماینده‌های کامل --
@@ -223,7 +270,7 @@ _tenant_notifier_tasks: dict[str, asyncio.Task] = {}
 
 async def _run_tenant_notifier_loop(tenant: "Tenant"):
     _current_tenant.set(tenant)
-    await _notifier_loop()
+    await asyncio.gather(_notifier_loop(), _server_status_loop())
 
 
 async def _notifier_supervisor():
