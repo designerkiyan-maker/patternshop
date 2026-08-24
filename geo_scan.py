@@ -405,38 +405,18 @@ def _ws_frame(payload: bytes) -> bytes:
     return header + mask + masked
 
 
-async def _http_upgrade(reader, writer, host: str, path: str, *, websocket: bool) -> bool:
-    """Voert de HTTP Upgrade-handshake uit voor WS of HTTPUpgrade.
-
-    HTTPUpgrade gebruikt wel dezelfde HTTP Upgrade-mechaniek, maar is geen
-    WebSocket-stream: er mogen daarom geen WebSocket-frames na de handshake
-    worden gebruikt.  Belangrijker voor de health-check: als de handshake
-    mislukt, mag niet worden teruggevallen op alleen TCP; een front/CDN kan
-    immers TCP op de poort accepteren terwijl de echte inbound achter de Host
-    header down is.
-    """
-    headers = [
-        f"GET {path} HTTP/1.1",
-        f"Host: {host}",
-        "Upgrade: websocket",
-        "Connection: Upgrade",
-    ]
-    if websocket:
-        key = base64.b64encode(os.urandom(16)).decode()
-        headers.extend([
-            f"Sec-WebSocket-Key: {key}",
-            "Sec-WebSocket-Version: 13",
-        ])
-    req = ("\r\n".join(headers) + "\r\n\r\n").encode()
+async def _ws_upgrade(reader, writer, host: str, path: str) -> bool:
+    key = base64.b64encode(os.urandom(16)).decode()
+    req = (
+        f"GET {path} HTTP/1.1\r\n"
+        f"Host: {host}\r\n"
+        f"Upgrade: websocket\r\nConnection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    ).encode()
     writer.write(req)
     await writer.drain()
     resp = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=4.0)
-    first_line = resp.split(b"\r\n", 1)[0].strip().upper()
-    return first_line.startswith(b"HTTP/") and b" 101 " in (first_line + b" ")
-
-
-async def _ws_upgrade(reader, writer, host: str, path: str) -> bool:
-    return await _http_upgrade(reader, writer, host, path, websocket=True)
+    return b"101" in resp.split(b"\r\n", 1)[0]
 
 
 async def _protocol_probe(cfg: dict, ip: str, timeout: float) -> Optional[str]:
@@ -489,19 +469,17 @@ async def _protocol_probe(cfg: dict, ip: str, timeout: float) -> Optional[str]:
             reader, writer = await asyncio.wait_for(asyncio.open_connection(ip, port_i), timeout=timeout)
 
         if network in ("ws", "httpupgrade"):
-            ok = await _http_upgrade(
-                reader,
-                writer,
-                net.get("ws_host") or ip,
-                net.get("ws_path") or "/",
-                websocket=(network == "ws"),
-            )
+            ok = await _ws_upgrade(reader, writer, net.get("ws_host") or ip, net.get("ws_path") or "/")
             if not ok:
-                # اینجا دیگر نباید به TCP fallback کنیم. در کانفیگ‌های
-                # HTTPUpgrade/WS ممکن است address یک دامنه‌ی فرانت/CDN باشد؛
-                # آن دامنه می‌تواند TCP را باز نگه دارد حتی وقتی inbound
-                # واقعی پشت Host از کار افتاده است. شکست Upgrade یعنی همین
-                # کانفیگ قابل استفاده نیست، پس صریحاً offline اعلام می‌کنیم.
+                # یک پاسخ HTTP کامل گرفتیم ولی 101 نبود — یعنی سرور روی این
+                # هاست/مسیر واقعاً درخواست را آپگرید نکرد. برخلاف تایم‌اوت/قطع
+                # کانکشن (که در بلوک except پایین به "offline" می‌رسد و مبهم
+                # است)، این یک پاسخ صریح و قطعی است، مخصوصاً برای کانفیگ‌های
+                # پشتِ دامنه‌ی کاور (مثل www.speedtest.net با
+                # Host: <دامنه‌ی واقعی>) که TCP خامِ آن‌ها ممکن است همیشه باز
+                # بماند حتی وقتی بک‌اند واقعی خاموش است. قبلاً اینجا None
+                # برمی‌گشت که باعث می‌شد کد به‌جای این نتیجه‌ی قطعی، به نتیجه‌ی
+                # نادرستِ TCP خام ("online") fallback کند.
                 return "offline"
 
         if protocol == "vless":
