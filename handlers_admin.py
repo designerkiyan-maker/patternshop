@@ -2294,6 +2294,32 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
             await _deliver_webpanel_link(db, call.message, call.from_user.id, bot_id)
 
+        @router.callback_query(F.data.startswith("adm_resbot_webpanel_loginlink:"))
+        async def cb_admin_resbot_webpanel_loginlink(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            bot_id = callback_id(call.data, "adm_resbot_webpanel_loginlink")
+            reseller_bot = db.get_reseller_bot(bot_id) if bot_id is not None else None
+            if not reseller_bot:
+                return await call.answer("یافت نشد.", show_alert=True)
+
+            panel_url = _get_admin_panel_url(db)
+            if not panel_url:
+                return await call.answer("هنوز آدرس پنل مدیریت وب تنظیم نشده.", show_alert=True)
+
+            b_value = reseller_bot["link_slug"] or str(bot_id)
+            login_link = f"{panel_url}/?b={b_value}"
+
+            await call.message.answer(
+                "🔗 لینک ثابت ورود پنل وب این نماینده:\n\n"
+                f"{login_link}\n\n"
+                "این لینک (بر خلاف لینک راه‌اندازی) چندبارمصرف است؛ نماینده هر بار با همین لینک "
+                "و یوزرنیم/پسوردی که خودش موقع راه‌اندازی ساخته وارد پنلش می‌شود. بهتر است "
+                "نماینده این لینک را بوکمارک کند.",
+                reply_markup=kb.resbot_webpanel_kb(bot_id),
+            )
+            await call.answer()
+
         @router.callback_query(F.data.startswith("adm_resbot_webpanel_regen:"))
         async def cb_admin_resbot_webpanel_regen(call: CallbackQuery, state: FSMContext):
             if not senior_admin_only(call.from_user.id):
