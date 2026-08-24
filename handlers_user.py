@@ -1578,17 +1578,56 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         try:
             topup = db.get_latest_pending_topup_awaiting_receipt(message.from_user.id)
         except Exception:
+            log.exception("خطا در جست‌وجوی شارژ کیف‌پول pending برای fallback رسید کاربر %s", message.from_user.id)
             topup = None
-        if not topup:
+
+        if topup:
+            try:
+                db.set_topup_receipt(topup["id"], file_id, receipt_type)
+                user_row = db.get_user(message.from_user.id)
+                caption = (
+                    f"👛 درخواست شارژ کیف پول #{topup['id']}\n"
+                    f"👤 کاربر: {user_row['first_name'] or ''} (@{user_row['username'] or '---'})\n"
+                    f"🆔 آیدی عددی: {message.from_user.id}\n"
+                    f"💰 مبلغ: {topup['amount']:,} تومان"
+                )
+                for admin_id in db.list_admins():
+                    factory = lambda aid=admin_id: _send_receipt_to_admin(
+                        bot, aid, file_id, receipt_type, caption, kb.topup_review_kb(topup["id"])
+                    )
+                    sent = await _send_admin_notification(bot, admin_id, factory, "شارژ کیف پول", topup["id"])
+                    if sent:
+                        db.set_topup_admin_message(topup["id"], admin_id, sent.message_id)
+            except Exception:
+                log.exception(
+                    "پردازش fallback رسید شارژ کیف‌پول #%s کاربر %s ناموفق بود.",
+                    topup["id"], message.from_user.id,
+                )
+                await message.answer(
+                    "⚠️ در ثبت رسید شما خطایی رخ داد. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
+                )
+                return
             log.warning(
-                "عکس/فایل بدون state و بدون هیچ سفارش/درخواست pending‌ای از کاربر %s دریافت شد.",
-                message.from_user.id,
+                "رسید شارژ کیف‌پول #%s کاربر %s با fallback (بدون FSM state) پردازش شد.",
+                topup["id"], message.from_user.id,
             )
             await message.answer(
-                "⚠️ متوجه نشدم این رسید مربوط به کدام سفارش/درخواست است "
-                "(احتمالاً ارتباط قطع شده بود). لطفاً دوباره از منوی اصلی همان مسیر خرید یا شارژ کیف پول را طی کنید.",
+                "✅ درخواست شارژ کیف پول شما برای بررسی ارسال شد. پس از تایید ادمین، مبلغ به کیف پول شما اضافه می‌شود.",
                 reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
             )
+            return
+
+        log.warning(
+            "عکس/فایل بدون state و بدون هیچ سفارش/درخواست pending‌ای از کاربر %s دریافت شد.",
+            message.from_user.id,
+        )
+        await message.answer(
+            "❌ رسید شما ثبت نشد.\n"
+            "دلیل: هیچ سفارش یا درخواست شارژ در انتظار رسیدی برای شما پیدا نشد "
+            "(احتمالاً ارتباط قطع شده بود یا قبلاً بررسی شده است).\n\n"
+            "لطفاً دوباره از منوی اصلی همان مسیر خرید یا شارژ کیف پول را طی کنید و رسید را مجدداً ارسال کنید.",
+            reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
+        )
 
     @router.message(ResellerRequestFlow.waiting_bot_token)
     async def reseller_request_bot_token(message: Message, state: FSMContext):
