@@ -348,6 +348,7 @@ function hasPerm(perm) {
   return ME.role === 'owner' || (ME.permissions || []).includes(perm);
 }
 function canSee(navRole) {
+  if (navRole === 'resellers' && ME.tenant) return false;
   if (navRole === 'any') return true;
   if (navRole === 'owner') return ME.role === 'owner';
   return hasPerm(navRole);
