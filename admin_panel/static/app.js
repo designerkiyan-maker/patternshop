@@ -527,6 +527,7 @@ function showApp() {
   startNotificationPolling();
   const pushBtn = $('#push-toggle-btn');
   if (pushBtn) pushBtn.addEventListener('click', openPushSettingsModal);
+  initInstallApp();
   let saved = null;
   try { saved = localStorage.getItem('admin_current_tab'); } catch (e) {}
   const savedValid = saved && NAV.find(n => n.key === saved && canSee(n.role));
@@ -635,6 +636,70 @@ function openPushSettingsModal() {
       if (disableBtn) disableBtn.addEventListener('click', async () => { await disablePushNotifications(); paint(); });
     };
     paint();
+  });
+}
+
+/* ============================================== نصب به عنوان اپ (PWA) === === */
+/* اندروید (کروم): با beforeinstallprompt یک دیالوگ نصب بومی نشون میدیم.
+   آیفون (سافاری): هیچ API ای برای نصب برنامه‌ای وجود نداره، پس فقط راهنمای
+   دستی «Share -> Add to Home Screen» رو نشون می‌دیم. */
+let deferredInstallPrompt = null;
+
+function isStandalonePwa() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+function isIosDevice() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // آیپد جدید خودش رو مک معرفی می‌کنه
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  $('#install-app-btn')?.style && ($('#install-app-btn').style.display = '');
+});
+
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  $('#install-app-btn')?.style && ($('#install-app-btn').style.display = 'none');
+  toast('پنل به عنوان اپلیکیشن روی این دستگاه نصب شد.');
+});
+
+function openIosInstallModal() {
+  openModal('نصب پنل روی آیفون', `
+    <p class="card-sub" style="margin-bottom:14px;line-height:2">
+      سافاری روی آیفون نصب خودکار را پشتیبانی نمی‌کند؛ برای اضافه کردن پنل به هوم‌اسکرین
+      (شبیه یک اپ مستقل، با آیکون و بدون نوار آدرس) این مراحل را دنبال کن:
+    </p>
+    <ol style="padding-inline-start:20px;line-height:2.2;color:var(--text-muted)">
+      <li>از نوار پایین سافاری، دکمه‌ی <b>Share</b> (مربع با فلش رو به بالا) را بزن.</li>
+      <li>در لیست، گزینه‌ی <b>Add to Home Screen</b> را انتخاب کن.</li>
+      <li>روی <b>Add</b> بزن.</li>
+      <li>از این به بعد، پنل را فقط از آیکونی که روی هوم‌اسکرین اضافه شد باز کن —
+        <b>فقط از همان آیکون</b> اعلان مرورگر (Push) هم قابل فعال‌سازی است، نه از تب معمولی سافاری.</li>
+    </ol>
+  `);
+}
+
+async function initInstallApp() {
+  const btn = $('#install-app-btn');
+  if (!btn) return;
+  if (isStandalonePwa()) { btn.style.display = 'none'; return; }
+  if (isIosDevice()) {
+    btn.style.display = ''; // روی آیفون همیشه نشون بده (beforeinstallprompt وجود نداره)
+    btn.addEventListener('click', openIosInstallModal);
+    return;
+  }
+  // اندروید/دسکتاپ کروم: تا وقتی beforeinstallprompt فایر نشده دکمه مخفی می‌ماند
+  btn.addEventListener('click', async () => {
+    if (!deferredInstallPrompt) {
+      toast('این مرورگر امکان نصب مستقیم را نمی‌دهد؛ از منوی مرورگر «Add to Home screen» را بزن.');
+      return;
+    }
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    btn.style.display = 'none';
   });
 }
 
