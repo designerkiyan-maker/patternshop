@@ -1694,7 +1694,9 @@ function svTooltipHtml(s) {
     <div class="sv-tt-head">${svFlagEmoji(s.country_code)} <b>${esc(s.city || s.country || '—')}</b><span class="sv-tt-country">${esc(s.country || '')}</span></div>
     <div class="sv-tt-name">${esc(s.remark || '—')}</div>
     <div class="sv-tt-ip mono">${esc(ipLine)}</div>
-    <div class="sv-tt-row">وضعیت: <b class="sv-tt-status-${s.status}">${SV_STATUS_LABEL[s.status] || 'نامشخص'}</b></div>
+    <div class="sv-tt-row">وضعیت: <b class="sv-tt-status-${s.status}">${SV_STATUS_LABEL[s.status] || 'نامشخص'}</b>
+      <span class="sv-tt-check-method">${s.check_method === 'protocol' ? '(بر اساس همین کانفیگ)' : '(فقط باز بودن پورت)'}</span>
+    </div>
     <div class="sv-tt-protocols">${protoBadges}</div>
     <div class="sv-tt-source">${srcNote}</div>`;
 }
