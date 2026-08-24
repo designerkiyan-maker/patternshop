@@ -2179,7 +2179,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer(f"سطح این نمایندگی به «{level_label}» تغییر کرد.")
 
         @router.callback_query(F.data.startswith("adm_resbot_webpanel:"))
-        async def cb_admin_resbot_webpanel(call: CallbackQuery):
+        async def cb_admin_resbot_webpanel(call: CallbackQuery, bot: Bot):
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             bot_id = callback_id(call.data, "adm_resbot_webpanel")
