@@ -37,7 +37,8 @@ from urllib.parse import urlparse, unquote
 import aiohttp
 
 _TIMEOUT = aiohttp.ClientTimeout(total=12)
-_TCP_TIMEOUT = 1.8
+_TCP_TIMEOUT = 1.8  # چک زنده (کلیک «اسکن مجدد» در داشبورد) — سرعت مهم است
+TCP_TIMEOUT_BACKGROUND = 5.0  # چک پس‌زمینه‌ی دوره‌ای — false-positive مهم‌تر از سرعت است
 _MAX_CONFIGS = 400
 _DNS_CONCURRENCY = 25
 _TCP_CONCURRENCY = 40
@@ -325,12 +326,12 @@ async def _resolve(host: str, sem: asyncio.Semaphore) -> Optional[str]:
     return None
 
 
-async def _tcp_check(host: str, port: int, sem: asyncio.Semaphore) -> str:
+async def _tcp_check(host: str, port: int, sem: asyncio.Semaphore, timeout: float = _TCP_TIMEOUT) -> str:
     if not port:
         return "unknown"
     async with sem:
         try:
-            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=_TCP_TIMEOUT)
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
             writer.close()
             try:
                 await writer.wait_closed()
@@ -368,7 +369,13 @@ async def _geolocate(ips: list) -> dict:
 
 # --------------------------------------------------------------- scanning --
 
-async def scan_subscription(link: str, *, force_refresh: bool = False, check_status: bool = True) -> dict:
+async def scan_subscription(
+    link: str,
+    *,
+    force_refresh: bool = False,
+    check_status: bool = True,
+    tcp_timeout: float = _TCP_TIMEOUT,
+) -> dict:
     now = time.monotonic()
     cached = _cache.get(link)
     if cached and not force_refresh and (now - cached["at"]) < _CACHE_TTL:
@@ -399,10 +406,13 @@ async def scan_subscription(link: str, *, force_refresh: bool = False, check_sta
     if check_status and ips:
         tcp_sem = asyncio.Semaphore(_TCP_CONCURRENCY)
         pairs = list({(c["ip"], int(c["port"])) for c in configs if c["ip"] and str(c["port"]).isdigit()})
-        results = await asyncio.gather(*(_tcp_check(ip, port, tcp_sem) for ip, port in pairs))
-        for (ip, _port), st in zip(pairs, results):
-            if status_map.get(ip) != "online":
-                status_map[ip] = st
+        results = await asyncio.gather(*(_tcp_check(ip, port, tcp_sem, timeout=tcp_timeout) for ip, port in pairs))
+        for (ip, port), st in zip(pairs, results):
+            # کلید (ip, port) نه فقط ip — وگرنه اگه چند کانفیگ روی یک IP با
+            # پورت‌های متفاوت باشن (مثلاً 443 و 8443)، آنلاین‌بودن یکی باعث
+            # می‌شد همه‌ی کانفیگ‌های همون IP «آنلاین» نشون داده بشن، حتی
+            # اونی که پورتش واقعاً بسته‌ست.
+            status_map[(ip, port)] = st
 
     servers = build_servers(configs, geo, status_map)
 
@@ -446,7 +456,8 @@ def build_servers(configs: list, geo: dict, status_map: dict) -> list:
         else:
             continue  # نه در remark و نه با geoip چیزی معلوم نشد
 
-        status = status_map.get(ip, "unknown") if ip else "unknown"
+        port_i = int(c["port"]) if str(c.get("port") or "").isdigit() else None
+        status = status_map.get((ip, port_i), "unknown") if ip and port_i is not None else "unknown"
         remark = c.get("remark") or ""
         servers.append({
             "country": country, "country_code": cc, "city": city,
