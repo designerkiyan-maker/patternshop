@@ -2242,7 +2242,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 logger.warning("ارسال لینک راه‌اندازی پنل وب به مالک نماینده (%s) ناموفق بود.", reseller_bot["owner_telegram_id"])
 
         @router.callback_query(F.data.startswith("adm_resbot_webpanel_regen:"))
-        async def cb_admin_resbot_webpanel_regen(call: CallbackQuery):
+        async def cb_admin_resbot_webpanel_regen(call: CallbackQuery, bot: Bot):
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             bot_id = callback_id(call.data, "adm_resbot_webpanel_regen")
@@ -2257,11 +2257,23 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 call,
                 f"🔁 لینک راه‌اندازی جدید ساخته شد (لینک قبلی دیگر کار نمی‌کند):\n\n{link}\n\n"
                 "توجه: اگر نماینده قبلاً یک‌بار یوزر/پس ست کرده باشد، این لینک اثری ندارد "
-                "(فقط برای اولین راه‌اندازی است).",
+                "(فقط برای اولین راه‌اندازی است).\n\n"
+                "این لینک همین الان برای نماینده در بات ارسال شد.",
                 reply_markup=kb.resbot_webpanel_kb(bot_id),
             )
             db.log_admin_action(call.from_user.id, "reseller_webpanel_regen", f"نماینده #{bot_id}")
             await call.answer("لینک جدید ساخته شد.")
+
+            try:
+                await bot.send_message(
+                    reseller_bot["owner_telegram_id"],
+                    "🔁 لینک راه‌اندازی جدید برای پنل وب نمایندگی شما ساخته شد!\n\n"
+                    "با باز کردن لینک زیر، یک‌بار یوزرنیم و پسورد دلخواه برای پنل وب خودتان تنظیم کنید "
+                    "(این لینک فقط یک‌بار کار می‌کند):\n\n"
+                    f"{link}",
+                )
+            except Exception:
+                logger.warning("ارسال لینک راه‌اندازی جدید پنل وب به مالک نماینده (%s) ناموفق بود.", reseller_bot["owner_telegram_id"])
 
         @router.callback_query(F.data.startswith("adm_resbot_webpanel_off:"))
         async def cb_admin_resbot_webpanel_off(call: CallbackQuery):
