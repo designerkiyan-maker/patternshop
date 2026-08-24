@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -1644,6 +1644,37 @@ def serve_service_worker():
     # عمداً روی ریشه‌ی دامنه سرو می‌شود (نه زیر /assets) تا scope پیش‌فرض
     # Service Worker کل پنل را بگیرد و بتواند برای هر صفحه‌ای اعلان Push نشان دهد.
     return FileResponse(os.path.join(STATIC_DIR, "sw.js"), media_type="application/javascript")
+
+
+@app.get("/manifest.json")
+def serve_manifest(request: Request):
+    """Web App Manifest برای قابلیت نصب (Add to Home Screen / PWA) روی اندروید
+    و آیفون. چون پنل چندمستاجری است و هر نماینده با کوئری‌استرینگ ?b=... از
+    بقیه جدا می‌شود، start_url باید همان b را نگه دارد وگرنه بعد از نصب،
+    آیکون روی هوم‌اسکرین به پنل درست باز نمی‌شود. index.html این مسیر را با
+    همان query string صفحه‌ی جاری صدا می‌زند (مثلا /manifest.json?b=xyz)."""
+    b_value = request.query_params.get("b", "").strip()
+    start_url = f"/?b={b_value}&source=pwa" if b_value else "/?source=pwa"
+    manifest = {
+        "name": "پنل مدیریت ShopVPN",
+        "short_name": "ShopVPN",
+        "description": "پنل مدیریت وب ShopVPN",
+        "start_url": start_url,
+        "scope": "/",
+        "display": "standalone",
+        "orientation": "portrait-primary",
+        "background_color": "#0B0C14",
+        "theme_color": "#0B0C14",
+        "dir": "rtl",
+        "lang": "fa",
+        "icons": [
+            {"src": "/assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": "/assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": "/assets/icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable"},
+            {"src": "/assets/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+        ],
+    }
+    return JSONResponse(manifest, media_type="application/manifest+json")
 
 
 def _asset_version(filename: str) -> int:
