@@ -24,12 +24,16 @@ from typing import Optional
 import aiohttp
 
 _MIRRORS = [
-    "https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json",
-    "https://unpkg.com/world-atlas@2/land-110m.json",
-    "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/land-110m.json",
+    "https://cdn.jsdelivr.net/npm/world-atlas@2/land-50m.json",
+    "https://unpkg.com/world-atlas@2/land-50m.json",
+    "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/land-50m.json",
 ]
-_TIMEOUT = aiohttp.ClientTimeout(total=20)
-_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_world_map_cache.json")
+_TIMEOUT = aiohttp.ClientTimeout(total=25)
+# اسم فایل نسخه‌دار است: چون قبلاً از land-110m (خام‌ترین/بچگانه‌ترین رزولوشن)
+# استفاده می‌شد، اگر کش دیسکِ قبلی با همین اسم می‌ماند، سرور آن نقشه‌ی
+# کم‌کیفیت را برای همیشه serve می‌کرد. با تغییر اسم، اولین اجرا بعد از این
+# آپدیت مجبور می‌شود دوباره (این‌بار land-50m، دقیق‌تر) دانلود کند.
+_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_world_map_cache_v2.json")
 
 _mem_cache = None  # {"ok": True, "land_path": "..."} پس از اولین موفقیت در طول عمر پروسه
 _fetch_lock = None  # asyncio.Lock ساخته‌شده lazy چون این ماژول ممکن است بدون event loop هم import شود
