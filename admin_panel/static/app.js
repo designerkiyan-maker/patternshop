@@ -51,6 +51,30 @@ const THEMES = [
     supportsMode: false,
     swatch: ['#00FF9C', '#FF2E9A', '#050a08'],
   },
+  {
+    id: 'clay',
+    name: 'Dawn Clay',
+    desc: 'خمیریِ گرم، حجیم و دوستانه — کارت‌های بادکرده هلویی',
+    ready: true,
+    supportsMode: false,
+    swatch: ['#F97316', '#FFF7ED', '#FB7185'],
+  },
+  {
+    id: 'paper',
+    name: 'Ink Paper',
+    desc: 'سرمقاله‌ای مینیمال — کاغذ لوکس، خط مویی و فضای سفید',
+    ready: true,
+    supportsMode: false,
+    swatch: ['#111827', '#FFFBF0', '#9CA3AF'],
+  },
+  {
+    id: 'obsidian',
+    name: 'Obsidian Signal',
+    desc: 'ترمینال داده متراکم — مشکی AMOLED با سیگنال مونو',
+    ready: true,
+    supportsMode: false,
+    swatch: ['#0AFF6B', '#000000', '#1A1A1A'],
+  },
 ];
 const DEFAULT_THEME = 'flat';
 
@@ -712,6 +736,9 @@ async function renderDashboard() {
   if (theme === 'brutalist') return renderDashboardBrutalist(s, sys);
   if (theme === 'glass') return renderDashboardGlass(s, sys);
   if (theme === 'cyberpunk') return renderDashboardCyberpunk(s, sys);
+  if (theme === 'clay') return renderDashboardClay(s, sys);
+  if (theme === 'paper') return renderDashboardPaper(s, sys);
+  if (theme === 'obsidian') return renderDashboardObsidian(s, sys);
   return renderDashboardFlat(s, sys);
 }
 
@@ -1435,6 +1462,116 @@ async function renderDashboardFlat(s, sys) {
   mountServerMap();
 }
 
+
+/* ------------------------------------------------------ dashboard: clay --- */
+function renderDashboardClay(s, sys){
+  const clayColors = ['#F97316','#FB923C','#FBBF24','#10B981','#EC4899','#06B6D4'];
+  const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
+  const maxRev = Math.max(...s.daily_series.map(d=>d.revenue),1);
+  const bars = s.daily_series.map((d,i)=>`<div class="clay-bar" data-h="${Math.max((d.revenue/maxRev)*100,6)}" title="${d.date}: ${fmt(d.revenue)}" style="background:${clayColors[i%clayColors.length]}"></div>`).join('');
+  const totalCat = s.category_breakdown.reduce((a,b)=>a+b.revenue,0)||1;
+  const donut = donutSegments(70,70,52, s.category_breakdown.map(c=>({value:c.revenue})), clayColors, 16);
+  const legend = s.category_breakdown.map((c,i)=>`<span class="clay-legend-item"><i style="background:${clayColors[i%clayColors.length]}"></i>${esc(c.name)}<b class="mono">${fmt(c.revenue)}</b></span>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+  const prodRows = s.top_products.map((p,i)=>`<div class="clay-row"><span class="clay-row-num" style="background:${clayColors[i%clayColors.length]}">${i+1}</span><span class="clay-row-name">${esc(p.name)}</span><span class="mono" style="font-size:12px;color:var(--text-muted)">${fmt(p.orders)} فروش</span></div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+  const resHtml = sys ? `<div class="clay-res-grid" style="margin-bottom:16px"><div class="clay-res-card" style="background:#FFF7ED"><span class="clay-stat-label">CPU</span><b class="mono" style="font-size:20px">${sys.cpu.percent}٪</b><span class="clay-res-track"><span class="clay-res-fill" data-w="${sys.cpu.percent}" style="background:#F97316"></span></span><span style="font-size:11px;color:var(--text-muted)">${sys.cpu.cores} هسته</span></div><div class="clay-res-card" style="background:#FFFBEB"><span class="clay-stat-label">RAM</span><b class="mono" style="font-size:20px">${sys.ram.percent}٪</b><span class="clay-res-track"><span class="clay-res-fill" data-w="${sys.ram.percent}" style="background:#F59E0B"></span></span><span style="font-size:11px;color:var(--text-muted)">${sys.ram.used_gb}/${sys.ram.total_gb} گیگ</span></div><div class="clay-res-card" style="background:#ECFDF5"><span class="clay-stat-label">DISK</span><b class="mono" style="font-size:20px">${sys.disk.percent}٪</b><span class="clay-res-track"><span class="clay-res-fill" data-w="${sys.disk.percent}" style="background:#10B981"></span></span><span style="font-size:11px;color:var(--text-muted)">${sys.disk.used_gb}/${sys.disk.total_gb} گیگ</span></div></div>` : '';
+  setContent(`
+    <div class="clay-hero"><div><h2>${greetingByHour()}، ${esc(ME.username)} ☀️</h2><p>${s.start_date} تا ${s.end_date} — روزی گرم و پر از فروش!</p></div><div class="clay-hero-orb"></div></div>
+    ${resHtml}
+    <div class="grid grid-4">
+      <div class="card clay-stat"><span class="clay-stat-label">درآمد ۱۴ روز</span><span class="clay-stat-val mono" data-count="${s.revenue}">۰</span><span class="clay-pill ${deltaUp?'up':'down'}">${deltaUp?'▲':'▼'} ${Math.abs(s.revenue_change_pct??0)}٪</span></div>
+      <div class="card clay-stat"><span class="clay-stat-label">سفارش تایید شده</span><span class="clay-stat-val mono" data-count="${s.approved}">۰</span></div>
+      <div class="card clay-stat"><span class="clay-stat-label">کاربران کل</span><span class="clay-stat-val mono" data-count="${s.total_users}">۰</span><span style="font-size:11px;color:var(--text-muted)">${fmt(s.new_users)} جدید</span></div>
+      <div class="card clay-stat"><span class="clay-stat-label">کانفیگ فعال</span><span class="clay-stat-val mono" data-count="${s.active_configs}">۰</span></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="clay-card-head">روند فروش روزانه</div><div class="clay-bars">${bars}</div></div>
+    <div class="grid grid-2" style="margin-top:16px">
+      <div class="card"><div class="clay-card-head">تفکیک درآمد</div><div class="clay-donut-wrap"><svg viewBox="0 0 140 140">${donut}</svg><div class="clay-legend">${legend}</div></div></div>
+      <div class="card"><div class="clay-card-head">پرفروش‌ترین‌ها</div>${prodRows}</div>
+    </div>
+    <div style="margin-top:16px">${serverMapCardHtml()}</div>
+  `);
+  const root2 = content();
+  $$('.clay-stat-val[data-count]',root2).forEach(el=>animateCount(el,Number(el.dataset.count)));
+  requestAnimationFrame(()=>setTimeout(()=>{
+    $$('.clay-bar[data-h]',root2).forEach(b=>{ b.style.height=b.dataset.h+'%'; });
+    $$('.clay-res-fill[data-w]',root2).forEach(b=>{ b.style.width=b.dataset.w+'%'; });
+  },60));
+  mountServerMap();
+}
+
+/* ----------------------------------------------------- dashboard: paper --- */
+function renderDashboardPaper(s, sys){
+  const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
+  const maxRev = Math.max(...s.daily_series.map(d=>d.revenue),1);
+  const spark = s.daily_series.map(d=>`<i data-h="${Math.max((d.revenue/maxRev)*100,4)}" title="${d.date}: ${fmt(d.revenue)}"></i>`).join('');
+  const maxCat = Math.max(...s.category_breakdown.map(c=>c.revenue),1);
+  const catRows = s.category_breakdown.map(c=>`<div class="paper-row"><span class="paper-row-name">${esc(c.name)}</span><span class="paper-row-bar"><span class="paper-row-fill" data-w="${(c.revenue/maxCat)*100}"></span></span><b class="mono" style="font-size:11.5px">${fmt(c.revenue)}</b></div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+  const prodRows = s.top_products.map(p=>`<div class="paper-row"><span class="paper-row-name">${esc(p.name)}</span><span class="mono" style="font-size:11.5px;color:var(--text-muted)">${fmt(p.orders)} فروش</span></div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+  const resHtml = sys ? `<div class="paper-res-grid" style="margin-bottom:16px"><div class="paper-res-card"><span class="paper-res-label">CPU</span><span class="paper-res-val mono">${sys.cpu.percent}٪</span><span style="font-size:11px;color:var(--text-muted)">${sys.cpu.cores} هسته</span></div><div class="paper-res-card"><span class="paper-res-label">RAM</span><span class="paper-res-val mono">${sys.ram.percent}٪</span><span style="font-size:11px;color:var(--text-muted)">${sys.ram.used_gb}/${sys.ram.total_gb} گیگ</span></div><div class="paper-res-card"><span class="paper-res-label">DISK</span><span class="paper-res-val mono">${sys.disk.percent}٪</span><span style="font-size:11px;color:var(--text-muted)">${sys.disk.used_gb}/${sys.disk.total_gb} گیگ</span></div></div>` : '';
+  setContent(`
+    <div class="paper-hero"><h2>${greetingByHour()}، ${esc(ME.username)}</h2><p>گزارش فروش ${s.start_date} تا ${s.end_date}</p><div class="paper-hero-meta"><span>${fmt(s.revenue)} تومان درآمد</span><span>·</span><span>${fmt(s.approved)} سفارش</span><span>·</span><span>${fmt(s.total_users)} کاربر</span></div><div class="paper-hero-rule"></div></div>
+    ${resHtml}
+    <div class="paper-stats">
+      <div class="paper-stat"><span class="paper-stat-label">درآمد ۱۴ روز</span><span class="paper-stat-val mono" data-count="${s.revenue}">۰</span><span class="paper-delta ${deltaUp?'up':'down'}">${deltaUp?'▲':'▼'} ${Math.abs(s.revenue_change_pct??0)}٪ نسبت به قبل</span></div>
+      <div class="paper-stat"><span class="paper-stat-label">سفارش تایید شده</span><span class="paper-stat-val mono" data-count="${s.approved}">۰</span><span class="paper-stat-sub">${s.conversion_rate}٪ نرخ تبدیل</span></div>
+      <div class="paper-stat"><span class="paper-stat-label">کاربران کل</span><span class="paper-stat-val mono" data-count="${s.total_users}">۰</span><span class="paper-stat-sub">${fmt(s.new_users)} جدید در این بازه</span></div>
+      <div class="paper-stat"><span class="paper-stat-label">کانفیگ فعال</span><span class="paper-stat-val mono" data-count="${s.active_configs}">۰</span><span class="paper-stat-sub">${fmt(s.open_tickets)} تیکت باز</span></div>
+    </div>
+    <div class="paper-panel" style="margin-top:16px"><div class="paper-panel-head">روند فروش روزانه — ${s.start_date} تا ${s.end_date}</div><div class="paper-spark">${spark}</div></div>
+    <div class="grid grid-2" style="margin-top:16px">
+      <div class="paper-panel"><div class="paper-panel-head">تفکیک درآمد</div>${catRows}</div>
+      <div class="paper-panel"><div class="paper-panel-head">پرفروش‌ترین محصولات</div>${prodRows}</div>
+    </div>
+    <div style="margin-top:16px">${serverMapCardHtml()}</div>
+  `);
+  const root2 = content();
+  $$('.paper-stat-val[data-count]',root2).forEach(el=>animateCount(el,Number(el.dataset.count)));
+  requestAnimationFrame(()=>setTimeout(()=>{
+    $$('.paper-spark i[data-h]',root2).forEach(b=>{ b.style.height=b.dataset.h+'%'; });
+    $$('.paper-row-fill[data-w]',root2).forEach(b=>{ b.style.width=b.dataset.w+'%'; });
+  },60));
+  mountServerMap();
+}
+
+/* -------------------------------------------------- dashboard: obsidian --- */
+function renderDashboardObsidian(s, sys){
+  const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
+  const maxRev = Math.max(...s.daily_series.map(d=>d.revenue),1);
+  const bars = s.daily_series.map(d=>`<div class="obs-bar" data-h="${Math.max((d.revenue/maxRev)*100,4)}" title="${d.date}: ${fmt(d.revenue)}"></div>`).join('');
+  const meters = [
+    {label:'نرخ تبدیل', pct:s.conversion_rate},
+    {label:'سلامت سرور', pct: sys ? Math.max(0,100-(sys.cpu.percent+sys.ram.percent+sys.disk.percent)/3) : 80},
+    {label:'تیکت باز', pct: s.active_configs ? Math.min(Math.round((s.open_tickets/s.active_configs)*100),100) : 0},
+  ];
+  const meterHtml = meters.map(m=>`<div class="obs-meter"><span class="obs-meter-label">${m.label}</span><span class="obs-meter-track"><span class="obs-meter-fill" data-w="${m.pct}" style="background:var(--emerald)"></span></span><span class="obs-meter-val mono">${fmt(Math.round(m.pct))}٪</span></div>`).join('');
+  const prodRows = s.top_products.map((p,i)=>`<tr><td class="mono" style="color:var(--emerald)">${String(i+1).padStart(2,'0')}</td><td>${esc(p.name)}</td><td class="mono">${fmt(p.orders)}</td></tr>`).join('') || `<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">داده‌ای نیست</td></tr>`;
+  const catRows = s.category_breakdown.map(c=>`<div class="obs-meter"><span class="obs-meter-label">${esc(c.name)}</span><span class="obs-meter-track"><span class="obs-meter-fill" data-w="${(c.revenue/Math.max(...s.category_breakdown.map(x=>x.revenue),1))*100}" style="background:var(--text-muted)"></span></span><b class="mono" style="font-size:11px">${fmt(c.revenue)}</b></div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+  const resHtml = sys ? `<div class="obs-res-grid" style="margin-bottom:14px"><div class="obs-res-card"><span class="obs-res-label">CPU</span><span class="obs-res-val mono">${sys.cpu.percent}٪</span><span class="obs-meter-track"><span class="obs-meter-fill" data-w="${sys.cpu.percent}" style="background:var(--emerald)"></span></span><span class="mono" style="font-size:10.5px;color:var(--text-muted)">${sys.cpu.cores} cores</span></div><div class="obs-res-card"><span class="obs-res-label">RAM</span><span class="obs-res-val mono">${sys.ram.percent}٪</span><span class="obs-meter-track"><span class="obs-meter-fill" data-w="${sys.ram.percent}" style="background:var(--amber)"></span></span><span class="mono" style="font-size:10.5px;color:var(--text-muted)">${sys.ram.used_gb}/${sys.ram.total_gb} GB</span></div><div class="obs-res-card"><span class="obs-res-label">DISK</span><span class="obs-res-val mono">${sys.disk.percent}٪</span><span class="obs-meter-track"><span class="obs-meter-fill" data-w="${sys.disk.percent}" style="background:var(--text-muted)"></span></span><span class="mono" style="font-size:10.5px;color:var(--text-muted)">${sys.disk.used_gb}/${sys.disk.total_gb} GB</span></div></div>` : '';
+  setContent(`
+    <div class="obs-hero"><div><span class="obs-hero-tag">● SYSTEM ONLINE — ${s.start_date} → ${s.end_date}</span><h2>${greetingByHour()}، ${esc(ME.username)}</h2><p>${fmt(s.revenue)} تومان · ${fmt(s.approved)} سفارش · ${fmt(s.total_users)} کاربر</p></div></div>
+    ${resHtml}
+    <div class="obs-grid4">
+      <div class="obs-stat accent"><span class="obs-stat-label">Revenue / 14d</span><span class="obs-stat-val mono" data-count="${s.revenue}">۰</span><span class="obs-stat-sub" style="color:${deltaUp?'var(--emerald)':'var(--rose)'}">${deltaUp?'▲':'▼'} ${Math.abs(s.revenue_change_pct??0)}%</span></div>
+      <div class="obs-stat"><span class="obs-stat-label">Approved</span><span class="obs-stat-val mono" data-count="${s.approved}">۰</span><span class="obs-stat-sub">${s.conversion_rate}% conv</span></div>
+      <div class="obs-stat"><span class="obs-stat-label">Users</span><span class="obs-stat-val mono" data-count="${s.total_users}">۰</span><span class="obs-stat-sub">+${fmt(s.new_users)} new</span></div>
+      <div class="obs-stat"><span class="obs-stat-label">Active / Open</span><span class="obs-stat-val mono" data-count="${s.active_configs}">۰</span><span class="obs-stat-sub">${fmt(s.open_tickets)} open tickets</span></div>
+    </div>
+    <div class="obs-panel" style="margin-top:14px"><div class="obs-panel-head">Daily Revenue</div><div class="obs-bars">${bars}</div></div>
+    <div class="grid grid-2" style="margin-top:14px">
+      <div class="obs-panel"><div class="obs-panel-head">Key Metrics</div>${meterHtml}</div>
+      <div class="obs-panel"><div class="obs-panel-head">Revenue Breakdown</div>${catRows}</div>
+    </div>
+    <div class="obs-panel" style="margin-top:14px"><div class="obs-panel-head">Top Products</div><table class="obs-table"><thead><tr><th>#</th><th>نام</th><th>فروش</th></tr></thead><tbody>${prodRows}</tbody></table></div>
+    <div style="margin-top:14px">${serverMapCardHtml()}</div>
+  `);
+  const root2 = content();
+  $$('.obs-stat-val[data-count]',root2).forEach(el=>animateCount(el,Number(el.dataset.count)));
+  requestAnimationFrame(()=>setTimeout(()=>{
+    $$('.obs-bar[data-h]',root2).forEach(b=>{ b.style.height=b.dataset.h+'%'; });
+    $$('.obs-meter-fill[data-w], .obs-res-card .obs-meter-fill[data-w]',root2).forEach(b=>{ b.style.width=b.dataset.w+'%'; });
+  },60));
+  mountServerMap();
+}
 /* ====================================================== world map === */
 // ویجت مشترک «نقشه‌ی جهانی سرورها» — در هر ۵ تم از طریق کلاس عمومی .card
 // (که هرکدام از تم‌ها استایل خودش را رویش اعمال می‌کند) و متغیرهای CSS
