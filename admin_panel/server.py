@@ -213,13 +213,22 @@ async def _notifier_loop():
 # آفلاین است؛ وقتی دوباره آنلاین شود هم یک اعلان بازیابی می‌فرستد.
 
 async def _server_status_loop():
-    last_status: dict[str, str] = {}
-    first_run = True
+    # یک بار آفلاین دیدن TCP لزوماً یعنی سرور واقعاً قطعه؛ ممکنه جیتر لحظه‌ای
+    # شبکه باشه. پس فقط وقتی یه کانفیگ دو دور متوالی (۳۰ دقیقه، چون هر دور
+    # SERVER_CHECK_INTERVAL_SECONDS=15دقیقه‌ست) پشت‌سرهم آفلاین دیده بشه پوش
+    # قطعی می‌فرستیم؛ به‌محضی که یه دور آنلاین ببینیم استریک ریست می‌شه.
+    offline_streak: dict[str, int] = {}
+    notified_offline: set[str] = set()
     while True:
         try:
             link = db.get_setting("master_sub_link", "").strip()
             if link:
-                result = await geo_scan.scan_subscription(link, force_refresh=True, check_status=True)
+                result = await geo_scan.scan_subscription(
+                    link,
+                    force_refresh=True,
+                    check_status=True,
+                    tcp_timeout=geo_scan.TCP_TIMEOUT_BACKGROUND,
+                )
                 if result.get("ok"):
                     current: dict[str, str] = {}
                     for s in result.get("servers", []):
@@ -228,23 +237,25 @@ async def _server_status_loop():
                             continue
                         current[key] = s.get("status", "unknown")
 
-                    if not first_run:
-                        for key, status in current.items():
-                            prev = last_status.get(key)
-                            if status == "offline" and prev != "offline":
+                    for key, status in current.items():
+                        if status == "offline":
+                            offline_streak[key] = offline_streak.get(key, 0) + 1
+                            if offline_streak[key] >= 2 and key not in notified_offline:
                                 await _notify_admins("panels", {
                                     "title": "🔴 قطعی کانفیگ",
                                     "body": f"کانفیگ «{key}» آفلاین شده است.",
                                     "tag": f"server-status-{key}",
                                 })
-                            elif status == "online" and prev == "offline":
+                                notified_offline.add(key)
+                        else:
+                            offline_streak[key] = 0
+                            if status == "online" and key in notified_offline:
                                 await _notify_admins("panels", {
                                     "title": "🟢 اتصال مجدد کانفیگ",
                                     "body": f"کانفیگ «{key}» دوباره آنلاین شد.",
                                     "tag": f"server-status-{key}",
                                 })
-                    last_status = current
-                    first_run = False
+                                notified_offline.discard(key)
         except Exception:
             logger.exception("خطا در حلقه‌ی بررسی وضعیت سرورها")
         await asyncio.sleep(SERVER_CHECK_INTERVAL_SECONDS)
