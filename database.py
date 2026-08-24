@@ -1780,6 +1780,19 @@ class Database:
                 "ORDER BY o.id"
             ).fetchall()
 
+    def get_latest_pending_order_awaiting_receipt(self, user_tg_id: int):
+        """آخرین سفارش (عادی یا کانفیگ شخصی) این کاربر که هنوز pending است و رسیدی
+        برایش ثبت نشده - برای fallback بازیابی رسیدهایی که به‌خاطر گم‌شدن FSM state
+        (مثلاً ری‌استارت بات) به هندلر state-دار اصلی نرسیده‌اند."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM orders WHERE user_id=? AND status='pending' "
+                "AND receipt_file_id IS NULL "
+                "AND NOT EXISTS (SELECT 1 FROM crypto_invoices ci WHERE ci.kind='order' AND ci.ref_id=orders.id) "
+                "ORDER BY id DESC LIMIT 1",
+                (user_tg_id,),
+            ).fetchone()
+
     def get_user_orders(self, user_tg_id: int):
         with self._get_conn() as conn:
             return conn.execute(
@@ -2167,6 +2180,18 @@ class Database:
     def get_topup(self, topup_id: int):
         with self._get_conn() as conn:
             return conn.execute("SELECT * FROM wallet_topups WHERE id=?", (topup_id,)).fetchone()
+
+    def get_latest_pending_topup_awaiting_receipt(self, user_tg_id: int):
+        """آخرین درخواست شارژ کیف‌پول این کاربر که هنوز pending است و رسیدی
+        برایش ثبت نشده - برای fallback بازیابی رسیدهایی که FSM state‌شان گم شده."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM wallet_topups WHERE user_id=? AND status='pending' "
+                "AND receipt_file_id IS NULL "
+                "AND NOT EXISTS (SELECT 1 FROM crypto_invoices ci WHERE ci.kind='wallet_topup' AND ci.ref_id=wallet_topups.id) "
+                "ORDER BY id DESC LIMIT 1",
+                (user_tg_id,),
+            ).fetchone()
 
     def approve_topup(self, topup_id: int) -> bool:
         topup = self.get_topup(topup_id)

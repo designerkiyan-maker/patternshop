@@ -1503,27 +1503,92 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         current_state = await state.get_state()
         if current_state:
             return  # یک state دیگر (سفارش/شارژ/...) در حال پردازش این عکس است
+
+        log = logging.getLogger("handlers_user")
+
         req = db.get_open_reseller_request(message.from_user.id)
-        if not req or req["status"] != "awaiting_payment":
+        if req and req["status"] == "awaiting_payment":
+            file_id, receipt_type = _receipt_payload(message)
+            if not file_id:
+                return
+            db.set_reseller_request_receipt(req["id"], file_id, receipt_type)
+            caption = (
+                f"💳 رسید پرداخت درخواست نمایندگی #{req['id']}\n"
+                f"👤 کاربر: {message.from_user.id}\n"
+                f"💰 مبلغ: {req['price_toman']:,} تومان"
+            )
+            for admin_id in _senior_admin_ids():
+                try:
+                    await _send_receipt_to_admin(
+                        bot, admin_id, file_id, receipt_type, caption,
+                        kb.reseller_request_payment_review_kb(req["id"])
+                    )
+                except Exception:
+                    pass
+            await message.answer("✅ رسید شما برای بررسی ارسال شد. پس از تایید ادمین، مرحله‌ی بعدی اعلام می‌شود.")
             return
+
+        # -------------------------------------------------------------------
+        # Fallback: کاربر state خودش را ندارد (معمولاً چون بین ارسال رسید و
+        # رسیدن پیام، پروسه‌ی بات ری‌استارت شده و MemoryStorage پاک شده است -
+        # این با ری‌استارت کل سرویس، یا استارت/استاپ بات نمایندگی توسط
+        # reconcile_resellers_loop اتفاق می‌افتد). بدون این بخش، عکس رسید
+        # کاملاً بی‌سروصدا نادیده گرفته می‌شد: نه در دیتابیس ذخیره می‌شد، نه
+        # به ادمین می‌رسید، نه کاربر می‌فهمید. اینجا با پیدا کردن آخرین
+        # سفارش pending این کاربر که هنوز رسید ندارد، رسید را به همان سفارش
+        # می‌چسبانیم - دقیقاً همان مسیر عادی receive_receipt.
         file_id, receipt_type = _receipt_payload(message)
         if not file_id:
             return
-        db.set_reseller_request_receipt(req["id"], file_id, receipt_type)
-        caption = (
-            f"💳 رسید پرداخت درخواست نمایندگی #{req['id']}\n"
-            f"👤 کاربر: {message.from_user.id}\n"
-            f"💰 مبلغ: {req['price_toman']:,} تومان"
-        )
-        for admin_id in _senior_admin_ids():
+
+        try:
+            order = db.get_latest_pending_order_awaiting_receipt(message.from_user.id)
+        except Exception:
+            log.exception("خطا در جست‌وجوی سفارش pending برای fallback رسید کاربر %s", message.from_user.id)
+            order = None
+
+        if order:
             try:
-                await _send_receipt_to_admin(
-                    bot, admin_id, file_id, receipt_type, caption,
-                    kb.reseller_request_payment_review_kb(req["id"])
+                db.set_order_receipt(order["id"], file_id, receipt_type)
+                await _notify_admins_of_order(
+                    bot, order["id"], receipt_file_id=file_id, receipt_type=receipt_type
                 )
             except Exception:
-                pass
-        await message.answer("✅ رسید شما برای بررسی ارسال شد. پس از تایید ادمین، مرحله‌ی بعدی اعلام می‌شود.")
+                log.exception(
+                    "پردازش fallback رسید سفارش #%s کاربر %s ناموفق بود.",
+                    order["id"], message.from_user.id,
+                )
+                await message.answer(
+                    "⚠️ در ثبت رسید شما خطایی رخ داد. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
+                )
+                return
+            log.warning(
+                "رسید سفارش #%s کاربر %s با fallback (بدون FSM state) پردازش شد.",
+                order["id"], message.from_user.id,
+            )
+            await message.answer(
+                "✅ رسید شما برای بررسی ارسال شد. پس از تایید ادمین، کانفیگ برای شما ارسال خواهد شد.",
+                reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
+            )
+            return
+
+        # هیچ سفارش/درخواست pending‌ای برای این کاربر پیدا نشد. برای شارژ کیف‌پول
+        # نمی‌توان بازیابی کرد چون مبلغ فقط داخل state نگه داشته می‌شود، نه دیتابیس؛
+        # پس حداقل کاربر را از سکوت کامل نجات می‌دهیم و راهنمایی می‌کنیم.
+        try:
+            topup = db.get_latest_pending_topup_awaiting_receipt(message.from_user.id)
+        except Exception:
+            topup = None
+        if not topup:
+            log.warning(
+                "عکس/فایل بدون state و بدون هیچ سفارش/درخواست pending‌ای از کاربر %s دریافت شد.",
+                message.from_user.id,
+            )
+            await message.answer(
+                "⚠️ متوجه نشدم این رسید مربوط به کدام سفارش/درخواست است "
+                "(احتمالاً ارتباط قطع شده بود). لطفاً دوباره از منوی اصلی همان مسیر خرید یا شارژ کیف پول را طی کنید.",
+                reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
+            )
 
     @router.message(ResellerRequestFlow.waiting_bot_token)
     async def reseller_request_bot_token(message: Message, state: FSMContext):

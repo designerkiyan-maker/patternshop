@@ -16,6 +16,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from fsm_storage import SQLiteStorage
 from aiogram.types import MenuButtonWebApp, MenuButtonDefault, WebAppInfo, ErrorEvent
 
 from database import Database
@@ -83,6 +84,19 @@ async def _global_error_handler(event: ErrorEvent) -> bool:
             await cq.answer("⚠️ خطایی رخ داد، دوباره تلاش کنید.", show_alert=False)
         except Exception:
             pass
+        return True
+    # قبلاً برای آپدیت‌های message (مثل عکس رسید که هندلرش exception می‌دهد،
+    # مثلاً به‌خاطر قفل موقت SQLite) این تابع فقط لاگ می‌کرد و برمی‌گشت -
+    # یعنی کاربر و ادمین هیچ‌کدام هیچ پیامی نمی‌گرفتند و از دید هر دو انگار
+    # آن پیام اصلاً نرسیده بود. حالا حداقل به خود کاربر اطلاع می‌دهیم که
+    # چیزی خراب شده تا او بداند دوباره تلاش کند، نه اینکه فکر کند رسیدش
+    # درست ثبت شده و منتظر تایید بماند.
+    msg = event.update.message
+    if msg is not None:
+        try:
+            await msg.answer("⚠️ در پردازش پیام شما خطایی رخ داد. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.")
+        except Exception:
+            pass
     return True
 
 
@@ -116,7 +130,20 @@ class BotManager:
         db.init_db(owner_id=owner_id)
 
         bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-        dp = Dispatcher(storage=MemoryStorage())
+        # قبلاً MemoryStorage (فقط RAM) بود که با هر ری‌استارت پروسه state‌های
+        # در حال انتظار (از جمله «منتظر عکس رسید») را پاک می‌کرد و باعث گم‌شدن
+        # رسیدهایی می‌شد که دقیقاً همان لحظه می‌رسیدند؛ حالا روی یک فایل SQLite
+        # کنار دیتابیس همان بات ذخیره می‌شود تا بعد از ری‌استارت هم بماند.
+        fsm_db_path = f"{db_path}.fsm.sqlite3"
+        try:
+            fsm_storage = SQLiteStorage(fsm_db_path)
+        except Exception:
+            logger.exception(
+                "ساخت SQLiteStorage برای FSM با db_path=%s ناموفق بود؛ استفاده‌ی موقت از MemoryStorage.",
+                fsm_db_path,
+            )
+            fsm_storage = MemoryStorage()
+        dp = Dispatcher(storage=fsm_storage)
         dp.errors.register(_global_error_handler)
 
         blocked_mw = BlockedUserMiddleware(db)
@@ -172,6 +199,10 @@ class BotManager:
                 pass
         try:
             await inst["bot"].session.close()
+        except Exception:
+            pass
+        try:
+            await inst["dp"].storage.close()
         except Exception:
             pass
         logger.info("بات با db_path=%s متوقف شد.", inst["db_path"])
@@ -279,6 +310,12 @@ class BotManager:
                     try:
                         if os.path.exists(purge_row["db_path"]):
                             os.remove(purge_row["db_path"])
+                        # فایل storage پایدار FSM (و فایل‌های کمکی WAL/SHM کنارش)
+                        # هم مربوط به همین بات نماینده هستند و باید با خودش پاک شوند.
+                        for suffix in (".fsm.sqlite3", ".fsm.sqlite3-wal", ".fsm.sqlite3-shm"):
+                            fsm_file = purge_row["db_path"] + suffix
+                            if os.path.exists(fsm_file):
+                                os.remove(fsm_file)
                         main_db.remove_pending_db_purge(purge_row["id"])
                         logger.info("فایل دیتابیس نماینده‌ی حذف‌شده پاک شد: %s", purge_row["db_path"])
                     except OSError:
