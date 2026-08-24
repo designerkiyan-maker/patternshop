@@ -108,6 +108,7 @@ async def _deliver_webpanel_link(db, answerable, admin_id: int, bot_id: int) -> 
 
     b_value = reseller_bot["link_slug"] or str(bot_id)
     link = f"{panel_url}/setup?b={b_value}&t={reseller_bot['web_panel_setup_token']}"
+    login_link = f"{panel_url}/?b={b_value}"
 
     await answerable.answer(
         "🌐 لینک راه‌اندازی پنل وب این نماینده:\n\n"
@@ -127,7 +128,9 @@ async def _deliver_webpanel_link(db, answerable, admin_id: int, bot_id: int) -> 
         "🌐 پنل مدیریت وب برای نمایندگی شما آماده است!\n\n"
         "با باز کردن لینک زیر، یک‌بار یوزرنیم و پسورد دلخواه برای پنل وب خودتان تنظیم کنید "
         "(این لینک فقط یک‌بار کار می‌کند):\n\n"
-        f"{link}",
+        f"{link}\n\n"
+        "🔗 لینک ثابت ورود پنل وب (برای دفعات بعد، بعد از تنظیم یوزرنیم/پسورد این را بوکمارک کنید):\n"
+        f"{login_link}",
     )
     if not sent:
         await answerable.answer(
