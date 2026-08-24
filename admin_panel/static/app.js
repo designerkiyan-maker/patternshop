@@ -461,7 +461,7 @@ async function boot_setup() {
   $('#setup-screen').hidden = false;
   if (!b || !t) {
     $('#setup-subtitle').textContent = 'لینک ناقص است.';
-    $('#setup-form').hidden = true;
+    $('#setup-fields').hidden = true;
     return;
   }
   try {
@@ -475,7 +475,7 @@ async function boot_setup() {
       : 'یک یوزرنیم و پسورد برای پنل وب خودت انتخاب کن';
   } catch (e) {
     $('#setup-subtitle').textContent = e.message;
-    $('#setup-form').hidden = true;
+    $('#setup-fields').hidden = true;
     return;
   }
 

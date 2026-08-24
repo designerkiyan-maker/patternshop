@@ -54,16 +54,18 @@
       <h1>راه‌اندازی پنل نمایندگی</h1>
       <p id="setup-subtitle">یک یوزرنیم و پسورد برای پنل وب خودت انتخاب کن</p>
     </div>
-    <label class="field">
-      <span>یوزرنیم (حداقل ۳ کاراکتر)</span>
-      <input type="text" id="setup-username" autocomplete="username" required>
-    </label>
-    <label class="field">
-      <span>پسورد (حداقل ۸ کاراکتر)</span>
-      <input type="password" id="setup-password" autocomplete="new-password" required>
-    </label>
-    <div id="setup-error" class="login-error" hidden></div>
-    <button type="submit" class="btn btn-primary btn-block" id="setup-submit">ساخت حساب و ورود</button>
+    <div id="setup-fields">
+      <label class="field">
+        <span>یوزرنیم (حداقل ۳ کاراکتر)</span>
+        <input type="text" id="setup-username" autocomplete="username" required>
+      </label>
+      <label class="field">
+        <span>پسورد (حداقل ۸ کاراکتر)</span>
+        <input type="password" id="setup-password" autocomplete="new-password" required>
+      </label>
+      <div id="setup-error" class="login-error" hidden></div>
+      <button type="submit" class="btn btn-primary btn-block" id="setup-submit">ساخت حساب و ورود</button>
+    </div>
   </form>
 </div>
 
