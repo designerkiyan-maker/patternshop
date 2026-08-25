@@ -1944,6 +1944,27 @@ async function renderAdminStatsSection() {
         `).join("")}
       </div>
 
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🎫 پشتیبانی و مشتریان تکراری</div>
+        <div class="stat-row"><span>تیکت ثبت‌شده در بازه</span><b>${fmt(s.tickets_created)}</b></div>
+        <div class="stat-row"><span>تیکت باز</span><b>${fmt(s.tickets_open)}</b></div>
+        <div class="stat-row"><span>میانگین زمان پاسخ اول</span><b>${s.avg_ticket_response_minutes != null ? s.avg_ticket_response_minutes + " دقیقه" : "—"}</b></div>
+        <div class="stat-row"><span>نرخ مشتری تکراری</span><b>${s.repeat_customer_rate}٪ (${fmt(s.repeat_customers)}/${fmt(s.total_customers)})</b></div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">📦 موجودی انبار محصولات فعال</div>
+        ${(!s.inventory || s.inventory.length === 0) ? `<div class="hint-text" style="margin:0">محصول فعالی ثبت نشده.</div>` : s.inventory.map((p) => `
+          <div class="admin-list-row">
+            <div class="admin-list-row-main">
+              <span>${p.low_stock ? "⚠️ " : ""}${escHtml(p.name)}</span>
+              <span class="hint-text" style="margin:0">${p.used} مصرف‌شده</span>
+            </div>
+            <div class="admin-list-row-actions"><b>${p.unused} آزاد</b></div>
+          </div>
+        `).join("")}
+      </div>
+
       <a class="btn outline small" style="width:auto;display:inline-block;text-decoration:none;text-align:center" href="${withTenant(`/api/admin/orders/export?start_date=${s.start_date}&end_date=${s.end_date}`)}" target="_blank">📤 خروجی اکسل سفارش‌های این بازه (CSV)</a>
     `;
 
