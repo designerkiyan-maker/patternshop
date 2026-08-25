@@ -1727,6 +1727,15 @@ function serverMapCardHtml() {
       <input type="text" id="sv-map-link-input" class="input" dir="ltr" placeholder="https://example.com/sub/xxxxx">
       <button class="btn btn-primary btn-sm" id="sv-map-scan-btn">بررسی و رسم نقشه</button>
     </div>
+    <div class="sv-map-checkrow">
+      <label>هر
+        <input type="number" id="sv-map-interval-input" class="input input-sm" min="1" max="120" style="width:64px">
+        دقیقه چک شود، بعد از
+        <input type="number" id="sv-map-streak-input" class="input input-sm" min="1" max="10" style="width:56px">
+        دور متوالیِ آفلاین اعلان بده
+      </label>
+      <button class="btn btn-sm" id="sv-map-check-save-btn">ذخیره</button>
+    </div>
     <div class="sv-map-stats" id="sv-map-stats"></div>
     <div class="sv-map-wrap" id="sv-map-wrap">
       <svg id="sv-map-svg" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet">
@@ -1919,6 +1928,38 @@ async function mountServerMap() {
     if (s.link) { if (refreshBtn) refreshBtn.hidden = false; await doScan(false); }
     else if (emptyEl) emptyEl.hidden = false;
   } catch (e) { /* بی‌اهمیت — کاربر می‌تواند دستی لینک بدهد */ }
+
+  const intervalInput = $('#sv-map-interval-input', root);
+  const streakInput = $('#sv-map-streak-input', root);
+  const checkSaveBtn = $('#sv-map-check-save-btn', root);
+
+  try {
+    const cs = await apiGet('/settings/server-check');
+    if (!$('.sv-map-card', content())) return;
+    if (intervalInput) {
+      intervalInput.value = cs.interval_min;
+      intervalInput.min = cs.min_interval_min;
+      intervalInput.max = cs.max_interval_min;
+    }
+    if (streakInput) {
+      streakInput.value = cs.offline_streak;
+      streakInput.min = cs.min_offline_streak;
+      streakInput.max = cs.max_offline_streak;
+    }
+  } catch (e) { /* بی‌اهمیت — مقادیر پیش‌فرض روی سرور اعمال می‌شود */ }
+
+  if (checkSaveBtn) checkSaveBtn.addEventListener('click', async () => {
+    const interval_min = parseInt(intervalInput.value, 10);
+    const offline_streak = parseInt(streakInput.value, 10);
+    if (!interval_min || !offline_streak) { toast('مقادیر را درست وارد کن', true); return; }
+    checkSaveBtn.disabled = true;
+    try {
+      await apiPost('/settings/server-check', { interval_min, offline_streak });
+      const totalMin = interval_min * offline_streak;
+      toast(`ذخیره شد — اعلان قطعی بعد از حدود ${totalMin} دقیقه قطعی پیوسته ارسال می‌شود.`);
+    } catch (e) { handleErr(e); }
+    finally { checkSaveBtn.disabled = false; }
+  });
 
   if (scanBtn) scanBtn.addEventListener('click', async () => {
     const link = (input.value || '').trim();

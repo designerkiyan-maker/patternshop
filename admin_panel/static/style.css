@@ -1435,6 +1435,10 @@ html[data-theme="obsidian"] .badge{ border-radius:2px; font-family: var(--font-m
 .sv-map-linkrow{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
 .sv-map-linkrow .input{ flex:1 1 240px; min-width:0; }
 
+.sv-map-checkrow{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; font-size:13px; color:var(--text-muted); }
+.sv-map-checkrow label{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.sv-map-checkrow .input-sm{ padding:4px 6px; text-align:center; }
+
 .sv-map-stats{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
 
 .sv-map-wrap{
