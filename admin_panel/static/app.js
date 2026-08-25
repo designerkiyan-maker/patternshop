@@ -75,6 +75,14 @@ const THEMES = [
     supportsMode: false,
     swatch: ['#0AFF6B', '#000000', '#1A1A1A'],
   },
+  {
+    id: 'warp',
+    name: 'Warp Tunnel',
+    desc: 'عمق سه‌بعدی — تونل نوری در پس‌زمینه، کارت‌ها با اسکرول از عمق ظاهر می‌شوند',
+    ready: true,
+    supportsMode: false,
+    swatch: ['#6C5CE7', '#22E1FF', '#0A0B1A'],
+  },
 ];
 const DEFAULT_THEME = 'flat';
 
@@ -91,6 +99,7 @@ function applyThemeChoice(themeId, mode) {
   document.documentElement.setAttribute('data-theme', finalTheme);
   document.documentElement.setAttribute('data-mode', finalMode);
   localStorage.setItem('sv-theme', JSON.stringify({ theme: finalTheme, mode: finalMode }));
+  if (typeof WarpFX !== 'undefined') WarpFX.sync(finalTheme);
 }
 // نگه‌داری سازگاری با کدهای قدیمی‌تر که فقط applyTheme(mode) صدا می‌زنن
 function applyTheme(mode) { applyThemeChoice(loadTheme().theme, mode); }
@@ -98,6 +107,155 @@ function applyTheme(mode) { applyThemeChoice(loadTheme().theme, mode); }
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+/* ===================================================== warp tunnel fx === */
+// جلوه‌های تم «Warp Tunnel»: تونل سه‌بعدیِ پس‌زمینه (کانواس)، ظاهرشدن کارت‌ها
+// از عمق هنگام اسکرول (IntersectionObserver) و کج‌شدن سه‌بعدی کارت با موس/لمس.
+// همه چیز فقط وقتی data-theme="warp" فعاله روشن می‌شه؛ در بقیه‌ی تم‌ها کاملاً
+// خاموشه و هیچ overheadی نداره. با prefers-reduced-motion هم غیرفعال می‌شه.
+var WarpFX = (function () {
+  var active = false;
+  var raf = null;
+  var canvas = null, ctx = null;
+  var scrollY = 0, targetScrollY = 0;
+  var mo = null, io = null;
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function ensureCanvas() {
+    var host = document.querySelector('.bg-blobs');
+    if (!host) return null;
+    var c = document.getElementById('warp-tunnel-canvas');
+    if (!c) {
+      c = document.createElement('canvas');
+      c.id = 'warp-tunnel-canvas';
+      host.appendChild(c);
+    }
+    return c;
+  }
+
+  function resize() {
+    if (!canvas) return;
+    canvas.width = window.innerWidth * (window.devicePixelRatio || 1);
+    canvas.height = window.innerHeight * (window.devicePixelRatio || 1);
+  }
+
+  function drawTunnel(t) {
+    if (!ctx || !canvas) return;
+    var dpr = window.devicePixelRatio || 1;
+    var w = canvas.width, h = canvas.height;
+    var cx = w / 2, cy = h * 0.32;
+    ctx.clearRect(0, 0, w, h);
+    var rings = 14;
+    var spacing = 140 * dpr;
+    var focal = 620 * dpr;
+    var drift = (t * 0.012) % spacing;
+    scrollY += (targetScrollY - scrollY) * 0.08;
+    for (var i = rings; i >= 0; i--) {
+      var z = i * spacing - drift - (scrollY * 1.4 % spacing);
+      if (z <= -spacing) z += (rings + 1) * spacing;
+      var scale = focal / (focal + z);
+      if (scale <= 0) continue;
+      var r = 46 * dpr * scale * (h / (520 * dpr));
+      var alpha = Math.max(0, Math.min(0.55, scale * 0.6 - 0.05));
+      if (alpha <= 0.01) continue;
+      var hue = (i % 2 === 0) ? '108,92,231' : '34,225,255';
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(r, 1), 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(' + hue + ',' + alpha.toFixed(3) + ')';
+      ctx.lineWidth = Math.max(1, 2.2 * dpr * scale);
+      ctx.stroke();
+    }
+    raf = requestAnimationFrame(drawTunnel);
+  }
+
+  function onScroll() {
+    targetScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+  }
+
+  function revealObserver() {
+    if (io) return io;
+    io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) {
+          en.target.classList.add('warp-in');
+          io.unobserve(en.target);
+        }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
+    return io;
+  }
+
+  function armCards(root) {
+    if (!active || reduced) return;
+    var cards = (root || document).querySelectorAll('.card:not(.warp-armed)');
+    var obs = revealObserver();
+    cards.forEach(function (el, idx) {
+      el.classList.add('warp-armed', 'warp-reveal');
+      el.style.transitionDelay = Math.min(idx * 55, 260) + 'ms';
+      obs.observe(el);
+    });
+  }
+
+  function onPointerMove(e) {
+    if (!active) return;
+    var card = e.target.closest && e.target.closest('.card');
+    if (!card) return;
+    var rect = card.getBoundingClientRect();
+    var px = (e.clientX - rect.left) / rect.width - 0.5;
+    var py = (e.clientY - rect.top) / rect.height - 0.5;
+    card.style.transform = 'perspective(900px) rotateX(' + (-py * 6).toFixed(2) + 'deg) rotateY(' + (px * 7).toFixed(2) + 'deg)';
+  }
+  function onPointerLeave(e) {
+    var card = e.target.closest && e.target.closest('.card');
+    if (card) card.style.transform = '';
+  }
+
+  function mount() {
+    if (active) return;
+    active = true;
+    canvas = ensureCanvas();
+    if (canvas) {
+      ctx = canvas.getContext('2d');
+      resize();
+      window.addEventListener('resize', resize);
+      if (!reduced) raf = requestAnimationFrame(drawTunnel);
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    mo = new MutationObserver(function () { armCards(content()); });
+    var root = content();
+    if (root) { mo.observe(root, { childList: true }); armCards(root); }
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerleave', onPointerLeave, true);
+  }
+
+  function unmount() {
+    if (!active) return;
+    active = false;
+    if (raf) cancelAnimationFrame(raf);
+    raf = null;
+    window.removeEventListener('resize', resize);
+    window.removeEventListener('scroll', onScroll);
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerleave', onPointerLeave, true);
+    if (mo) mo.disconnect();
+    mo = null;
+    if (io) io.disconnect();
+    io = null;
+    if (canvas && canvas.parentNode) canvas.parentNode.removeChild(canvas);
+    canvas = null; ctx = null;
+    $$('.warp-armed').forEach(function (el) {
+      el.classList.remove('warp-armed', 'warp-reveal', 'warp-in');
+      el.style.transform = ''; el.style.transitionDelay = '';
+    });
+  }
+
+  function sync(theme) {
+    if (theme === 'warp') mount(); else unmount();
+  }
+
+  return { sync: sync, armCards: function () { armCards(content()); } };
+})();
+WarpFX.sync(loadTheme().theme);
 
 /* ============================================================= icons === */
 const ICONS = {
@@ -805,6 +963,7 @@ async function renderDashboard() {
   else if (theme === 'clay') await renderDashboardClay(s, sys);
   else if (theme === 'paper') await renderDashboardPaper(s, sys);
   else if (theme === 'obsidian') await renderDashboardObsidian(s, sys);
+  else if (theme === 'warp') await renderDashboardWarp(s, sys);
   else await renderDashboardFlat(s, sys);
   appendExtraStatsPanel(s);
 }
@@ -1681,6 +1840,136 @@ function renderDashboardObsidian(s, sys){
   },60));
   mountServerMap();
 }
+/* ------------------------------------------------------- dashboard: warp --- */
+function warpRingHtml(pct, color, label, value) {
+  const p = Math.max(0, Math.min(100, Math.round(pct)));
+  return `
+    <div class="warp-ring-item">
+      <div class="ring warp-ring" style="--ring-a:${color}" data-pct="${p}"><span>${p}٪</span></div>
+      <div class="warp-ring-info"><strong>${value}</strong><span>${label}</span></div>
+    </div>`;
+}
+
+function renderDashboardWarp(s, sys) {
+  const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
+  const chartW = 640, chartH = 200;
+  const revValues = s.daily_series.map(d => d.revenue);
+  const { line, area } = cyberSmoothPath(revValues, chartW, chartH, 10);
+
+  const maxCatRev = Math.max(...s.category_breakdown.map(c => c.revenue), 1);
+  const catColors = ['#6C5CE7', '#22E1FF', '#FF4D8D', '#8C7CFF', '#5CF0C2', '#FFB020'];
+  const catBars = s.category_breakdown.map((c, i) => `
+    <div class="bar-row">
+      <span class="bar-name">${esc(c.name)}</span>
+      <span class="bar-track"><span class="bar-fill" data-w="${(c.revenue / maxCatRev) * 100}" style="background:${catColors[i % catColors.length]};box-shadow:0 0 10px ${catColors[i % catColors.length]}99"></span></span>
+      <span class="bar-val">${fmt(c.revenue)}</span>
+    </div>`).join('') || '<span class="card-sub">داده‌ای برای این بازه نیست</span>';
+
+  const maxProdRev = Math.max(...s.top_products.map(p => p.revenue), 1);
+  const prodRows = s.top_products.map((p, i) => `
+    <div class="warp-prod-row">
+      <span class="warp-prod-rank">${String(i + 1).padStart(2, '0')}</span>
+      <span class="warp-prod-name">${esc(p.name)}</span>
+      <span class="bar-track"><span class="bar-fill" data-w="${(p.revenue / maxProdRev) * 100}" style="background:${catColors[i % catColors.length]};box-shadow:0 0 10px ${catColors[i % catColors.length]}99"></span></span>
+      <span class="warp-prod-val mono">${fmt(p.orders)} فروش</span>
+    </div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
+
+  const ticketRatio = s.active_configs ? Math.min(Math.round((s.open_tickets / s.active_configs) * 100), 100) : 0;
+  const invRows = (s.inventory || []).slice(0, 6).map(i => `
+    <div class="bar-row">
+      <span class="bar-name">${esc(i.name)}${i.low_stock ? ' ⚠️' : ''}</span>
+      <span class="bar-track"><span class="bar-fill" data-w="${Math.min(i.unused * 4, 100)}" style="background:${i.low_stock ? '#FF4D8D' : '#22E1FF'}"></span></span>
+      <span class="bar-val">${fmt(i.unused)} آزاد</span>
+    </div>`).join('') || '<span class="card-sub">محصول فعالی ثبت نشده</span>';
+
+  setContent(`
+    <div class="warp-hero card">
+      <div class="warp-hero-glow"></div>
+      <div class="warp-hero-text">
+        <span class="warp-hero-tag">◆ ${s.start_date} — ${s.end_date}</span>
+        <h2>${greetingByHour()}، ${esc(ME.username)}</h2>
+        <p>نمای زنده‌ی فروشگاه؛ هرچه پایین‌تر بری، عمق بیشتری از داده‌ها می‌بینی.</p>
+      </div>
+    </div>
+
+    <div class="grid grid-4 warp-stats">
+      <div class="card stat-card">
+        <div class="stat-top">
+          <span class="stat-icon stat-icon-1">${svg('revenue')}</span>
+          <span class="delta ${deltaUp ? 'up' : 'down'} mono">${deltaUp ? '▲' : '▼'} ${Math.abs(s.revenue_change_pct ?? 0)}%</span>
+        </div>
+        <span class="value mono" data-count="${s.revenue}">۰</span>
+        <span class="label">درآمد بازه</span>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-top"><span class="stat-icon stat-icon-2">${svg('check')}</span></div>
+        <span class="value mono" data-count="${s.approved}">۰</span>
+        <span class="label">سفارش تایید شده · ${s.conversion_rate}٪ تبدیل</span>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-top"><span class="stat-icon stat-icon-3">${svg('users')}</span></div>
+        <span class="value mono" data-count="${s.total_users}">۰</span>
+        <span class="label">کاربران کل · ${fmt(s.new_users)} جدید</span>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-top"><span class="stat-icon stat-icon-4">${svg('tickets')}</span></div>
+        <span class="value mono" data-count="${s.active_configs}">۰</span>
+        <span class="label">کانفیگ فعال · ${fmt(s.open_tickets)} تیکت باز</span>
+      </div>
+    </div>
+
+    <div class="card warp-chart-card">
+      <div class="card-head"><h3>روند درآمد روزانه</h3><span class="card-sub">${fmt(s.revenue)} تومان در بازه</span></div>
+      <svg class="warp-chart" viewBox="0 0 ${chartW} ${chartH}" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="warpAreaGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#6C5CE7" stop-opacity="0.45"/>
+            <stop offset="100%" stop-color="#6C5CE7" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path d="${area}" fill="url(#warpAreaGrad)" stroke="none"></path>
+        <path class="warp-chart-line" d="${line}" fill="none"></path>
+      </svg>
+    </div>
+
+    <div class="grid grid-2 warp-row">
+      <div class="card">
+        <div class="card-head"><h3>سهم درآمد دسته‌بندی‌ها</h3></div>
+        <div class="chip-row" style="margin-bottom:10px"><span class="chip">مستقیم: ${fmt(s.direct_revenue)}</span><span class="chip">رفرال: ${fmt(s.referral_revenue)}</span></div>
+        ${catBars}
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>وضعیت انبار</h3></div>
+        ${invRows}
+      </div>
+    </div>
+
+    <div class="grid grid-2 warp-row">
+      <div class="card">
+        <div class="card-head"><h3>پرفروش‌ترین محصولات</h3></div>
+        ${prodRows}
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>پشتیبانی و مشتریان</h3></div>
+        <div class="warp-ring-grid">
+          ${warpRingHtml(ticketRatio, '#FF4D8D', 'نسبت تیکت باز', fmt(s.open_tickets))}
+          ${warpRingHtml(s.repeat_customer_rate || 0, '#22E1FF', 'نرخ مشتری تکراری', (s.repeat_customer_rate || 0) + '٪')}
+        </div>
+        <div class="bar-row" style="margin-top:6px"><span class="bar-name">میانگین پاسخ اول</span><span class="bar-val" style="margin-inline-start:auto">${s.avg_ticket_response_minutes != null ? s.avg_ticket_response_minutes + ' دقیقه' : '—'}</span></div>
+      </div>
+    </div>
+
+    ${serverMapCardHtml()}
+  `);
+
+  const root = content();
+  $$('.value[data-count]', root).forEach(el => animateCount(el, Number(el.dataset.count)));
+  activateBarFills(root);
+  activateRings(root);
+  WarpFX.armCards();
+  mountServerMap();
+}
+
 /* ====================================================== world map === */
 // ویجت مشترک «نقشه‌ی جهانی سرورها» — در هر ۵ تم از طریق کلاس عمومی .card
 // (که هرکدام از تم‌ها استایل خودش را رویش اعمال می‌کند) و متغیرهای CSS
