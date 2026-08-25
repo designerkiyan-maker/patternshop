@@ -51,7 +51,10 @@ from sub_info import fetch_sub_info
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
-from panel_providers import get_provider, PanelError, PanelUsernameTakenError
+from panel_providers import (
+    get_provider, PanelError, PanelUsernameTakenError, PROVIDERS,
+    SUB_BASE_URL_PANEL_TYPES, INBOUND_SELECT_PANEL_TYPES,
+)
 from reseller_auto_provision import provision_auto_config, provision_test_config, ProvisionError
 
 app = FastAPI(title="V2Ray Shop Mini App API")
@@ -1544,7 +1547,7 @@ class PanelServerSetTemplate(BaseModel):
 
 
 class PanelServerXuiConfig(BaseModel):
-    inbound_id: int
+    inbound_id: Optional[int] = None
     sub_base_url: str
 
 
@@ -1563,8 +1566,12 @@ class CustomConfigSettingsUpdate(BaseModel):
 
 
 def _panel_server_public(s) -> dict:
-    is_3xui = s["panel_type"] == "3xui"
-    configured = bool(s["xui_inbound_id"] and s["xui_sub_base_url"]) if is_3xui else bool(s["group_ids"] and s["proxy_settings"])
+    is_sub_base_type = s["panel_type"] in SUB_BASE_URL_PANEL_TYPES
+    if is_sub_base_type:
+        needs_inbound = s["panel_type"] in INBOUND_SELECT_PANEL_TYPES
+        configured = bool(s["xui_sub_base_url"]) and (bool(s["xui_inbound_id"]) if needs_inbound else True)
+    else:
+        configured = bool(s["group_ids"] and s["proxy_settings"])
     return {
         "id": s["id"], "name": s["name"], "panel_type": s["panel_type"],
         "api_url": s["api_url"], "template_username": s["template_username"],
@@ -1589,12 +1596,12 @@ async def api_admin_add_panel_server(body: PanelServerCreate, auth=Depends(requi
     admin_id, _, _ = auth
     if not body.name.strip() or not body.api_url.strip() or not body.api_username.strip() or not body.api_password.strip():
         raise HTTPException(status_code=400, detail="نام، آدرس، یوزرنیم و پسورد الزامی هستند.")
-    if body.panel_type not in ("pasarguard", "3xui"):
+    if body.panel_type not in PROVIDERS:
         raise HTTPException(status_code=400, detail="نوع پنل پشتیبانی نمی‌شود.")
 
-    if body.panel_type == "3xui":
+    if body.panel_type in INBOUND_SELECT_PANEL_TYPES:
         server_id = db.add_panel_server(
-            body.name.strip(), "3xui", body.api_url.strip(),
+            body.name.strip(), body.panel_type, body.api_url.strip(),
             body.api_username.strip(), body.api_password,
         )
         server = db.get_panel_server(server_id)
@@ -1610,7 +1617,17 @@ async def api_admin_add_panel_server(body: PanelServerCreate, auth=Depends(requi
         db.log_admin_action(admin_id, "panel_server_add", f"سرور «{body.name}» (3X-UI, #{server_id}) از مینی‌اپ")
         return {"id": server_id, "inbounds": inbounds}
 
-    # پیش‌فرض: PasarGuard
+    if body.panel_type in SUB_BASE_URL_PANEL_TYPES:
+        # مثل Hiddify: inbound لازم نیست؛ سرور همین‌جا ساخته می‌شود و بعد باید
+        # با فراخوانی /xui-config (فقط با sub_base_url، بدون inbound_id) تکمیل شود.
+        server_id = db.add_panel_server(
+            body.name.strip(), body.panel_type, body.api_url.strip(),
+            body.api_username.strip(), body.api_password,
+        )
+        db.log_admin_action(admin_id, "panel_server_add", f"سرور «{body.name}» (#{server_id}) از مینی‌اپ")
+        return {"id": server_id, "needs_sub_base_url": True}
+
+    # پنل‌های خانواده‌ی PasarGuard/Marzban/Marzneshin
     if not body.template_username or not body.template_username.strip():
         raise HTTPException(status_code=400, detail="نام کاربری نمونه الزامی است.")
     server_id = db.add_panel_server(
@@ -1655,8 +1672,10 @@ async def api_admin_set_xui_config(server_id: int, body: PanelServerXuiConfig, a
     server = db.get_panel_server(server_id)
     if not server:
         raise HTTPException(status_code=404, detail="سرور یافت نشد.")
-    if server["panel_type"] != "3xui":
-        raise HTTPException(status_code=400, detail="این سرور از نوع 3X-UI نیست.")
+    if server["panel_type"] not in SUB_BASE_URL_PANEL_TYPES:
+        raise HTTPException(status_code=400, detail="این سرور به این تنظیمات نیاز ندارد.")
+    if server["panel_type"] in INBOUND_SELECT_PANEL_TYPES and not body.inbound_id:
+        raise HTTPException(status_code=400, detail="انتخاب inbound برای این نوع پنل الزامی است.")
     url = body.sub_base_url.strip()
     if not url.startswith("http://") and not url.startswith("https://"):
         raise HTTPException(status_code=400, detail="آدرس Subscription باید با http:// یا https:// شروع شود.")
