@@ -1651,7 +1651,7 @@ function renderDashboardObsidian(s, sys){
 // endpoint خودمان (هم‌مبدأ، بدون نیاز به هیچ CDN) می‌خوانیم. نتیجه هم در
 // localStorage کش می‌شود تا در بازدیدهای بعدی اصلاً نیازی به فراخوانی
 // مجدد نباشد.
-const SV_MAP_CACHE_KEY = 'sv_map_real_v3';
+const SV_MAP_CACHE_KEY = 'sv_map_real_v4'; // v4: مسیر ساده‌سازی‌شده (رفع هنگ زوم روی موبایل) — کلید عوض شد تا کش سنگین قبلی مرورگر باطل شود
 let SV_REAL = null;
 let SV_REAL_PROMISE = null;
 
