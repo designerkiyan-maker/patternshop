@@ -2684,6 +2684,9 @@ async function renderAdminPanelsSection() {
           <select class="input" id="ps-type" style="margin-bottom:10px">
             <option value="pasarguard">PasarGuard</option>
             <option value="3xui">3X-UI</option>
+            <option value="marzban">Marzban</option>
+            <option value="marzneshin">Marzneshin</option>
+            <option value="hiddify">Hiddify</option>
           </select>
           <label class="field-label">آدرس API (مثلاً https://panel.example.com)</label>
           <input class="input" id="ps-url" type="text" placeholder="https://..." style="direction:ltr;text-align:left;margin-bottom:10px" />
@@ -2697,6 +2700,7 @@ async function renderAdminPanelsSection() {
             <input class="input" id="ps-template" type="text" style="direction:ltr;text-align:left;margin-bottom:4px" />
           </div>
           <p class="hint-text" id="ps-xui-hint" style="display:none;margin-top:0">بعد از اتصال، لیست inbound های پنل خوانده می‌شود و در مرحله‌ی بعد یکی را انتخاب می‌کنی.</p>
+          <p class="hint-text" id="ps-hiddify-hint" style="display:none;margin-top:0">هیدیفای یوزر/پس ندارد: در «نام کاربری» هر چیزی بنویس، و در «رمز عبور» همان Hiddify-API-Key (UUID ادمین) را بگذار. بعد از اتصال، آدرس عمومی Subscription را می‌پرسیم.</p>
           <div class="field-error" id="ps-error"></div>
           <div style="display:flex;gap:8px;margin-top:8px">
             <button class="btn" id="ps-save">💾 افزودن سرور</button>
@@ -2705,10 +2709,12 @@ async function renderAdminPanelsSection() {
         </div>
       `;
       const psType = document.getElementById("ps-type");
+      const NO_TEMPLATE_TYPES = ["3xui", "hiddify"];
       const syncPsType = () => {
-        const is3xui = psType.value === "3xui";
-        document.getElementById("ps-template-wrap").style.display = is3xui ? "none" : "block";
-        document.getElementById("ps-xui-hint").style.display = is3xui ? "block" : "none";
+        const needsTemplate = !NO_TEMPLATE_TYPES.includes(psType.value);
+        document.getElementById("ps-template-wrap").style.display = needsTemplate ? "block" : "none";
+        document.getElementById("ps-xui-hint").style.display = psType.value === "3xui" ? "block" : "none";
+        document.getElementById("ps-hiddify-hint").style.display = psType.value === "hiddify" ? "block" : "none";
       };
       psType.onchange = syncPsType;
       syncPsType();
@@ -2728,7 +2734,7 @@ async function renderAdminPanelsSection() {
         if (!payload.name || !payload.api_url || !payload.api_username || !payload.api_password) {
           errBox.textContent = "نام، آدرس، یوزرنیم و پسورد الزامی هستند."; return;
         }
-        if (panelType !== "3xui" && !payload.template_username) {
+        if (panelType !== "3xui" && panelType !== "hiddify" && !payload.template_username) {
           errBox.textContent = "نام کاربری نمونه الزامی است."; return;
         }
         try {
@@ -2738,6 +2744,8 @@ async function renderAdminPanelsSection() {
           tg.HapticFeedback.notificationOccurred("success");
           if (panelType === "3xui") {
             adminPanelsView = { level: "xui-config", serverId: res.id, inbounds: res.inbounds, name: payload.name };
+          } else if (panelType === "hiddify") {
+            adminPanelsView = { level: "suburl-config", serverId: res.id, name: payload.name };
           } else {
             notify("سرور با موفقیت اضافه شد.");
             adminPanelsView = { level: "servers" };
@@ -2799,6 +2807,46 @@ async function renderAdminPanelsSection() {
       };
       return;
     }
+
+    if (adminPanelsView.level === "suburl-config") {
+      body.innerHTML = `
+        <div class="card">
+          <div class="eyebrow" style="margin-top:0">⚙️ تنظیم آدرس Subscription برای «${adminPanelsView.name || ""}»</div>
+          <label class="field-label">آدرس عمومی Subscription پنل</label>
+          <p class="hint-text" style="margin-top:0">چون معمولاً با آدرس API ادمین فرق دارد؛ همان دامنه/مسیری که پنل برای لینک اشتراک کاربر نشان می‌دهد - بدون / انتهایی.</p>
+          <input class="input" id="ps-suburl" type="text" placeholder="https://..." style="direction:ltr;text-align:left;margin-bottom:4px" />
+          <div class="field-error" id="ps-suburl-error"></div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn" id="ps-suburl-save">💾 ذخیره</button>
+            <button class="btn outline" id="ps-suburl-cancel">بعداً</button>
+          </div>
+        </div>
+      `;
+      document.getElementById("ps-suburl-cancel").onclick = () => { adminPanelsView = { level: "servers" }; renderAdminPanelsSection(); };
+      document.getElementById("ps-suburl-save").onclick = async () => {
+        const errBox = document.getElementById("ps-suburl-error");
+        errBox.textContent = "";
+        const sub_base_url = document.getElementById("ps-suburl").value.trim();
+        if (!sub_base_url) {
+          errBox.textContent = "این فیلد الزامی است."; return;
+        }
+        try {
+          document.getElementById("ps-suburl-save").disabled = true;
+          await api(`/api/admin/panel-servers/${adminPanelsView.serverId}/xui-config`, {
+            method: "POST", body: JSON.stringify({ sub_base_url }),
+          });
+          tg.HapticFeedback.notificationOccurred("success");
+          notify("سرور با موفقیت تنظیم شد.");
+          adminPanelsView = { level: "servers" };
+          renderAdminPanelsSection();
+        } catch (e) {
+          errBox.textContent = e.message;
+          document.getElementById("ps-suburl-save").disabled = false;
+        }
+      };
+      return;
+    }
+
 
     if (adminPanelsView.level === "pricing") {
       const tiers = await api("/api/admin/custom-config/pricing-tiers");
@@ -2918,6 +2966,8 @@ async function renderAdminPanelsSection() {
               <div class="hint-text" style="margin:4px 0 4px;direction:ltr;text-align:left">${s.api_url}</div>
               <div class="hint-text" style="margin:0 0 4px">${s.panel_type === "3xui"
                 ? (s.is_configured ? `⚙️ Inbound #${s.xui_inbound_id} تنظیم شده` : "⚠️ Inbound تنظیم نشده")
+                : s.panel_type === "hiddify"
+                ? (s.is_configured ? "✅ آدرس Subscription تنظیم شده" : "⚠️ آدرس Subscription تنظیم نشده")
                 : (s.has_template ? `🧩 قالب از کاربر «${s.template_username}»` : "⚠️ قالب تنظیم نشده")}</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
                 <span class="tag" style="opacity:${s.used_for_custom_config ? 1 : 0.4}">${s.used_for_custom_config ? "✅" : "◻️"} خرید شخصی</span>
@@ -2927,6 +2977,8 @@ async function renderAdminPanelsSection() {
                 <button class="btn outline" data-test="${s.id}" style="padding:4px 10px;font-size:12px">🔌 تست اتصال</button>
                 ${s.panel_type === "3xui"
                   ? `<button class="btn outline" data-xui-inbound="${s.id}" data-xui-name="${s.name}" style="padding:4px 10px;font-size:12px">⚙️ تنظیم Inbound</button>`
+                  : s.panel_type === "hiddify"
+                  ? `<button class="btn outline" data-suburl="${s.id}" data-suburl-name="${s.name}" style="padding:4px 10px;font-size:12px">⚙️ تنظیم آدرس Sub</button>`
                   : `<button class="btn outline" data-template="${s.id}" style="padding:4px 10px;font-size:12px">🧩 تغییر قالب</button>`}
                 <button class="btn outline" data-usage-custom="${s.id}" style="padding:4px 10px;font-size:12px">${s.used_for_custom_config ? "غیرفعال (خرید)" : "فعال (خرید)"}</button>
                 <button class="btn outline" data-usage-test="${s.id}" style="padding:4px 10px;font-size:12px">${s.used_for_test_config ? "غیرفعال (تست)" : "فعال (تست)"}</button>
@@ -3016,6 +3068,12 @@ async function renderAdminPanelsSection() {
           adminPanelsView = { level: "xui-config", serverId, inbounds, name: btn.dataset.xuiName };
           renderAdminPanelsSection();
         } catch (e) { notify(e.message); btn.textContent = "⚙️ تنظیم Inbound"; }
+      };
+    });
+    document.querySelectorAll("[data-suburl]").forEach((btn) => {
+      btn.onclick = () => {
+        adminPanelsView = { level: "suburl-config", serverId: btn.dataset.suburl, name: btn.dataset.suburlName };
+        renderAdminPanelsSection();
       };
     });
     document.querySelectorAll("[data-usage-custom]").forEach((btn) => {
