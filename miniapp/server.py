@@ -2337,7 +2337,7 @@ def api_admin_dashboard(
     start_date: str = Query(None), end_date: str = Query(None), auth=Depends(require_senior_admin)
 ):
     _, db, _ = auth
-    return db.get_sales_stats(start_date=start_date, end_date=end_date)
+    return db.get_full_stats(start_date=start_date, end_date=end_date)
 
 
 @app.get("/api/admin/orders/export")
