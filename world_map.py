@@ -29,11 +29,12 @@ _MIRRORS = [
     "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/land-50m.json",
 ]
 _TIMEOUT = aiohttp.ClientTimeout(total=25)
-# اسم فایل نسخه‌دار است: چون قبلاً از land-110m (خام‌ترین/بچگانه‌ترین رزولوشن)
-# استفاده می‌شد، اگر کش دیسکِ قبلی با همین اسم می‌ماند، سرور آن نقشه‌ی
-# کم‌کیفیت را برای همیشه serve می‌کرد. با تغییر اسم، اولین اجرا بعد از این
-# آپدیت مجبور می‌شود دوباره (این‌بار land-50m، دقیق‌تر) دانلود کند.
-_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_world_map_cache_v2.json")
+# اسم فایل نسخه‌دار است: با هر تغییر در نحوه‌ی تولید مسیر (رزولوشن منبع یا
+# الگوریتم ساده‌سازی) باید عوض شود، وگرنه سرور کش قدیمی/سنگین‌تر را برای
+# همیشه serve می‌کند. v3: اعمال ساده‌سازی Douglas-Peucker چون مسیر خامِ
+# land-50m آن‌قدر نقطه داشت که زوم روی موبایل (به‌خصوص سافاری iOS) صفحه را
+# کاملاً هنگ می‌کرد.
+_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_world_map_cache_v3.json")
 
 _mem_cache = None  # {"ok": True, "land_path": "..."} پس از اولین موفقیت در طول عمر پروسه
 _fetch_lock = None  # asyncio.Lock ساخته‌شده lazy چون این ماژول ممکن است بدون event loop هم import شود
@@ -101,6 +102,55 @@ def _rings_of_geometry(geom: dict):
     # سایر انواع (Point/LineString/...) برای «زمین» انتظار نمی‌رود پیش بیایند
 
 
+def _rdp_simplify(points: list, epsilon: float) -> list:
+    """Ramer-Douglas-Peucker روی نقاط پروجکت‌شده (فضای صفحه‌ی SVG، نه lon/lat)
+    اجرا می‌شود چون در مقیاس نمایشیِ نهاییِ ۱۰۰۰x۵۰۰ معنا دارد: در آن مقیاس،
+    خطوط ساحلیِ خامِ land-50m ده‌ها هزار نقطه دارند که هیچ تفاوت بصری‌ای در
+    یک نقشه‌ی کوچک روی موبایل ایجاد نمی‌کنند ولی رندر/زوم SVG را بسیار سنگین
+    و روی سافاری iOS باعث هنگ صفحه می‌کنند. پیاده‌سازی تکراری (نه بازگشتی)
+    است تا برای حلقه‌های خیلی طولانی به عمق پشته‌ی پایتون نخوریم.
+    """
+    n = len(points)
+    if n < 3 or epsilon <= 0:
+        return points
+
+    def _perp_dist(p, a, b):
+        ax, ay = a
+        bx, by = b
+        px, py = p
+        dx, dy = bx - ax, by - ay
+        if dx == 0 and dy == 0:
+            return ((px - ax) ** 2 + (py - ay) ** 2) ** 0.5
+        t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)
+        cx, cy = ax + t * dx, ay + t * dy
+        return ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
+
+    keep = bytearray(n)
+    keep[0] = keep[n - 1] = 1
+    stack = [(0, n - 1)]
+    while stack:
+        start, end = stack.pop()
+        if end - start < 2:
+            continue
+        a, b = points[start], points[end]
+        max_dist, max_idx = -1.0, -1
+        for i in range(start + 1, end):
+            d = _perp_dist(points[i], a, b)
+            if d > max_dist:
+                max_dist, max_idx = d, i
+        if max_dist > epsilon:
+            keep[max_idx] = 1
+            stack.append((start, max_idx))
+            stack.append((max_idx, end))
+    return [p for i, p in enumerate(points) if keep[i]]
+
+
+# فاصله‌ی مجاز خطا در واحدهای همان فضای SVG (viewBox 0..1000 x 0..500).
+# مقداری که تفاوت بصری‌اش در نمایش موبایل/دسکتاپ محسوس نیست ولی تعداد
+# نقاط را معمولاً بیش از ۹۰٪ کم می‌کند.
+_SIMPLIFY_EPSILON = 0.6
+
+
 def _topology_to_svg_path(topo: dict, object_name: str = "land") -> str:
     transform = topo["transform"]
     arcs_decoded = [_decode_arc(arc, transform) for arc in topo["arcs"]]
@@ -111,10 +161,13 @@ def _topology_to_svg_path(topo: dict, object_name: str = "land") -> str:
         ring = _build_ring(arc_indices, arcs_decoded)
         if len(ring) < 2:
             continue
+        projected = [_project(lon, lat) for lon, lat in ring]
+        projected = _rdp_simplify(projected, _SIMPLIFY_EPSILON)
+        if len(projected) < 2:
+            continue
         seg = ["M"]
-        for i, (lon, lat) in enumerate(ring):
-            x, y = _project(lon, lat)
-            seg.append(f"{x:.2f},{y:.2f}" if i == 0 else f"L{x:.2f},{y:.2f}")
+        for i, (x, y) in enumerate(projected):
+            seg.append(f"{x:.1f},{y:.1f}" if i == 0 else f"L{x:.1f},{y:.1f}")
         seg.append("Z")
         d_parts.append("".join(seg))
     return "".join(d_parts)
