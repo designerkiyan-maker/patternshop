@@ -28,7 +28,10 @@ from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 import crypto_payment
-from panel_providers import get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS
+from panel_providers import (
+    get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS,
+    SUB_BASE_URL_PANEL_TYPES, INBOUND_SELECT_PANEL_TYPES,
+)
 from reseller_auto_provision import provision_auto_config, ProvisionError
 from states import (
     AdminAddCategory,
@@ -150,10 +153,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         return db.is_full_admin(user_id)
 
     def panel_server_readiness_text(server) -> str:
-        if server["panel_type"] == "3xui":
-            if server["xui_inbound_id"] and server["xui_sub_base_url"]:
-                return f"inbound #{server['xui_inbound_id']} تنظیم شده"
-            return "⚠️ inbound/آدرس Subscription هنوز تنظیم نشده"
+        if server["panel_type"] in SUB_BASE_URL_PANEL_TYPES:
+            if server["panel_type"] in INBOUND_SELECT_PANEL_TYPES:
+                if server["xui_inbound_id"] and server["xui_sub_base_url"]:
+                    return f"inbound #{server['xui_inbound_id']} تنظیم شده"
+                return "⚠️ inbound/آدرس Subscription هنوز تنظیم نشده"
+            if server["xui_sub_base_url"]:
+                return "✅ آدرس Subscription تنظیم شده"
+            return "⚠️ آدرس Subscription هنوز تنظیم نشده"
         return f"قالب از کاربر «{server['template_username']}»" if server["template_username"] else "⚠️ قالب هنوز تنظیم نشده"
 
     def senior_admin_only(user_id: int) -> bool:
@@ -1594,13 +1601,23 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         await state.update_data(url=url)
         await state.set_state(AdminAddPanelServer.waiting_username)
-        await message.answer("نام کاربری ادمین پنل را بفرست:")
+        data = await state.get_data()
+        if data.get("panel_type") == "hiddify":
+            await message.answer(
+                "هیدیفای یوزر/پس ندارد؛ این فیلد استفاده نمی‌شود - فقط هر متنی (مثلاً «hiddify») بفرست:"
+            )
+        else:
+            await message.answer("نام کاربری ادمین پنل را بفرست:")
 
     @router.message(AdminAddPanelServer.waiting_username)
     async def process_panel_server_username(message: Message, state: FSMContext):
         await state.update_data(username=message.text.strip())
         await state.set_state(AdminAddPanelServer.waiting_password)
-        await message.answer("رمز عبور ادمین پنل را بفرست:")
+        data = await state.get_data()
+        if data.get("panel_type") == "hiddify":
+            await message.answer("Hiddify-API-Key (همان UUID ادمین از داخل پنل: تنظیمات ← API) را بفرست:")
+        else:
+            await message.answer("رمز عبور ادمین پنل را بفرست:")
 
     @router.message(AdminAddPanelServer.waiting_password)
     async def process_panel_server_password(message: Message, state: FSMContext):
@@ -1611,10 +1628,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             pass
         data = await state.get_data()
 
-        if data["panel_type"] == "3xui":
+        if data["panel_type"] in INBOUND_SELECT_PANEL_TYPES:
             await message.answer("⏳ در حال دریافت لیست inbound از پنل...")
             server_id = db.add_panel_server(
-                name=data["name"], panel_type="3xui", api_url=data["url"],
+                name=data["name"], panel_type=data["panel_type"], api_url=data["url"],
                 api_username=data["username"], api_password=data["password"],
             )
             server = db.get_panel_server(server_id)
@@ -1636,11 +1653,25 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("کدام inbound برای ساخت کاربرهای جدید استفاده شود؟", reply_markup=kb.inbound_select_kb(inbounds))
             return
 
-        # پیش‌فرض: PasarGuard
+        if data["panel_type"] in SUB_BASE_URL_PANEL_TYPES:
+            # مثل Hiddify: inbound لازم نیست، فقط یک آدرس Subscription جدا از آدرس ادمین
+            server_id = db.add_panel_server(
+                name=data["name"], panel_type=data["panel_type"], api_url=data["url"],
+                api_username=data["username"], api_password=data["password"],
+            )
+            await state.update_data(server_id=server_id)
+            await state.set_state(AdminAddPanelServer.waiting_sub_base_url)
+            await message.answer(
+                "آدرس عمومی Subscription پنل را بفرست (چون معمولاً با آدرس API ادمین فرق دارد؛ "
+                "همان دامنه/مسیری که پنل برای لینک اشتراک کاربر نشان می‌دهد - بدون / انتهایی):"
+            )
+            return
+
+        # پنل‌های خانواده‌ی PasarGuard/Marzban/Marzneshin: قالب از کاربر نمونه
         await state.set_state(AdminAddPanelServer.waiting_template_user)
         await message.answer(
             "یک نام کاربری که از قبل روی این پنل وجود دارد بفرست.\n"
-            "تنظیمات پروتکل/گروه همین کاربر به‌عنوان قالب پیش‌فرض برای همه‌ی "
+            "تنظیمات پروتکل/گروه (یا سرویس) همین کاربر به‌عنوان قالب پیش‌فرض برای همه‌ی "
             "کانفیگ‌های شخصی جدید استفاده می‌شود."
         )
 
@@ -1662,11 +1693,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("آدرس باید با http:// یا https:// شروع شود.")
             return
         data = await state.get_data()
-        db.update_panel_server(data["server_id"], xui_inbound_id=data["inbound_id"], xui_sub_base_url=url)
+        if "inbound_id" in data:
+            db.update_panel_server(data["server_id"], xui_inbound_id=data["inbound_id"], xui_sub_base_url=url)
+        else:
+            db.update_panel_server(data["server_id"], xui_sub_base_url=url)
         await state.clear()
-        db.log_admin_action(message.from_user.id, "panel_server_add", f"سرور «{data['name']}» (3X-UI, #{data['server_id']})")
+        label = PANEL_TYPE_LABELS.get(data["panel_type"], data["panel_type"])
+        db.log_admin_action(message.from_user.id, "panel_server_add", f"سرور «{data['name']}» ({label}, #{data['server_id']})")
         await message.answer(
-            f"✅ سرور «{data['name']}» (3X-UI) با موفقیت اضافه شد.",
+            f"✅ سرور «{data['name']}» ({label}) با موفقیت اضافه شد.",
             reply_markup=kb.admin_panel_kb(db, is_main_bot),
         )
 
@@ -1674,7 +1709,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def process_panel_server_template_user(message: Message, state: FSMContext):
         data = await state.get_data()
         server_id = db.add_panel_server(
-            name=data["name"], panel_type="pasarguard", api_url=data["url"],
+            name=data["name"], panel_type=data["panel_type"], api_url=data["url"],
             api_username=data["username"], api_password=data["password"],
         )
         server = db.get_panel_server(server_id)
@@ -1696,9 +1731,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             template_username=message.text.strip(),
         )
         await state.clear()
-        db.log_admin_action(message.from_user.id, "panel_server_add", f"سرور «{data['name']}» (#{server_id})")
+        label = PANEL_TYPE_LABELS.get(data["panel_type"], data["panel_type"])
+        db.log_admin_action(message.from_user.id, "panel_server_add", f"سرور «{data['name']}» ({label}, #{server_id})")
         await message.answer(
-            f"✅ سرور «{data['name']}» با قالب گرفته‌شده از «{message.text.strip()}» اضافه شد.",
+            f"✅ سرور «{data['name']}» ({label}) با قالب گرفته‌شده از «{message.text.strip()}» اضافه شد.",
             reply_markup=kb.admin_panel_kb(db, is_main_bot),
         )
 

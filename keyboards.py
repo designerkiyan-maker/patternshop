@@ -908,6 +908,9 @@ def panel_type_select_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="PasarGuard", callback_data="adm_panel_type:pasarguard")],
         [InlineKeyboardButton(text="3X-UI", callback_data="adm_panel_type:3xui")],
+        [InlineKeyboardButton(text="Marzban", callback_data="adm_panel_type:marzban")],
+        [InlineKeyboardButton(text="Marzneshin", callback_data="adm_panel_type:marzneshin")],
+        [InlineKeyboardButton(text="Hiddify", callback_data="adm_panel_type:hiddify")],
         [InlineKeyboardButton(text="❌ انصراف", callback_data="cancel_flow")],
     ])
 
