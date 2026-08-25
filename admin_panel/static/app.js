@@ -798,14 +798,57 @@ async function renderDashboard() {
   let sys = null;
   try { sys = await apiGet('/system/stats'); } catch (e) { /* psutil ممکن است نصب نباشد */ }
   const theme = loadTheme().theme;
-  if (theme === 'bento') return renderDashboardBento(s, sys);
-  if (theme === 'brutalist') return renderDashboardBrutalist(s, sys);
-  if (theme === 'glass') return renderDashboardGlass(s, sys);
-  if (theme === 'cyberpunk') return renderDashboardCyberpunk(s, sys);
-  if (theme === 'clay') return renderDashboardClay(s, sys);
-  if (theme === 'paper') return renderDashboardPaper(s, sys);
-  if (theme === 'obsidian') return renderDashboardObsidian(s, sys);
-  return renderDashboardFlat(s, sys);
+  if (theme === 'bento') await renderDashboardBento(s, sys);
+  else if (theme === 'brutalist') await renderDashboardBrutalist(s, sys);
+  else if (theme === 'glass') await renderDashboardGlass(s, sys);
+  else if (theme === 'cyberpunk') await renderDashboardCyberpunk(s, sys);
+  else if (theme === 'clay') await renderDashboardClay(s, sys);
+  else if (theme === 'paper') await renderDashboardPaper(s, sys);
+  else if (theme === 'obsidian') await renderDashboardObsidian(s, sys);
+  else await renderDashboardFlat(s, sys);
+  appendExtraStatsPanel(s);
+}
+
+/* ------------------------------------------ dashboard: extra stats panel --- */
+/* موجودی انبار + تیکت‌ها + نرخ مشتری تکراری. یک پنل مشترک که مستقل از تم زیر
+   داشبورد هر تم اضافه می‌شود، تا نیازی به تکرار در ۸ پیاده‌سازی جدا نباشد. */
+function appendExtraStatsPanel(s) {
+  const root = content();
+  if (!root) return;
+  const old = $('#extra-stats-panel', root);
+  if (old) old.remove();
+
+  const inv = s.inventory || [];
+  const low = s.low_stock_products || [];
+  const invRows = inv.map(i => `
+    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border,rgba(128,128,128,.15))">
+      <span>${esc(i.name)}${i.low_stock ? ' ⚠️' : ''}</span>
+      <span class="mono">${fmt(i.unused)} آزاد / ${fmt(i.used)} مصرف‌شده</span>
+    </div>`).join('') || '<span class="card-sub">محصول فعالی ثبت نشده</span>';
+
+  const respText = s.avg_ticket_response_minutes != null ? `${s.avg_ticket_response_minutes} دقیقه` : '—';
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.id = 'extra-stats-panel';
+  el.style.marginTop = '16px';
+  el.innerHTML = `
+    <div class="card-head"><h3>موجودی و پشتیبانی</h3><span class="card-sub">${s.start_date} تا ${s.end_date}</span></div>
+    <div class="grid grid-2" style="gap:16px;align-items:start">
+      <div>
+        <div class="card-sub" style="margin-bottom:8px">موجودی انبار محصولات فعال</div>
+        ${invRows}
+      </div>
+      <div>
+        <div class="card-sub" style="margin-bottom:8px">تیکت‌های پشتیبانی و مشتریان</div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0"><span>تیکت ثبت‌شده در بازه</span><span class="mono">${fmt(s.tickets_created)}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0"><span>تیکت باز</span><span class="mono">${fmt(s.tickets_open)}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0"><span>میانگین زمان پاسخ اول</span><span class="mono">${respText}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0"><span>نرخ مشتری تکراری</span><span class="mono">${s.repeat_customer_rate}٪ (${fmt(s.repeat_customers)}/${fmt(s.total_customers)})</span></div>
+      </div>
+    </div>
+    ${low.length ? `<div class="card-sub" style="margin-top:12px;color:#FB7185">⚠️ موجودی کم: ${low.map(p => esc(p.name)).join('، ')}</div>` : ''}
+  `;
+  root.appendChild(el);
 }
 
 /* ----------------------------------------------------- dashboard: glass --- */
