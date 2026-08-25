@@ -8,6 +8,7 @@
 
 import os
 import asyncio
+from datetime import date, timedelta
 import tempfile
 import logging
 
@@ -3536,20 +3537,53 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     # آمار فروش
     # -------------------------------------------------------------------
 
+    def _fmt_stats_report(stats: dict) -> str:
+        def _pct(v):
+            if v is None:
+                return "—"
+            sign = "+" if v > 0 else ""
+            return f"{sign}{v}٪"
+
+        lines = [
+            f"📊 آمار فروشگاه ({to_jalali_str(stats['start_date'])} تا {to_jalali_str(stats['end_date'])})\n",
+            f"👥 کاربران کل: {stats['total_users']:,} | 🆕 جدید در بازه: {stats['new_users']:,}",
+            f"✅ سفارش تایید شده: {stats['approved']:,} ({_pct(stats['orders_change_pct'])} نسبت به بازه‌ی قبل)",
+            f"⏳ در انتظار: {stats['pending']:,} | ❌ رد شده: {stats['rejected']:,}",
+            f"💰 درآمد: {stats['revenue']:,} تومان ({_pct(stats['revenue_change_pct'])})",
+            f"📈 نرخ تبدیل: {stats['conversion_rate']}٪ | 🧾 میانگین سبد خرید: {stats['aov']:,} تومان",
+            f"🔁 مشتری تکراری: {stats['repeat_customers']:,} از {stats['total_customers']:,} ({stats['repeat_customer_rate']}٪)",
+            f"🤝 درآمد رفرال: {stats['referral_revenue']:,} | مستقیم: {stats['direct_revenue']:,} تومان",
+            f"🎫 تیکت: {stats['tickets_created']:,} ثبت‌شده، {stats['tickets_open']:,} باز",
+        ]
+        if stats["avg_ticket_response_minutes"] is not None:
+            lines.append(f"⏱ میانگین زمان پاسخ اول: {stats['avg_ticket_response_minutes']} دقیقه")
+        if stats["top_products"]:
+            lines.append("\n🏆 پرفروش‌ترین محصولات:")
+            for i, p in enumerate(stats["top_products"][:5], 1):
+                lines.append(f"{i}. {p['name']} — {p['orders']:,} فروش، {p['revenue']:,} تومان")
+        if stats["low_stock_products"]:
+            lines.append("\n⚠️ موجودی کم:")
+            for p in stats["low_stock_products"][:8]:
+                lines.append(f"• {p['name']}: {p['unused']} کانفیگ باقی‌مانده")
+        return "\n".join(lines)
+
     @router.callback_query(F.data == "adm_stats")
     async def cb_admin_stats(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        stats = db.get_stats()
-        text = (
-            "📊 آمار فروشگاه:\n\n"
-            f"👥 تعداد کاربران: {stats['users']}\n"
-            f"⏳ سفارش‌های در انتظار: {stats['pending']}\n"
-            f"✅ سفارش‌های تایید شده: {stats['approved']}\n"
-            f"❌ سفارش‌های رد شده: {stats['rejected']}\n"
-            f"💰 مجموع فروش: {stats['revenue']:,} تومان"
-        )
-        await replace_admin_view(call, text, reply_markup=kb.admin_back_kb())
+        stats = await asyncio.to_thread(db.get_full_stats, None, None)
+        await replace_admin_view(call, _fmt_stats_report(stats), reply_markup=kb.admin_stats_period_kb(7))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_stats_p:"))
+    async def cb_admin_stats_period(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        days = int(call.data.split(":", 1)[1])
+        end_date = date.today().isoformat()
+        start_date = (date.today() - timedelta(days=days - 1)).isoformat()
+        stats = await asyncio.to_thread(db.get_full_stats, start_date, end_date)
+        await replace_admin_view(call, _fmt_stats_report(stats), reply_markup=kb.admin_stats_period_kb(days))
         await call.answer()
 
     # -------------------------------------------------------------------

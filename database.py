@@ -1991,6 +1991,69 @@ class Database:
             })
             return current
 
+    def get_full_stats(self, start_date: str = None, end_date: str = None) -> dict:
+        """آمار کامل: get_sales_stats به‌علاوه‌ی موجودی انبار، تیکت‌ها و مشتریان تکراری.
+        منبع واحد برای بات، مینی‌اپ و پنل وب تا هر سه دقیقاً یک عدد نشان دهند."""
+        stats = self.get_sales_stats(start_date, end_date)
+        s, e = stats["start_date"], stats["end_date"]
+        threshold = int(self.get_setting("low_stock_threshold", "3") or 3)
+        with self._get_conn() as conn:
+            inventory_rows = conn.execute(
+                "SELECT p.id, p.name name, "
+                "SUM(CASE WHEN c.is_used=0 THEN 1 ELSE 0 END) unused, "
+                "SUM(CASE WHEN c.is_used=1 THEN 1 ELSE 0 END) used "
+                "FROM products p LEFT JOIN configs c ON c.product_id=p.id "
+                "WHERE p.is_active=1 GROUP BY p.id ORDER BY p.name"
+            ).fetchall()
+            inventory = [
+                {
+                    "product_id": r["id"], "name": r["name"],
+                    "unused": r["unused"] or 0, "used": r["used"] or 0,
+                    "low_stock": (r["unused"] or 0) <= threshold,
+                }
+                for r in inventory_rows
+            ]
+            low_stock_products = [i for i in inventory if i["low_stock"]]
+
+            ticket_row = conn.execute(
+                "SELECT COUNT(*) c, SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) open_c, "
+                "SUM(CASE WHEN status='closed' THEN 1 ELSE 0 END) closed_c "
+                "FROM tickets WHERE date(created_at) BETWEEN ? AND ?", (s, e),
+            ).fetchone()
+            first_response_rows = conn.execute(
+                "SELECT t.created_at t_created, MIN(m.created_at) first_admin_reply "
+                "FROM tickets t JOIN ticket_messages m ON m.ticket_id=t.id AND m.sender='admin' "
+                "WHERE date(t.created_at) BETWEEN ? AND ? GROUP BY t.id", (s, e),
+            ).fetchall()
+            response_minutes = [
+                (conn.execute("SELECT (julianday(?) - julianday(?)) * 1440 d",
+                               (r["first_admin_reply"], r["t_created"])).fetchone()["d"])
+                for r in first_response_rows
+            ]
+            avg_response_minutes = round(sum(response_minutes) / len(response_minutes), 1) if response_minutes else None
+
+            repeat_customers = conn.execute(
+                "SELECT COUNT(*) c FROM (SELECT user_id FROM orders WHERE status='approved' "
+                "GROUP BY user_id HAVING COUNT(*) > 1)"
+            ).fetchone()["c"]
+            total_customers = conn.execute(
+                "SELECT COUNT(DISTINCT user_id) c FROM orders WHERE status='approved'"
+            ).fetchone()["c"]
+            repeat_rate = round(repeat_customers / total_customers * 100, 1) if total_customers else 0.0
+
+        stats.update({
+            "inventory": inventory,
+            "low_stock_products": low_stock_products,
+            "tickets_created": ticket_row["c"] or 0,
+            "tickets_open": ticket_row["open_c"] or 0,
+            "tickets_closed": ticket_row["closed_c"] or 0,
+            "avg_ticket_response_minutes": avg_response_minutes,
+            "repeat_customers": repeat_customers,
+            "total_customers": total_customers,
+            "repeat_customer_rate": repeat_rate,
+        })
+        return stats
+
     def get_orders_for_export(self, start_date: str = None, end_date: str = None):
         """لیست خام سفارش‌ها برای خروجی CSV، در بازه‌ی زمانی داده‌شده."""
         with self._get_conn() as conn:

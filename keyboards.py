@@ -521,6 +521,28 @@ def buy_flow_colors_kb(db) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def admin_stats_period_kb(active_days: int = 7) -> InlineKeyboardMarkup:
+    periods = [(1, "امروز"), (7, "۷ روز اخیر"), (30, "۳۰ روز اخیر"), (90, "۹۰ روز اخیر")]
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=("✅ " if d == active_days else "") + label,
+                callback_data=f"adm_stats_p:{d}",
+            )
+            for d, label in periods[:2]
+        ],
+        [
+            InlineKeyboardButton(
+                text=("✅ " if d == active_days else "") + label,
+                callback_data=f"adm_stats_p:{d}",
+            )
+            for d, label in periods[2:]
+        ],
+        [InlineKeyboardButton(text="⬅️ بازگشت به پنل مدیریت", callback_data="adm_back_panel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def admin_back_kb(callback_data="adm_back_panel") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت به پنل مدیریت", callback_data=callback_data)]]
