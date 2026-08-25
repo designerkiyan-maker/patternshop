@@ -600,7 +600,7 @@ async def notify_user(chat_id: int, text: str):
 
 @app.get("/api/dashboard")
 def api_dashboard(start: Optional[str] = None, end: Optional[str] = None, admin=Depends(get_current_admin)):
-    return db.get_sales_stats(start, end)
+    return db.get_full_stats(start, end)
 
 
 # ------------------------------------------------------------- servers map --
