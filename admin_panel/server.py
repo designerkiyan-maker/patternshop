@@ -44,7 +44,6 @@ logger = logging.getLogger("admin_panel.server")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 COOKIE_NAME = "panel_session"
 NOTIFY_POLL_SECONDS = 15
-SERVER_CHECK_INTERVAL_SECONDS = 15 * 60  # هر ۱۵ دقیقه کانفیگ‌های لینک ساب مادر چک شوند
 
 app = FastAPI(title="ShopVPN Admin Panel")
 main_db = Database(DB_PATH)
@@ -206,21 +205,53 @@ async def _notifier_loop():
 
 
 # ------------------------------------------------------ server status watch --
-# هر ۱۵ دقیقه کانفیگ‌های «لینک ساب مادر» را دوباره اسکن می‌کند (همان منطق
-# دکمه‌ی «اسکن مجدد» نقشه‌ی جهانی سرورها) و اگر کانفیگی که قبلاً آنلاین/نامشخص
-# بوده حالا آفلاین شده، یک Push می‌فرستد. برای جلوگیری از اسپم، هر کانفیگ فقط
-# یک‌بار در لحظه‌ی *تغییر* وضعیت به آفلاین اعلان می‌گیرد، نه هر بار که هنوز
-# آفلاین است؛ وقتی دوباره آنلاین شود هم یک اعلان بازیابی می‌فرستد.
+# هر چند دقیقه (قابل‌تنظیم از پنل، کلید تنظیمات server_check_interval_min)
+# کانفیگ‌های «لینک ساب مادر» را دوباره اسکن می‌کند (همان منطق دکمه‌ی «اسکن
+# مجدد» نقشه‌ی جهانی سرورها) و اگر کانفیگی که قبلاً آنلاین/نامشخص بوده حالا
+# آفلاین شده، یک Push می‌فرستد. برای جلوگیری از اسپم، هر کانفیگ فقط یک‌بار
+# در لحظه‌ی *تغییر* وضعیت به آفلاین اعلان می‌گیرد، نه هر بار که هنوز آفلاین
+# است؛ وقتی دوباره آنلاین شود هم یک اعلان بازیابی می‌فرستد.
+
+# مقادیر پیش‌فرض وقتی هنوز از پنل چیزی تنظیم نشده باشد، و بازه‌ی مجاز برای
+# جلوگیری از مقادیر بی‌معنی (مثلاً صفر یا خیلی بزرگ) وارد شده از پنل.
+DEFAULT_SERVER_CHECK_INTERVAL_MIN = 3
+DEFAULT_SERVER_OFFLINE_STREAK = 2
+_MIN_CHECK_INTERVAL_MIN = 1
+_MAX_CHECK_INTERVAL_MIN = 120
+_MIN_OFFLINE_STREAK = 1
+_MAX_OFFLINE_STREAK = 10
+
+
+def _get_server_check_interval_seconds() -> int:
+    try:
+        minutes = int(db.get_setting("server_check_interval_min", str(DEFAULT_SERVER_CHECK_INTERVAL_MIN)))
+    except (TypeError, ValueError):
+        minutes = DEFAULT_SERVER_CHECK_INTERVAL_MIN
+    minutes = max(_MIN_CHECK_INTERVAL_MIN, min(_MAX_CHECK_INTERVAL_MIN, minutes))
+    return minutes * 60
+
+
+def _get_server_offline_streak_threshold() -> int:
+    try:
+        streak = int(db.get_setting("server_offline_streak", str(DEFAULT_SERVER_OFFLINE_STREAK)))
+    except (TypeError, ValueError):
+        streak = DEFAULT_SERVER_OFFLINE_STREAK
+    return max(_MIN_OFFLINE_STREAK, min(_MAX_OFFLINE_STREAK, streak))
+
 
 async def _server_status_loop():
     # یک بار آفلاین دیدن TCP لزوماً یعنی سرور واقعاً قطعه؛ ممکنه جیتر لحظه‌ای
-    # شبکه باشه. پس فقط وقتی یه کانفیگ دو دور متوالی (۳۰ دقیقه، چون هر دور
-    # SERVER_CHECK_INTERVAL_SECONDS=15دقیقه‌ست) پشت‌سرهم آفلاین دیده بشه پوش
-    # قطعی می‌فرستیم؛ به‌محضی که یه دور آنلاین ببینیم استریک ریست می‌شه.
+    # شبکه باشه. پس فقط وقتی یه کانفیگ چند دور متوالی (تعدادش از پنل قابل‌تنظیم
+    # است) پشت‌سرهم آفلاین دیده بشه پوش قطعی می‌فرستیم؛ به‌محضی که یه دور
+    # آنلاین ببینیم استریک ریست می‌شه. هر دو تنظیم (بازه‌ی هر دور اسکن و تعداد
+    # دور لازم) در هر iteration از دیتابیس خوانده می‌شوند تا بدون ری‌استارت
+    # سرویس قابل تغییر باشند.
     offline_streak: dict[str, int] = {}
     notified_offline: set[str] = set()
     while True:
+        interval_seconds = _get_server_check_interval_seconds()
         try:
+            streak_needed = _get_server_offline_streak_threshold()
             link = db.get_setting("master_sub_link", "").strip()
             if link:
                 result = await geo_scan.scan_subscription(
@@ -240,7 +271,7 @@ async def _server_status_loop():
                     for key, status in current.items():
                         if status == "offline":
                             offline_streak[key] = offline_streak.get(key, 0) + 1
-                            if offline_streak[key] >= 2 and key not in notified_offline:
+                            if offline_streak[key] >= streak_needed and key not in notified_offline:
                                 await _notify_admins("panels", {
                                     "title": "🔴 قطعی کانفیگ",
                                     "body": f"کانفیگ «{key}» آفلاین شده است.",
@@ -258,7 +289,7 @@ async def _server_status_loop():
                                 notified_offline.discard(key)
         except Exception:
             logger.exception("خطا در حلقه‌ی بررسی وضعیت سرورها")
-        await asyncio.sleep(SERVER_CHECK_INTERVAL_SECONDS)
+        await asyncio.sleep(interval_seconds)
 
 
 @app.on_event("startup")
@@ -591,6 +622,39 @@ def api_set_master_sub(body: MasterSubBody, admin=Depends(require_permission("se
     if link and not (link.startswith("http://") or link.startswith("https://")):
         raise HTTPException(400, "لینک ساب باید با http:// یا https:// شروع شود.")
     db.set_setting("master_sub_link", link)
+    return {"ok": True}
+
+
+class ServerCheckSettingsBody(BaseModel):
+    interval_min: int
+    offline_streak: int
+
+
+@app.get("/api/settings/server-check")
+def api_get_server_check_settings(admin=Depends(get_current_admin)):
+    return {
+        "interval_min": int(db.get_setting("server_check_interval_min", str(DEFAULT_SERVER_CHECK_INTERVAL_MIN))),
+        "offline_streak": int(db.get_setting("server_offline_streak", str(DEFAULT_SERVER_OFFLINE_STREAK))),
+        "min_interval_min": _MIN_CHECK_INTERVAL_MIN,
+        "max_interval_min": _MAX_CHECK_INTERVAL_MIN,
+        "min_offline_streak": _MIN_OFFLINE_STREAK,
+        "max_offline_streak": _MAX_OFFLINE_STREAK,
+    }
+
+
+@app.post("/api/settings/server-check")
+def api_set_server_check_settings(body: ServerCheckSettingsBody, admin=Depends(require_permission("settings"))):
+    if not (_MIN_CHECK_INTERVAL_MIN <= body.interval_min <= _MAX_CHECK_INTERVAL_MIN):
+        raise HTTPException(400, f"بازه‌ی هر دور اسکن باید بین {_MIN_CHECK_INTERVAL_MIN} تا {_MAX_CHECK_INTERVAL_MIN} دقیقه باشد.")
+    if not (_MIN_OFFLINE_STREAK <= body.offline_streak <= _MAX_OFFLINE_STREAK):
+        raise HTTPException(400, f"تعداد دور متوالی باید بین {_MIN_OFFLINE_STREAK} تا {_MAX_OFFLINE_STREAK} باشد.")
+    db.set_setting("server_check_interval_min", str(body.interval_min))
+    db.set_setting("server_offline_streak", str(body.offline_streak))
+    db.log_admin_action(
+        admin["id"], "setting_change",
+        f"server_check_interval_min={body.interval_min}, server_offline_streak={body.offline_streak} (پنل وب - {admin['username']})",
+        "setting", "server_check",
+    )
     return {"ok": True}
 
 
