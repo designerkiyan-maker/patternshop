@@ -3645,6 +3645,7 @@ function renderResellerCohortBlock(data) {
 /* ============================================================== panels === */
 async function renderPanels() {
   const servers = await apiGet('/panel-servers');
+  if (loadTheme().theme === 'brutalist') return renderPanelsBrutalist(servers);
   setContent(`
     <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-panel">+ پنل جدید</button></div>
     <div class="card"><div class="table-wrap"><table>
@@ -3684,6 +3685,69 @@ async function renderPanels() {
       toast(r.ok ? 'اتصال موفق بود.' : (r.error || 'اتصال ناموفق بود.'), !r.ok);
     } catch (e) { handleErr(e); }
     finally { b.textContent = 'تست اتصال'; b.disabled = false; }
+  }));
+  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('حذف شود؟')) return;
+    try { await apiDelete(`/panel-servers/${b.dataset.del}`); toast('حذف شد.'); renderPanels(); } catch (e) { handleErr(e); }
+  }));
+}
+
+/* --------------------------------------------------- panels: brutalist -- */
+// هر سرور پنل به‌شکل کارت «سرور رَک» با چراغ وضعیت گرد و دکمه‌ی تست اتصال
+// که در حین تست چشمک می‌زند.
+function renderPanelsBrutalist(servers) {
+  setContent(`
+    <div class="bru-hero" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div>
+        <h2>سرورهای پنل VPN</h2>
+        <p>${fmt(servers.length)} سرور متصل</p>
+      </div>
+      <button class="bru-stamp bru-stamp-ok" id="add-panel" style="--r:-3deg">+ پنل جدید</button>
+    </div>
+    <div class="bru-panel-grid">
+      ${servers.map((s, i) => `
+        <div class="bru-server-card bru-card-anim" style="animation-delay:${Math.min(i * 35, 300)}ms">
+          <div class="bru-server-top">
+            <span class="bru-server-dot ${s.is_active ? 'on' : 'off'}"></span>
+            <span class="bru-server-name">${esc(s.name)}</span>
+          </div>
+          <div class="bru-coupon-row"><span>نوع</span><b>${esc(s.type_label)}</b></div>
+          <div class="bru-server-url mono">${esc(s.api_url)}</div>
+          <div class="bru-coupon-actions" style="padding:0;border:none;margin-top:8px">
+            <button class="btn btn-sm" data-test="${s.id}">تست اتصال</button>
+            <button class="btn btn-danger btn-sm" data-del="${s.id}">حذف</button>
+          </div>
+        </div>
+      `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>پنلی ثبت نشده</div>`}
+    </div>
+  `);
+  $('#add-panel').addEventListener('click', () => openModal('پنل جدید', `
+    <div class="form-grid">
+      <input class="input" id="p-name" placeholder="نام (مثلا سرور آلمان)">
+      <select class="input" id="p-type"><option value="pasarguard">PasarGuard</option><option value="3xui">3X-UI</option></select>
+      <input class="input" id="p-url" placeholder="آدرس پنل (https://...)">
+      <div class="form-row"><input class="input" id="p-user" placeholder="یوزرنیم"><input class="input" id="p-pass" type="password" placeholder="پسورد"></div>
+      <button class="btn btn-primary" id="p-save">ثبت</button>
+    </div>`, (body, close) => {
+    $('#p-save', body).addEventListener('click', async () => {
+      const name = $('#p-name', body).value.trim(), api_url = $('#p-url', body).value.trim();
+      if (!name || !api_url) return toast('نام و آدرس الزامی است.', true);
+      try {
+        await apiPost('/panel-servers', {
+          name, panel_type: $('#p-type', body).value, api_url,
+          api_username: $('#p-user', body).value, api_password: $('#p-pass', body).value,
+        });
+        toast('پنل اضافه شد.'); close(); renderPanels();
+      } catch (e) { handleErr(e); }
+    });
+  }));
+  $$('[data-test]', content()).forEach(b => b.addEventListener('click', async () => {
+    b.classList.add('bru-testing'); b.textContent = 'در حال تست...'; b.disabled = true;
+    try {
+      const r = await apiPost(`/panel-servers/${b.dataset.test}/test`);
+      toast(r.ok ? 'اتصال موفق بود.' : (r.error || 'اتصال ناموفق بود.'), !r.ok);
+    } catch (e) { handleErr(e); }
+    finally { b.classList.remove('bru-testing'); b.textContent = 'تست اتصال'; b.disabled = false; }
   }));
   $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
     if (!confirm('حذف شود؟')) return;
@@ -3900,7 +3964,7 @@ function settingsTabsHtml() {
 
 function switchSettingsTab(tab, root) {
   settingsActiveTab = tab;
-  $$('#settings-tabs-nav .tab-btn', root).forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  $$('#settings-tabs-nav .tab-btn, #settings-tabs-nav .bru-seg-btn', root).forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   $$('[data-settings-tab]', root).forEach(el => { el.style.display = el.dataset.settingsTab === tab ? '' : 'none'; });
 }
 
@@ -4055,6 +4119,7 @@ async function renderSettings() {
     apiGet('/exchange-rate').catch(e => ({ ok: false, rate: null, source: null, updated_at: null, error: e.message })),
     apiGet('/settings/menu-order').catch(() => []),
   ]);
+  if (loadTheme().theme === 'brutalist') return renderSettingsBrutalist(settings, rate, menuOrder);
   setContent(`
     ${settingsTabsHtml()}
 
@@ -4073,6 +4138,49 @@ async function renderSettings() {
     </div>
   `);
   $$('#settings-tabs-nav .tab-btn', content()).forEach(btn => btn.addEventListener('click', () => switchSettingsTab(btn.dataset.tab, content())));
+  bindSettingsGroupEvents(content());
+  renderMenuOrderList();
+  $('#menu-order-save').addEventListener('click', saveMenuOrder);
+  $('#settings-save').addEventListener('click', () => collectAndSaveSettings(content(), $('#settings-save')));
+  $('#rate-refresh').addEventListener('click', async () => {
+    const btn = $('#rate-refresh');
+    btn.disabled = true; btn.textContent = 'در حال دریافت...';
+    try {
+      await apiPost('/exchange-rate/refresh');
+      toast('نرخ بروزرسانی شد.');
+    } catch (e) {
+      handleErr(e);
+    } finally {
+      renderSettings();
+    }
+  });
+}
+
+/* ------------------------------------------------- settings: brutalist -- */
+// ناوبری از تب افقی به سایدبار عمودی تبدیل می‌شه (مثل داشبورد ادمین‌های
+// واقعی) — بدنه‌ی فرم‌ها با همون منطق قبلی، فقط قاب/سوییچ/سواچ برutalist.
+function renderSettingsBrutalist(settings, rate, menuOrder) {
+  setContent(`
+    <div class="bru-hero"><h2>تنظیمات</h2><p>پیکربندی محتوا، پرداخت، کمپین و سرویس‌های ربات</p></div>
+    <div class="bru-settings-layout">
+      <nav class="bru-settings-nav" id="settings-tabs-nav">
+        ${SETTINGS_TABS.map(t => `<button type="button" class="bru-seg-btn ${t.key === settingsActiveTab ? 'active' : ''}" data-tab="${t.key}">${t.label}</button>`).join('')}
+      </nav>
+      <div class="bru-settings-content">
+        <div data-settings-tab="content" style="${settingsActiveTab === 'content' ? '' : 'display:none'}">
+          ${menuOrderCardHtml(menuOrder)}
+        </div>
+        <div data-settings-tab="payment" style="${settingsActiveTab === 'payment' ? '' : 'display:none'}">
+          ${rateCardHtml(rate)}
+        </div>
+        ${renderSettingsGroups(settings)}
+        <div class="settings-save-bar">
+          <button class="bru-stamp bru-stamp-ok btn-block" id="settings-save" style="--r:-2deg;width:100%">ذخیره تغییرات</button>
+        </div>
+      </div>
+    </div>
+  `);
+  $$('#settings-tabs-nav .bru-seg-btn', content()).forEach(btn => btn.addEventListener('click', () => switchSettingsTab(btn.dataset.tab, content())));
   bindSettingsGroupEvents(content());
   renderMenuOrderList();
   $('#menu-order-save').addEventListener('click', saveMenuOrder);
@@ -4159,6 +4267,7 @@ async function renderLogs() {
   if (logsFilter.record_id) qs.set('record_id', logsFilter.record_id);
   const res = await apiGet(`/admin-logs?${qs.toString()}`);
   const pages = Math.max(Math.ceil(res.total / res.limit), 1);
+  if (loadTheme().theme === 'brutalist') return renderLogsBrutalist(actionsRes, res, pages);
   setContent(`
     <div class="card" style="margin-bottom:14px">
       <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
@@ -4194,6 +4303,49 @@ async function renderLogs() {
   $('#lf-clear').addEventListener('click', () => { logsFilter = { action: '', record_type: '', record_id: '' }; logsPage = 1; renderLogs(); });
 }
 
+/* ---------------------------------------------------- logs: brutalist --- */
+// لاگ‌ها به‌شکل نوار زمانی (تایم‌لاین) با خط ضخیم سمت راست، به‌جای جدول.
+function renderLogsBrutalist(actionsRes, res, pages) {
+  setContent(`
+    <div class="bru-hero"><h2>لاگ سیستم</h2><p>${fmt(res.total)} رکورد ثبت‌شده</p></div>
+    <div class="bru-panel" style="margin-bottom:16px">
+      <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+        <select class="input" id="lf-action">
+          <option value="">همه‌ی عملیات</option>
+          ${actionsRes.actions.map(a => `<option value="${a}" ${a === logsFilter.action ? 'selected' : ''}>${actionLabel(a)}</option>`).join('')}
+        </select>
+        <select class="input" id="lf-type">
+          <option value="">همه‌ی رکوردها</option>
+          ${Object.keys(RECORD_TYPE_LABEL).map(t => `<option value="${t}" ${t === logsFilter.record_type ? 'selected' : ''}>${RECORD_TYPE_LABEL[t]}</option>`).join('')}
+        </select>
+        <input class="input" id="lf-id" placeholder="شناسه رکورد (مثلاً آیدی سفارش)" value="${esc(logsFilter.record_id)}">
+        <button class="bru-stamp bru-stamp-ok" id="lf-apply" style="--r:-2deg">اعمال فیلتر</button>
+        <button class="btn btn-sm" id="lf-clear">پاک‌کردن</button>
+      </div>
+    </div>
+    <div class="bru-log-list">
+      ${res.items.map((l, i) => `
+        <div class="bru-log-row bru-card-anim" style="animation-delay:${Math.min(i * 25, 220)}ms">
+          <span class="bru-log-time mono">${fmtDate(l.created_at)}</span>
+          <div class="bru-log-main">
+            <span class="bru-log-action">${actionLabel(l.action)}</span>
+            <span class="bru-log-admin mono">ادمین #${l.admin_id}</span>
+            ${l.record_type ? `<span class="chip">${RECORD_TYPE_LABEL[l.record_type] || esc(l.record_type)} #${esc(l.record_id)}</span>` : ''}
+          </div>
+          ${l.details ? `<div class="bru-log-details">${esc(l.details)}</div>` : ''}
+        </div>
+      `).join('') || `<div class="empty-state"><div class="icon">${svg('empty')}</div>لاگی ثبت نشده</div>`}
+    </div>
+    <div class="pager" style="margin-top:16px">${Array.from({ length: pages }, (_, i) => i + 1).map(p => `<button class="btn btn-sm ${p === logsPage ? 'btn-primary' : ''}" data-page="${p}">${p}</button>`).join('')}</div>
+  `);
+  $$('[data-page]', content()).forEach(b => b.addEventListener('click', () => { logsPage = Number(b.dataset.page); renderLogs(); }));
+  $('#lf-apply').addEventListener('click', () => {
+    logsFilter = { action: $('#lf-action').value, record_type: $('#lf-type').value, record_id: $('#lf-id').value.trim() };
+    logsPage = 1; renderLogs();
+  });
+  $('#lf-clear').addEventListener('click', () => { logsFilter = { action: '', record_type: '', record_id: '' }; logsPage = 1; renderLogs(); });
+}
+
 /* ========================================================== webadmins === */
 const PERM_LABEL = {
   orders: 'سفارش‌ها و شارژ کیف پول', users: 'کاربران (بلاک/کیف پول)', catalog: 'محصولات و بانک کانفیگ',
@@ -4216,6 +4368,7 @@ let PERM_KEYS = [];
 async function renderWebAdmins() {
   if (!PERM_KEYS.length) PERM_KEYS = (await apiGet('/web-admins/permissions')).permissions;
   const admins = await apiGet('/web-admins');
+  if (loadTheme().theme === 'brutalist') return renderWebAdminsBrutalist(admins);
   setContent(`
     <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-admin">+ کاربر پنل جدید</button></div>
     <div class="card"><div class="table-wrap"><table>
@@ -4232,6 +4385,77 @@ async function renderWebAdmins() {
           <button class="btn btn-danger btn-sm" data-del="${a.id}">حذف</button>`}</td>
       </tr>`).join('')}</tbody>
     </table></div></div>
+  `);
+  $('#add-admin').addEventListener('click', () => openModal('کاربر پنل جدید', `
+    <div class="form-grid">
+      <input class="input" id="na-user" placeholder="یوزرنیم">
+      <input class="input" id="na-pass" type="password" placeholder="پسورد (حداقل ۸ کاراکتر)">
+      <div class="card-sub" style="margin-top:4px">مجوزها:</div>
+      ${permChecklistHtml('na', [])}
+      <button class="btn btn-primary" id="na-save">ثبت</button>
+    </div>`, (body, close) => {
+    $('#na-save', body).addEventListener('click', async () => {
+      try {
+        await apiPost('/web-admins', {
+          username: $('#na-user', body).value.trim(), password: $('#na-pass', body).value,
+          role: 'admin', permissions: readPermChecklist(body, 'na'),
+        });
+        toast('کاربر ساخته شد.'); close(); renderWebAdmins();
+      } catch (e) { handleErr(e); }
+    });
+  }));
+  $$('[data-edit-perms]', content()).forEach(b => b.addEventListener('click', () => {
+    const a = admins.find(x => x.id === Number(b.dataset.editPerms));
+    openModal(`مجوزهای ${esc(a.username)}`, `
+      ${permChecklistHtml('ep', a.permissions)}
+      <button class="btn btn-primary" id="ep-save" style="margin-top:14px">ذخیره</button>
+    `, (body, close) => {
+      $('#ep-save', body).addEventListener('click', async () => {
+        try {
+          await apiPost(`/web-admins/${a.id}/permissions`, { permissions: readPermChecklist(body, 'ep') });
+          toast('مجوزها به‌روزرسانی شد.'); close(); renderWebAdmins();
+        } catch (e) { handleErr(e); }
+      });
+    });
+  }));
+  $$('[data-toggle-active]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/web-admins/${b.dataset.toggleActive}/active`, { active: b.dataset.active !== 'true' }); renderWebAdmins(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('این حساب حذف شود؟')) return;
+    try { await apiDelete(`/web-admins/${b.dataset.del}`); toast('حذف شد.'); renderWebAdmins(); } catch (e) { handleErr(e); }
+  }));
+}
+
+/* ------------------------------------------------- webadmins: brutalist - */
+// کارت شناسنامه‌ای برای هر ادمین پنل، با برچسب نقش مثل مهر روی پرونده.
+function renderWebAdminsBrutalist(admins) {
+  setContent(`
+    <div class="bru-hero" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div>
+        <h2>ادمین‌های پنل</h2>
+        <p>${fmt(admins.length)} حساب ثبت‌شده</p>
+      </div>
+      <button class="bru-stamp bru-stamp-ok" id="add-admin" style="--r:-3deg">+ کاربر پنل جدید</button>
+    </div>
+    <div class="bru-user-grid">
+      ${admins.map((a, i) => `
+        <div class="bru-user-card bru-card-anim" style="animation-delay:${Math.min(i * 35, 300)}ms;text-align:center">
+          <span class="bru-flag ${a.is_active ? 'bru-flag-ok' : 'bru-flag-no'}">${a.is_active ? 'فعال' : 'غیرفعال'}</span>
+          <div class="bru-user-avatar mono">${esc(a.username.trim().charAt(0).toUpperCase())}</div>
+          <div class="bru-user-name">${esc(a.username)}</div>
+          <div class="bru-flag" style="background:var(--primary);margin-top:4px">${ROLE_LABEL[a.role]}</div>
+          <div class="bru-user-id mono" style="margin-top:6px">ورود: ${fmtDate(a.last_login)}</div>
+          <div class="bru-user-joined" style="max-width:190px">${a.role === 'owner' ? 'دسترسی کامل' : (a.permissions.length ? a.permissions.map(p => PERM_LABEL[p] || p).join('، ') : 'بدون مجوز')}</div>
+          ${a.role !== 'owner' ? `
+          <div class="bru-user-actions">
+            <button class="btn btn-sm" data-edit-perms="${a.id}">مجوزها</button>
+            <button class="btn btn-sm" data-toggle-active="${a.id}" data-active="${a.is_active}">${a.is_active ? 'غیرفعال' : 'فعال'}</button>
+            <button class="btn btn-danger btn-sm" data-del="${a.id}">حذف</button>
+          </div>` : ''}
+        </div>
+      `).join('')}
+    </div>
   `);
   $('#add-admin').addEventListener('click', () => openModal('کاربر پنل جدید', `
     <div class="form-grid">

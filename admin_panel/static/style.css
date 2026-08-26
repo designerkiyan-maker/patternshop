@@ -993,6 +993,51 @@ html[data-theme="brutalist"] .topbar-clock{ border-radius:0; border:2px solid #0
 .bru-reseller-credit .mono{ font-size:19px; font-weight:900; }
 .bru-reseller-credit small{ font-size:10.5px; font-weight:700; opacity:.8; }
 
+/* ---- پنل‌های VPN: کارت سرور -------------------------------------------- */
+.bru-panel-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px; }
+.bru-server-card{ border:3px solid #000; background:#fff; box-shadow:var(--shadow-card); padding:14px 16px;
+  display:flex; flex-direction:column; gap:8px; transition:transform .12s, box-shadow .12s; }
+.bru-server-card:hover{ transform:translate(-2px,-2px); box-shadow:7px 7px 0 #000; }
+.bru-server-top{ display:flex; align-items:center; gap:9px; }
+.bru-server-dot{ width:11px; height:11px; border-radius:50%; border:2px solid #000; flex-shrink:0; }
+.bru-server-dot.on{ background:var(--emerald); }
+.bru-server-dot.off{ background:var(--rose); }
+.bru-server-name{ font-weight:800; font-size:14px; }
+.bru-server-url{ font-size:11px; direction:ltr; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-muted); }
+[data-test].bru-testing{ animation:bruPulse .7s ease-in-out infinite; }
+@keyframes bruPulse{ 50%{ opacity:.45; } }
+
+/* ---- تنظیمات: سایدبار عمودی + آکاردئون + سوییچ/سواچ برutalist --------- */
+.bru-settings-layout{ display:flex; gap:20px; align-items:flex-start; flex-wrap:wrap; }
+.bru-settings-nav{ display:flex; flex-direction:column; gap:0; flex-shrink:0; width:210px;
+  border:2.5px solid #000; box-shadow:var(--shadow-btn); overflow:hidden; }
+.bru-settings-nav .bru-seg-btn{ width:100%; text-align:right; border-inline-end:none; border-bottom:2.5px solid #000; padding:12px 14px; }
+.bru-settings-nav .bru-seg-btn:last-child{ border-bottom:none; }
+.bru-settings-content{ flex:1; min-width:260px; }
+
+html[data-theme="brutalist"] .settings-group{ border:2.5px solid #000; box-shadow:var(--shadow-btn); margin-bottom:14px; background:#fff; }
+html[data-theme="brutalist"] .settings-group-head{ background:#000; color:#fff; font-weight:800; padding:12px 16px; }
+html[data-theme="brutalist"] .settings-group-body{ padding:16px; }
+html[data-theme="brutalist"] .switch{ width:44px; height:24px; border:2.5px solid #000; border-radius:0; background:#fff; position:relative; }
+html[data-theme="brutalist"] .switch i{ position:absolute; top:2px; inset-inline-start:2px; width:16px; height:16px; background:#000; border-radius:0; transition:transform .12s; }
+html[data-theme="brutalist"] .switch[data-on="1"]{ background:var(--emerald); }
+html[data-theme="brutalist"] .switch[data-on="1"] i{ transform:translateX(20px); }
+html[data-theme="brutalist"] .color-swatch{ border-radius:0; border:2.5px solid #000; width:26px; height:26px; }
+html[data-theme="brutalist"] .color-swatch.active{ box-shadow:0 0 0 2px #fff, 0 0 0 4px #000; }
+html[data-theme="brutalist"] .menu-order-row{ border:2.5px solid #000; box-shadow:var(--shadow-btn); margin-bottom:8px; background:#fff; border-radius:0; }
+html[data-theme="brutalist"] .menu-order-row.dragging{ box-shadow:0 0 0 #000; transform:translate(3px,3px); }
+html[data-theme="brutalist"] .menu-order-drag-handle{ font-weight:900; }
+
+/* ---- لاگ‌ها: تایم‌لاین ------------------------------------------------- */
+.bru-log-list{ display:flex; flex-direction:column; gap:9px; }
+.bru-log-row{ border-inline-start:5px solid #000; background:#fff; box-shadow:var(--shadow-btn); padding:10px 14px;
+  border-top:2.5px solid #000; border-bottom:2.5px solid #000; border-inline-end:2.5px solid #000; }
+.bru-log-time{ font-size:11px; font-weight:800; color:var(--text-muted); }
+.bru-log-main{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:3px; }
+.bru-log-action{ font-weight:800; font-size:13px; }
+.bru-log-admin{ font-size:11px; color:var(--text-muted); }
+.bru-log-details{ font-size:12px; color:var(--text-muted); margin-top:4px; }
+
 /* ===================================================================
    تم Glassmorphism — پس‌زمینه‌ی تیره با بلوب‌های نوری محو، کارت‌های
    شیشه‌ای بلوردار، اکسنت‌های نئون ملایم، دونات/دایال به‌جای بار/رادار.
