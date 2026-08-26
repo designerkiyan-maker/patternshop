@@ -1102,101 +1102,7 @@ html[data-theme="brutalist"] .menu-order-drag-handle{ font-weight:900; }
 .bru-log-action{ font-weight:800; font-size:13px; }
 .bru-log-admin{ font-size:11px; color:var(--text-muted); }
 .bru-log-details{ font-size:12px; color:var(--text-muted); margin-top:4px; }
-
-/* ===================================================================
-   تم Glassmorphism — پس‌زمینه‌ی تیره با بلوب‌های نوری محو، کارت‌های
-   شیشه‌ای بلوردار، اکسنت‌های نئون ملایم، دونات/دایال به‌جای بار/رادار.
-=================================================================== */
-html[data-theme="glass"]{
-  --bg: #0B1020;
-  --bg-2: #0E1430;
-  --surface: rgba(255,255,255,.06);
-  --surface-2: rgba(255,255,255,.09);
-  --surface-hi: rgba(255,255,255,.09);
-  --border: rgba(255,255,255,.16);
-  --border-soft: rgba(255,255,255,.1);
-
-  --text: #F2F4FF;
-  --text-muted: #9BA3C7;
-  --text-dim: #5B6390;
-
-  --primary: #8B5CF6;
-  --primary-ink: #FFFFFF;
-  --cyan: #22D3EE;
-  --amber: #FBBF24;
-  --emerald: #34D399;
-  --rose: #FB7185;
-  --violet: var(--primary);
-  --fuchsia: #EC4899;
-
-  --radius: 22px;
-  --radius-sm: 16px;
-  --radius-xs: 12px;
-
-  --shadow-card: 0 8px 32px rgba(0,0,0,.35);
-  --shadow-pop: 0 24px 60px rgba(0,0,0,.5);
-  --shadow-btn: 0 4px 14px rgba(0,0,0,.3);
-
-  --focus-ring: 0 0 0 3px rgba(139,92,246,.4);
-}
-html[data-theme="glass"] body{
-  background:
-    radial-gradient(circle at 15% 12%, rgba(139,92,246,.22), transparent 45%),
-    radial-gradient(circle at 85% 18%, rgba(34,211,238,.16), transparent 40%),
-    radial-gradient(circle at 50% 90%, rgba(236,72,153,.14), transparent 45%),
-    var(--bg);
-}
-html[data-theme="glass"] .bg-blobs{ display:block; position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
-html[data-theme="glass"] .bg-blobs i{
-  position:absolute; border-radius:50%; filter:blur(70px); opacity:.5;
-  animation:glassBlobFloat 16s ease-in-out infinite alternate;
-}
-html[data-theme="glass"] .bg-blobs i:nth-child(1){ width:340px; height:340px; background:#8B5CF6; top:-80px; left:-60px; }
-html[data-theme="glass"] .bg-blobs i:nth-child(2){ width:300px; height:300px; background:#22D3EE; top:40%; right:-100px; animation-delay:-5s; }
-html[data-theme="glass"] .bg-blobs i:nth-child(3){ width:280px; height:280px; background:#EC4899; bottom:-100px; left:30%; animation-delay:-10s; }
 @keyframes glassBlobFloat{ from{ transform:translate(0,0) scale(1);} to{ transform:translate(30px,-25px) scale(1.12);} }
-
-html[data-theme="glass"] .card,
-html[data-theme="glass"] .login-card,
-html[data-theme="glass"] .modal,
-html[data-theme="glass"] .sidebar,
-html[data-theme="glass"] .topbar{
-  backdrop-filter:blur(22px) saturate(180%); -webkit-backdrop-filter:blur(22px) saturate(180%);
-}
-html[data-theme="glass"] .card{ border:1px solid var(--border); }
-html[data-theme="glass"] .sidebar{ background:rgba(255,255,255,.04); border-left:1px solid var(--border-soft); }
-html[data-theme="glass"] .topbar{ background:rgba(11,16,32,.55); border-bottom:1px solid var(--border-soft); }
-html[data-theme="glass"] .brand-mark{ box-shadow:0 0 16px rgba(139,92,246,.6); }
-html[data-theme="glass"] .nav-item.active{ box-shadow:0 0 14px rgba(139,92,246,.5); }
-html[data-theme="glass"] .hero-orbit, html[data-theme="glass"] .hero-net{ display:flex; align-items:center; justify-content:center; width:150px; height:150px; flex-shrink:0; }
-
-/* عناصر مشترک (تنظیمات/مودال‌ها) که بین همه‌ی تم‌ها یکسان رندر می‌شن،
-   اینجا مخصوص گلس، بلوردار و شیشه‌ای می‌شن تا با بقیه‌ی صفحه یکدست باشن. */
-html[data-theme="glass"] .settings-group{
-  background:var(--surface); border:1px solid var(--border);
-  backdrop-filter:blur(18px) saturate(180%); -webkit-backdrop-filter:blur(18px) saturate(180%);
-}
-html[data-theme="glass"] .settings-group-head:hover{ background:rgba(255,255,255,.03); }
-html[data-theme="glass"] .field input,
-html[data-theme="glass"] .input,
-html[data-theme="glass"] select.input,
-html[data-theme="glass"] textarea.input{
-  background:rgba(255,255,255,.05); backdrop-filter:blur(12px) saturate(180%); -webkit-backdrop-filter:blur(12px) saturate(180%);
-}
-html[data-theme="glass"] .field input:focus,
-html[data-theme="glass"] .input:focus{
-  border-color:var(--primary); box-shadow:0 0 0 3px rgba(139,92,246,.28), 0 0 16px rgba(139,92,246,.22);
-}
-html[data-theme="glass"] .switch{ background:rgba(255,255,255,.06); }
-html[data-theme="glass"] .switch[data-on="1"]{ box-shadow:0 0 12px rgba(52,211,153,.5); }
-html[data-theme="glass"] .color-swatch.active{ box-shadow:0 0 0 2px var(--surface), 0 0 0 4px var(--primary), 0 0 14px rgba(139,92,246,.5); }
-html[data-theme="glass"] .menu-order-row{
-  background:rgba(255,255,255,.05); border:1px solid var(--border-soft);
-  backdrop-filter:blur(14px) saturate(180%); -webkit-backdrop-filter:blur(14px) saturate(180%);
-}
-html[data-theme="glass"] .menu-order-row.dragging{ border-color:var(--primary); box-shadow:0 0 14px rgba(139,92,246,.35); }
-html[data-theme="glass"] .btn{ backdrop-filter:blur(10px) saturate(180%); -webkit-backdrop-filter:blur(10px) saturate(180%); }
-html[data-theme="glass"] .btn-primary{ box-shadow:0 0 14px rgba(139,92,246,.45); }
 
 .glass-stat{ display:flex; flex-direction:column; gap:8px; }
 .glass-stat-label{ font-size:12px; color:var(--text-muted); font-weight:600; }
@@ -1258,9 +1164,8 @@ html[data-theme="glass"] .btn-primary{ box-shadow:0 0 14px rgba(139,92,246,.45);
 .gl-hero{
   display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
   padding:18px 20px; border-radius:var(--radius); margin-bottom:16px;
-  background:rgba(255,255,255,.07); border:1px solid var(--border);
-  backdrop-filter:blur(22px) saturate(180%); -webkit-backdrop-filter:blur(22px) saturate(180%);
-  box-shadow:var(--shadow-card), inset 0 1px 0 rgba(255,255,255,.15);
+  background:var(--surface); border:1px solid var(--border);
+  backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px); box-shadow:var(--shadow-card);
 }
 .gl-hero h2{ margin:0 0 4px; font-size:19px; }
 .gl-hero p{ margin:0; font-size:12.5px; color:var(--text-muted); }
@@ -1284,12 +1189,11 @@ html[data-theme="glass"] .btn-primary{ box-shadow:0 0 14px rgba(139,92,246,.45);
 
 .gl-card-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; }
 .gl-card{
-  padding:16px; border-radius:var(--radius-sm); background:rgba(255,255,255,.07); border:1px solid var(--border);
-  backdrop-filter:blur(18px) saturate(180%); -webkit-backdrop-filter:blur(18px) saturate(180%);
-  box-shadow:var(--shadow-card), inset 0 1px 0 rgba(255,255,255,.13);
+  padding:16px; border-radius:var(--radius-sm); background:var(--surface); border:1px solid var(--border);
+  backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); box-shadow:var(--shadow-card);
   display:flex; flex-direction:column; gap:8px; transition:.2s;
 }
-.gl-card:hover{ border-color:rgba(139,92,246,.5); box-shadow:0 0 20px rgba(139,92,246,.25), inset 0 1px 0 rgba(255,255,255,.18); transform:translateY(-2px); }
+.gl-card:hover{ border-color:rgba(139,92,246,.5); box-shadow:0 0 20px rgba(139,92,246,.25); }
 .gl-card-price{ font-size:17px; font-weight:800; }
 .gl-card-title{ font-size:13.5px; font-weight:700; }
 .gl-card-sub{ font-size:11.5px; color:var(--text-muted); }
@@ -1298,11 +1202,9 @@ html[data-theme="glass"] .btn-primary{ box-shadow:0 0 14px rgba(139,92,246,.45);
 .gl-list{ display:flex; flex-direction:column; gap:8px; }
 .gl-row{
   display:flex; align-items:center; gap:12px; padding:11px 14px; border-radius:var(--radius-sm);
-  background:rgba(255,255,255,.07); border:1px solid var(--border); transition:border-color .2s, box-shadow .2s;
-  backdrop-filter:blur(18px) saturate(180%); -webkit-backdrop-filter:blur(18px) saturate(180%);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.12);
+  background:var(--surface); border:1px solid var(--border);
+  backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px);
 }
-.gl-row:hover{ border-color:rgba(139,92,246,.4); box-shadow:0 0 16px rgba(139,92,246,.18), inset 0 1px 0 rgba(255,255,255,.12); }
 .gl-row-main{ flex:1; min-width:0; }
 .gl-row-title{ font-size:13.5px; font-weight:700; display:block; }
 .gl-row-sub{ font-size:11.5px; color:var(--text-muted); }
@@ -1315,15 +1217,13 @@ html[data-theme="glass"] .btn-primary{ box-shadow:0 0 14px rgba(139,92,246,.45);
 .gl-pill-ok{ color:#34D399; background:rgba(52,211,153,.14); }
 .gl-pill-no{ color:#FB7185; background:rgba(251,113,133,.14); }
 .gl-pill-mid{ color:#FBBF24; background:rgba(251,191,36,.14); }
-.gl-row-wrap{ border-radius:var(--radius-sm); background:rgba(255,255,255,.07); border:1px solid var(--border);
-  backdrop-filter:blur(18px) saturate(180%); -webkit-backdrop-filter:blur(18px) saturate(180%); overflow:hidden;
-  transition:border-color .2s, box-shadow .2s; box-shadow:inset 0 1px 0 rgba(255,255,255,.12); }
-.gl-row-wrap:hover{ border-color:rgba(139,92,246,.4); box-shadow:0 0 16px rgba(139,92,246,.18), inset 0 1px 0 rgba(255,255,255,.12); }
-.gl-row-wrap .gl-row{ border:none; backdrop-filter:none; -webkit-backdrop-filter:none; background:transparent; border-radius:0; box-shadow:none; }
+.gl-row-wrap{ border-radius:var(--radius-sm); background:var(--surface); border:1px solid var(--border);
+  backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); overflow:hidden; }
+.gl-row-wrap .gl-row{ border:none; backdrop-filter:none; -webkit-backdrop-filter:none; background:transparent; border-radius:0; }
 .gl-row-amount{ font-size:13px; font-weight:800; }
 .gl-row-actions{ display:flex; gap:8px; padding:0 14px 12px; margin-top:-4px; flex-wrap:wrap; }
 .gl-search{ width:100%; border:1px solid var(--border); border-radius:999px; padding:10px 16px; background:var(--surface);
-  color:var(--text); backdrop-filter:blur(18px) saturate(180%); -webkit-backdrop-filter:blur(18px) saturate(180%); }
+  color:var(--text); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); }
 .gl-search:focus{ outline:none; box-shadow:0 0 0 3px rgba(139,92,246,.35); }
 
 /* ---------------------------------------------- shared page kit: cyberpunk (cyb-) --- */
@@ -1556,117 +1456,6 @@ html[data-theme="glass"] .btn-primary{ box-shadow:0 0 14px rgba(139,92,246,.45);
 .wrp-row-actions{ display:flex; gap:8px; padding:0 15px 13px; margin-top:-4px; flex-wrap:wrap; }
 .wrp-search{ width:100%; border:1px solid var(--border-soft); border-radius:999px; padding:10px 16px; background:var(--surface-2); color:var(--text); }
 .wrp-search:focus{ outline:none; box-shadow:0 0 0 3px rgba(124,92,255,.3); border-color:var(--primary); }
-
-/* ================================================== theme: cyberpunk === */
-html[data-theme="cyberpunk"]{
-  --bg: #050806;
-  --bg-2: #030504;
-  --surface: #0A1512;
-  --surface-2: #0F1E19;
-  --surface-hi: rgba(0,255,156,.06);
-  --border: rgba(0,255,156,.28);
-  --border-soft: rgba(0,255,156,.14);
-
-  --text: #D8FFEF;
-  --text-muted: #6FA890;
-  --text-dim: #3B5A4E;
-
-  --primary: #00FF9C;
-  --primary-ink: #04120C;
-  --cyan: #00E5FF;
-  --amber: #C6FF00;
-  --emerald: #00E58A;
-  --rose: #FF2E5B;
-  --violet: #FF2E9A;
-  --fuchsia: #FF2E9A;
-
-  --font-body: "Vazirmatn", -apple-system, Tahoma, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "Vazirmatn", monospace;
-
-  --radius: 4px;
-  --radius-sm: 3px;
-  --radius-xs: 2px;
-
-  --shadow-card: 0 0 0 1px rgba(0,255,156,.06), 0 8px 24px rgba(0,0,0,.55);
-  --shadow-pop: 0 0 40px rgba(0,255,156,.15), 0 24px 60px rgba(0,0,0,.6);
-  --shadow-btn: 0 0 12px rgba(0,255,156,.25);
-
-  --focus-ring: 0 0 0 3px rgba(0,255,156,.35);
-}
-html[data-theme="cyberpunk"] body{
-  background:
-    repeating-linear-gradient(180deg, rgba(0,255,156,.035) 0px, rgba(0,255,156,.035) 1px, transparent 1px, transparent 3px),
-    radial-gradient(circle at 12% 8%, rgba(0,255,156,.10), transparent 42%),
-    radial-gradient(circle at 88% 14%, rgba(255,46,154,.10), transparent 40%),
-    linear-gradient(180deg, #060a08, var(--bg) 40%);
-}
-html[data-theme="cyberpunk"] .bg-blobs{
-  display:block; position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden;
-  background-image:
-    linear-gradient(rgba(0,255,156,.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0,255,156,.05) 1px, transparent 1px);
-  background-size:34px 34px;
-  mask-image:radial-gradient(circle at 50% 20%, #000 0%, transparent 75%);
-}
-html[data-theme="cyberpunk"] .bg-blobs i{ display:none; }
-html[data-theme="cyberpunk"] ::selection{ background:rgba(0,255,156,.3); color:#03120c; }
-html[data-theme="cyberpunk"] ::-webkit-scrollbar-thumb{ background:rgba(0,255,156,.22); }
-html[data-theme="cyberpunk"] h1, html[data-theme="cyberpunk"] h2, html[data-theme="cyberpunk"] h3, html[data-theme="cyberpunk"] h4{
-  font-family:var(--font-mono); letter-spacing:-.01em;
-}
-
-html[data-theme="cyberpunk"] .card,
-html[data-theme="cyberpunk"] .login-card,
-html[data-theme="cyberpunk"] .modal{
-  background:linear-gradient(180deg, rgba(0,255,156,.03), transparent 40%), var(--surface);
-  border:1px solid var(--border); position:relative;
-  clip-path:polygon(0 10px, 10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%);
-}
-html[data-theme="cyberpunk"] .card::before,
-html[data-theme="cyberpunk"] .login-card::before{
-  content:''; position:absolute; inset:0; pointer-events:none;
-  background:linear-gradient(115deg, transparent 40%, rgba(0,255,156,.05) 50%, transparent 60%);
-}
-html[data-theme="cyberpunk"] .btn{
-  border-radius:var(--radius-sm); border:1px solid var(--border);
-  clip-path:polygon(0 6px, 6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%);
-  text-transform:uppercase; font-family:var(--font-mono); font-size:12px; letter-spacing:.04em;
-}
-html[data-theme="cyberpunk"] .btn-primary{
-  background:var(--primary); color:var(--primary-ink); box-shadow:0 0 16px rgba(0,255,156,.45);
-}
-html[data-theme="cyberpunk"] .btn-primary:hover{ filter:brightness(1.1); box-shadow:0 0 22px rgba(0,255,156,.65); }
-html[data-theme="cyberpunk"] .input, html[data-theme="cyberpunk"] .field input{
-  background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-xs);
-  font-family:var(--font-mono); color:var(--primary);
-}
-html[data-theme="cyberpunk"] .field input:focus{ box-shadow:0 0 0 3px rgba(0,255,156,.18); border-color:var(--primary); }
-html[data-theme="cyberpunk"] .field span{ text-transform:uppercase; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; }
-html[data-theme="cyberpunk"] .badge{ border:1px solid currentColor; border-radius:2px; font-family:var(--font-mono); }
-html[data-theme="cyberpunk"] table{ border:1px solid var(--border); }
-html[data-theme="cyberpunk"] thead th{ border-bottom:1px solid var(--border); font-family:var(--font-mono); text-transform:uppercase; font-size:10.5px; color:var(--primary); }
-html[data-theme="cyberpunk"] .login-logo{ border-radius:var(--radius-xs); box-shadow:0 0 20px rgba(0,255,156,.5); }
-
-html[data-theme="cyberpunk"] .sidebar{
-  background:linear-gradient(180deg, #061009, #030503); border-left:1px solid var(--border-soft);
-}
-html[data-theme="cyberpunk"] .brand-mark{
-  border-radius:var(--radius-xs); box-shadow:0 0 18px rgba(0,255,156,.55);
-}
-html[data-theme="cyberpunk"] .brand-text strong{ font-family:var(--font-mono); }
-html[data-theme="cyberpunk"] .nav-item{ border-radius:2px; }
-html[data-theme="cyberpunk"] .nav-item:hover{ background:rgba(0,255,156,.08); color:var(--primary); }
-html[data-theme="cyberpunk"] .nav-icon{ border-radius:2px; }
-html[data-theme="cyberpunk"] .nav-item.active{
-  background:rgba(0,255,156,.1); color:var(--primary); box-shadow:inset 3px 0 0 var(--primary), 0 0 14px rgba(0,255,156,.2);
-}
-html[data-theme="cyberpunk"] .nav-item.active .nav-icon{ color:var(--primary); }
-html[data-theme="cyberpunk"] .nav-item.active .dot-count{ background:rgba(255,46,154,.25); color:#FF2E9A; }
-html[data-theme="cyberpunk"] .me-avatar{ border-radius:2px; }
-html[data-theme="cyberpunk"] #logout-btn{ color:#FF2E5B; border-color:rgba(255,46,91,.35); }
-html[data-theme="cyberpunk"] .topbar{ background:rgba(5,10,8,.7); backdrop-filter:blur(6px); }
-html[data-theme="cyberpunk"] .topbar-clock{ font-family:var(--font-mono); border:1px solid var(--border); color:var(--primary); }
-html[data-theme="cyberpunk"] .live-dot{ background:var(--primary); box-shadow:0 0 8px var(--primary); animation:cpPulseDot 1.4s ease-in-out infinite; }
 @keyframes cpPulseDot{ 0%,100%{ opacity:1; } 50%{ opacity:.35; } }
 
 /* ------------------------------------------------- cyberpunk dashboard --- */
@@ -1751,67 +1540,6 @@ html[data-theme="cyberpunk"] .live-dot{ background:var(--primary); box-shadow:0 
 .cp-res-fill{ display:block; height:100%; width:0; transition:width 1s cubic-bezier(.16,1,.3,1); }
 .cp-res-item b{ color:var(--text); font-size:13px; }
 @media (max-width:640px){ .cp-res-grid{ grid-template-columns:1fr; } }
-
-/* =========================================================== theme: clay === */
-/* Dawn Clay — گرم، حجیم، خمیری. کارت‌های بادکرده با سایه نرم دوتایی و گوشه‌های خیلی گرد */
-html[data-theme="clay"]{
-  --bg: #FFF7ED;
-  --bg-2: #FFEDD5;
-  --surface: #FFFFFF;
-  --surface-2: #FFF7ED;
-  --surface-hi: #FFF0E0;
-  --border: #FED7AA;
-  --border-soft: #FFE4C7;
-  --text: #431407;
-  --text-muted: #9A6B4D;
-  --text-dim: #C49A7A;
-  --primary: #F97316;
-  --primary-ink: #FFFFFF;
-  --cyan: #06B6D4;
-  --amber: #F59E0B;
-  --emerald: #10B981;
-  --rose: #FB7185;
-  --violet: #F97316;
-  --fuchsia: #EC4899;
-  --font-body: "Vazirmatn", -apple-system, Tahoma, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "Vazirmatn", monospace;
-  --radius: 28px;
-  --radius-sm: 20px;
-  --radius-xs: 14px;
-  --shadow-card: 0 8px 24px rgba(249,115,22,.10), 0 2px 8px rgba(249,115,22,.08);
-  --shadow-pop: 0 20px 50px rgba(124,45,18,.18);
-  --shadow-btn: 0 4px 14px rgba(249,115,22,.25);
-  --focus-ring: 0 0 0 3px rgba(249,115,22,.28);
-}
-html[data-theme="clay"] body{
-  background:
-    radial-gradient(ellipse 700px 400px at 20% -10%, rgba(251,146,60,.18), transparent 60%),
-    radial-gradient(ellipse 600px 350px at 90% 0%, rgba(251,113,133,.12), transparent 60%),
-    var(--bg);
-}
-html[data-theme="clay"] .bg-blobs{ display:none; }
-html[data-theme="clay"] .card,
-html[data-theme="clay"] .login-card,
-html[data-theme="clay"] .modal{
-  border: 1.5px solid var(--border-soft);
-  box-shadow: var(--shadow-card);
-}
-html[data-theme="clay"] .card{ border-radius: var(--radius); }
-html[data-theme="clay"] .btn{ border-radius: 999px; font-weight:700; }
-html[data-theme="clay"] .btn-primary{ background: linear-gradient(135deg,#F97316,#FB923C); border-color: transparent; }
-html[data-theme="clay"] .input, html[data-theme="clay"] .field input{ border-radius: 999px; border-color: var(--border); background: #fff; }
-html[data-theme="clay"] .sidebar{
-  background: #fff; border-left: 1.5px solid var(--border-soft);
-  border-radius: 24px; margin: 12px 12px 12px 0; height: calc(100vh - 24px);
-  box-shadow: 0 8px 32px rgba(124,45,18,.08);
-}
-html[data-theme="clay"] .brand-mark{ background: linear-gradient(135deg,#F97316,#FB923C); border-radius: 14px; width:42px; height:42px; }
-html[data-theme="clay"] .nav-item{ border-radius: 999px; padding: 8px 12px; }
-html[data-theme="clay"] .nav-item.active{ background: linear-gradient(135deg,#F97316,#FB923C); color:#fff; box-shadow: 0 4px 12px rgba(249,115,22,.3); }
-html[data-theme="clay"] .topbar{ background: rgba(255,255,255,.85); backdrop-filter: blur(12px); border-radius: 999px; margin: 12px 16px 0; border: 1.5px solid var(--border-soft); box-shadow: var(--shadow-card); top: 12px; }
-html[data-theme="clay"] .topbar-clock{ border-radius: 999px; background: var(--bg-2); border-color: var(--border-soft); }
-html[data-theme="clay"] .hero{ border-radius: 28px; background: linear-gradient(135deg,#FFF7ED,#FFEDD5); border-color: var(--border-soft); }
-html[data-theme="clay"] .badge{ border-radius: 999px; }
 /* clay dashboard */
 .clay-hero{ display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; background: linear-gradient(135deg,#FFF7ED 0%,#FFEDD5 50%,#FED7AA 100%); border:1.5px solid #FED7AA; border-radius:28px; padding:26px 28px; margin-bottom:16px; box-shadow: 0 8px 24px rgba(249,115,22,.10); }
 .clay-hero h2{ font-size:22px; font-weight:900; color:#431407; }
@@ -1843,56 +1571,6 @@ html[data-theme="clay"] .badge{ border-radius: 999px; }
 .clay-res-card{ border-radius:20px; padding:16px; display:flex; flex-direction:column; gap:8px; border:1.5px solid var(--border-soft); }
 .clay-res-track{ height:10px; border-radius:999px; background: var(--bg-2); overflow:hidden; }
 .clay-res-fill{ display:block; height:100%; border-radius:999px; width:0; transition: width 1s cubic-bezier(.16,1,.3,1); }
-
-/* =========================================================== theme: paper === */
-/* Ink Paper — مینیمال سرمقاله‌ای، کاغذ لوکس، خط مویی 1px، فضای سفید زیاد */
-html[data-theme="paper"]{
-  --bg: #FFFBF0;
-  --bg-2: #FDF6EC;
-  --surface: #FFFFFF;
-  --surface-2: #FFFBF0;
-  --surface-hi: #FDF6EC;
-  --border: #E7E0D1;
-  --border-soft: #EDE8DC;
-  --text: #1A1A1E;
-  --text-muted: #8A8578;
-  --text-dim: #C2BEB0;
-  --primary: #111827;
-  --primary-ink: #FFFFFF;
-  --cyan: #374151;
-  --amber: #92400E;
-  --emerald: #065F46;
-  --rose: #991B1B;
-  --violet: #1F2937;
-  --fuchsia: #7C2D12;
-  --font-body: "Vazirmatn", -apple-system, Tahoma, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "Vazirmatn", monospace;
-  --radius: 10px;
-  --radius-sm: 8px;
-  --radius-xs: 6px;
-  --shadow-card: 0 1px 3px rgba(26,26,30,.06);
-  --shadow-pop: 0 16px 40px rgba(26,26,30,.12);
-  --shadow-btn: 0 1px 2px rgba(26,26,30,.08);
-  --focus-ring: 0 0 0 3px rgba(17,24,39,.12);
-}
-html[data-theme="paper"] body{ background: var(--bg); }
-html[data-theme="paper"] .bg-blobs{ display:none; }
-html[data-theme="paper"] .card,
-html[data-theme="paper"] .login-card,
-html[data-theme="paper"] .modal{ border:1px solid var(--border-soft); box-shadow: none; border-radius: var(--radius); }
-html[data-theme="paper"] .btn{ border-radius: 6px; font-weight:600; border-width:1px; }
-html[data-theme="paper"] .btn-primary{ background: var(--primary); color:#fff; }
-html[data-theme="paper"] .input, html[data-theme="paper"] .field input{ border-radius:6px; background:#fff; border-color: var(--border); }
-html[data-theme="paper"] .sidebar{ background:#fff; border-left:1px solid var(--border); width:230px; }
-html[data-theme="paper"] .brand-mark{ background: var(--primary); color:#fff; border-radius:6px; font-family: var(--font-mono); }
-html[data-theme="paper"] .nav-section{ font-size:9.5px; letter-spacing:.14em; color:var(--text-dim); border-top:1px solid var(--border-soft); padding-top:14px; }
-html[data-theme="paper"] .nav-item{ border-radius:4px; font-size:13px; }
-html[data-theme="paper"] .nav-item.active{ background: var(--primary); color:#fff; }
-html[data-theme="paper"] .nav-item.active .nav-icon{ color:#fff; }
-html[data-theme="paper"] .topbar{ background:#fff; border-bottom:1px solid var(--border); }
-html[data-theme="paper"] .topbar h2{ font-weight:900; letter-spacing:-.02em; }
-html[data-theme="paper"] .topbar-clock{ border-radius:6px; background: var(--bg-2); border:1px solid var(--border-soft); }
-html[data-theme="paper"] .hero{ border-radius: var(--radius); background:#fff; border:1px solid var(--border); }
 /* paper dashboard */
 .paper-hero{ background:#fff; border:1px solid var(--border); border-radius:10px; padding:28px 30px; margin-bottom:16px; }
 .paper-hero-rule{ height:3px; background: var(--primary); border-radius:2px; margin-top:14px; }
@@ -1922,58 +1600,6 @@ html[data-theme="paper"] .hero{ border-radius: var(--radius); background:#fff; b
 .paper-res-card{ background:#fff; border:1px solid var(--border-soft); border-radius:10px; padding:16px; display:flex; flex-direction:column; gap:8px; }
 .paper-res-label{ font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); }
 .paper-res-val{ font-size:22px; font-weight:900; font-family: var(--font-mono); }
-
-/* ======================================================== theme: obsidian === */
-/* Obsidian Signal — AMOLED سیاه متراکم، مونو، یک اکسنت سیگنال، بدون سایه */
-html[data-theme="obsidian"]{
-  --bg: #000000;
-  --bg-2: #0A0A0A;
-  --surface: #111111;
-  --surface-2: #1A1A1A;
-  --surface-hi: #1E1E1E;
-  --border: #222222;
-  --border-soft: #1A1A1A;
-  --text: #EDEDED;
-  --text-muted: #888888;
-  --text-dim: #555555;
-  --primary: #EDEDED;
-  --primary-ink: #000000;
-  --cyan: #0AFF6B;
-  --amber: #FFB800;
-  --emerald: #0AFF6B;
-  --rose: #FF3344;
-  --violet: #EDEDED;
-  --fuchsia: #FF3344;
-  --font-body: "Vazirmatn", -apple-system, Tahoma, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --radius: 6px;
-  --radius-sm: 4px;
-  --radius-xs: 2px;
-  --shadow-card: none;
-  --shadow-pop: 0 16px 40px rgba(0,0,0,.6);
-  --shadow-btn: none;
-  --focus-ring: 0 0 0 2px rgba(10,255,107,.3);
-}
-html[data-theme="obsidian"] body{ background: var(--bg); }
-html[data-theme="obsidian"] .bg-blobs{ display:none; }
-html[data-theme="obsidian"] ::selection{ background: rgba(10,255,107,.25); }
-html[data-theme="obsidian"] .card,
-html[data-theme="obsidian"] .login-card,
-html[data-theme="obsidian"] .modal{ border:1px solid var(--border); box-shadow:none; border-radius: var(--radius); background: var(--surface); }
-html[data-theme="obsidian"] .btn{ border-radius: var(--radius-xs); font-family: var(--font-mono); font-size:12px; letter-spacing:.02em; border-color: var(--border); }
-html[data-theme="obsidian"] .btn-primary{ background: var(--emerald); color:#000; border-color: var(--emerald); font-weight:800; }
-html[data-theme="obsidian"] .input, html[data-theme="obsidian"] .field input{ border-radius: var(--radius-xs); background: var(--surface-2); border-color: var(--border); color: var(--text); font-family: var(--font-mono); font-size:12.5px; }
-html[data-theme="obsidian"] .sidebar{ background: #080808; border-left:1px solid var(--border); }
-html[data-theme="obsidian"] .brand-mark{ background: var(--emerald); color:#000; border-radius:2px; font-family: var(--font-mono); }
-html[data-theme="obsidian"] .brand-text strong{ font-family: var(--font-mono); font-size:13px; }
-html[data-theme="obsidian"] .nav-item{ border-radius:2px; font-family: var(--font-mono); font-size:12px; border-inline-start:2px solid transparent; }
-html[data-theme="obsidian"] .nav-item.active{ background: #1A1A1A; color: var(--emerald); border-inline-start-color: var(--emerald); }
-html[data-theme="obsidian"] .nav-item.active .nav-icon{ color: var(--emerald); }
-html[data-theme="obsidian"] .nav-section{ font-family: var(--font-mono); font-size:9.5px; letter-spacing:.12em; color:var(--text-dim); }
-html[data-theme="obsidian"] .topbar{ background: #080808; border-bottom:1px solid var(--border); }
-html[data-theme="obsidian"] .topbar-clock{ font-family: var(--font-mono); border-radius:2px; background: var(--surface-2); border-color: var(--border); }
-html[data-theme="obsidian"] .live-dot{ background: var(--emerald); box-shadow: 0 0 6px var(--emerald); }
-html[data-theme="obsidian"] .badge{ border-radius:2px; font-family: var(--font-mono); font-size:10.5px; }
 /* obsidian dashboard */
 .obs-hero{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; background: var(--surface); border:1px solid var(--border); border-radius:6px; padding:20px 22px; margin-bottom:14px; border-inline-start:3px solid var(--emerald); }
 .obs-hero h2{ font-family: var(--font-mono); font-size:16px; font-weight:800; letter-spacing:-.01em; }
@@ -2103,200 +1729,17 @@ html[data-theme="obsidian"] .badge{ border-radius:2px; font-family: var(--font-m
   .sv-map-wrap{ aspect-ratio:2/1; }
   .sv-ml-ip{ display:none; }
 }
-
-/* =================================================================
-   Warp Tunnel — لهجه‌ی «عمق»: پنل‌های شیشه‌ای تیره روی اورای بنفش/نیلی
-   تونالِ محو (نه رنگین‌کمانی)، هر کارت یک گوشه‌ی تاشده داره که لایه‌ی
-   زیرینش رو نشون می‌ده (سیگنیچر اصلی تم = «عمق قابل‌دیدن»)، پشت هیرو
-   دو پنل شبح‌مانند در فاصله‌ی Z مختلف قرار گرفتن (دسته‌ی کارت‌های
-   انباشته). عنوان‌ها با فونت Chakra Petch (که از قبل لود شده ولی جایی
-   استفاده نمی‌شد). اسکرول با animation-timeline بومی مرورگر عمق کارت‌ها
-   رو عوض می‌کنه؛ در مرورگرهای بدون پشتیبانی، افکت با IntersectionObserver
-   (در app.js) جایگزین می‌شه.
-================================================================= */
-html[data-theme="warp"]{
-  --bg: #0B0A18;
-  --bg-2: #06050F;
-  --surface: #171432;
-  --surface-2: #1E1A42;
-  --surface-hi: rgba(150,130,255,.07);
-  --border: rgba(150,130,255,.20);
-  --border-soft: rgba(150,130,255,.11);
-
-  --text: #F1EFFF;
-  --text-muted: #9A93C9;
-  --text-dim: #5B5488;
-
-  --primary: #7C5CFF;
-  --primary-ink: #FFFFFF;
-  --cyan: #3FE0C0;
-  --amber: #FFB454;
-  --emerald: #3FE0C0;
-  --rose: #FF6F91;
-  --violet: #7C5CFF;
-  --fuchsia: #FF6F91;
-
-  --font-display: "Chakra Petch", var(--font-body);
-
-  --radius: 18px;
-  --radius-sm: 13px;
-  --radius-xs: 9px;
-
-  --shadow-card: 0 1px 0 rgba(255,255,255,.04) inset, 0 24px 48px rgba(2,2,12,.55);
-  --shadow-pop: 0 30px 70px rgba(2,2,12,.65);
-  --shadow-btn: 0 8px 20px rgba(124,92,255,.35);
-  --focus-ring: 0 0 0 3px rgba(124,92,255,.35);
-}
-
-/* ---------------------------------------------------------- اورای پس‌زمینه --- */
-html[data-theme="warp"] body{ background:var(--bg); }
-html[data-theme="warp"] .bg-blobs{
-  display:block; position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden;
-}
-html[data-theme="warp"] .bg-blobs i{
-  position:absolute; border-radius:50%; filter:blur(90px); opacity:.55;
-  animation:warpDrift 22s ease-in-out infinite;
-}
-html[data-theme="warp"] .bg-blobs i:nth-child(1){ width:520px; height:520px; background:#5A3CFF; top:-160px; right:-120px; }
-html[data-theme="warp"] .bg-blobs i:nth-child(2){ width:460px; height:460px; background:#241C5C; bottom:-180px; left:-100px; animation-delay:-8s; }
-html[data-theme="warp"] .bg-blobs i:nth-child(3){ width:360px; height:360px; background:#3FE0C0; opacity:.16; top:38%; left:52%; animation-delay:-15s; }
 @keyframes warpDrift{
   0%,100%{ transform:translate(0,0) scale(1); }
   50%{ transform:translate(-30px,26px) scale(1.08); }
 }
-html[data-theme="warp"] ::selection{ background:rgba(124,92,255,.35); color:#fff; }
-html[data-theme="warp"] ::-webkit-scrollbar-thumb{ background:rgba(124,92,255,.25); }
-html[data-theme="warp"] h1, html[data-theme="warp"] h2, html[data-theme="warp"] h3, html[data-theme="warp"] h4{
-  font-family:var(--font-display); letter-spacing:.01em; font-weight:600;
-}
-
-/* ------------------------------------------------- کارت با گوشه‌ی تاشده --- */
-html[data-theme="warp"] .content{ position:relative; z-index:1; }
-html[data-theme="warp"] .card,
-html[data-theme="warp"] .login-card,
-html[data-theme="warp"] .modal{
-  background:linear-gradient(165deg, rgba(124,92,255,.10), rgba(23,20,50,.72) 55%);
-  border:1px solid var(--border-soft);
-  backdrop-filter:blur(18px);
-  -webkit-backdrop-filter:blur(18px);
-  clip-path:polygon(0 0, calc(100% - 26px) 0, 100% 26px, 100% 100%, 0 100%);
-  position:relative;
-}
-html[data-theme="warp"] .card::before{
-  content:''; position:absolute; top:0; right:0; width:26px; height:26px;
-  background:linear-gradient(135deg, rgba(255,255,255,.16), rgba(124,92,255,.5) 60%, transparent 61%);
-  clip-path:polygon(100% 0, 100% 100%, 0 0);
-  pointer-events:none;
-}
-html[data-theme="warp"] .card::after{
-  content:''; position:absolute; top:0; right:0; width:26px; height:26px; z-index:-1;
-  background:#000; opacity:.35; filter:blur(4px); transform:translate(2px,2px);
-  clip-path:polygon(100% 0, 100% 100%, 0 0);
-  pointer-events:none;
-}
-html[data-theme="warp"] .btn{ border-radius:var(--radius-sm); font-family:var(--font-display); font-weight:600; letter-spacing:.01em; }
-html[data-theme="warp"] .btn-primary{
-  background:linear-gradient(135deg,#7C5CFF,#5A3CFF); border-color:transparent; box-shadow:var(--shadow-btn);
-}
-html[data-theme="warp"] .btn-primary:hover{ filter:brightness(1.12); box-shadow:0 10px 26px rgba(124,92,255,.5); }
-html[data-theme="warp"] .input, html[data-theme="warp"] .field input{
-  background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-xs); color:var(--text);
-}
-html[data-theme="warp"] .field input:focus{ box-shadow:var(--focus-ring); border-color:var(--primary); }
-html[data-theme="warp"] .badge{ border:1px solid currentColor; border-radius:20px; }
-html[data-theme="warp"] table{ border:1px solid var(--border-soft); }
-html[data-theme="warp"] thead th{ border-bottom:1px solid var(--border-soft); color:var(--text-muted); font-family:var(--font-display); font-size:11.5px; letter-spacing:.04em; }
-html[data-theme="warp"] .login-logo{ box-shadow:0 0 30px rgba(124,92,255,.5); }
-
-html[data-theme="warp"] .sidebar{
-  background:linear-gradient(180deg, rgba(23,20,50,.85), rgba(6,5,15,.9));
-  border-left:1px solid var(--border-soft); backdrop-filter:blur(14px);
-}
-html[data-theme="warp"] .brand-mark{ box-shadow:0 0 20px rgba(124,92,255,.55); }
-html[data-theme="warp"] .brand-text strong{ font-family:var(--font-display); }
-html[data-theme="warp"] .nav-item{ border-radius:var(--radius-xs); }
-html[data-theme="warp"] .nav-item:hover{ background:rgba(124,92,255,.10); color:var(--primary); }
-html[data-theme="warp"] .nav-item.active{
-  background:rgba(124,92,255,.16); color:#C9BFFF;
-  box-shadow:inset 3px 0 0 var(--primary), 0 0 18px rgba(124,92,255,.22);
-}
-html[data-theme="warp"] .nav-item.active .nav-icon{ color:#C9BFFF; }
-html[data-theme="warp"] .topbar{ background:rgba(6,5,15,.6); backdrop-filter:blur(10px); border-bottom:1px solid var(--border-soft); }
-html[data-theme="warp"] .topbar h2{ font-family:var(--font-display); }
-html[data-theme="warp"] .topbar-clock{ border:1px solid var(--border-soft); }
-html[data-theme="warp"] .live-dot{ background:var(--cyan); box-shadow:0 0 10px var(--cyan); animation:warpPulseDot 1.6s ease-in-out infinite; }
 @keyframes warpPulseDot{ 0%,100%{ opacity:1; } 50%{ opacity:.3; } }
 
-/* ------------------------------------------- عمق واقعی هنگام اسکرول --- */
-/* حالت پایه (JS فقط این کلاس رو اضافه/حذف می‌کنه؛ روی مرورگرهایی که از
-   animation-timeline پشتیبانی می‌کنن، قانون @supports پایین‌تر جایگزینش
-   می‌شه و دیگه نیازی به تغییر کلاس با اسکرول نیست). */
-html[data-theme="warp"] .warp-reveal{
-  opacity:0; transform:translateY(26px) scale(.97);
-  transition:opacity .6s var(--ease), transform .6s var(--ease);
-}
-html[data-theme="warp"] .warp-reveal.warp-in{ opacity:1; transform:none; }
-
 @supports (animation-timeline: view()){
-  html[data-theme="warp"] .warp-reveal{
-    opacity:1; transform:none; transition:none;
-    animation: warpViewIn linear both;
-    animation-timeline: view();
-    animation-range: entry 0% cover 30%;
-  }
   @keyframes warpViewIn{
     from{ opacity:0; transform:translateY(30px) scale(.97); }
     to{ opacity:1; transform:none; }
   }
-}
-
-/* ------------------------------------------------------- warp: hero --- */
-html[data-theme="warp"] .warp-hero{
-  position:relative; padding:26px 30px; margin-bottom:34px;
-}
-html[data-theme="warp"] .warp-hero::before,
-html[data-theme="warp"] .warp-hero::after{ display:none; } /* گوشه‌ی تاشده روی هیرو لازم نیست، پشتش دسته‌ی کارت داره */
-html[data-theme="warp"] .warp-stack-ghost{
-  position:absolute; inset:0; border-radius:var(--radius); pointer-events:none;
-  border:1px solid var(--border-soft); background:rgba(30,26,66,.4);
-}
-html[data-theme="warp"] .warp-stack-ghost.g1{ transform:translate(10px,10px) scale(.98); opacity:.55; z-index:-1; }
-html[data-theme="warp"] .warp-stack-ghost.g2{ transform:translate(20px,20px) scale(.96); opacity:.3; z-index:-2; }
-html[data-theme="warp"] .warp-hero-text{ position:relative; z-index:1; }
-html[data-theme="warp"] .warp-hero-tag{
-  display:inline-block; font-family:var(--font-display); font-size:11px; letter-spacing:.1em; color:var(--cyan);
-  border:1px solid var(--border); border-radius:20px; padding:4px 13px; margin-bottom:12px;
-}
-html[data-theme="warp"] .warp-hero-text h2{ font-size:22px; margin:2px 0 7px; }
-html[data-theme="warp"] .warp-hero-text p{ color:var(--text-muted); font-size:13.5px; }
-
-html[data-theme="warp"] .warp-stats .stat-card .value{ font-family:var(--font-display); }
-
-html[data-theme="warp"] .warp-chart-card{ margin-top:16px; }
-html[data-theme="warp"] .warp-chart{ width:100%; height:200px; overflow:visible; }
-html[data-theme="warp"] .warp-chart-line{
-  stroke:var(--cyan); stroke-width:2.4; stroke-linecap:round;
-  filter:drop-shadow(0 0 7px rgba(63,224,192,.55));
-}
-
-html[data-theme="warp"] .warp-row{ margin-top:16px; }
-html[data-theme="warp"] .warp-ring-grid{ display:flex; gap:20px; flex-wrap:wrap; }
-html[data-theme="warp"] .warp-ring-item{ display:flex; align-items:center; gap:14px; }
-html[data-theme="warp"] .warp-ring{ width:60px; height:60px; }
-html[data-theme="warp"] .warp-ring-info strong{ display:block; font-size:13.5px; }
-html[data-theme="warp"] .warp-ring-info span{ font-size:11.5px; color:var(--text-muted); }
-
-html[data-theme="warp"] .warp-prod-row{ display:flex; align-items:center; gap:10px; padding:7px 0; font-size:12.5px; }
-html[data-theme="warp"] .warp-prod-rank{ font-family:var(--font-display); color:var(--cyan); flex:0 0 20px; }
-html[data-theme="warp"] .warp-prod-name{ flex:0 0 100px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-html[data-theme="warp"] .warp-prod-val{ flex:0 0 auto; color:var(--text-muted); font-size:11.5px; }
-
-@media (prefers-reduced-motion: reduce){
-  html[data-theme="warp"] .bg-blobs i{ animation:none; }
-}
-@media (max-width:720px){
-  html[data-theme="warp"] .card::before, html[data-theme="warp"] .card::after{ width:18px; height:18px; }
-  html[data-theme="warp"] .card{ clip-path:polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%); }
 }
 
 /* =================================================================
@@ -2334,120 +1777,3 @@ html[data-theme="brutalist"][data-mode="dark"] .topbar{ border-bottom-color:#F5F
 html[data-theme="brutalist"][data-mode="dark"] .topbar-clock{ border-color:#F5F0DC; }
 html[data-theme="brutalist"][data-mode="dark"] #logout-btn{ background:#1E1E1E; color:var(--text); }
 html[data-theme="brutalist"][data-mode="dark"] .me-avatar{ background:#F5F0DC; color:#000; border-color:#000; }
-
-/* ---- Clay (پیش‌فرض روشن) → نسخه‌ی تیره؛ همون گرمای نارنجی، فقط روی
-   زمینه‌ی تیره ---- */
-html[data-theme="clay"][data-mode="dark"]{
-  --bg:#1C140E; --bg-2:#150F0A; --surface:#241A12; --surface-2:#1C140E;
-  --surface-hi:#2C2016; --border:rgba(249,115,22,.25); --border-soft:rgba(249,115,22,.15);
-  --text:#FDF0E4; --text-muted:#C79A78; --text-dim:#8A6A50;
-  --shadow-card:0 8px 24px rgba(0,0,0,.35); --shadow-pop:0 20px 50px rgba(0,0,0,.5); --shadow-btn:0 4px 14px rgba(0,0,0,.35);
-}
-html[data-theme="clay"][data-mode="dark"] body{
-  background:
-    radial-gradient(ellipse 700px 400px at 20% -10%, rgba(251,146,60,.14), transparent 60%),
-    radial-gradient(ellipse 600px 350px at 90% 0%, rgba(251,113,133,.08), transparent 60%),
-    var(--bg);
-}
-html[data-theme="clay"][data-mode="dark"] .input, html[data-theme="clay"][data-mode="dark"] .field input{ background:var(--surface-2); color:var(--text); }
-html[data-theme="clay"][data-mode="dark"] .sidebar{ background:var(--surface); box-shadow:0 8px 32px rgba(0,0,0,.35); }
-html[data-theme="clay"][data-mode="dark"] .topbar{ background:rgba(36,26,18,.85); }
-html[data-theme="clay"][data-mode="dark"] .hero{ background:linear-gradient(135deg,#241A12,#1C140E); }
-
-/* ---- Paper (پیش‌فرض روشن) → نسخه‌ی تیره؛ primary مرکب-مشکی بود، توی
-   تیره باید روشن بشه تا دکمه‌ها دیده بشن ---- */
-html[data-theme="paper"][data-mode="dark"]{
-  --bg:#17181C; --bg-2:#101114; --surface:#1E2025; --surface-2:#17181C;
-  --surface-hi:#22242A; --border:#2C2E35; --border-soft:#24262C;
-  --text:#EDEDEF; --text-muted:#8D8F98; --text-dim:#54565E;
-  --primary:#EDEDEF; --primary-ink:#17181C;
-  --cyan:#9CA3AF; --amber:#D9975A; --emerald:#5FAE8E; --rose:#E08585; --violet:#C7C9D1; --fuchsia:#C77B58;
-  --shadow-card:0 1px 3px rgba(0,0,0,.3); --shadow-pop:0 16px 40px rgba(0,0,0,.5); --shadow-btn:0 1px 2px rgba(0,0,0,.3);
-  --focus-ring:0 0 0 3px rgba(237,237,239,.15);
-}
-html[data-theme="paper"][data-mode="dark"] .input, html[data-theme="paper"][data-mode="dark"] .field input{ background:var(--surface-2); color:var(--text); }
-html[data-theme="paper"][data-mode="dark"] .sidebar{ background:var(--surface); }
-html[data-theme="paper"][data-mode="dark"] .topbar{ background:var(--surface); }
-html[data-theme="paper"][data-mode="dark"] .hero{ background:var(--surface); }
-html[data-theme="paper"][data-mode="dark"] .btn-primary{ color:var(--primary-ink); }
-html[data-theme="paper"][data-mode="dark"] .nav-item.active{ color:var(--primary-ink); }
-html[data-theme="paper"][data-mode="dark"] .nav-item.active .nav-icon{ color:var(--primary-ink); }
-
-/* ---- Glass (پیش‌فرض تیره) → نسخه‌ی روشن؛ همون شیشه‌ی مات، این‌بار روی
-   پس‌زمینه‌ی پاستلی روشن ---- */
-html[data-theme="glass"][data-mode="light"]{
-  --bg:#EEF0FA; --bg-2:#E4E7F5; --surface:rgba(255,255,255,.55); --surface-2:rgba(255,255,255,.7);
-  --surface-hi:rgba(20,20,50,.04); --border:rgba(20,20,50,.10); --border-soft:rgba(20,20,50,.07);
-  --text:#221F3D; --text-muted:#5B5780; --text-dim:#9A96BE;
-  --primary:#7C4DE0; --primary-ink:#FFFFFF; --cyan:#0891A8; --amber:#B45309; --emerald:#0E9F6E; --rose:#E11D5C; --fuchsia:#C0267D;
-  --shadow-card:0 8px 32px rgba(80,70,140,.12); --shadow-pop:0 24px 60px rgba(80,70,140,.2); --shadow-btn:0 4px 14px rgba(80,70,140,.15);
-  --focus-ring:0 0 0 3px rgba(124,77,224,.3);
-}
-html[data-theme="glass"][data-mode="light"] body{
-  background:
-    radial-gradient(circle at 15% 12%, rgba(139,92,246,.16), transparent 45%),
-    radial-gradient(circle at 85% 18%, rgba(34,211,238,.14), transparent 40%),
-    radial-gradient(circle at 50% 90%, rgba(236,72,153,.12), transparent 45%),
-    var(--bg);
-}
-html[data-theme="glass"][data-mode="light"] .sidebar{ background:rgba(255,255,255,.45); }
-html[data-theme="glass"][data-mode="light"] .topbar{ background:rgba(238,240,250,.6); }
-html[data-theme="glass"][data-mode="light"] ::selection{ background:rgba(124,77,224,.2); }
-
-/* ---- Cyberpunk (پیش‌فرض تیره) → نسخه‌ی روشن؛ حس «آزمایشگاه/کاغذ فنی»
-   با همون سبز/صورتی نئون ولی پررنگ‌تر روی زمینه‌ی روشن ---- */
-html[data-theme="cyberpunk"][data-mode="light"]{
-  --bg:#F1F5F1; --bg-2:#E6EDE7; --surface:#FFFFFF; --surface-2:#EAF2EC;
-  --surface-hi:rgba(0,150,90,.05); --border:rgba(0,120,70,.3); --border-soft:rgba(0,120,70,.15);
-  --text:#0A2318; --text-muted:#3E6B54; --text-dim:#8AAC9B;
-  --primary:#00A85E; --primary-ink:#FFFFFF; --cyan:#0086A8; --amber:#8A7A00; --emerald:#00A868; --rose:#C81E45; --violet:#C81E82; --fuchsia:#C81E82;
-  --shadow-card:0 0 0 1px rgba(0,150,90,.1), 0 8px 24px rgba(0,40,20,.08);
-  --shadow-pop:0 0 30px rgba(0,150,90,.12), 0 24px 60px rgba(0,40,20,.14);
-  --shadow-btn:0 2px 10px rgba(0,150,90,.2); --focus-ring:0 0 0 3px rgba(0,168,94,.3);
-}
-html[data-theme="cyberpunk"][data-mode="light"] body{
-  background:
-    repeating-linear-gradient(180deg, rgba(0,120,70,.03) 0px, rgba(0,120,70,.03) 1px, transparent 1px, transparent 3px),
-    radial-gradient(circle at 12% 8%, rgba(0,168,94,.08), transparent 42%),
-    radial-gradient(circle at 88% 14%, rgba(200,30,130,.06), transparent 40%),
-    var(--bg);
-}
-html[data-theme="cyberpunk"][data-mode="light"] ::selection{ background:rgba(0,168,94,.22); color:#04120c; }
-html[data-theme="cyberpunk"][data-mode="light"] .topbar{ background:rgba(241,245,241,.8); }
-html[data-theme="cyberpunk"][data-mode="light"] .sidebar{ background:linear-gradient(180deg, #fff, #EAF2EC); }
-html[data-theme="cyberpunk"][data-mode="light"] .btn-primary:hover{ box-shadow:0 4px 16px rgba(0,168,94,.35); }
-
-/* ---- Obsidian (پیش‌فرض تیره‌ی مطلق) → نسخه‌ی روشن؛ همون ترمینال، این‌بار
-   کاغذ سفید با متن مشکی و همون سبز سیگنال برای تاکید ---- */
-html[data-theme="obsidian"][data-mode="light"]{
-  --bg:#FAFAFA; --bg-2:#F0F0F0; --surface:#FFFFFF; --surface-2:#F2F2F2;
-  --surface-hi:#EDEDED; --border:#DDDDDD; --border-soft:#E8E8E8;
-  --text:#111111; --text-muted:#666666; --text-dim:#999999;
-  --primary:#111111; --primary-ink:#FFFFFF; --cyan:#00A050; --amber:#A06A00; --emerald:#00A050; --rose:#CC2233; --violet:#111111; --fuchsia:#CC2233;
-  --shadow-pop:0 16px 40px rgba(0,0,0,.15); --focus-ring:0 0 0 2px rgba(0,160,80,.35);
-}
-html[data-theme="obsidian"][data-mode="light"] .sidebar{ background:#F7F7F7; }
-html[data-theme="obsidian"][data-mode="light"] .topbar{ background:#F7F7F7; }
-html[data-theme="obsidian"][data-mode="light"] .nav-item.active{ background:#EAEAEA; }
-html[data-theme="obsidian"][data-mode="light"] .btn-primary{ color:#fff; }
-html[data-theme="obsidian"][data-mode="light"] ::selection{ background:rgba(0,160,80,.2); }
-
-/* ---- Warp Tunnel (پیش‌فرض تیره‌ی فضایی) → نسخه‌ی روشن؛ بنفش روی
-   زمینه‌ی خیلی روشنِ لاواندری، عمق از سایه تامین می‌شه نه گلوی نئون ---- */
-html[data-theme="warp"][data-mode="light"]{
-  --bg:#F1EFFC; --bg-2:#E7E3F9; --surface:rgba(255,255,255,.75); --surface-2:#FFFFFF;
-  --surface-hi:rgba(124,92,255,.06); --border:rgba(124,92,255,.18); --border-soft:rgba(124,92,255,.1);
-  --text:#211D3B; --text-muted:#615C87; --text-dim:#9E99C2;
-  --primary:#6C3CE9; --primary-ink:#FFFFFF; --cyan:#0E8F79; --amber:#B4650F; --emerald:#0E8F79; --rose:#D63A72; --violet:#6C3CE9; --fuchsia:#D63A72;
-  --shadow-card:0 1px 0 rgba(255,255,255,.6) inset, 0 20px 40px rgba(90,70,180,.12);
-  --shadow-pop:0 30px 60px rgba(90,70,180,.18); --shadow-btn:0 8px 18px rgba(108,60,233,.22);
-  --focus-ring:0 0 0 3px rgba(108,60,233,.25);
-}
-html[data-theme="warp"][data-mode="light"] .bg-blobs i{ opacity:.35; }
-html[data-theme="warp"][data-mode="light"] .bg-blobs i:nth-child(3){ opacity:.12; }
-html[data-theme="warp"][data-mode="light"] .card::before{
-  background:linear-gradient(135deg, rgba(255,255,255,.9), rgba(124,92,255,.35) 60%, transparent 61%);
-}
-html[data-theme="warp"][data-mode="light"] .sidebar{ background:linear-gradient(180deg, rgba(255,255,255,.9), rgba(231,227,249,.9)); }
-html[data-theme="warp"][data-mode="light"] .topbar{ background:rgba(241,239,252,.7); }
-html[data-theme="warp"][data-mode="light"] ::selection{ background:rgba(108,60,233,.22); }

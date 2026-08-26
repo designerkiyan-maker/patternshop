@@ -30,12 +30,12 @@
 <script>
 (function(){
   try{
-    var t = JSON.parse(localStorage.getItem('sv-theme') || 'null') || { theme:'flat', mode:'dark' };
-    document.documentElement.setAttribute('data-theme', t.theme || 'flat');
-    document.documentElement.setAttribute('data-mode', t.mode || 'dark');
+    var t = JSON.parse(localStorage.getItem('sv-theme') || 'null') || { theme:'bento', mode:'light' };
+    document.documentElement.setAttribute('data-theme', t.theme || 'bento');
+    document.documentElement.setAttribute('data-mode', t.mode || 'light');
   }catch(e){
-    document.documentElement.setAttribute('data-theme','flat');
-    document.documentElement.setAttribute('data-mode','dark');
+    document.documentElement.setAttribute('data-theme','bento');
+    document.documentElement.setAttribute('data-mode','light');
   }
 })();
 </script>
