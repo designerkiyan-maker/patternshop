@@ -2393,6 +2393,7 @@ async function renderOrders() {
   const canAct = hasPerm('orders');
   const orders = await apiGet(`/orders?status=${ordersStatus}`);
   if (loadTheme().theme === 'brutalist') return renderOrdersBrutalist(orders, canAct);
+  if (loadTheme().theme === 'bento') return renderOrdersBento(orders, canAct);
   setContent(`
     <div class="tabs">
       ${['pending', 'approved', 'rejected'].map(s => `<button class="tab-btn ${s === ordersStatus ? 'active' : ''}" data-status="${s}">${{ pending: 'در انتظار', approved: 'تایید شده', rejected: 'رد شده' }[s]}</button>`).join('')}
@@ -2429,6 +2430,54 @@ async function renderOrders() {
     catch (e) { handleErr(e); b.disabled = false; }
   }));
   $$('[data-reject]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('سفارش رد شود؟')) return;
+    try { await apiPost(`/orders/${b.dataset.reject}/reject`); toast('سفارش رد شد.'); renderOrders(); }
+    catch (e) { handleErr(e); }
+  }));
+}
+
+/* -------------------------------------------------------- orders: bento -- */
+function renderOrdersBento(orders, canAct) {
+  const total = orders.reduce((sum, o) => sum + Number(o.final_price ?? o.base_price ?? 0), 0);
+  setContent(`
+    <div class="bn-hero">
+      <div><h2>سفارش‌ها</h2><p>${fmt(orders.length)} مورد · جمع ${fmt(total)} تومان</p></div>
+      <div class="bn-seg">${['pending', 'approved', 'rejected'].map(s => `<button class="bn-seg-btn ${s === ordersStatus ? 'active' : ''}" data-status="${s}">${ORDERS_STATUS_LABEL[s]}</button>`).join('')}</div>
+    </div>
+    <div class="bn-list">
+      ${orders.map((o, i) => `
+        <div class="bn-row-wrap bn-card-anim" style="animation-delay:${Math.min(i * 30, 260)}ms">
+          <div class="bn-row">
+            ${bnAvatar((o.product_name || '?').trim().charAt(0), i)}
+            <div class="bn-row-main">
+              <span class="bn-row-title">${esc(o.product_name)}</span>
+              <span class="bn-row-sub">${esc(o.username || o.user_id)} · ${fmtDate(o.created_at)}</span>
+            </div>
+            <div class="bn-row-trail">
+              <span class="bn-row-amount mono">${fmt(o.final_price ?? o.base_price)} ت</span>
+              ${o.receipt_file_id ? `<button class="bn-btn bn-btn-ghost" data-receipt="order:${o.id}">رسید</button>` : ''}
+              ${historyBtn('order', o.id)}
+            </div>
+          </div>
+          ${canAct && ordersStatus === 'pending' ? `<div class="bn-row-actions">
+            <button class="bn-btn bn-btn-ok" data-approve="${o.id}">تایید</button>
+            <button class="bn-btn bn-btn-no" data-reject="${o.id}">رد</button>
+          </div>` : ''}
+        </div>
+      `).join('') || `<div class="empty-state"><div class="icon">${svg('empty')}</div>سفارشی در این وضعیت نیست</div>`}
+    </div>
+  `);
+  $$('.bn-seg-btn', content()).forEach(b => b.addEventListener('click', () => { ordersStatus = b.dataset.status; renderOrders(); }));
+  $$('[data-receipt]', content()).forEach(b => b.addEventListener('click', () => {
+    const [kind, id] = b.dataset.receipt.split(':');
+    showReceiptModal(kind, id);
+  }));
+  $$('[data-approve]', content()).forEach(b => b.addEventListener('click', async function () {
+    this.disabled = true;
+    try { await apiPost(`/orders/${b.dataset.approve}/approve`); toast('سفارش تایید شد.'); renderOrders(); }
+    catch (e) { handleErr(e); this.disabled = false; }
+  }));
+  $$('[data-reject]', content()).forEach(b => b.addEventListener('click', async function () {
     if (!confirm('سفارش رد شود؟')) return;
     try { await apiPost(`/orders/${b.dataset.reject}/reject`); toast('سفارش رد شد.'); renderOrders(); }
     catch (e) { handleErr(e); }
@@ -2501,6 +2550,7 @@ async function renderTopups() {
   const canAct = hasPerm('orders');
   const topups = await apiGet(`/topups?status=${topupsStatus}`);
   if (loadTheme().theme === 'brutalist') return renderTopupsBrutalist(topups, canAct);
+  if (loadTheme().theme === 'bento') return renderTopupsBento(topups, canAct);
   setContent(`
     <div class="tabs">
       ${['pending', 'approved', 'rejected'].map(s => `<button class="tab-btn ${s === topupsStatus ? 'active' : ''}" data-status="${s}">${{ pending: 'در انتظار', approved: 'تایید شده', rejected: 'رد شده' }[s]}</button>`).join('')}
@@ -2521,6 +2571,50 @@ async function renderTopups() {
     </div>
   `);
   $$('.tab-btn', content()).forEach(b => b.addEventListener('click', () => { topupsStatus = b.dataset.status; renderTopups(); }));
+  $$('[data-receipt]', content()).forEach(b => b.addEventListener('click', () => {
+    const [kind, id] = b.dataset.receipt.split(':');
+    showReceiptModal(kind, id);
+  }));
+  $$('[data-approve]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/topups/${b.dataset.approve}/approve`); toast('شارژ تایید شد.'); renderTopups(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-reject]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('این شارژ رد شود؟')) return;
+    try { await apiPost(`/topups/${b.dataset.reject}/reject`); toast('رد شد.'); renderTopups(); } catch (e) { handleErr(e); }
+  }));
+}
+
+/* -------------------------------------------------------- topups: bento -- */
+function renderTopupsBento(topups, canAct) {
+  const total = topups.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  setContent(`
+    <div class="bn-hero">
+      <div><h2>شارژ کیف پول</h2><p>${fmt(topups.length)} مورد · جمع ${fmt(total)} تومان</p></div>
+      <div class="bn-seg">${['pending', 'approved', 'rejected'].map(s => `<button class="bn-seg-btn ${s === topupsStatus ? 'active' : ''}" data-status="${s}">${ORDERS_STATUS_LABEL[s]}</button>`).join('')}</div>
+    </div>
+    <div class="bn-list">
+      ${topups.map((t, i) => `
+        <div class="bn-row-wrap bn-card-anim" style="animation-delay:${Math.min(i * 30, 260)}ms">
+          <div class="bn-row">
+            ${bnAvatar((t.username || '؟').trim().charAt(0), i)}
+            <div class="bn-row-main">
+              <span class="bn-row-title">${esc(t.username || t.user_id)}</span>
+              <span class="bn-row-sub">${fmtDate(t.created_at)}</span>
+            </div>
+            <div class="bn-row-trail">
+              <span class="bn-row-amount mono">${fmt(t.amount)} ت</span>
+              ${t.receipt_file_id ? `<button class="bn-btn bn-btn-ghost" data-receipt="topup:${t.id}">رسید</button>` : ''}
+            </div>
+          </div>
+          ${canAct && topupsStatus === 'pending' ? `<div class="bn-row-actions">
+            <button class="bn-btn bn-btn-ok" data-approve="${t.id}">تایید</button>
+            <button class="bn-btn bn-btn-no" data-reject="${t.id}">رد</button>
+          </div>` : ''}
+        </div>
+      `).join('') || `<div class="empty-state"><div class="icon">${svg('empty')}</div>درخواستی در این وضعیت نیست</div>`}
+    </div>
+  `);
+  $$('.bn-seg-btn', content()).forEach(b => b.addEventListener('click', () => { topupsStatus = b.dataset.status; renderTopups(); }));
   $$('[data-receipt]', content()).forEach(b => b.addEventListener('click', () => {
     const [kind, id] = b.dataset.receipt.split(':');
     showReceiptModal(kind, id);
@@ -2594,6 +2688,7 @@ async function renderUsers() {
   const res = await apiGet(`/users?q=${encodeURIComponent(usersState.q)}&status=${usersState.status}&page=${usersState.page}`);
   const pages = Math.max(Math.ceil(res.total / res.limit), 1);
   if (loadTheme().theme === 'brutalist') return renderUsersBrutalist(res, pages);
+  if (loadTheme().theme === 'bento') return renderUsersBento(res, pages);
   setContent(`
     <div class="toolbar">
       <input class="input" id="user-search" placeholder="جستجو (آیدی، یوزرنیم، نام)..." value="${esc(usersState.q)}">
@@ -2621,6 +2716,46 @@ async function renderUsers() {
   `);
   $('#user-search').addEventListener('keydown', e => { if (e.key === 'Enter') { usersState.q = e.target.value; usersState.page = 1; renderUsers(); } });
   $('#user-status').addEventListener('change', e => { usersState.status = e.target.value; usersState.page = 1; renderUsers(); });
+  $$('[data-page]', content()).forEach(b => b.addEventListener('click', () => { usersState.page = Number(b.dataset.page); renderUsers(); }));
+  $$('[data-block]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/users/${b.dataset.block}/block`); toast('کاربر مسدود شد.'); renderUsers(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-unblock]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/users/${b.dataset.unblock}/unblock`); toast('رفع مسدودیت شد.'); renderUsers(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-detail]', content()).forEach(b => b.addEventListener('click', () => showUserDetail(Number(b.dataset.detail))));
+}
+
+/* ---------------------------------------------------------- users: bento */
+function renderUsersBento(res, pages) {
+  setContent(`
+    <div class="bn-hero">
+      <div><h2>کاربران</h2><p>${fmt(res.total)} کاربر ثبت‌شده</p></div>
+      <div class="bn-seg">${['all', 'active', 'expired', 'blocked'].map(s => `<button class="bn-seg-btn ${s === usersState.status ? 'active' : ''}" data-ustatus="${s}">${USERS_STATUS_LABEL[s]}</button>`).join('')}</div>
+    </div>
+    <input class="bn-search" id="user-search" placeholder="جستجو: آیدی، یوزرنیم، نام..." value="${esc(usersState.q)}" style="margin-bottom:14px">
+    <div class="bn-list">
+      ${res.items.map((u, i) => `
+        <div class="bn-row bn-card-anim" style="animation-delay:${Math.min(i * 25, 240)}ms">
+          ${bnAvatar((u.first_name || u.username || '؟').trim().charAt(0).toUpperCase(), i)}
+          <div class="bn-row-main">
+            <span class="bn-row-title">${esc(u.username ? '@' + u.username : (u.first_name || '—'))}</span>
+            <span class="bn-row-sub">ID: ${u.telegram_id} · عضویت ${fmtDate(u.joined_at)}</span>
+          </div>
+          <div class="bn-row-trail">
+            ${bnPill(u.is_blocked ? 'مسدود' : 'فعال', u.is_blocked ? 'no' : 'ok')}
+            <button class="bn-btn bn-btn-ghost" data-detail="${u.telegram_id}">جزئیات</button>
+            ${hasPerm('users') ? (u.is_blocked
+              ? `<button class="bn-btn bn-btn-ok" data-unblock="${u.telegram_id}">رفع مسدودی</button>`
+              : `<button class="bn-btn bn-btn-no" data-block="${u.telegram_id}">مسدودسازی</button>`) : ''}
+          </div>
+        </div>
+      `).join('') || `<div class="empty-state"><div class="icon">${svg('empty')}</div>کاربری یافت نشد</div>`}
+    </div>
+    <div class="pager" style="margin-top:16px">${Array.from({ length: pages }, (_, i) => i + 1).map(p => `<button class="btn btn-sm ${p === usersState.page ? 'btn-primary' : ''}" data-page="${p}">${p}</button>`).join('')}</div>
+  `);
+  $('#user-search').addEventListener('keydown', e => { if (e.key === 'Enter') { usersState.q = e.target.value; usersState.page = 1; renderUsers(); } });
+  $$('.bn-seg-btn[data-ustatus]', content()).forEach(b => b.addEventListener('click', () => { usersState.status = b.dataset.ustatus; usersState.page = 1; renderUsers(); }));
   $$('[data-page]', content()).forEach(b => b.addEventListener('click', () => { usersState.page = Number(b.dataset.page); renderUsers(); }));
   $$('[data-block]', content()).forEach(b => b.addEventListener('click', async () => {
     try { await apiPost(`/users/${b.dataset.block}/block`); toast('کاربر مسدود شد.'); renderUsers(); } catch (e) { handleErr(e); }
@@ -2742,6 +2877,7 @@ let catalogTab = 'products';
 async function renderCatalog() {
   const [categories, products] = await Promise.all([apiGet('/categories'), apiGet('/products')]);
   if (loadTheme().theme === 'brutalist') return renderCatalogBrutalist(categories, products);
+  if (loadTheme().theme === 'bento') return renderCatalogBento(categories, products);
   setContent(`
     <div class="tabs">
       <button class="tab-btn ${catalogTab === 'products' ? 'active' : ''}" data-t="products">محصولات</button>
@@ -2793,6 +2929,107 @@ async function renderCatalog() {
         <button class="btn btn-danger btn-sm" data-del-prod="${p.id}">حذف</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="6" class="empty-state">محصولی نیست</td></tr>'}</tbody></table></div></div>`;
+
+  $('#add-prod').addEventListener('click', () => openModal('محصول جدید', `
+    <div class="form-grid">
+      <select class="input" id="prod-cat">${categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+      <input class="input" id="prod-name" placeholder="نام محصول">
+      <div class="form-row"><input class="input" id="prod-price" type="number" placeholder="قیمت (تومان)">
+      <input class="input" id="prod-duration" type="number" placeholder="مدت (روز)" value="30"></div>
+      <textarea class="input" id="prod-desc" placeholder="توضیحات (اختیاری)" rows="2"></textarea>
+      <button class="btn btn-primary" id="prod-save">ثبت</button>
+    </div>`, (b, close) => {
+    $('#prod-save', b).addEventListener('click', async () => {
+      const name = $('#prod-name', b).value.trim();
+      const price = Number($('#prod-price', b).value);
+      if (!name || !price) return toast('نام و قیمت الزامی است.', true);
+      try {
+        await apiPost('/products', {
+          category_id: Number($('#prod-cat', b).value), name, price,
+          description: $('#prod-desc', b).value, duration_days: Number($('#prod-duration', b).value) || 30,
+        });
+        toast('محصول اضافه شد.'); close(); renderCatalog();
+      } catch (e) { handleErr(e); }
+    });
+  }));
+  $$('[data-toggle-prod]', body).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/products/${b.dataset.toggleProd}/toggle`); renderCatalog(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-del-prod]', body).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('این محصول حذف شود؟')) return;
+    try { await apiDelete(`/products/${b.dataset.delProd}`); toast('حذف شد.'); renderCatalog(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-configs]', body).forEach(b => b.addEventListener('click', () => showConfigBank(Number(b.dataset.configs))));
+}
+
+/* ---------------------------------------------------------- catalog: bento */
+function renderCatalogBento(categories, products) {
+  setContent(`
+    <div class="bn-hero">
+      <div><h2>ویترین محصولات</h2><p>${fmt(products.length)} محصول در ${fmt(categories.length)} دسته‌بندی</p></div>
+      <div class="bn-seg">
+        <button class="bn-seg-btn ${catalogTab === 'products' ? 'active' : ''}" data-t="products">محصولات</button>
+        <button class="bn-seg-btn ${catalogTab === 'categories' ? 'active' : ''}" data-t="categories">دسته‌بندی‌ها</button>
+      </div>
+    </div>
+    <div id="catalog-body"></div>
+  `);
+  $$('.bn-seg-btn[data-t]', content()).forEach(b => b.addEventListener('click', () => { catalogTab = b.dataset.t; renderCatalog(); }));
+
+  const body = $('#catalog-body');
+  if (catalogTab === 'categories') {
+    body.innerHTML = `
+      <div class="bn-toolbar" style="justify-content:flex-end"><button class="bn-btn bn-btn-ok" id="add-cat">+ دسته‌بندی جدید</button></div>
+      <div class="bn-list">
+        ${categories.map((c, i) => `
+          <div class="bn-row bn-card-anim" style="animation-delay:${Math.min(i * 25, 220)}ms">
+            ${bnAvatar(c.name.trim().charAt(0), i)}
+            <div class="bn-row-main"><span class="bn-row-title">${esc(c.name)}</span></div>
+            <div class="bn-row-trail">
+              ${bnPill(c.is_active ? 'فعال' : 'غیرفعال', c.is_active ? 'ok' : 'no')}
+              <button class="bn-btn bn-btn-ghost" data-toggle-cat="${c.id}">${c.is_active ? 'غیرفعال کن' : 'فعال کن'}</button>
+              <button class="bn-btn bn-btn-no" data-del-cat="${c.id}">حذف</button>
+            </div>
+          </div>
+        `).join('') || `<div class="empty-state"><div class="icon">${svg('empty')}</div>دسته‌بندی‌ای نیست</div>`}
+      </div>`;
+    $('#add-cat').addEventListener('click', () => openModal('دسته‌بندی جدید', `
+      <div class="form-grid"><input class="input" id="cat-name" placeholder="نام دسته‌بندی">
+      <button class="btn btn-primary" id="cat-save">ثبت</button></div>`, (b, close) => {
+      $('#cat-save', b).addEventListener('click', async () => {
+        const name = $('#cat-name', b).value.trim(); if (!name) return;
+        try { await apiPost('/categories', { name }); toast('اضافه شد.'); close(); renderCatalog(); } catch (e) { handleErr(e); }
+      });
+    }));
+    $$('[data-toggle-cat]', body).forEach(b => b.addEventListener('click', async () => {
+      try { await apiPost(`/categories/${b.dataset.toggleCat}/toggle`); renderCatalog(); } catch (e) { handleErr(e); }
+    }));
+    $$('[data-del-cat]', body).forEach(b => b.addEventListener('click', async () => {
+      if (!confirm('حذف شود؟ (محصولات این دسته هم حذف می‌شوند)')) return;
+      try { await apiDelete(`/categories/${b.dataset.delCat}`); toast('حذف شد.'); renderCatalog(); } catch (e) { handleErr(e); }
+    }));
+    return;
+  }
+
+  body.innerHTML = `
+    <div class="bn-toolbar" style="justify-content:flex-end"><button class="bn-btn bn-btn-ok" id="add-prod">+ محصول جدید</button></div>
+    <div class="bn-card-grid">
+      ${products.map((p, i) => `
+        <div class="bn-card bn-card-anim" style="animation-delay:${Math.min(i * 30, 260)}ms">
+          <div class="bw ${BN_ACCENTS[i % BN_ACCENTS.length]}" style="border-radius:16px;padding:12px 14px">
+            <span class="bw-value mono" style="font-size:18px">${fmt(p.price)} ت</span>
+          </div>
+          <div class="bn-row-title" style="font-size:14px">${esc(p.name)}</div>
+          <div class="bn-row-sub">${esc(p.category_name)} · موجودی: ${p.is_auto_provision ? 'خودکار' : fmt(p.stock)}</div>
+          ${bnPill(p.is_active ? 'فعال' : 'غیرفعال', p.is_active ? 'ok' : 'no')}
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+            ${!p.is_auto_provision ? `<button class="bn-btn bn-btn-ghost" data-configs="${p.id}">بانک کانفیگ</button>` : ''}
+            <button class="bn-btn bn-btn-ghost" data-toggle-prod="${p.id}">${p.is_active ? 'غیرفعال' : 'فعال'}</button>
+            <button class="bn-btn bn-btn-no" data-del-prod="${p.id}">حذف</button>
+          </div>
+        </div>
+      `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>محصولی نیست</div>`}
+    </div>`;
 
   $('#add-prod').addEventListener('click', () => openModal('محصول جدید', `
     <div class="form-grid">
@@ -2984,6 +3221,7 @@ async function showConfigBank(productId) {
 async function renderDiscounts() {
   const codes = await apiGet('/discounts');
   if (loadTheme().theme === 'brutalist') return renderDiscountsBrutalist(codes);
+  if (loadTheme().theme === 'bento') return renderDiscountsBento(codes);
   setContent(`
     <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-code">+ کد تخفیف جدید</button></div>
     <div class="card"><div class="table-wrap"><table>
@@ -2998,6 +3236,63 @@ async function renderDiscounts() {
         <button class="btn btn-danger btn-sm" data-del="${c.id}">حذف</button></td>
       </tr>`).join('') || '<tr><td colspan="6" class="empty-state">کدی ثبت نشده</td></tr>'}</tbody>
     </table></div></div>
+  `);
+  $('#add-code').addEventListener('click', () => openModal('کد تخفیف جدید', `
+    <div class="form-grid">
+      <input class="input" id="code-value" placeholder="کد (مثلا SUMMER20)">
+      <div class="form-row">
+        <input class="input" id="code-percent" type="number" placeholder="درصد تخفیف">
+        <input class="input" id="code-fixed" type="number" placeholder="یا مبلغ ثابت">
+      </div>
+      <input class="input" id="code-maxuses" type="number" placeholder="سقف تعداد استفاده (۰=نامحدود)" value="0">
+      <button class="btn btn-primary" id="code-save">ثبت</button>
+    </div>`, (b, close) => {
+    $('#code-save', b).addEventListener('click', async () => {
+      const code = $('#code-value', b).value.trim();
+      if (!code) return toast('کد را وارد کن.', true);
+      try {
+        await apiPost('/discounts', {
+          code,
+          percent: Number($('#code-percent', b).value) || null,
+          fixed_amount: Number($('#code-fixed', b).value) || null,
+          max_uses: Number($('#code-maxuses', b).value) || 0,
+        });
+        toast('کد اضافه شد.'); close(); renderDiscounts();
+      } catch (e) { handleErr(e); }
+    });
+  }));
+  $$('[data-toggle]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/discounts/${b.dataset.toggle}/toggle`); renderDiscounts(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('حذف شود؟')) return;
+    try { await apiDelete(`/discounts/${b.dataset.del}`); toast('حذف شد.'); renderDiscounts(); } catch (e) { handleErr(e); }
+  }));
+}
+
+/* ------------------------------------------------------ discounts: bento */
+function renderDiscountsBento(codes) {
+  setContent(`
+    <div class="bn-hero">
+      <div><h2>کدهای تخفیف</h2><p>${fmt(codes.length)} کد ثبت‌شده</p></div>
+      <button class="bn-btn bn-btn-ok" id="add-code">+ کد جدید</button>
+    </div>
+    <div class="bn-card-grid">
+      ${codes.map((c, i) => `
+        <div class="bn-card bn-card-anim" style="animation-delay:${Math.min(i * 30, 260)}ms">
+          <div class="bw ${BN_ACCENTS[i % BN_ACCENTS.length]}" style="border-radius:16px;padding:12px 14px">
+            <span class="bw-value mono" style="font-size:20px">${c.percent ? c.percent + '%' : fmt(c.fixed_amount) + ' ت'}</span>
+          </div>
+          <div class="bn-row-title mono" style="font-size:14px">${esc(c.code)}</div>
+          <div class="bn-row-sub">سقف: ${c.max_uses ? fmt(c.max_uses) : 'نامحدود'} · مصرف: ${fmt(c.used_count)}</div>
+          ${bnPill(c.is_active ? 'فعال' : 'غیرفعال', c.is_active ? 'ok' : 'no')}
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <button class="bn-btn bn-btn-ghost" data-toggle="${c.id}">${c.is_active ? 'غیرفعال' : 'فعال'}</button>
+            <button class="bn-btn bn-btn-no" data-del="${c.id}">حذف</button>
+          </div>
+        </div>
+      `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>کدی ثبت نشده</div>`}
+    </div>
   `);
   $('#add-code').addEventListener('click', () => openModal('کد تخفیف جدید', `
     <div class="form-grid">
@@ -3102,6 +3397,7 @@ async function renderSupport() {
   stopSupportPoll();
   const convs = await apiGet('/support/conversations');
   if (loadTheme().theme === 'brutalist') return renderSupportBrutalist(convs);
+  if (loadTheme().theme === 'bento') return renderSupportBento(convs);
   setContent(`
     <div class="card"><div class="table-wrap"><table>
       <thead><tr><th>کاربر</th><th>آخرین پیام</th><th>زمان</th><th></th></tr></thead>
@@ -3130,6 +3426,41 @@ function renderSupportRows(convs) {
     <td><button class="btn btn-sm" data-open="${c.user_id}">مشاهده</button></td>
   </tr>`).join('') || '<tr><td colspan="4" class="empty-state">گفتگویی نیست</td></tr>';
   $$('[data-open]', tbody).forEach(b => b.addEventListener('click', () => showSupportChat(Number(b.dataset.open))));
+}
+
+/* ---------------------------------------------------------- support: bento */
+function renderSupportBento(convs) {
+  setContent(`
+    <div class="bn-hero"><div><h2>صندوق پشتیبانی</h2><p>${fmt(convs.length)} گفتگو</p></div></div>
+    <div class="bn-list" id="support-inbox-list">${supportInboxRowsHtmlBento(convs)}</div>
+  `);
+  $$('[data-open]', content()).forEach(b => b.addEventListener('click', () => showSupportChat(Number(b.dataset.open))));
+  SUPPORT_POLL_TIMER = setInterval(async () => {
+    if (CURRENT_TAB !== 'support') return stopSupportPoll();
+    try { const fresh = await apiGet('/support/conversations'); renderSupportRowsBento(fresh); } catch (e) { /* silent */ }
+  }, 5000);
+}
+function supportInboxRowsHtmlBento(convs) {
+  return convs.map((c, i) => `
+    <div class="bn-row bn-card-anim" style="animation-delay:${Math.min(i * 25, 220)}ms">
+      ${bnAvatar((c.user_name || c.user_username || '؟').trim().charAt(0), i)}
+      <div class="bn-row-main">
+        <span class="bn-row-title">${esc(c.user_name || c.user_username || ('#' + c.user_id))}${c.locked_for_me ? ' 🔒' : ''}</span>
+        <span class="bn-row-sub">${c.last_sender === 'admin' ? '↩ ' : ''}${esc(c.last_message || '')}</span>
+      </div>
+      <div class="bn-row-trail">
+        ${c.unread ? bnPill(c.unread, 'no') : ''}
+        <span class="bn-row-sub mono">${fmtDate(c.last_at)}</span>
+        <button class="bn-btn bn-btn-ghost" data-open="${c.user_id}">مشاهده</button>
+      </div>
+    </div>
+  `).join('') || `<div class="empty-state"><div class="icon">${svg('empty')}</div>گفتگویی نیست</div>`;
+}
+function renderSupportRowsBento(convs) {
+  const list = $('#support-inbox-list', content());
+  if (!list) return;
+  list.innerHTML = supportInboxRowsHtmlBento(convs);
+  $$('[data-open]', list).forEach(b => b.addEventListener('click', () => showSupportChat(Number(b.dataset.open))));
 }
 
 /* -------------------------------------------------- support: brutalist -- */
@@ -3228,6 +3559,7 @@ const TICKETS_STATUS_LABEL = { '': 'همه', open: 'باز', answered: 'پاسخ
 async function renderTickets() {
   const tickets = await apiGet(`/tickets${ticketsStatusFilter ? '?status=' + ticketsStatusFilter : ''}`);
   if (loadTheme().theme === 'brutalist') return renderTicketsBrutalist(tickets);
+  if (loadTheme().theme === 'bento') return renderTicketsBento(tickets);
   setContent(`
     <div class="tabs">
       ${[['', 'همه'], ['open', 'باز'], ['answered', 'پاسخ‌داده‌شده'], ['closed', 'بسته']].map(([v, l]) => `<button class="tab-btn ${v === ticketsStatusFilter ? 'active' : ''}" data-s="${v}">${l}</button>`).join('')}
@@ -3243,6 +3575,33 @@ async function renderTickets() {
     </table></div></div>
   `);
   $$('.tab-btn', content()).forEach(b => b.addEventListener('click', () => { ticketsStatusFilter = b.dataset.s; renderTickets(); }));
+  $$('[data-open]', content()).forEach(b => b.addEventListener('click', () => showTicket(Number(b.dataset.open))));
+}
+
+/* ---------------------------------------------------------- tickets: bento */
+function renderTicketsBento(tickets) {
+  setContent(`
+    <div class="bn-hero">
+      <div><h2>تیکت‌های پشتیبانی</h2><p>${fmt(tickets.length)} تیکت در فیلتر «${TICKETS_STATUS_LABEL[ticketsStatusFilter]}»</p></div>
+      <div class="bn-seg">${[['', 'همه'], ['open', 'باز'], ['answered', 'پاسخ‌داده‌شده'], ['closed', 'بسته']].map(([v, l]) => `<button class="bn-seg-btn ${v === ticketsStatusFilter ? 'active' : ''}" data-s="${v}">${l}</button>`).join('')}</div>
+    </div>
+    <div class="bn-list">
+      ${tickets.map((t, i) => `
+        <div class="bn-row bn-card-anim" style="animation-delay:${Math.min(i * 25, 220)}ms">
+          ${bnAvatar((t.username || '؟').trim().charAt(0), i)}
+          <div class="bn-row-main">
+            <span class="bn-row-title">${esc(t.subject)}</span>
+            <span class="bn-row-sub">${esc(t.username || t.user_id)} · ${fmtDate(t.updated_at)}</span>
+          </div>
+          <div class="bn-row-trail">
+            ${bnPill(TICKETS_STATUS_LABEL[t.status] || t.status, t.status === 'open' ? 'pending' : t.status === 'answered' ? 'ok' : 'no')}
+            <button class="bn-btn bn-btn-ghost" data-open="${t.id}">مشاهده</button>
+          </div>
+        </div>
+      `).join('') || `<div class="empty-state"><div class="icon">${svg('empty')}</div>تیکتی نیست</div>`}
+    </div>
+  `);
+  $$('.bn-seg-btn[data-s]', content()).forEach(b => b.addEventListener('click', () => { ticketsStatusFilter = b.dataset.s; renderTickets(); }));
   $$('[data-open]', content()).forEach(b => b.addEventListener('click', () => showTicket(Number(b.dataset.open))));
 }
 
@@ -3312,8 +3671,55 @@ async function showTicket(ticketId) {
 }
 
 /* =========================================================== broadcast === */
+/* ------------------------------------------------------ broadcast: bento */
+function renderBroadcastBento() {
+  setContent(`
+    <div class="bn-hero"><div><h2>پیام همگانی</h2><p>ارسال متنی به همه‌ی کاربران غیرمسدود ربات</p></div></div>
+    <div class="bn-card" style="max-width:680px">
+      <textarea class="bn-search" id="bc-text" rows="7" maxlength="4000" style="width:100%;border-radius:18px;resize:vertical" placeholder="متن پیام را بنویس..."></textarea>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+        <span class="mono" id="bc-count" style="font-size:12px;color:var(--text-muted)">۰ / ۴۰۰۰</span>
+        <button class="bn-btn bn-btn-ok" id="bc-send" style="padding:10px 22px">ارسال به همه</button>
+      </div>
+      <div id="bc-result" style="margin-top:16px"></div>
+    </div>
+  `);
+  const ta = $('#bc-text', content());
+  ta.addEventListener('input', () => { $('#bc-count', content()).textContent = `${ta.value.length} / 4000`; });
+
+  $('#bc-send', content()).addEventListener('click', () => {
+    const text = ta.value.trim();
+    if (!text) return toast('متن پیام خالی است.', true);
+    openModal('تایید ارسال همگانی', `
+      <p style="font-size:13px;line-height:1.9">این پیام برای <strong>همه‌ی کاربران</strong> ربات ارسال می‌شود و قابل بازگشت نیست. مطمئنی؟</p>
+      <div style="border-radius:14px;background:var(--surface-2);padding:10px 12px;font-size:13px;white-space:pre-wrap;max-height:160px;overflow-y:auto">${esc(text)}</div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="bc-confirm">بله، ارسال کن</button>
+      </div>
+    `, (body, close) => {
+      $('#bc-confirm', body).addEventListener('click', async () => {
+        const btn = $('#bc-confirm', body);
+        btn.disabled = true; btn.textContent = 'در حال ارسال...';
+        try {
+          const res = await apiPost('/broadcast', { message: text });
+          close();
+          $('#bc-result', content()).innerHTML = `
+            <div class="bento-grid" style="grid-auto-rows:minmax(84px,auto)">
+              <div class="bw w-blue"><span class="bw-label">کل</span><span class="bw-value mono">${fmt(res.total)}</span></div>
+              <div class="bw w-green"><span class="bw-label">موفق</span><span class="bw-value mono">${fmt(res.success)}</span></div>
+              <div class="bw w-pink"><span class="bw-label">ناموفق</span><span class="bw-value mono">${fmt(res.failed)}</span></div>
+            </div>`;
+          ta.value = ''; $('#bc-count', content()).textContent = '۰ / ۴۰۰۰';
+          toast('پیام همگانی ارسال شد.');
+        } catch (e) { close(); handleErr(e); }
+      });
+    });
+  });
+}
+
 async function renderBroadcast() {
   if (loadTheme().theme === 'brutalist') return renderBroadcastBrutalist();
+  if (loadTheme().theme === 'bento') return renderBroadcastBento();
   setContent(`
     <div class="card" style="max-width:640px">
       <h3 style="margin:0 0 4px">ارسال پیام همگانی</h3>
@@ -3419,6 +3825,7 @@ async function renderResellers() {
   ]);
 
   if (loadTheme().theme === 'brutalist') return renderResellersBrutalist(resellers, cohort);
+  if (loadTheme().theme === 'bento') return renderResellersBento(resellers, cohort);
 
   const cohortHtml = cohort ? renderResellerCohortBlock(cohort) : '';
 
@@ -3457,6 +3864,88 @@ async function renderResellers() {
       box.style.display = box.style.display === 'none' ? '' : 'none';
     }));
   }
+}
+
+/* ------------------------------------------------------ resellers: bento */
+function renderResellersBento(resellers, cohort) {
+  const cohortHtml = cohort ? renderResellerCohortBlockBento(cohort) : '';
+  setContent(`
+    <div class="bn-hero"><div><h2>نمایندگی‌ها</h2><p>${fmt(resellers.length)} نماینده ثبت‌شده</p></div></div>
+    ${cohortHtml}
+    <div class="bn-card-grid" style="margin-top:16px">
+      ${resellers.map((r, i) => `
+        <div class="bn-card bn-card-anim" style="animation-delay:${Math.min(i * 30, 260)}ms">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            ${bnAvatar((r.username || '؟').trim().charAt(0), i)}
+            ${bnPill(r.is_reseller ? 'فعال' : 'غیرفعال', r.is_reseller ? 'ok' : 'no')}
+          </div>
+          <div class="bn-row-title">${esc(r.username || '—')}</div>
+          <div class="bn-row-sub mono">#${r.telegram_id}</div>
+          <div class="bw w-purple" style="border-radius:16px;padding:10px 14px;margin-top:4px">
+            <span class="bw-value mono" style="font-size:18px">${fmt(r.reseller_credit_gb)} گیگ</span>
+          </div>
+          <button class="bn-btn bn-btn-ghost" data-credit="${r.telegram_id}" style="width:100%;margin-top:6px">تنظیم اعتبار</button>
+        </div>
+      `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>نماینده‌ای ثبت نشده</div>`}
+    </div>
+  `);
+  $$('[data-credit]', content()).forEach(b => b.addEventListener('click', () => openModal('تنظیم اعتبار حجمی', `
+    <div class="form-grid">
+      <input class="input" id="credit-delta" type="number" placeholder="مقدار (گیگ، منفی=کسر)">
+      <input class="input" id="credit-reason" placeholder="دلیل (اختیاری)">
+      <button class="btn btn-primary" id="credit-save">ثبت</button>
+    </div>`, (body, close) => {
+    $('#credit-save', body).addEventListener('click', async () => {
+      const delta_gb = Number($('#credit-delta', body).value);
+      if (!delta_gb) return;
+      try {
+        await apiPost(`/resellers/${b.dataset.credit}/credit`, { delta_gb, reason: $('#credit-reason', body).value });
+        toast('اعتبار به‌روزرسانی شد.'); close(); renderResellers();
+      } catch (e) { handleErr(e); }
+    });
+  })));
+  if (cohort) {
+    const root = content();
+    requestAnimationFrame(() => setTimeout(() => { $$('.bw-res-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; }); }, 60));
+    $$('[data-toggle-churn]', root).forEach(el => el.addEventListener('click', () => {
+      const box = $('#churn-list-box', root);
+      box.style.display = box.style.display === 'none' ? '' : 'none';
+    }));
+  }
+}
+function renderResellerCohortBlockBento(data) {
+  const c = data.churn;
+  const months = data.cohorts;
+  const allMonths = months.length ? months[months.length - 1].retention.map(r => r.month) : [];
+  const heatRows = months.map(co => {
+    const cells = co.retention.map(r => `<td class="mono" style="text-align:center">${co.size ? `${r.pct}٪<div style="font-size:10px;opacity:.7">${fmt(r.active)}</div>` : '—'}</td>`).join('');
+    const pad = allMonths.length - co.retention.length;
+    return `<tr><td class="mono">${co.cohort_month}</td><td class="mono">${fmt(co.size)}</td>${cells}${'<td></td>'.repeat(Math.max(0, pad))}</tr>`;
+  }).join('');
+  const churnRows = c.list.slice(0, 30).map(u => `
+    <tr><td class="mono">${u.telegram_id}</td><td>${esc(u.username || '—')}</td>
+      <td class="mono">${fmt(u.credit_gb)}</td><td class="mono">${u.last_activity ? fmtDate(u.last_activity) : 'هیچ‌وقت'}</td>
+      <td class="mono">${fmt(u.days_inactive)} روز</td></tr>`).join('') || '<tr><td colspan="5" class="empty-state">نماینده‌ی ریزش‌کرده‌ای نیست 🎉</td></tr>';
+  return `
+    <div class="bento-grid" style="grid-auto-rows:minmax(90px,auto)">
+      <div class="bw w-blue"><span class="bw-label">کل نمایندگان</span><span class="bw-value mono">${fmt(c.total)}</span></div>
+      <div class="bw w-green"><span class="bw-label">فعال (${fmt(c.inactivity_days)}روز)</span><span class="bw-value mono">${fmt(c.active)}</span></div>
+      <div class="bw w-orange" data-toggle-churn style="cursor:pointer"><span class="bw-label">ریزش‌کرده — کلیک</span><span class="bw-value mono">${fmt(c.churned)}</span><span class="bw-sub">${c.churn_rate}٪ نرخ ریزش</span></div>
+    </div>
+    <div class="bn-card" style="margin-top:14px">
+      <div class="bn-row-title" style="margin-bottom:10px">کوهورت نگهداشت ماهانه</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>ماه کوهورت</th><th>تعداد</th>${allMonths.map((m, i) => `<th class="mono">M${i}</th>`).join('')}</tr></thead>
+        <tbody>${heatRows || '<tr><td colspan="2" class="empty-state">داده‌ای نیست</td></tr>'}</tbody>
+      </table></div>
+    </div>
+    <div class="bn-card" id="churn-list-box" style="display:none;margin-top:14px">
+      <div class="bn-row-title" style="margin-bottom:10px">نماینده‌های در آستانه‌ی ریزش / ریزش‌کرده</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>اعتبار</th><th>آخرین فعالیت</th><th>بی‌فعالیتی</th></tr></thead>
+        <tbody>${churnRows}</tbody>
+      </table></div>
+    </div>`;
 }
 
 /* ------------------------------------------------ resellers: brutalist -- */
@@ -3646,6 +4135,7 @@ function renderResellerCohortBlock(data) {
 async function renderPanels() {
   const servers = await apiGet('/panel-servers');
   if (loadTheme().theme === 'brutalist') return renderPanelsBrutalist(servers);
+  if (loadTheme().theme === 'bento') return renderPanelsBento(servers);
   setContent(`
     <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-panel">+ پنل جدید</button></div>
     <div class="card"><div class="table-wrap"><table>
@@ -3657,6 +4147,64 @@ async function renderPanels() {
         <button class="btn btn-danger btn-sm" data-del="${s.id}">حذف</button></td>
       </tr>`).join('') || '<tr><td colspan="5" class="empty-state">پنلی ثبت نشده</td></tr>'}</tbody>
     </table></div></div>
+  `);
+  $('#add-panel').addEventListener('click', () => openModal('پنل جدید', `
+    <div class="form-grid">
+      <input class="input" id="p-name" placeholder="نام (مثلا سرور آلمان)">
+      <select class="input" id="p-type"><option value="pasarguard">PasarGuard</option><option value="3xui">3X-UI</option></select>
+      <input class="input" id="p-url" placeholder="آدرس پنل (https://...)">
+      <div class="form-row"><input class="input" id="p-user" placeholder="یوزرنیم"><input class="input" id="p-pass" type="password" placeholder="پسورد"></div>
+      <button class="btn btn-primary" id="p-save">ثبت</button>
+    </div>`, (body, close) => {
+    $('#p-save', body).addEventListener('click', async () => {
+      const name = $('#p-name', body).value.trim(), api_url = $('#p-url', body).value.trim();
+      if (!name || !api_url) return toast('نام و آدرس الزامی است.', true);
+      try {
+        await apiPost('/panel-servers', {
+          name, panel_type: $('#p-type', body).value, api_url,
+          api_username: $('#p-user', body).value, api_password: $('#p-pass', body).value,
+        });
+        toast('پنل اضافه شد.'); close(); renderPanels();
+      } catch (e) { handleErr(e); }
+    });
+  }));
+  $$('[data-test]', content()).forEach(b => b.addEventListener('click', async () => {
+    b.textContent = 'در حال تست...'; b.disabled = true;
+    try {
+      const r = await apiPost(`/panel-servers/${b.dataset.test}/test`);
+      toast(r.ok ? 'اتصال موفق بود.' : (r.error || 'اتصال ناموفق بود.'), !r.ok);
+    } catch (e) { handleErr(e); }
+    finally { b.textContent = 'تست اتصال'; b.disabled = false; }
+  }));
+  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('حذف شود؟')) return;
+    try { await apiDelete(`/panel-servers/${b.dataset.del}`); toast('حذف شد.'); renderPanels(); } catch (e) { handleErr(e); }
+  }));
+}
+
+/* ------------------------------------------------------------ panels: bento */
+function renderPanelsBento(servers) {
+  setContent(`
+    <div class="bn-hero">
+      <div><h2>سرورهای پنل VPN</h2><p>${fmt(servers.length)} سرور متصل</p></div>
+      <button class="bn-btn bn-btn-ok" id="add-panel">+ پنل جدید</button>
+    </div>
+    <div class="bn-card-grid">
+      ${servers.map((s, i) => `
+        <div class="bn-card bn-card-anim" style="animation-delay:${Math.min(i * 30, 260)}ms">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="width:10px;height:10px;border-radius:50%;background:${s.is_active ? 'var(--emerald)' : 'var(--rose)'};flex-shrink:0"></span>
+            <span class="bn-row-title">${esc(s.name)}</span>
+          </div>
+          <div class="bn-row-sub">${esc(s.type_label)}</div>
+          <div class="bn-row-sub mono" style="direction:ltr;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.api_url)}</div>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <button class="bn-btn bn-btn-ghost" data-test="${s.id}">تست اتصال</button>
+            <button class="bn-btn bn-btn-no" data-del="${s.id}">حذف</button>
+          </div>
+        </div>
+      `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>پنلی ثبت نشده</div>`}
+    </div>
   `);
   $('#add-panel').addEventListener('click', () => openModal('پنل جدید', `
     <div class="form-grid">
@@ -3964,7 +4512,7 @@ function settingsTabsHtml() {
 
 function switchSettingsTab(tab, root) {
   settingsActiveTab = tab;
-  $$('#settings-tabs-nav .tab-btn, #settings-tabs-nav .bru-seg-btn', root).forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  $$('#settings-tabs-nav .tab-btn, #settings-tabs-nav .bru-seg-btn, #settings-tabs-nav .bn-seg-btn', root).forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   $$('[data-settings-tab]', root).forEach(el => { el.style.display = el.dataset.settingsTab === tab ? '' : 'none'; });
 }
 
@@ -4120,6 +4668,7 @@ async function renderSettings() {
     apiGet('/settings/menu-order').catch(() => []),
   ]);
   if (loadTheme().theme === 'brutalist') return renderSettingsBrutalist(settings, rate, menuOrder);
+  if (loadTheme().theme === 'bento') return renderSettingsBento(settings, rate, menuOrder);
   setContent(`
     ${settingsTabsHtml()}
 
@@ -4138,6 +4687,45 @@ async function renderSettings() {
     </div>
   `);
   $$('#settings-tabs-nav .tab-btn', content()).forEach(btn => btn.addEventListener('click', () => switchSettingsTab(btn.dataset.tab, content())));
+  bindSettingsGroupEvents(content());
+  renderMenuOrderList();
+  $('#menu-order-save').addEventListener('click', saveMenuOrder);
+  $('#settings-save').addEventListener('click', () => collectAndSaveSettings(content(), $('#settings-save')));
+  $('#rate-refresh').addEventListener('click', async () => {
+    const btn = $('#rate-refresh');
+    btn.disabled = true; btn.textContent = 'در حال دریافت...';
+    try {
+      await apiPost('/exchange-rate/refresh');
+      toast('نرخ بروزرسانی شد.');
+    } catch (e) {
+      handleErr(e);
+    } finally {
+      renderSettings();
+    }
+  });
+}
+
+/* ----------------------------------------------------- settings: bento -- */
+// تب افقی به سگمنت کپسولی اپلی تبدیل می‌شه؛ بدنه‌ی فرم همون منطق قبلیه،
+// فقط با آکاردئون/سوییچ/سواچ گردتر (از طریق CSS اسکوپ‌شده به تم bento).
+function renderSettingsBento(settings, rate, menuOrder) {
+  setContent(`
+    <div class="bn-hero"><div><h2>تنظیمات</h2><p>پیکربندی محتوا، پرداخت، کمپین و سرویس‌های ربات</p></div></div>
+    <div class="bn-seg" id="settings-tabs-nav" style="margin-bottom:16px">
+      ${SETTINGS_TABS.map(t => `<button type="button" class="bn-seg-btn ${t.key === settingsActiveTab ? 'active' : ''}" data-tab="${t.key}">${t.label}</button>`).join('')}
+    </div>
+    <div data-settings-tab="content" style="${settingsActiveTab === 'content' ? '' : 'display:none'}">
+      ${menuOrderCardHtml(menuOrder)}
+    </div>
+    <div data-settings-tab="payment" style="${settingsActiveTab === 'payment' ? '' : 'display:none'}">
+      ${rateCardHtml(rate)}
+    </div>
+    ${renderSettingsGroups(settings)}
+    <div class="settings-save-bar">
+      <button class="bn-btn bn-btn-ok btn-block" id="settings-save" style="width:100%;padding:12px">ذخیره تغییرات</button>
+    </div>
+  `);
+  $$('#settings-tabs-nav .bn-seg-btn', content()).forEach(btn => btn.addEventListener('click', () => switchSettingsTab(btn.dataset.tab, content())));
   bindSettingsGroupEvents(content());
   renderMenuOrderList();
   $('#menu-order-save').addEventListener('click', saveMenuOrder);
@@ -4239,6 +4827,14 @@ function goToLogsFor(recordType, recordId) {
   logsPage = 1;
   goTo('logs');
 }
+/* ---------------------------------------------------- bento helpers ---- */
+// اجزای مشترک تم Bento (اپل): پیل رنگی برای وضعیت، آواتار دایره‌ای گرادیانی —
+// دقیقاً همون زبان بصری ویجت‌های داشبورد (.bw / .w-*) که برای بقیه‌ی صفحات
+// هم استفاده می‌شه تا کل پنل یکدست بمونه.
+const BN_ACCENTS = ['w-blue', 'w-green', 'w-orange', 'w-pink', 'w-purple'];
+function bnPill(label, kind) { return `<span class="bn-pill bn-pill-${kind}">${label}</span>`; }
+function bnAvatar(ch, i) { return `<div class="bn-avatar ${BN_ACCENTS[i % BN_ACCENTS.length]}">${esc(ch)}</div>`; }
+
 function historyBtn(recordType, recordId) {
   return hasPerm('system')
     ? `<button class="btn btn-ghost btn-sm" data-history="${recordType}:${recordId}" title="تاریخچه">تاریخچه</button>` : '';
@@ -4268,6 +4864,7 @@ async function renderLogs() {
   const res = await apiGet(`/admin-logs?${qs.toString()}`);
   const pages = Math.max(Math.ceil(res.total / res.limit), 1);
   if (loadTheme().theme === 'brutalist') return renderLogsBrutalist(actionsRes, res, pages);
+  if (loadTheme().theme === 'bento') return renderLogsBento(actionsRes, res, pages);
   setContent(`
     <div class="card" style="margin-bottom:14px">
       <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
@@ -4294,6 +4891,47 @@ async function renderLogs() {
     </table></div>
     <div class="pager">${Array.from({ length: pages }, (_, i) => i + 1).map(p => `<button class="btn btn-sm ${p === logsPage ? 'btn-primary' : ''}" data-page="${p}">${p}</button>`).join('')}</div>
     </div>
+  `);
+  $$('[data-page]', content()).forEach(b => b.addEventListener('click', () => { logsPage = Number(b.dataset.page); renderLogs(); }));
+  $('#lf-apply').addEventListener('click', () => {
+    logsFilter = { action: $('#lf-action').value, record_type: $('#lf-type').value, record_id: $('#lf-id').value.trim() };
+    logsPage = 1; renderLogs();
+  });
+  $('#lf-clear').addEventListener('click', () => { logsFilter = { action: '', record_type: '', record_id: '' }; logsPage = 1; renderLogs(); });
+}
+
+/* ------------------------------------------------------------- logs: bento */
+function renderLogsBento(actionsRes, res, pages) {
+  setContent(`
+    <div class="bn-hero"><div><h2>لاگ سیستم</h2><p>${fmt(res.total)} رکورد ثبت‌شده</p></div></div>
+    <div class="bn-card" style="margin-bottom:14px">
+      <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+        <select class="input" id="lf-action">
+          <option value="">همه‌ی عملیات</option>
+          ${actionsRes.actions.map(a => `<option value="${a}" ${a === logsFilter.action ? 'selected' : ''}>${actionLabel(a)}</option>`).join('')}
+        </select>
+        <select class="input" id="lf-type">
+          <option value="">همه‌ی رکوردها</option>
+          ${Object.keys(RECORD_TYPE_LABEL).map(t => `<option value="${t}" ${t === logsFilter.record_type ? 'selected' : ''}>${RECORD_TYPE_LABEL[t]}</option>`).join('')}
+        </select>
+        <input class="input" id="lf-id" placeholder="شناسه رکورد" value="${esc(logsFilter.record_id)}">
+        <button class="bn-btn bn-btn-ok" id="lf-apply">اعمال فیلتر</button>
+        <button class="bn-btn bn-btn-ghost" id="lf-clear">پاک‌کردن</button>
+      </div>
+    </div>
+    <div class="bn-list">
+      ${res.items.map((l, i) => `
+        <div class="bn-row bn-card-anim" style="animation-delay:${Math.min(i * 20, 200)}ms">
+          ${bnAvatar('#', i)}
+          <div class="bn-row-main">
+            <span class="bn-row-title">${actionLabel(l.action)}</span>
+            <span class="bn-row-sub">ادمین #${l.admin_id}${l.record_type ? ` · ${RECORD_TYPE_LABEL[l.record_type] || esc(l.record_type)} #${esc(l.record_id)}` : ''}${l.details ? ' · ' + esc(l.details) : ''}</span>
+          </div>
+          <span class="bn-row-sub mono">${fmtDate(l.created_at)}</span>
+        </div>
+      `).join('') || `<div class="empty-state"><div class="icon">${svg('empty')}</div>لاگی ثبت نشده</div>`}
+    </div>
+    <div class="pager" style="margin-top:16px">${Array.from({ length: pages }, (_, i) => i + 1).map(p => `<button class="btn btn-sm ${p === logsPage ? 'btn-primary' : ''}" data-page="${p}">${p}</button>`).join('')}</div>
   `);
   $$('[data-page]', content()).forEach(b => b.addEventListener('click', () => { logsPage = Number(b.dataset.page); renderLogs(); }));
   $('#lf-apply').addEventListener('click', () => {
@@ -4369,6 +5007,7 @@ async function renderWebAdmins() {
   if (!PERM_KEYS.length) PERM_KEYS = (await apiGet('/web-admins/permissions')).permissions;
   const admins = await apiGet('/web-admins');
   if (loadTheme().theme === 'brutalist') return renderWebAdminsBrutalist(admins);
+  if (loadTheme().theme === 'bento') return renderWebAdminsBento(admins);
   setContent(`
     <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-admin">+ کاربر پنل جدید</button></div>
     <div class="card"><div class="table-wrap"><table>
@@ -4385,6 +5024,73 @@ async function renderWebAdmins() {
           <button class="btn btn-danger btn-sm" data-del="${a.id}">حذف</button>`}</td>
       </tr>`).join('')}</tbody>
     </table></div></div>
+  `);
+  $('#add-admin').addEventListener('click', () => openModal('کاربر پنل جدید', `
+    <div class="form-grid">
+      <input class="input" id="na-user" placeholder="یوزرنیم">
+      <input class="input" id="na-pass" type="password" placeholder="پسورد (حداقل ۸ کاراکتر)">
+      <div class="card-sub" style="margin-top:4px">مجوزها:</div>
+      ${permChecklistHtml('na', [])}
+      <button class="btn btn-primary" id="na-save">ثبت</button>
+    </div>`, (body, close) => {
+    $('#na-save', body).addEventListener('click', async () => {
+      try {
+        await apiPost('/web-admins', {
+          username: $('#na-user', body).value.trim(), password: $('#na-pass', body).value,
+          role: 'admin', permissions: readPermChecklist(body, 'na'),
+        });
+        toast('کاربر ساخته شد.'); close(); renderWebAdmins();
+      } catch (e) { handleErr(e); }
+    });
+  }));
+  $$('[data-edit-perms]', content()).forEach(b => b.addEventListener('click', () => {
+    const a = admins.find(x => x.id === Number(b.dataset.editPerms));
+    openModal(`مجوزهای ${esc(a.username)}`, `
+      ${permChecklistHtml('ep', a.permissions)}
+      <button class="btn btn-primary" id="ep-save" style="margin-top:14px">ذخیره</button>
+    `, (body, close) => {
+      $('#ep-save', body).addEventListener('click', async () => {
+        try {
+          await apiPost(`/web-admins/${a.id}/permissions`, { permissions: readPermChecklist(body, 'ep') });
+          toast('مجوزها به‌روزرسانی شد.'); close(); renderWebAdmins();
+        } catch (e) { handleErr(e); }
+      });
+    });
+  }));
+  $$('[data-toggle-active]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/web-admins/${b.dataset.toggleActive}/active`, { active: b.dataset.active !== 'true' }); renderWebAdmins(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('این حساب حذف شود؟')) return;
+    try { await apiDelete(`/web-admins/${b.dataset.del}`); toast('حذف شد.'); renderWebAdmins(); } catch (e) { handleErr(e); }
+  }));
+}
+
+/* ------------------------------------------------------- webadmins: bento */
+function renderWebAdminsBento(admins) {
+  setContent(`
+    <div class="bn-hero">
+      <div><h2>ادمین‌های پنل</h2><p>${fmt(admins.length)} حساب ثبت‌شده</p></div>
+      <button class="bn-btn bn-btn-ok" id="add-admin">+ کاربر پنل جدید</button>
+    </div>
+    <div class="bn-list">
+      ${admins.map((a, i) => `
+        <div class="bn-row bn-card-anim" style="animation-delay:${Math.min(i * 25, 220)}ms">
+          ${bnAvatar(a.username.trim().charAt(0).toUpperCase(), i)}
+          <div class="bn-row-main">
+            <span class="bn-row-title">${esc(a.username)}</span>
+            <span class="bn-row-sub">${ROLE_LABEL[a.role]} · ورود: ${fmtDate(a.last_login)}</span>
+          </div>
+          <div class="bn-row-trail">
+            ${bnPill(a.is_active ? 'فعال' : 'غیرفعال', a.is_active ? 'ok' : 'no')}
+            ${a.role !== 'owner' ? `
+            <button class="bn-btn bn-btn-ghost" data-edit-perms="${a.id}">مجوزها</button>
+            <button class="bn-btn bn-btn-ghost" data-toggle-active="${a.id}" data-active="${a.is_active}">${a.is_active ? 'غیرفعال' : 'فعال'}</button>
+            <button class="bn-btn bn-btn-no" data-del="${a.id}">حذف</button>` : ''}
+          </div>
+        </div>
+      `).join('')}
+    </div>
   `);
   $('#add-admin').addEventListener('click', () => openModal('کاربر پنل جدید', `
     <div class="form-grid">
