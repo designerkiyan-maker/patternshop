@@ -1715,3 +1715,156 @@ html[data-theme="warp"] .warp-prod-val{ flex:0 0 auto; color:var(--text-muted); 
   html[data-theme="warp"] .card::before, html[data-theme="warp"] .card::after{ width:18px; height:18px; }
   html[data-theme="warp"] .card{ clip-path:polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%); }
 }
+
+/* =================================================================
+   حالت روشن/تیره برای همه‌ی تم‌ها — هر تم فقط متغیرهای رنگی رو برای
+   حالت مقابلِ پیش‌فرض خودش override می‌کنه؛ شکل/فونت/گردی‌گوشه/افکت‌های
+   خاص تم دست‌نخورده می‌مونه، فقط روشنایی سطوح و کنتراست متن عوض می‌شه.
+================================================================= */
+
+/* ---- Bento (پیش‌فرض روشن) → نسخه‌ی تیره ---- */
+html[data-theme="bento"][data-mode="dark"]{
+  --bg:#161618; --bg-2:#0F0F11; --surface:#1F1F22; --surface-2:#2A2A2E;
+  --surface-hi:rgba(255,255,255,.04); --border:rgba(255,255,255,.09); --border-soft:rgba(255,255,255,.06);
+  --text:#F2F2F5; --text-muted:#9A9AA2; --text-dim:#5C5C63;
+  --shadow-card:0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px rgba(0,0,0,.4);
+  --shadow-pop:0 20px 50px rgba(0,0,0,.55); --shadow-btn:0 2px 8px rgba(0,0,0,.35);
+}
+
+/* ---- Brutalist (پیش‌فرض روشن/کرم) → نسخه‌ی تیره؛ حاشیه‌های مشکی سفت
+   سیگنیچر اصلیه، پس توی تیره به سفید تبدیل می‌شن تا دیده بشن ---- */
+html[data-theme="brutalist"][data-mode="dark"]{
+  --bg:#151515; --bg-2:#0E0E0E; --surface:#1E1E1E; --surface-2:#1E1E1E;
+  --border:#F5F0DC; --border-soft:#F5F0DC; --text:#F5F0DC; --text-muted:#B8B4A0; --text-dim:#7A7768;
+  --shadow-card:5px 5px 0 #F5F0DC; --shadow-pop:9px 9px 0 #F5F0DC; --shadow-btn:3px 3px 0 #F5F0DC;
+  --focus-ring:0 0 0 3px #F5F0DC;
+}
+html[data-theme="brutalist"][data-mode="dark"] .card,
+html[data-theme="brutalist"][data-mode="dark"] .login-card,
+html[data-theme="brutalist"][data-mode="dark"] .modal{ border-color:#F5F0DC; }
+html[data-theme="brutalist"][data-mode="dark"] .btn{ border-color:#F5F0DC; }
+html[data-theme="brutalist"][data-mode="dark"] .btn:active{ box-shadow:0 0 0 #F5F0DC; }
+html[data-theme="brutalist"][data-mode="dark"] .input, html[data-theme="brutalist"][data-mode="dark"] .field input{ border-color:#F5F0DC; background:var(--surface); color:var(--text); }
+html[data-theme="brutalist"][data-mode="dark"] table,
+html[data-theme="brutalist"][data-mode="dark"] thead th{ border-color:#F5F0DC; }
+html[data-theme="brutalist"][data-mode="dark"] .topbar{ border-bottom-color:#F5F0DC; }
+html[data-theme="brutalist"][data-mode="dark"] .topbar-clock{ border-color:#F5F0DC; }
+html[data-theme="brutalist"][data-mode="dark"] #logout-btn{ background:#1E1E1E; color:var(--text); }
+html[data-theme="brutalist"][data-mode="dark"] .me-avatar{ background:#F5F0DC; color:#000; border-color:#000; }
+
+/* ---- Clay (پیش‌فرض روشن) → نسخه‌ی تیره؛ همون گرمای نارنجی، فقط روی
+   زمینه‌ی تیره ---- */
+html[data-theme="clay"][data-mode="dark"]{
+  --bg:#1C140E; --bg-2:#150F0A; --surface:#241A12; --surface-2:#1C140E;
+  --surface-hi:#2C2016; --border:rgba(249,115,22,.25); --border-soft:rgba(249,115,22,.15);
+  --text:#FDF0E4; --text-muted:#C79A78; --text-dim:#8A6A50;
+  --shadow-card:0 8px 24px rgba(0,0,0,.35); --shadow-pop:0 20px 50px rgba(0,0,0,.5); --shadow-btn:0 4px 14px rgba(0,0,0,.35);
+}
+html[data-theme="clay"][data-mode="dark"] body{
+  background:
+    radial-gradient(ellipse 700px 400px at 20% -10%, rgba(251,146,60,.14), transparent 60%),
+    radial-gradient(ellipse 600px 350px at 90% 0%, rgba(251,113,133,.08), transparent 60%),
+    var(--bg);
+}
+html[data-theme="clay"][data-mode="dark"] .input, html[data-theme="clay"][data-mode="dark"] .field input{ background:var(--surface-2); color:var(--text); }
+html[data-theme="clay"][data-mode="dark"] .sidebar{ background:var(--surface); box-shadow:0 8px 32px rgba(0,0,0,.35); }
+html[data-theme="clay"][data-mode="dark"] .topbar{ background:rgba(36,26,18,.85); }
+html[data-theme="clay"][data-mode="dark"] .hero{ background:linear-gradient(135deg,#241A12,#1C140E); }
+
+/* ---- Paper (پیش‌فرض روشن) → نسخه‌ی تیره؛ primary مرکب-مشکی بود، توی
+   تیره باید روشن بشه تا دکمه‌ها دیده بشن ---- */
+html[data-theme="paper"][data-mode="dark"]{
+  --bg:#17181C; --bg-2:#101114; --surface:#1E2025; --surface-2:#17181C;
+  --surface-hi:#22242A; --border:#2C2E35; --border-soft:#24262C;
+  --text:#EDEDEF; --text-muted:#8D8F98; --text-dim:#54565E;
+  --primary:#EDEDEF; --primary-ink:#17181C;
+  --cyan:#9CA3AF; --amber:#D9975A; --emerald:#5FAE8E; --rose:#E08585; --violet:#C7C9D1; --fuchsia:#C77B58;
+  --shadow-card:0 1px 3px rgba(0,0,0,.3); --shadow-pop:0 16px 40px rgba(0,0,0,.5); --shadow-btn:0 1px 2px rgba(0,0,0,.3);
+  --focus-ring:0 0 0 3px rgba(237,237,239,.15);
+}
+html[data-theme="paper"][data-mode="dark"] .input, html[data-theme="paper"][data-mode="dark"] .field input{ background:var(--surface-2); color:var(--text); }
+html[data-theme="paper"][data-mode="dark"] .sidebar{ background:var(--surface); }
+html[data-theme="paper"][data-mode="dark"] .topbar{ background:var(--surface); }
+html[data-theme="paper"][data-mode="dark"] .hero{ background:var(--surface); }
+html[data-theme="paper"][data-mode="dark"] .btn-primary{ color:var(--primary-ink); }
+html[data-theme="paper"][data-mode="dark"] .nav-item.active{ color:var(--primary-ink); }
+html[data-theme="paper"][data-mode="dark"] .nav-item.active .nav-icon{ color:var(--primary-ink); }
+
+/* ---- Glass (پیش‌فرض تیره) → نسخه‌ی روشن؛ همون شیشه‌ی مات، این‌بار روی
+   پس‌زمینه‌ی پاستلی روشن ---- */
+html[data-theme="glass"][data-mode="light"]{
+  --bg:#EEF0FA; --bg-2:#E4E7F5; --surface:rgba(255,255,255,.55); --surface-2:rgba(255,255,255,.7);
+  --surface-hi:rgba(20,20,50,.04); --border:rgba(20,20,50,.10); --border-soft:rgba(20,20,50,.07);
+  --text:#221F3D; --text-muted:#5B5780; --text-dim:#9A96BE;
+  --primary:#7C4DE0; --primary-ink:#FFFFFF; --cyan:#0891A8; --amber:#B45309; --emerald:#0E9F6E; --rose:#E11D5C; --fuchsia:#C0267D;
+  --shadow-card:0 8px 32px rgba(80,70,140,.12); --shadow-pop:0 24px 60px rgba(80,70,140,.2); --shadow-btn:0 4px 14px rgba(80,70,140,.15);
+  --focus-ring:0 0 0 3px rgba(124,77,224,.3);
+}
+html[data-theme="glass"][data-mode="light"] body{
+  background:
+    radial-gradient(circle at 15% 12%, rgba(139,92,246,.16), transparent 45%),
+    radial-gradient(circle at 85% 18%, rgba(34,211,238,.14), transparent 40%),
+    radial-gradient(circle at 50% 90%, rgba(236,72,153,.12), transparent 45%),
+    var(--bg);
+}
+html[data-theme="glass"][data-mode="light"] .sidebar{ background:rgba(255,255,255,.45); }
+html[data-theme="glass"][data-mode="light"] .topbar{ background:rgba(238,240,250,.6); }
+html[data-theme="glass"][data-mode="light"] ::selection{ background:rgba(124,77,224,.2); }
+
+/* ---- Cyberpunk (پیش‌فرض تیره) → نسخه‌ی روشن؛ حس «آزمایشگاه/کاغذ فنی»
+   با همون سبز/صورتی نئون ولی پررنگ‌تر روی زمینه‌ی روشن ---- */
+html[data-theme="cyberpunk"][data-mode="light"]{
+  --bg:#F1F5F1; --bg-2:#E6EDE7; --surface:#FFFFFF; --surface-2:#EAF2EC;
+  --surface-hi:rgba(0,150,90,.05); --border:rgba(0,120,70,.3); --border-soft:rgba(0,120,70,.15);
+  --text:#0A2318; --text-muted:#3E6B54; --text-dim:#8AAC9B;
+  --primary:#00A85E; --primary-ink:#FFFFFF; --cyan:#0086A8; --amber:#8A7A00; --emerald:#00A868; --rose:#C81E45; --violet:#C81E82; --fuchsia:#C81E82;
+  --shadow-card:0 0 0 1px rgba(0,150,90,.1), 0 8px 24px rgba(0,40,20,.08);
+  --shadow-pop:0 0 30px rgba(0,150,90,.12), 0 24px 60px rgba(0,40,20,.14);
+  --shadow-btn:0 2px 10px rgba(0,150,90,.2); --focus-ring:0 0 0 3px rgba(0,168,94,.3);
+}
+html[data-theme="cyberpunk"][data-mode="light"] body{
+  background:
+    repeating-linear-gradient(180deg, rgba(0,120,70,.03) 0px, rgba(0,120,70,.03) 1px, transparent 1px, transparent 3px),
+    radial-gradient(circle at 12% 8%, rgba(0,168,94,.08), transparent 42%),
+    radial-gradient(circle at 88% 14%, rgba(200,30,130,.06), transparent 40%),
+    var(--bg);
+}
+html[data-theme="cyberpunk"][data-mode="light"] ::selection{ background:rgba(0,168,94,.22); color:#04120c; }
+html[data-theme="cyberpunk"][data-mode="light"] .topbar{ background:rgba(241,245,241,.8); }
+html[data-theme="cyberpunk"][data-mode="light"] .sidebar{ background:linear-gradient(180deg, #fff, #EAF2EC); }
+html[data-theme="cyberpunk"][data-mode="light"] .btn-primary:hover{ box-shadow:0 4px 16px rgba(0,168,94,.35); }
+
+/* ---- Obsidian (پیش‌فرض تیره‌ی مطلق) → نسخه‌ی روشن؛ همون ترمینال، این‌بار
+   کاغذ سفید با متن مشکی و همون سبز سیگنال برای تاکید ---- */
+html[data-theme="obsidian"][data-mode="light"]{
+  --bg:#FAFAFA; --bg-2:#F0F0F0; --surface:#FFFFFF; --surface-2:#F2F2F2;
+  --surface-hi:#EDEDED; --border:#DDDDDD; --border-soft:#E8E8E8;
+  --text:#111111; --text-muted:#666666; --text-dim:#999999;
+  --primary:#111111; --primary-ink:#FFFFFF; --cyan:#00A050; --amber:#A06A00; --emerald:#00A050; --rose:#CC2233; --violet:#111111; --fuchsia:#CC2233;
+  --shadow-pop:0 16px 40px rgba(0,0,0,.15); --focus-ring:0 0 0 2px rgba(0,160,80,.35);
+}
+html[data-theme="obsidian"][data-mode="light"] .sidebar{ background:#F7F7F7; }
+html[data-theme="obsidian"][data-mode="light"] .topbar{ background:#F7F7F7; }
+html[data-theme="obsidian"][data-mode="light"] .nav-item.active{ background:#EAEAEA; }
+html[data-theme="obsidian"][data-mode="light"] .btn-primary{ color:#fff; }
+html[data-theme="obsidian"][data-mode="light"] ::selection{ background:rgba(0,160,80,.2); }
+
+/* ---- Warp Tunnel (پیش‌فرض تیره‌ی فضایی) → نسخه‌ی روشن؛ بنفش روی
+   زمینه‌ی خیلی روشنِ لاواندری، عمق از سایه تامین می‌شه نه گلوی نئون ---- */
+html[data-theme="warp"][data-mode="light"]{
+  --bg:#F1EFFC; --bg-2:#E7E3F9; --surface:rgba(255,255,255,.75); --surface-2:#FFFFFF;
+  --surface-hi:rgba(124,92,255,.06); --border:rgba(124,92,255,.18); --border-soft:rgba(124,92,255,.1);
+  --text:#211D3B; --text-muted:#615C87; --text-dim:#9E99C2;
+  --primary:#6C3CE9; --primary-ink:#FFFFFF; --cyan:#0E8F79; --amber:#B4650F; --emerald:#0E8F79; --rose:#D63A72; --violet:#6C3CE9; --fuchsia:#D63A72;
+  --shadow-card:0 1px 0 rgba(255,255,255,.6) inset, 0 20px 40px rgba(90,70,180,.12);
+  --shadow-pop:0 30px 60px rgba(90,70,180,.18); --shadow-btn:0 8px 18px rgba(108,60,233,.22);
+  --focus-ring:0 0 0 3px rgba(108,60,233,.25);
+}
+html[data-theme="warp"][data-mode="light"] .bg-blobs i{ opacity:.35; }
+html[data-theme="warp"][data-mode="light"] .bg-blobs i:nth-child(3){ opacity:.12; }
+html[data-theme="warp"][data-mode="light"] .card::before{
+  background:linear-gradient(135deg, rgba(255,255,255,.9), rgba(124,92,255,.35) 60%, transparent 61%);
+}
+html[data-theme="warp"][data-mode="light"] .sidebar{ background:linear-gradient(180deg, rgba(255,255,255,.9), rgba(231,227,249,.9)); }
+html[data-theme="warp"][data-mode="light"] .topbar{ background:rgba(241,239,252,.7); }
+html[data-theme="warp"][data-mode="light"] ::selection{ background:rgba(108,60,233,.22); }

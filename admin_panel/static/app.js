@@ -16,7 +16,8 @@ const THEMES = [
     name: 'Fintech Flat',
     desc: 'سایدبار + کارت‌های تخت بنفش، نمودار رادار',
     ready: true,
-    supportsMode: true, // این تم حالت روشن/تیره داره
+    supportsMode: true,
+    defaultMode: 'dark',
     swatch: ['#7367F0', '#23253A', '#1B1D2C'],
   },
   {
@@ -24,7 +25,8 @@ const THEMES = [
     name: 'Bento Grid',
     desc: 'کارت‌های نامنظم چندسایز مثل ویجت‌های اپل',
     ready: true,
-    supportsMode: false,
+    supportsMode: true,
+    defaultMode: 'light',
     swatch: ['#0A84FF', '#30D158', '#FF9F0A'],
   },
   {
@@ -32,7 +34,8 @@ const THEMES = [
     name: 'Neo-brutalist',
     desc: 'کادر ضخیم، بی‌سایه، تایپوگرافی بولد',
     ready: true,
-    supportsMode: false,
+    supportsMode: true,
+    defaultMode: 'light',
     swatch: ['#FFE600', '#000000', '#FFFFFF'],
   },
   {
@@ -40,7 +43,8 @@ const THEMES = [
     name: 'Glassmorphism',
     desc: 'شیشه‌ای، بلور، لایه‌ای',
     ready: true,
-    supportsMode: false,
+    supportsMode: true,
+    defaultMode: 'dark',
     swatch: ['#8A9BFF', '#22D3EE', '#0B1020'],
   },
   {
@@ -48,7 +52,8 @@ const THEMES = [
     name: 'Cyberpunk',
     desc: 'ترمینال هک، اسکن‌لاین، رادار تهدید، نمودار مه‌آلود نئون',
     ready: true,
-    supportsMode: false,
+    supportsMode: true,
+    defaultMode: 'dark',
     swatch: ['#00FF9C', '#FF2E9A', '#050a08'],
   },
   {
@@ -56,7 +61,8 @@ const THEMES = [
     name: 'Dawn Clay',
     desc: 'خمیریِ گرم، حجیم و دوستانه — کارت‌های بادکرده هلویی',
     ready: true,
-    supportsMode: false,
+    supportsMode: true,
+    defaultMode: 'light',
     swatch: ['#F97316', '#FFF7ED', '#FB7185'],
   },
   {
@@ -64,7 +70,8 @@ const THEMES = [
     name: 'Ink Paper',
     desc: 'سرمقاله‌ای مینیمال — کاغذ لوکس، خط مویی و فضای سفید',
     ready: true,
-    supportsMode: false,
+    supportsMode: true,
+    defaultMode: 'light',
     swatch: ['#111827', '#FFFBF0', '#9CA3AF'],
   },
   {
@@ -72,7 +79,8 @@ const THEMES = [
     name: 'Obsidian Signal',
     desc: 'ترمینال داده متراکم — مشکی AMOLED با سیگنال مونو',
     ready: true,
-    supportsMode: false,
+    supportsMode: true,
+    defaultMode: 'dark',
     swatch: ['#0AFF6B', '#000000', '#1A1A1A'],
   },
   {
@@ -80,7 +88,8 @@ const THEMES = [
     name: 'Warp Tunnel',
     desc: 'عمق سه‌بعدی — تونل نوری در پس‌زمینه، کارت‌ها با اسکرول از عمق ظاهر می‌شوند',
     ready: true,
-    supportsMode: false,
+    supportsMode: true,
+    defaultMode: 'dark',
     swatch: ['#6C5CE7', '#22E1FF', '#0A0B1A'],
   },
 ];
@@ -92,14 +101,46 @@ function loadTheme() {
     return { theme: t.theme || DEFAULT_THEME, mode: t.mode || 'dark' };
   } catch (e) { return { theme: DEFAULT_THEME, mode: 'dark' }; }
 }
+// هر تم حالت روشن/تیره‌ی دلخواه خودش رو جدا به خاطر می‌سپاره (مثلاً کاربر
+// می‌تونه Bento رو روشن نگه داره ولی Warp Tunnel رو تیره) — با defaultMode
+// خود تم به عنوان مقدار اول، پیش از اینکه کاربر چیزی انتخاب کرده باشه.
+function getModeForTheme(themeId) {
+  try {
+    const map = JSON.parse(localStorage.getItem('sv-theme-modes')) || {};
+    if (map[themeId]) return map[themeId];
+  } catch (e) {}
+  const meta = THEMES.find(t => t.id === themeId);
+  return (meta && meta.defaultMode) || 'dark';
+}
+function rememberModeForTheme(themeId, mode) {
+  let map = {};
+  try { map = JSON.parse(localStorage.getItem('sv-theme-modes')) || {}; } catch (e) {}
+  map[themeId] = mode;
+  try { localStorage.setItem('sv-theme-modes', JSON.stringify(map)); } catch (e) {}
+}
 function applyThemeChoice(themeId, mode) {
   const meta = THEMES.find(t => t.id === themeId) || THEMES[0];
   const finalTheme = meta.ready ? meta.id : DEFAULT_THEME;
-  const finalMode = mode || 'dark';
+  const finalMode = mode || getModeForTheme(finalTheme);
   document.documentElement.setAttribute('data-theme', finalTheme);
   document.documentElement.setAttribute('data-mode', finalMode);
   localStorage.setItem('sv-theme', JSON.stringify({ theme: finalTheme, mode: finalMode }));
+  rememberModeForTheme(finalTheme, finalMode);
   if (typeof WarpFX !== 'undefined') WarpFX.sync(finalTheme);
+  if (typeof syncTopbarModeToggle === 'function') syncTopbarModeToggle();
+}
+// دکمه‌ی تعویض حالت روشن/تیره در نوار بالا؛ فقط برای تم‌هایی که ازش
+// پشتیبانی می‌کنن نمایش داده می‌شه (بقیه‌ی تم‌ها فقط یک حالت تیره دارن).
+function syncTopbarModeToggle() {
+  const btn = document.getElementById('topbar-mode-toggle');
+  if (!btn) return;
+  const cur = loadTheme();
+  const meta = THEMES.find(t => t.id === cur.theme);
+  if (!meta || !meta.supportsMode) { btn.style.display = 'none'; return; }
+  btn.style.display = '';
+  const isDark = cur.mode === 'dark';
+  btn.textContent = isDark ? '☀️' : '🌙';
+  btn.title = isDark ? 'رفتن به حالت روشن' : 'رفتن به حالت تیره';
 }
 // نگه‌داری سازگاری با کدهای قدیمی‌تر که فقط applyTheme(mode) صدا می‌زنن
 function applyTheme(mode) { applyThemeChoice(loadTheme().theme, mode); }
@@ -621,6 +662,12 @@ function showApp() {
   startNotificationPolling();
   const pushBtn = $('#push-toggle-btn');
   if (pushBtn) pushBtn.addEventListener('click', openPushSettingsModal);
+  const modeBtn = $('#topbar-mode-toggle');
+  if (modeBtn) modeBtn.addEventListener('click', () => {
+    const cur = loadTheme();
+    applyThemeChoice(cur.theme, cur.mode === 'dark' ? 'light' : 'dark');
+  });
+  syncTopbarModeToggle();
   initInstallApp();
   let saved = null;
   try { saved = localStorage.getItem('admin_current_tab'); } catch (e) {}
@@ -3732,15 +3779,7 @@ async function renderAccount() {
       <div class="theme-grid" id="theme-grid">
         ${THEMES.map(t => renderThemeCard(t, cur)).join('')}
       </div>
-      ${activeMeta.supportsMode ? `
-      <div class="card-head" style="margin-top:16px">
-        <h3 style="font-size:13.5px">حالت نمایش</h3>
-        <div class="mode-toggle" id="mode-toggle">
-          <button data-mode="light" class="${cur.mode === 'light' ? 'active' : ''}">☀️ روشن</button>
-          <button data-mode="dark" class="${cur.mode === 'dark' ? 'active' : ''}">🌙 تیره</button>
-        </div>
-      </div>` : ''}
-      <span class="card-sub">این یک ترجیح شخصیه و فقط برای همین مرورگر ذخیره می‌شود؛ روی نمایش پنل برای بقیه‌ی ادمین‌ها اثری ندارد.</span>
+      <span class="card-sub">این یک ترجیح شخصیه و فقط برای همین مرورگر ذخیره می‌شود؛ روی نمایش پنل برای بقیه‌ی ادمین‌ها اثری ندارد.${activeMeta.supportsMode ? ' سوییچ روشن/تیره از نوار بالا در دسترسه.' : ''}</span>
     </div>
 
     <div class="card" style="max-width:420px">
@@ -3756,12 +3795,8 @@ async function renderAccount() {
     const id = card.dataset.themeId;
     const meta = THEMES.find(t => t.id === id);
     if (!meta.ready) { toast('این تم هنوز آماده نیست — به‌زودی اضافه می‌شود.'); return; }
-    applyThemeChoice(id, loadTheme().mode);
+    applyThemeChoice(id);
     renderAccount();
-  }));
-  $$('#mode-toggle button', content()).forEach(btn => btn.addEventListener('click', () => {
-    applyThemeChoice(loadTheme().theme, btn.dataset.mode);
-    $$('#mode-toggle button', content()).forEach(b => b.classList.toggle('active', b === btn));
   }));
   $('#acc-save').addEventListener('click', async () => {
     try {
