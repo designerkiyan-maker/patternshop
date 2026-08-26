@@ -38,6 +38,15 @@ const THEMES = [
     defaultMode: 'dark',
     swatch: ['#FF2A6D', '#00FFF0', '#05050A'],
   },
+  {
+    id: 'streetops',
+    name: 'Street Ops',
+    desc: 'HUD الهام‌گرفته از بازی‌های شهر باز — نوار سلامت، ستاره‌ی تحت‌تعقیب، منوی پایین صفحه',
+    ready: true,
+    supportsMode: false,
+    defaultMode: 'dark',
+    swatch: ['#FFB020', '#22D3EE', '#14161C'],
+  },
 ];
 const DEFAULT_THEME = 'bento';
 
@@ -880,6 +889,7 @@ async function renderDashboard() {
   const theme = loadTheme().theme;
   if (theme === 'brutalist') await renderDashboardBrutalist(s, sys);
   else if (theme === 'cyberpunk') await renderDashboardCyberpunk(s, sys);
+  else if (theme === 'streetops') await renderDashboardStreetOps(s, sys);
   else await renderDashboardBento(s, sys);
   const root = content();
   if (root) root.insertAdjacentHTML('afterbegin', dashRangeBarHtml(s));
@@ -1056,6 +1066,92 @@ function renderDashboardCyberpunk(s, sys) {
     });
     $$('.cp-bar-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
   }, 60));
+  mountServerMap();
+}
+
+/* ------------------------------------------------ dashboard: streetops --- */
+function soSegBar(pct, segments = 12) {
+  const p = Math.max(0, Math.min(100, Math.round(pct)));
+  const filled = Math.round((p / 100) * segments);
+  const color = p >= 60 ? 'var(--emerald)' : p >= 30 ? 'var(--amber)' : 'var(--rose)';
+  let html = '';
+  for (let i = 0; i < segments; i++) html += `<span class="so-seg${i < filled ? ' on' : ''}" style="${i < filled ? `background:${color};box-shadow:0 0 6px ${color}` : ''}"></span>`;
+  return html;
+}
+function soWantedStars(ratio) {
+  const level = Math.max(0, Math.min(5, Math.round(ratio * 5)));
+  let html = '';
+  for (let i = 0; i < 5; i++) html += `<span class="so-star${i < level ? ' on' : ''}">★</span>`;
+  return html;
+}
+function renderDashboardStreetOps(s, sys) {
+  const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
+  const wantedRatio = s.active_configs ? Math.min((s.open_tickets / s.active_configs) * 3, 1) : 0;
+  const health = sys ? Math.max(0, 100 - (sys.cpu.percent + sys.ram.percent + sys.disk.percent) / 3) : 80;
+
+  const resHtml = sys ? `
+    <div class="so-panel">
+      <div class="so-panel-head">SERVER VITALS</div>
+      <div class="so-vital-row"><span>CPU</span>${soSegBar(sys.cpu.percent)}<b class="mono">${sys.cpu.percent}%</b></div>
+      <div class="so-vital-row"><span>RAM</span>${soSegBar(sys.ram.percent)}<b class="mono">${sys.ram.percent}%</b></div>
+      <div class="so-vital-row"><span>DISK</span>${soSegBar(sys.disk.percent)}<b class="mono">${sys.disk.percent}%</b></div>
+    </div>` : '';
+
+  const maxCatRev = Math.max(...s.category_breakdown.map(c => c.revenue), 1);
+  const loadout = s.category_breakdown.map(c => `
+    <div class="so-vital-row"><span>${esc(c.name)}</span>${soSegBar((c.revenue / maxCatRev) * 100, 16)}<b class="mono">${fmt(c.revenue)}</b></div>
+  `).join('') || '<span class="card-sub">بدون داده</span>';
+
+  const missions = s.top_products.map((p, i) => `
+    <div class="so-mission-row"><span class="so-mission-check">✓</span><span class="so-mission-name">${esc(p.name)}</span><span class="so-mission-val mono">${fmt(p.orders)}x</span></div>
+  `).join('') || '<span class="card-sub">بدون داده</span>';
+
+  setContent(`
+    <div class="so-hero">
+      <div class="so-hero-bar top"></div>
+      <div class="so-hero-body">
+        <span class="so-hero-tag">OBJECTIVE</span>
+        <h2>${greetingByHour()}، ${esc(ME.username)}</h2>
+        <p class="mono">${fmtDateOnly(s.start_date)} — ${fmtDateOnly(s.end_date)}</p>
+      </div>
+      <div class="so-hero-bar bottom"></div>
+    </div>
+
+    <div class="so-stat-grid">
+      <div class="so-stat so-stat-cash">
+        <span class="so-stat-label">CASH</span>
+        <span class="so-stat-val mono">$<span data-count="${s.revenue}">0</span></span>
+        <span class="so-stat-tag ${deltaUp ? 'up' : 'down'}">${deltaUp ? '▲' : '▼'} ${Math.abs(s.revenue_change_pct ?? 0)}%</span>
+      </div>
+      <div class="so-stat"><span class="so-stat-label">CREW (کاربران)</span><span class="so-stat-val mono" data-count="${s.total_users}">0</span></div>
+      <div class="so-stat"><span class="so-stat-label">MISSIONS DONE</span><span class="so-stat-val mono" data-count="${s.approved}">0</span></div>
+      <div class="so-stat">
+        <span class="so-stat-label">WANTED (تیکت باز)</span>
+        <span class="so-stat-stars">${soWantedStars(wantedRatio)}</span>
+        <span class="so-stat-tag">${fmt(s.open_tickets)} باز</span>
+      </div>
+    </div>
+
+    <div class="so-cols" style="margin-top:16px">
+      <div class="so-panel">
+        <div class="so-panel-head">HEALTH &amp; PERFORMANCE</div>
+        <div class="so-vital-row"><span>نرخ تبدیل</span>${soSegBar(s.conversion_rate)}<b class="mono">${fmt(Math.round(s.conversion_rate))}%</b></div>
+        <div class="so-vital-row"><span>سلامت سرور</span>${soSegBar(health)}<b class="mono">${fmt(Math.round(health))}%</b></div>
+        <div class="so-vital-row"><span>کانفیگ فعال</span>${soSegBar(Math.min(Math.round((s.active_configs / Math.max(s.total_users, 1)) * 100), 100))}<b class="mono">${fmt(s.active_configs)}</b></div>
+      </div>
+      ${resHtml}
+    </div>
+
+    <div class="so-cols" style="margin-top:16px">
+      <div class="so-panel"><div class="so-panel-head">LOADOUT — درآمد به تفکیک دسته</div>${loadout}</div>
+      <div class="so-panel"><div class="so-panel-head">MISSION LOG — پرفروش‌ترین محصولات</div>${missions}</div>
+    </div>
+
+    <div style="margin-top:16px">${serverMapCardHtml()}</div>
+  `);
+
+  const root = content();
+  $$('.so-stat-val [data-count], .so-stat-val[data-count]', root).forEach(el => animateCount(el, Number(el.dataset.count)));
   mountServerMap();
 }
 

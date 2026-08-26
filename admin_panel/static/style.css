@@ -1960,3 +1960,127 @@ html[data-theme="cyberpunk"] .cp-list-val{ color:var(--emerald); font-size:12px;
   html[data-theme="cyberpunk"] .cp-stat-grid, html[data-theme="cyberpunk"] .cp-cols{ grid-template-columns:1fr; }
   html[data-theme="cyberpunk"] .cp-gauge-row{ gap:14px; }
 }
+
+/* ===================================================================
+   Street Ops theme — open-world game HUD. Nav becomes a floating
+   bottom dock; brand + account chips float in the top corners over
+   the content, like an in-game HUD overlay. Single dark mode.
+=================================================================== */
+html[data-theme="streetops"]{
+  --bg:#14161C; --bg-2:#0F1014; --surface:#1B1D24; --surface-2:#22252E;
+  --surface-hi:rgba(255,176,32,.07); --border:rgba(255,255,255,.10); --border-soft:rgba(255,255,255,.06);
+  --text:#F2F1EC; --text-muted:#9A9A9E; --text-dim:#5C5C60;
+  --primary:#FFB020; --primary-ink:#14161C; --cyan:#22D3EE; --amber:#FFB020; --emerald:#8BC34A; --rose:#FF3B30;
+  --accent-1:var(--primary); --accent-2:var(--cyan); --accent-3:var(--amber); --accent-4:var(--emerald);
+  --violet:#8BC34A; --fuchsia:#FF3B30;
+  --font-body:"Rajdhani","Vazirmatn",sans-serif; --font-mono:"JetBrains Mono",ui-monospace,monospace;
+  --radius:6px; --radius-sm:6px; --radius-xs:4px;
+  --shadow-card:0 10px 26px rgba(0,0,0,.45); --shadow-pop:0 20px 60px rgba(0,0,0,.6); --shadow-btn:0 4px 12px rgba(0,0,0,.4);
+  --focus-ring:0 0 0 2px rgba(255,176,32,.55);
+}
+html[data-theme="streetops"] body{
+  background:
+    radial-gradient(ellipse 1000px 500px at 50% -10%, rgba(255,176,32,.10), transparent 60%),
+    radial-gradient(ellipse 800px 500px at 100% 100%, rgba(34,211,238,.08), transparent 60%),
+    var(--bg);
+}
+html[data-theme="streetops"] h1, html[data-theme="streetops"] h2, html[data-theme="streetops"] h3, html[data-theme="streetops"] h4{
+  text-transform:uppercase; letter-spacing:.02em; font-weight:700;
+}
+
+/* ---- shared components ---- */
+html[data-theme="streetops"] .card, html[data-theme="streetops"] .modal, html[data-theme="streetops"] .login-card{
+  border-radius:var(--radius); border:1px solid var(--border-soft);
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%);
+  background:var(--surface);
+}
+html[data-theme="streetops"] .card-head h3{ font-size:13px; }
+html[data-theme="streetops"] .btn{
+  border-radius:4px; font-weight:700; text-transform:uppercase; font-size:12.5px; letter-spacing:.03em;
+  clip-path:polygon(8px 0,100% 0,100% 100%,0 100%,0 8px);
+}
+html[data-theme="streetops"] .btn-primary{ background:var(--primary); color:#14161C; box-shadow:0 0 16px rgba(255,176,32,.4); }
+html[data-theme="streetops"] .btn-primary:hover{ filter:brightness(1.1); }
+html[data-theme="streetops"] .btn-danger{ background:rgba(255,59,48,.15); color:var(--rose); border-color:rgba(255,59,48,.4); }
+html[data-theme="streetops"] .field input, html[data-theme="streetops"] .input, html[data-theme="streetops"] select.input{
+  border-radius:4px; background:var(--bg-2);
+}
+html[data-theme="streetops"] .badge{ border-radius:4px; text-transform:uppercase; font-weight:700; font-size:10.5px; }
+html[data-theme="streetops"] table{ font-size:13px; }
+html[data-theme="streetops"] thead th{ color:var(--primary); font-size:10.5px; }
+html[data-theme="streetops"] tbody tr:hover{ background:var(--surface-hi); }
+html[data-theme="streetops"] .tab-btn{ border-radius:4px; text-transform:uppercase; font-weight:700; font-size:11.5px; }
+html[data-theme="streetops"] .tab-btn.active{ background:var(--primary); color:#14161C; }
+html[data-theme="streetops"] .stat-card .value, html[data-theme="streetops"] .topbar-clock{ font-family:var(--font-mono); }
+html[data-theme="streetops"] .login-logo, html[data-theme="streetops"] .brand-mark{ border-radius:6px; background:var(--primary); color:#14161C; }
+
+/* ---- menu placement: floating bottom dock + corner HUD chips ---- */
+@media (min-width:961px){
+  html[data-theme="streetops"] .sidebar{ display:contents; }
+  html[data-theme="streetops"] .sidebar-brand{
+    position:fixed; top:16px; inset-inline-start:16px; z-index:16; padding:8px 16px 8px 10px;
+    background:var(--surface); border:1px solid var(--border); box-shadow:var(--shadow-btn);
+    clip-path:polygon(0 0,100% 0,100% 70%,88% 100%,0 100%);
+  }
+  html[data-theme="streetops"] .sidebar-footer{
+    position:fixed; top:16px; inset-inline-end:16px; z-index:16; width:auto; border:none; padding:8px 14px;
+    margin:0; display:flex; align-items:center; gap:12px; background:var(--surface); border:1px solid var(--border);
+    clip-path:polygon(12% 0,100% 0,100% 100%,0 100%,0 30%);
+  }
+  html[data-theme="streetops"] .me-info{ display:flex; }
+  html[data-theme="streetops"] #logout-btn{ width:auto; padding:8px 12px; }
+  html[data-theme="streetops"] .nav-tunnel{
+    position:fixed; bottom:18px; left:50%; transform:translateX(-50%); z-index:16;
+    display:flex; align-items:center; gap:4px; overflow-x:auto; max-width:88vw;
+    background:rgba(27,29,36,.92); backdrop-filter:blur(6px); border:1px solid var(--border);
+    padding:8px; border-radius:14px; box-shadow:var(--shadow-pop);
+  }
+  html[data-theme="streetops"] .nav-section{ display:none; }
+  html[data-theme="streetops"] .nav-item{
+    flex-direction:column; gap:3px; padding:8px 12px; margin:0; border-radius:9px; white-space:nowrap;
+  }
+  html[data-theme="streetops"] .nav-item span:last-child{ font-size:9.5px; text-transform:uppercase; font-weight:700; }
+  html[data-theme="streetops"] .nav-item.active{ background:var(--primary); color:#14161C; }
+  html[data-theme="streetops"] .nav-item.active .nav-icon{ color:#14161C; }
+  html[data-theme="streetops"] .topbar{ padding-inline:190px; }
+  html[data-theme="streetops"] .content{ padding-bottom:110px; }
+}
+html[data-theme="streetops"] .topbar{ background:transparent; border-bottom:1px solid var(--border-soft); }
+html[data-theme="streetops"] .live-dot{ background:var(--emerald); box-shadow:0 0 8px var(--emerald); }
+
+/* ---- dashboard: streetops ---- */
+html[data-theme="streetops"] .so-hero{ position:relative; padding:26px 10px; margin-bottom:18px; text-align:center; }
+html[data-theme="streetops"] .so-hero-bar{ position:absolute; left:0; right:0; height:22px; background:#000; }
+html[data-theme="streetops"] .so-hero-bar.top{ top:0; } html[data-theme="streetops"] .so-hero-bar.bottom{ bottom:0; }
+html[data-theme="streetops"] .so-hero-tag{ font-family:var(--font-mono); font-size:11px; color:var(--primary); letter-spacing:.15em; }
+html[data-theme="streetops"] .so-hero h2{ font-size:24px; margin:6px 0 4px; }
+html[data-theme="streetops"] .so-hero p{ color:var(--text-muted); font-size:12px; }
+html[data-theme="streetops"] .so-stat-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+html[data-theme="streetops"] .so-stat{
+  background:var(--surface); border:1px solid var(--border-soft); border-radius:var(--radius); padding:14px 16px;
+  display:flex; flex-direction:column; gap:6px; clip-path:polygon(0 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%);
+}
+html[data-theme="streetops"] .so-stat-cash{ border:1px solid var(--primary); box-shadow:0 0 16px rgba(255,176,32,.25); }
+html[data-theme="streetops"] .so-stat-label{ font-size:10.5px; color:var(--text-muted); text-transform:uppercase; font-weight:700; letter-spacing:.05em; }
+html[data-theme="streetops"] .so-stat-val{ font-size:24px; font-weight:700; }
+html[data-theme="streetops"] .so-stat-cash .so-stat-val{ color:var(--emerald); }
+html[data-theme="streetops"] .so-stat-tag{ font-size:11px; font-family:var(--font-mono); align-self:flex-start; padding:2px 8px; border-radius:4px; background:var(--surface-2); }
+html[data-theme="streetops"] .so-stat-tag.up{ color:var(--emerald); } html[data-theme="streetops"] .so-stat-tag.down{ color:var(--rose); }
+html[data-theme="streetops"] .so-stat-stars{ font-size:16px; letter-spacing:2px; color:var(--border); }
+html[data-theme="streetops"] .so-star.on{ color:var(--rose); text-shadow:0 0 8px rgba(255,59,48,.6); }
+html[data-theme="streetops"] .so-cols{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+html[data-theme="streetops"] .so-panel{ background:var(--surface); border:1px solid var(--border-soft); border-radius:var(--radius); padding:16px 18px; }
+html[data-theme="streetops"] .so-panel-head{ font-size:11.5px; font-weight:700; letter-spacing:.06em; color:var(--primary); margin-bottom:12px; text-transform:uppercase; border-bottom:1px solid var(--border-soft); padding-bottom:8px; }
+html[data-theme="streetops"] .so-vital-row{ display:flex; align-items:center; gap:10px; padding:6px 0; }
+html[data-theme="streetops"] .so-vital-row > span:first-child{ width:120px; flex-shrink:0; font-size:12px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+html[data-theme="streetops"] .so-vital-row b{ width:52px; text-align:end; font-size:12px; flex-shrink:0; }
+html[data-theme="streetops"] .so-seg{ flex:1; height:12px; background:var(--surface-2); border-radius:1px; }
+html[data-theme="streetops"] .so-mission-row{ display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px dashed var(--border-soft); }
+html[data-theme="streetops"] .so-mission-row:last-child{ border-bottom:none; }
+html[data-theme="streetops"] .so-mission-check{ color:var(--emerald); font-weight:700; }
+html[data-theme="streetops"] .so-mission-name{ flex:1; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+html[data-theme="streetops"] .so-mission-val{ color:var(--primary); font-size:12px; }
+
+@media (max-width:960px){
+  html[data-theme="streetops"] .so-stat-grid, html[data-theme="streetops"] .so-cols{ grid-template-columns:1fr; }
+}
