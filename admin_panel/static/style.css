@@ -1170,6 +1170,34 @@ html[data-theme="glass"] .brand-mark{ box-shadow:0 0 16px rgba(139,92,246,.6); }
 html[data-theme="glass"] .nav-item.active{ box-shadow:0 0 14px rgba(139,92,246,.5); }
 html[data-theme="glass"] .hero-orbit, html[data-theme="glass"] .hero-net{ display:flex; align-items:center; justify-content:center; width:150px; height:150px; flex-shrink:0; }
 
+/* عناصر مشترک (تنظیمات/مودال‌ها) که بین همه‌ی تم‌ها یکسان رندر می‌شن،
+   اینجا مخصوص گلس، بلوردار و شیشه‌ای می‌شن تا با بقیه‌ی صفحه یکدست باشن. */
+html[data-theme="glass"] .settings-group{
+  background:var(--surface); border:1px solid var(--border);
+  backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px);
+}
+html[data-theme="glass"] .settings-group-head:hover{ background:rgba(255,255,255,.03); }
+html[data-theme="glass"] .field input,
+html[data-theme="glass"] .input,
+html[data-theme="glass"] select.input,
+html[data-theme="glass"] textarea.input{
+  background:rgba(255,255,255,.05); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+}
+html[data-theme="glass"] .field input:focus,
+html[data-theme="glass"] .input:focus{
+  border-color:var(--primary); box-shadow:0 0 0 3px rgba(139,92,246,.28), 0 0 16px rgba(139,92,246,.22);
+}
+html[data-theme="glass"] .switch{ background:rgba(255,255,255,.06); }
+html[data-theme="glass"] .switch[data-on="1"]{ box-shadow:0 0 12px rgba(52,211,153,.5); }
+html[data-theme="glass"] .color-swatch.active{ box-shadow:0 0 0 2px var(--surface), 0 0 0 4px var(--primary), 0 0 14px rgba(139,92,246,.5); }
+html[data-theme="glass"] .menu-order-row{
+  background:rgba(255,255,255,.05); border:1px solid var(--border-soft);
+  backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+}
+html[data-theme="glass"] .menu-order-row.dragging{ border-color:var(--primary); box-shadow:0 0 14px rgba(139,92,246,.35); }
+html[data-theme="glass"] .btn{ backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); }
+html[data-theme="glass"] .btn-primary{ box-shadow:0 0 14px rgba(139,92,246,.45); }
+
 .glass-stat{ display:flex; flex-direction:column; gap:8px; }
 .glass-stat-label{ font-size:12px; color:var(--text-muted); font-weight:600; }
 .glass-stat-tag{ width:fit-content; font-size:11px; font-weight:700; padding:3px 10px; border-radius:20px; }
