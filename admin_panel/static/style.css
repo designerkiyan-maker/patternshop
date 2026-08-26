@@ -1161,7 +1161,7 @@ html[data-theme="glass"] .login-card,
 html[data-theme="glass"] .modal,
 html[data-theme="glass"] .sidebar,
 html[data-theme="glass"] .topbar{
-  backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px);
+  backdrop-filter:blur(22px) saturate(180%); -webkit-backdrop-filter:blur(22px) saturate(180%);
 }
 html[data-theme="glass"] .card{ border:1px solid var(--border); }
 html[data-theme="glass"] .sidebar{ background:rgba(255,255,255,.04); border-left:1px solid var(--border-soft); }
@@ -1174,14 +1174,14 @@ html[data-theme="glass"] .hero-orbit, html[data-theme="glass"] .hero-net{ displa
    اینجا مخصوص گلس، بلوردار و شیشه‌ای می‌شن تا با بقیه‌ی صفحه یکدست باشن. */
 html[data-theme="glass"] .settings-group{
   background:var(--surface); border:1px solid var(--border);
-  backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px);
+  backdrop-filter:blur(18px) saturate(180%); -webkit-backdrop-filter:blur(18px) saturate(180%);
 }
 html[data-theme="glass"] .settings-group-head:hover{ background:rgba(255,255,255,.03); }
 html[data-theme="glass"] .field input,
 html[data-theme="glass"] .input,
 html[data-theme="glass"] select.input,
 html[data-theme="glass"] textarea.input{
-  background:rgba(255,255,255,.05); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+  background:rgba(255,255,255,.05); backdrop-filter:blur(12px) saturate(180%); -webkit-backdrop-filter:blur(12px) saturate(180%);
 }
 html[data-theme="glass"] .field input:focus,
 html[data-theme="glass"] .input:focus{
@@ -1192,10 +1192,10 @@ html[data-theme="glass"] .switch[data-on="1"]{ box-shadow:0 0 12px rgba(52,211,1
 html[data-theme="glass"] .color-swatch.active{ box-shadow:0 0 0 2px var(--surface), 0 0 0 4px var(--primary), 0 0 14px rgba(139,92,246,.5); }
 html[data-theme="glass"] .menu-order-row{
   background:rgba(255,255,255,.05); border:1px solid var(--border-soft);
-  backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+  backdrop-filter:blur(14px) saturate(180%); -webkit-backdrop-filter:blur(14px) saturate(180%);
 }
 html[data-theme="glass"] .menu-order-row.dragging{ border-color:var(--primary); box-shadow:0 0 14px rgba(139,92,246,.35); }
-html[data-theme="glass"] .btn{ backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); }
+html[data-theme="glass"] .btn{ backdrop-filter:blur(10px) saturate(180%); -webkit-backdrop-filter:blur(10px) saturate(180%); }
 html[data-theme="glass"] .btn-primary{ box-shadow:0 0 14px rgba(139,92,246,.45); }
 
 .glass-stat{ display:flex; flex-direction:column; gap:8px; }
@@ -1258,8 +1258,9 @@ html[data-theme="glass"] .btn-primary{ box-shadow:0 0 14px rgba(139,92,246,.45);
 .gl-hero{
   display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
   padding:18px 20px; border-radius:var(--radius); margin-bottom:16px;
-  background:var(--surface); border:1px solid var(--border);
-  backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px); box-shadow:var(--shadow-card);
+  background:rgba(255,255,255,.07); border:1px solid var(--border);
+  backdrop-filter:blur(22px) saturate(180%); -webkit-backdrop-filter:blur(22px) saturate(180%);
+  box-shadow:var(--shadow-card), inset 0 1px 0 rgba(255,255,255,.15);
 }
 .gl-hero h2{ margin:0 0 4px; font-size:19px; }
 .gl-hero p{ margin:0; font-size:12.5px; color:var(--text-muted); }
@@ -1283,11 +1284,12 @@ html[data-theme="glass"] .btn-primary{ box-shadow:0 0 14px rgba(139,92,246,.45);
 
 .gl-card-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; }
 .gl-card{
-  padding:16px; border-radius:var(--radius-sm); background:var(--surface); border:1px solid var(--border);
-  backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); box-shadow:var(--shadow-card);
+  padding:16px; border-radius:var(--radius-sm); background:rgba(255,255,255,.07); border:1px solid var(--border);
+  backdrop-filter:blur(18px) saturate(180%); -webkit-backdrop-filter:blur(18px) saturate(180%);
+  box-shadow:var(--shadow-card), inset 0 1px 0 rgba(255,255,255,.13);
   display:flex; flex-direction:column; gap:8px; transition:.2s;
 }
-.gl-card:hover{ border-color:rgba(139,92,246,.5); box-shadow:0 0 20px rgba(139,92,246,.25); }
+.gl-card:hover{ border-color:rgba(139,92,246,.5); box-shadow:0 0 20px rgba(139,92,246,.25), inset 0 1px 0 rgba(255,255,255,.18); transform:translateY(-2px); }
 .gl-card-price{ font-size:17px; font-weight:800; }
 .gl-card-title{ font-size:13.5px; font-weight:700; }
 .gl-card-sub{ font-size:11.5px; color:var(--text-muted); }
@@ -1296,9 +1298,11 @@ html[data-theme="glass"] .btn-primary{ box-shadow:0 0 14px rgba(139,92,246,.45);
 .gl-list{ display:flex; flex-direction:column; gap:8px; }
 .gl-row{
   display:flex; align-items:center; gap:12px; padding:11px 14px; border-radius:var(--radius-sm);
-  background:var(--surface); border:1px solid var(--border);
-  backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px);
+  background:rgba(255,255,255,.07); border:1px solid var(--border); transition:border-color .2s, box-shadow .2s;
+  backdrop-filter:blur(18px) saturate(180%); -webkit-backdrop-filter:blur(18px) saturate(180%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12);
 }
+.gl-row:hover{ border-color:rgba(139,92,246,.4); box-shadow:0 0 16px rgba(139,92,246,.18), inset 0 1px 0 rgba(255,255,255,.12); }
 .gl-row-main{ flex:1; min-width:0; }
 .gl-row-title{ font-size:13.5px; font-weight:700; display:block; }
 .gl-row-sub{ font-size:11.5px; color:var(--text-muted); }
@@ -1311,13 +1315,15 @@ html[data-theme="glass"] .btn-primary{ box-shadow:0 0 14px rgba(139,92,246,.45);
 .gl-pill-ok{ color:#34D399; background:rgba(52,211,153,.14); }
 .gl-pill-no{ color:#FB7185; background:rgba(251,113,133,.14); }
 .gl-pill-mid{ color:#FBBF24; background:rgba(251,191,36,.14); }
-.gl-row-wrap{ border-radius:var(--radius-sm); background:var(--surface); border:1px solid var(--border);
-  backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); overflow:hidden; }
-.gl-row-wrap .gl-row{ border:none; backdrop-filter:none; -webkit-backdrop-filter:none; background:transparent; border-radius:0; }
+.gl-row-wrap{ border-radius:var(--radius-sm); background:rgba(255,255,255,.07); border:1px solid var(--border);
+  backdrop-filter:blur(18px) saturate(180%); -webkit-backdrop-filter:blur(18px) saturate(180%); overflow:hidden;
+  transition:border-color .2s, box-shadow .2s; box-shadow:inset 0 1px 0 rgba(255,255,255,.12); }
+.gl-row-wrap:hover{ border-color:rgba(139,92,246,.4); box-shadow:0 0 16px rgba(139,92,246,.18), inset 0 1px 0 rgba(255,255,255,.12); }
+.gl-row-wrap .gl-row{ border:none; backdrop-filter:none; -webkit-backdrop-filter:none; background:transparent; border-radius:0; box-shadow:none; }
 .gl-row-amount{ font-size:13px; font-weight:800; }
 .gl-row-actions{ display:flex; gap:8px; padding:0 14px 12px; margin-top:-4px; flex-wrap:wrap; }
 .gl-search{ width:100%; border:1px solid var(--border); border-radius:999px; padding:10px 16px; background:var(--surface);
-  color:var(--text); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); }
+  color:var(--text); backdrop-filter:blur(18px) saturate(180%); -webkit-backdrop-filter:blur(18px) saturate(180%); }
 .gl-search:focus{ outline:none; box-shadow:0 0 0 3px rgba(139,92,246,.35); }
 
 /* ---------------------------------------------- shared page kit: cyberpunk (cyb-) --- */
