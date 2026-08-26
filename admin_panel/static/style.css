@@ -1522,150 +1522,196 @@ html[data-theme="obsidian"] .badge{ border-radius:2px; font-family: var(--font-m
 }
 
 /* =================================================================
-   Warp Tunnel — عمق سه‌بعدی. تونل نوری در پس‌زمینه (کانواس)، کارت‌ها با
-   اسکرول از عمق ظاهر می‌شوند (IntersectionObserver در app.js/WarpFX)،
-   هاور روی کارت‌ها کج‌شدن سه‌بعدی سبک داره. لهجه‌ی رنگی: بنفش الکتریک +
-   سیان سیگنال روی پس‌زمینه‌ی نیلی فضایی.
+   Warp Tunnel — لهجه‌ی «عمق»: پنل‌های شیشه‌ای تیره روی اورای بنفش/نیلی
+   تونالِ محو (نه رنگین‌کمانی)، هر کارت یک گوشه‌ی تاشده داره که لایه‌ی
+   زیرینش رو نشون می‌ده (سیگنیچر اصلی تم = «عمق قابل‌دیدن»)، پشت هیرو
+   دو پنل شبح‌مانند در فاصله‌ی Z مختلف قرار گرفتن (دسته‌ی کارت‌های
+   انباشته). عنوان‌ها با فونت Chakra Petch (که از قبل لود شده ولی جایی
+   استفاده نمی‌شد). اسکرول با animation-timeline بومی مرورگر عمق کارت‌ها
+   رو عوض می‌کنه؛ در مرورگرهای بدون پشتیبانی، افکت با IntersectionObserver
+   (در app.js) جایگزین می‌شه.
 ================================================================= */
 html[data-theme="warp"]{
-  --bg: #0A0B1A;
-  --bg-2: #060714;
-  --surface: #12142B;
-  --surface-2: #191C3B;
-  --surface-hi: rgba(108,92,231,.08);
-  --border: rgba(108,92,231,.22);
-  --border-soft: rgba(108,92,231,.12);
+  --bg: #0B0A18;
+  --bg-2: #06050F;
+  --surface: #171432;
+  --surface-2: #1E1A42;
+  --surface-hi: rgba(150,130,255,.07);
+  --border: rgba(150,130,255,.20);
+  --border-soft: rgba(150,130,255,.11);
 
-  --text: #EEF0FF;
-  --text-muted: #8D90C0;
-  --text-dim: #52558A;
+  --text: #F1EFFF;
+  --text-muted: #9A93C9;
+  --text-dim: #5B5488;
 
-  --primary: #6C5CE7;
+  --primary: #7C5CFF;
   --primary-ink: #FFFFFF;
-  --cyan: #22E1FF;
-  --amber: #FFB020;
-  --emerald: #5CF0C2;
-  --rose: #FF4D8D;
-  --violet: #6C5CE7;
-  --fuchsia: #FF4D8D;
+  --cyan: #3FE0C0;
+  --amber: #FFB454;
+  --emerald: #3FE0C0;
+  --rose: #FF6F91;
+  --violet: #7C5CFF;
+  --fuchsia: #FF6F91;
+
+  --font-display: "Chakra Petch", var(--font-body);
 
   --radius: 18px;
-  --radius-sm: 14px;
-  --radius-xs: 10px;
+  --radius-sm: 13px;
+  --radius-xs: 9px;
 
-  --shadow-card: 0 0 0 1px rgba(108,92,231,.08), 0 20px 50px rgba(3,4,14,.55);
-  --shadow-pop: 0 0 60px rgba(108,92,231,.2), 0 30px 70px rgba(0,0,0,.6);
-  --shadow-btn: 0 0 16px rgba(108,92,231,.4);
-  --focus-ring: 0 0 0 3px rgba(108,92,231,.35);
+  --shadow-card: 0 1px 0 rgba(255,255,255,.04) inset, 0 24px 48px rgba(2,2,12,.55);
+  --shadow-pop: 0 30px 70px rgba(2,2,12,.65);
+  --shadow-btn: 0 8px 20px rgba(124,92,255,.35);
+  --focus-ring: 0 0 0 3px rgba(124,92,255,.35);
 }
-html[data-theme="warp"] body{
-  background:
-    radial-gradient(ellipse 900px 500px at 50% -10%, rgba(108,92,231,.20), transparent 60%),
-    radial-gradient(ellipse 700px 500px at 90% 20%, rgba(34,225,255,.10), transparent 55%),
-    linear-gradient(180deg, #07081a, var(--bg) 45%);
-}
-html[data-theme="warp"] ::selection{ background:rgba(108,92,231,.35); color:#fff; }
-html[data-theme="warp"] ::-webkit-scrollbar-thumb{ background:rgba(108,92,231,.28); }
 
-/* ------------------------------------------------------- تونل پس‌زمینه --- */
+/* ---------------------------------------------------------- اورای پس‌زمینه --- */
+html[data-theme="warp"] body{ background:var(--bg); }
 html[data-theme="warp"] .bg-blobs{
   display:block; position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden;
 }
-html[data-theme="warp"] .bg-blobs i{ display:none; }
-#warp-tunnel-canvas{ position:absolute; inset:0; width:100%; height:100%; opacity:.85; }
-
-/* ---------------------------------------------------- عمق سه‌بعدی صفحه --- */
-html[data-theme="warp"] .content{ perspective:1600px; position:relative; z-index:1; }
-html[data-theme="warp"] .card{
-  transform-style:preserve-3d; will-change:transform;
-  transition: transform .15s ease-out, box-shadow .3s var(--ease);
+html[data-theme="warp"] .bg-blobs i{
+  position:absolute; border-radius:50%; filter:blur(90px); opacity:.55;
+  animation:warpDrift 22s ease-in-out infinite;
 }
-html[data-theme="warp"] .card:hover{ box-shadow:var(--shadow-pop); }
-
-/* حالت اولیه‌ی کارت قبل از ورود به دید — از عمق و با چرخش می‌آید بیرون */
-html[data-theme="warp"] .warp-reveal{
-  opacity:0; transform:rotateX(-22deg) translateY(46px) translateZ(-240px);
-  transition: opacity .75s var(--ease), transform .75s cubic-bezier(.16,1,.3,1);
+html[data-theme="warp"] .bg-blobs i:nth-child(1){ width:520px; height:520px; background:#5A3CFF; top:-160px; right:-120px; }
+html[data-theme="warp"] .bg-blobs i:nth-child(2){ width:460px; height:460px; background:#241C5C; bottom:-180px; left:-100px; animation-delay:-8s; }
+html[data-theme="warp"] .bg-blobs i:nth-child(3){ width:360px; height:360px; background:#3FE0C0; opacity:.16; top:38%; left:52%; animation-delay:-15s; }
+@keyframes warpDrift{
+  0%,100%{ transform:translate(0,0) scale(1); }
+  50%{ transform:translate(-30px,26px) scale(1.08); }
 }
-html[data-theme="warp"] .warp-reveal.warp-in{
-  opacity:1; transform:none;
+html[data-theme="warp"] ::selection{ background:rgba(124,92,255,.35); color:#fff; }
+html[data-theme="warp"] ::-webkit-scrollbar-thumb{ background:rgba(124,92,255,.25); }
+html[data-theme="warp"] h1, html[data-theme="warp"] h2, html[data-theme="warp"] h3, html[data-theme="warp"] h4{
+  font-family:var(--font-display); letter-spacing:.01em; font-weight:600;
 }
 
-html[data-theme="warp"] .card, html[data-theme="warp"] .login-card, html[data-theme="warp"] .modal{
-  background:linear-gradient(165deg, rgba(108,92,231,.07), transparent 45%), var(--surface);
-  border:1px solid var(--border);
+/* ------------------------------------------------- کارت با گوشه‌ی تاشده --- */
+html[data-theme="warp"] .content{ position:relative; z-index:1; }
+html[data-theme="warp"] .card,
+html[data-theme="warp"] .login-card,
+html[data-theme="warp"] .modal{
+  background:linear-gradient(165deg, rgba(124,92,255,.10), rgba(23,20,50,.72) 55%);
+  border:1px solid var(--border-soft);
+  backdrop-filter:blur(18px);
+  -webkit-backdrop-filter:blur(18px);
+  clip-path:polygon(0 0, calc(100% - 26px) 0, 100% 26px, 100% 100%, 0 100%);
+  position:relative;
 }
-html[data-theme="warp"] .btn{ border-radius:var(--radius-sm); }
+html[data-theme="warp"] .card::before{
+  content:''; position:absolute; top:0; right:0; width:26px; height:26px;
+  background:linear-gradient(135deg, rgba(255,255,255,.16), rgba(124,92,255,.5) 60%, transparent 61%);
+  clip-path:polygon(100% 0, 100% 100%, 0 0);
+  pointer-events:none;
+}
+html[data-theme="warp"] .card::after{
+  content:''; position:absolute; top:0; right:0; width:26px; height:26px; z-index:-1;
+  background:#000; opacity:.35; filter:blur(4px); transform:translate(2px,2px);
+  clip-path:polygon(100% 0, 100% 100%, 0 0);
+  pointer-events:none;
+}
+html[data-theme="warp"] .btn{ border-radius:var(--radius-sm); font-family:var(--font-display); font-weight:600; letter-spacing:.01em; }
 html[data-theme="warp"] .btn-primary{
-  background:linear-gradient(135deg,#6C5CE7,#8C7CFF); border-color:transparent; box-shadow:0 0 18px rgba(108,92,231,.5);
+  background:linear-gradient(135deg,#7C5CFF,#5A3CFF); border-color:transparent; box-shadow:var(--shadow-btn);
 }
-html[data-theme="warp"] .btn-primary:hover{ filter:brightness(1.1); box-shadow:0 0 26px rgba(108,92,231,.7); }
+html[data-theme="warp"] .btn-primary:hover{ filter:brightness(1.12); box-shadow:0 10px 26px rgba(124,92,255,.5); }
 html[data-theme="warp"] .input, html[data-theme="warp"] .field input{
-  background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-xs);
+  background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-xs); color:var(--text);
 }
-html[data-theme="warp"] .field input:focus{ box-shadow:0 0 0 3px rgba(108,92,231,.22); border-color:var(--primary); }
-html[data-theme="warp"] .badge{ border:1px solid currentColor; }
-html[data-theme="warp"] table{ border:1px solid var(--border); }
-html[data-theme="warp"] thead th{ border-bottom:1px solid var(--border); color:var(--primary); }
-html[data-theme="warp"] .login-logo{ box-shadow:0 0 24px rgba(108,92,231,.55); }
+html[data-theme="warp"] .field input:focus{ box-shadow:var(--focus-ring); border-color:var(--primary); }
+html[data-theme="warp"] .badge{ border:1px solid currentColor; border-radius:20px; }
+html[data-theme="warp"] table{ border:1px solid var(--border-soft); }
+html[data-theme="warp"] thead th{ border-bottom:1px solid var(--border-soft); color:var(--text-muted); font-family:var(--font-display); font-size:11.5px; letter-spacing:.04em; }
+html[data-theme="warp"] .login-logo{ box-shadow:0 0 30px rgba(124,92,255,.5); }
 
 html[data-theme="warp"] .sidebar{
-  background:linear-gradient(180deg, #0D0F24, #07081a); border-left:1px solid var(--border-soft);
-  backdrop-filter:blur(6px);
+  background:linear-gradient(180deg, rgba(23,20,50,.85), rgba(6,5,15,.9));
+  border-left:1px solid var(--border-soft); backdrop-filter:blur(14px);
 }
-html[data-theme="warp"] .brand-mark{ box-shadow:0 0 18px rgba(108,92,231,.6); }
+html[data-theme="warp"] .brand-mark{ box-shadow:0 0 20px rgba(124,92,255,.55); }
+html[data-theme="warp"] .brand-text strong{ font-family:var(--font-display); }
 html[data-theme="warp"] .nav-item{ border-radius:var(--radius-xs); }
-html[data-theme="warp"] .nav-item:hover{ background:rgba(108,92,231,.1); color:var(--primary); }
+html[data-theme="warp"] .nav-item:hover{ background:rgba(124,92,255,.10); color:var(--primary); }
 html[data-theme="warp"] .nav-item.active{
-  background:rgba(108,92,231,.14); color:var(--primary); box-shadow:inset 3px 0 0 var(--primary), 0 0 16px rgba(108,92,231,.22);
+  background:rgba(124,92,255,.16); color:#C9BFFF;
+  box-shadow:inset 3px 0 0 var(--primary), 0 0 18px rgba(124,92,255,.22);
 }
-html[data-theme="warp"] .nav-item.active .nav-icon{ color:var(--primary); }
-html[data-theme="warp"] .topbar{ background:rgba(7,8,26,.65); backdrop-filter:blur(8px); border-bottom:1px solid var(--border-soft); }
-html[data-theme="warp"] .topbar-clock{ border:1px solid var(--border); color:var(--primary); }
-html[data-theme="warp"] .live-dot{ background:var(--cyan); box-shadow:0 0 10px var(--cyan); animation:warpPulseDot 1.4s ease-in-out infinite; }
+html[data-theme="warp"] .nav-item.active .nav-icon{ color:#C9BFFF; }
+html[data-theme="warp"] .topbar{ background:rgba(6,5,15,.6); backdrop-filter:blur(10px); border-bottom:1px solid var(--border-soft); }
+html[data-theme="warp"] .topbar h2{ font-family:var(--font-display); }
+html[data-theme="warp"] .topbar-clock{ border:1px solid var(--border-soft); }
+html[data-theme="warp"] .live-dot{ background:var(--cyan); box-shadow:0 0 10px var(--cyan); animation:warpPulseDot 1.6s ease-in-out infinite; }
 @keyframes warpPulseDot{ 0%,100%{ opacity:1; } 50%{ opacity:.3; } }
 
-/* --------------------------------------------------- warp: dashboard --- */
+/* ------------------------------------------- عمق واقعی هنگام اسکرول --- */
+/* حالت پایه (JS فقط این کلاس رو اضافه/حذف می‌کنه؛ روی مرورگرهایی که از
+   animation-timeline پشتیبانی می‌کنن، قانون @supports پایین‌تر جایگزینش
+   می‌شه و دیگه نیازی به تغییر کلاس با اسکرول نیست). */
+html[data-theme="warp"] .warp-reveal{
+  opacity:0; transform:translateY(26px) scale(.97);
+  transition:opacity .6s var(--ease), transform .6s var(--ease);
+}
+html[data-theme="warp"] .warp-reveal.warp-in{ opacity:1; transform:none; }
+
+@supports (animation-timeline: view()){
+  html[data-theme="warp"] .warp-reveal{
+    opacity:1; transform:none; transition:none;
+    animation: warpViewIn linear both;
+    animation-timeline: view();
+    animation-range: entry 0% cover 30%;
+  }
+  @keyframes warpViewIn{
+    from{ opacity:0; transform:translateY(30px) scale(.97); }
+    to{ opacity:1; transform:none; }
+  }
+}
+
+/* ------------------------------------------------------- warp: hero --- */
 html[data-theme="warp"] .warp-hero{
-  position:relative; overflow:hidden; padding:26px 28px; margin-bottom:16px;
-  background:linear-gradient(135deg, rgba(108,92,231,.16), rgba(34,225,255,.06) 60%, transparent), var(--surface);
+  position:relative; padding:26px 30px; margin-bottom:34px;
 }
-html[data-theme="warp"] .warp-hero-glow{
-  position:absolute; width:340px; height:340px; border-radius:50%; top:-160px; left:-80px;
-  background:radial-gradient(circle, rgba(108,92,231,.35), transparent 70%); filter:blur(10px);
-  animation:warpFloat 8s ease-in-out infinite;
+html[data-theme="warp"] .warp-hero::before,
+html[data-theme="warp"] .warp-hero::after{ display:none; } /* گوشه‌ی تاشده روی هیرو لازم نیست، پشتش دسته‌ی کارت داره */
+html[data-theme="warp"] .warp-stack-ghost{
+  position:absolute; inset:0; border-radius:var(--radius); pointer-events:none;
+  border:1px solid var(--border-soft); background:rgba(30,26,66,.4);
 }
-@keyframes warpFloat{ 0%,100%{ transform:translateY(0) translateX(0); } 50%{ transform:translateY(24px) translateX(18px); } }
+html[data-theme="warp"] .warp-stack-ghost.g1{ transform:translate(10px,10px) scale(.98); opacity:.55; z-index:-1; }
+html[data-theme="warp"] .warp-stack-ghost.g2{ transform:translate(20px,20px) scale(.96); opacity:.3; z-index:-2; }
 html[data-theme="warp"] .warp-hero-text{ position:relative; z-index:1; }
 html[data-theme="warp"] .warp-hero-tag{
-  display:inline-block; font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; color:var(--cyan);
-  border:1px solid var(--border); border-radius:20px; padding:4px 12px; margin-bottom:10px;
+  display:inline-block; font-family:var(--font-display); font-size:11px; letter-spacing:.1em; color:var(--cyan);
+  border:1px solid var(--border); border-radius:20px; padding:4px 13px; margin-bottom:12px;
 }
-html[data-theme="warp"] .warp-hero-text h2{ font-size:21px; font-weight:800; margin:2px 0 6px; }
+html[data-theme="warp"] .warp-hero-text h2{ font-size:22px; margin:2px 0 7px; }
 html[data-theme="warp"] .warp-hero-text p{ color:var(--text-muted); font-size:13.5px; }
 
-html[data-theme="warp"] .warp-stats .stat-card .value{ text-shadow:0 0 18px rgba(108,92,231,.35); }
+html[data-theme="warp"] .warp-stats .stat-card .value{ font-family:var(--font-display); }
 
 html[data-theme="warp"] .warp-chart-card{ margin-top:16px; }
 html[data-theme="warp"] .warp-chart{ width:100%; height:200px; overflow:visible; }
 html[data-theme="warp"] .warp-chart-line{
-  stroke:var(--cyan); stroke-width:2.6; stroke-linecap:round;
-  filter:drop-shadow(0 0 8px rgba(34,225,255,.7));
+  stroke:var(--cyan); stroke-width:2.4; stroke-linecap:round;
+  filter:drop-shadow(0 0 7px rgba(63,224,192,.55));
 }
 
 html[data-theme="warp"] .warp-row{ margin-top:16px; }
 html[data-theme="warp"] .warp-ring-grid{ display:flex; gap:20px; flex-wrap:wrap; }
 html[data-theme="warp"] .warp-ring-item{ display:flex; align-items:center; gap:14px; }
-html[data-theme="warp"] .warp-ring{ width:60px; height:60px; box-shadow:0 0 16px rgba(108,92,231,.25); border-radius:50%; }
+html[data-theme="warp"] .warp-ring{ width:60px; height:60px; }
 html[data-theme="warp"] .warp-ring-info strong{ display:block; font-size:13.5px; }
 html[data-theme="warp"] .warp-ring-info span{ font-size:11.5px; color:var(--text-muted); }
 
 html[data-theme="warp"] .warp-prod-row{ display:flex; align-items:center; gap:10px; padding:7px 0; font-size:12.5px; }
-html[data-theme="warp"] .warp-prod-rank{ font-family:var(--font-mono); color:var(--cyan); flex:0 0 20px; }
+html[data-theme="warp"] .warp-prod-rank{ font-family:var(--font-display); color:var(--cyan); flex:0 0 20px; }
 html[data-theme="warp"] .warp-prod-name{ flex:0 0 100px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 html[data-theme="warp"] .warp-prod-val{ flex:0 0 auto; color:var(--text-muted); font-size:11.5px; }
 
+@media (prefers-reduced-motion: reduce){
+  html[data-theme="warp"] .bg-blobs i{ animation:none; }
+}
 @media (max-width:720px){
-  html[data-theme="warp"] .content{ perspective:900px; }
-  html[data-theme="warp"] .warp-reveal{ transform:translateY(30px) translateZ(-120px); }
+  html[data-theme="warp"] .card::before, html[data-theme="warp"] .card::after{ width:18px; height:18px; }
+  html[data-theme="warp"] .card{ clip-path:polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%); }
 }

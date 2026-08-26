@@ -108,69 +108,19 @@ function applyTheme(mode) { applyThemeChoice(loadTheme().theme, mode); }
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-/* ===================================================== warp tunnel fx === */
-// جلوه‌های تم «Warp Tunnel»: تونل سه‌بعدیِ پس‌زمینه (کانواس)، ظاهرشدن کارت‌ها
-// از عمق هنگام اسکرول (IntersectionObserver) و کج‌شدن سه‌بعدی کارت با موس/لمس.
-// همه چیز فقط وقتی data-theme="warp" فعاله روشن می‌شه؛ در بقیه‌ی تم‌ها کاملاً
-// خاموشه و هیچ overheadی نداره. با prefers-reduced-motion هم غیرفعال می‌شه.
+/* ===================================================== warp theme fx === */
+// جلوه‌های تم «Warp Tunnel»: کارت‌ها هنگام ورود به دید (اسکرول) از عمق
+// محو می‌شن به جای پاپ ناگهانی، و هاور/لمس یه کج‌شدن سه‌بعدی خیلی سبک
+// می‌ده. در مرورگرهایی که از CSS animation-timeline:view() پشتیبانی
+// می‌کنن، جلوه‌ی اسکرول کاملاً با CSS خالصه (بدون این جاوااسکریپت)؛ این
+// کد فقط fallback و تیلته. فقط وقتی data-theme="warp" فعاله روشنه.
 var WarpFX = (function () {
   var active = false;
-  var raf = null;
-  var canvas = null, ctx = null;
-  var scrollY = 0, targetScrollY = 0;
   var mo = null, io = null;
   var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  function ensureCanvas() {
-    var host = document.querySelector('.bg-blobs');
-    if (!host) return null;
-    var c = document.getElementById('warp-tunnel-canvas');
-    if (!c) {
-      c = document.createElement('canvas');
-      c.id = 'warp-tunnel-canvas';
-      host.appendChild(c);
-    }
-    return c;
-  }
-
-  function resize() {
-    if (!canvas) return;
-    canvas.width = window.innerWidth * (window.devicePixelRatio || 1);
-    canvas.height = window.innerHeight * (window.devicePixelRatio || 1);
-  }
-
-  function drawTunnel(t) {
-    if (!ctx || !canvas) return;
-    var dpr = window.devicePixelRatio || 1;
-    var w = canvas.width, h = canvas.height;
-    var cx = w / 2, cy = h * 0.32;
-    ctx.clearRect(0, 0, w, h);
-    var rings = 14;
-    var spacing = 140 * dpr;
-    var focal = 620 * dpr;
-    var drift = (t * 0.012) % spacing;
-    scrollY += (targetScrollY - scrollY) * 0.08;
-    for (var i = rings; i >= 0; i--) {
-      var z = i * spacing - drift - (scrollY * 1.4 % spacing);
-      if (z <= -spacing) z += (rings + 1) * spacing;
-      var scale = focal / (focal + z);
-      if (scale <= 0) continue;
-      var r = 46 * dpr * scale * (h / (520 * dpr));
-      var alpha = Math.max(0, Math.min(0.55, scale * 0.6 - 0.05));
-      if (alpha <= 0.01) continue;
-      var hue = (i % 2 === 0) ? '108,92,231' : '34,225,255';
-      ctx.beginPath();
-      ctx.arc(cx, cy, Math.max(r, 1), 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(' + hue + ',' + alpha.toFixed(3) + ')';
-      ctx.lineWidth = Math.max(1, 2.2 * dpr * scale);
-      ctx.stroke();
-    }
-    raf = requestAnimationFrame(drawTunnel);
-  }
-
-  function onScroll() {
-    targetScrollY = window.scrollY || document.documentElement.scrollTop || 0;
-  }
+  var nativeScrollTimeline = (function () {
+    try { return CSS.supports('animation-timeline', 'view()'); } catch (e) { return false; }
+  })();
 
   function revealObserver() {
     if (io) return io;
@@ -186,12 +136,12 @@ var WarpFX = (function () {
   }
 
   function armCards(root) {
-    if (!active || reduced) return;
+    if (!active || reduced || nativeScrollTimeline) return;
     var cards = (root || document).querySelectorAll('.card:not(.warp-armed)');
     var obs = revealObserver();
     cards.forEach(function (el, idx) {
       el.classList.add('warp-armed', 'warp-reveal');
-      el.style.transitionDelay = Math.min(idx * 55, 260) + 'ms';
+      el.style.transitionDelay = Math.min(idx * 45, 220) + 'ms';
       obs.observe(el);
     });
   }
@@ -203,7 +153,7 @@ var WarpFX = (function () {
     var rect = card.getBoundingClientRect();
     var px = (e.clientX - rect.left) / rect.width - 0.5;
     var py = (e.clientY - rect.top) / rect.height - 0.5;
-    card.style.transform = 'perspective(900px) rotateX(' + (-py * 6).toFixed(2) + 'deg) rotateY(' + (px * 7).toFixed(2) + 'deg)';
+    card.style.transform = 'perspective(1000px) rotateX(' + (-py * 3.2).toFixed(2) + 'deg) rotateY(' + (px * 3.6).toFixed(2) + 'deg)';
   }
   function onPointerLeave(e) {
     var card = e.target.closest && e.target.closest('.card');
@@ -213,14 +163,6 @@ var WarpFX = (function () {
   function mount() {
     if (active) return;
     active = true;
-    canvas = ensureCanvas();
-    if (canvas) {
-      ctx = canvas.getContext('2d');
-      resize();
-      window.addEventListener('resize', resize);
-      if (!reduced) raf = requestAnimationFrame(drawTunnel);
-    }
-    window.addEventListener('scroll', onScroll, { passive: true });
     mo = new MutationObserver(function () { armCards(content()); });
     var root = content();
     if (root) { mo.observe(root, { childList: true }); armCards(root); }
@@ -231,18 +173,12 @@ var WarpFX = (function () {
   function unmount() {
     if (!active) return;
     active = false;
-    if (raf) cancelAnimationFrame(raf);
-    raf = null;
-    window.removeEventListener('resize', resize);
-    window.removeEventListener('scroll', onScroll);
     document.removeEventListener('pointermove', onPointerMove);
     document.removeEventListener('pointerleave', onPointerLeave, true);
     if (mo) mo.disconnect();
     mo = null;
     if (io) io.disconnect();
     io = null;
-    if (canvas && canvas.parentNode) canvas.parentNode.removeChild(canvas);
-    canvas = null; ctx = null;
     $$('.warp-armed').forEach(function (el) {
       el.classList.remove('warp-armed', 'warp-reveal', 'warp-in');
       el.style.transform = ''; el.style.transitionDelay = '';
@@ -1884,7 +1820,8 @@ function renderDashboardWarp(s, sys) {
 
   setContent(`
     <div class="warp-hero card">
-      <div class="warp-hero-glow"></div>
+      <div class="warp-stack-ghost g2"></div>
+      <div class="warp-stack-ghost g1"></div>
       <div class="warp-hero-text">
         <span class="warp-hero-tag">◆ ${s.start_date} — ${s.end_date}</span>
         <h2>${greetingByHour()}، ${esc(ME.username)}</h2>
