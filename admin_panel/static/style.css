@@ -1777,3 +1777,186 @@ html[data-theme="brutalist"][data-mode="dark"] .topbar{ border-bottom-color:#F5F
 html[data-theme="brutalist"][data-mode="dark"] .topbar-clock{ border-color:#F5F0DC; }
 html[data-theme="brutalist"][data-mode="dark"] #logout-btn{ background:#1E1E1E; color:var(--text); }
 html[data-theme="brutalist"][data-mode="dark"] .me-avatar{ background:#F5F0DC; color:#000; border-color:#000; }
+
+/* ===================================================================
+   Cyberpunk theme — neon terminal / HUD. Single dark mode by design.
+   Menu moves to a top command bar (not a side rail like bento/brutalist),
+   flat surfaces are replaced with scanlined panels and neon accents.
+=================================================================== */
+html[data-theme="cyberpunk"]{
+  --bg:#05050A; --bg-2:#0A0A14; --surface:#0B0E17; --surface-2:#111726;
+  --surface-hi:rgba(0,255,194,.07); --border:rgba(0,255,194,.28); --border-soft:rgba(0,255,194,.14);
+  --text:#D8FFF3; --text-muted:#7C93AE; --text-dim:#41546C;
+  --primary:#FF2A6D; --primary-ink:#05050A; --cyan:#00FFF0; --amber:#FFD400; --emerald:#00FFC2; --rose:#FF2A6D;
+  --accent-1:var(--primary); --accent-2:var(--cyan); --accent-3:var(--amber); --accent-4:var(--emerald);
+  --violet:#B967FF; --fuchsia:#FF2A6D;
+  --font-body:"Chakra Petch","Vazirmatn",sans-serif; --font-mono:"JetBrains Mono",ui-monospace,monospace;
+  --radius:3px; --radius-sm:2px; --radius-xs:2px;
+  --shadow-card:0 0 0 1px rgba(0,255,194,.06), 0 10px 30px rgba(0,0,0,.5);
+  --shadow-pop:0 0 70px rgba(255,42,109,.28); --shadow-btn:0 0 14px rgba(0,255,194,.3);
+  --focus-ring:0 0 0 2px rgba(0,255,194,.55);
+}
+html[data-theme="cyberpunk"] body{
+  background:
+    repeating-linear-gradient(0deg, rgba(0,255,194,.025) 0px, rgba(0,255,194,.025) 1px, transparent 1px, transparent 3px),
+    radial-gradient(ellipse 900px 500px at 15% -10%, rgba(255,42,109,.14), transparent 60%),
+    radial-gradient(ellipse 900px 600px at 100% 10%, rgba(0,255,240,.10), transparent 60%),
+    var(--bg);
+}
+html[data-theme="cyberpunk"] body::after{
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:9999; mix-blend-mode:overlay;
+  background:repeating-linear-gradient(180deg, rgba(255,255,255,.025) 0px, transparent 1px, transparent 2px);
+  animation:cp-scan 9s linear infinite;
+}
+@keyframes cp-scan{ 0%{ background-position:0 0; } 100%{ background-position:0 240px; } }
+html[data-theme="cyberpunk"] *{ font-family:var(--font-body); }
+html[data-theme="cyberpunk"] h1, html[data-theme="cyberpunk"] h2, html[data-theme="cyberpunk"] h3, html[data-theme="cyberpunk"] h4{
+  text-transform:uppercase; letter-spacing:.03em;
+}
+html[data-theme="cyberpunk"] ::selection{ background:rgba(0,255,194,.3); color:#fff; }
+html[data-theme="cyberpunk"] :focus-visible{ outline:2px solid var(--emerald); }
+
+/* ---- brand / login ---- */
+html[data-theme="cyberpunk"] .login-card{
+  border:1px solid var(--border); border-radius:var(--radius); background:var(--surface);
+  box-shadow:0 0 0 1px rgba(0,255,194,.08), 0 0 60px rgba(255,42,109,.15);
+}
+html[data-theme="cyberpunk"] .login-logo, html[data-theme="cyberpunk"] .brand-mark{
+  border-radius:2px; background:var(--bg); border:1px solid var(--emerald); color:var(--emerald);
+  box-shadow:0 0 14px rgba(0,255,194,.5);
+}
+html[data-theme="cyberpunk"] .login-brand h1{
+  text-shadow:2px 0 var(--cyan), -2px 0 var(--primary); font-size:17px;
+}
+html[data-theme="cyberpunk"] .field span{ text-transform:uppercase; font-size:11px; letter-spacing:.08em; color:var(--emerald); }
+
+/* ---- shared components ---- */
+html[data-theme="cyberpunk"] .card, html[data-theme="cyberpunk"] .modal{
+  border-radius:var(--radius); border:1px solid var(--border-soft); border-inline-start:3px solid var(--emerald);
+  background:linear-gradient(180deg, rgba(0,255,194,.03), transparent 40%), var(--surface);
+}
+html[data-theme="cyberpunk"] .card-head h3::before{ content:'// '; color:var(--emerald); }
+html[data-theme="cyberpunk"] .btn{
+  border-radius:var(--radius-xs); text-transform:uppercase; font-size:12px; letter-spacing:.06em;
+  font-family:var(--font-mono); border:1px solid var(--border); background:var(--surface-2);
+}
+html[data-theme="cyberpunk"] .btn:hover{ border-color:var(--emerald); box-shadow:0 0 12px rgba(0,255,194,.35); }
+html[data-theme="cyberpunk"] .btn-primary{
+  background:transparent; color:var(--primary); border-color:var(--primary);
+  box-shadow:0 0 12px rgba(255,42,109,.35); text-shadow:0 0 8px rgba(255,42,109,.6);
+}
+html[data-theme="cyberpunk"] .btn-primary:hover{ background:rgba(255,42,109,.12); }
+html[data-theme="cyberpunk"] .btn-danger{ background:transparent; border-color:var(--rose); color:var(--rose); }
+html[data-theme="cyberpunk"] .field input, html[data-theme="cyberpunk"] .input, html[data-theme="cyberpunk"] select.input, html[data-theme="cyberpunk"] textarea.input{
+  border-radius:var(--radius-xs); background:var(--bg-2); border:1px solid var(--border-soft); font-family:var(--font-mono);
+}
+html[data-theme="cyberpunk"] .field input:focus, html[data-theme="cyberpunk"] .input:focus{
+  border-color:var(--emerald); box-shadow:0 0 0 3px rgba(0,255,194,.15);
+}
+html[data-theme="cyberpunk"] .badge{ border-radius:0; border:1px solid currentColor; background:transparent !important; font-family:var(--font-mono); text-transform:uppercase; }
+html[data-theme="cyberpunk"] .badge::before{ display:none; }
+html[data-theme="cyberpunk"] table{ font-family:var(--font-mono); font-size:12.5px; }
+html[data-theme="cyberpunk"] thead th{ border-bottom:1px solid var(--border); color:var(--emerald); }
+html[data-theme="cyberpunk"] tbody tr:hover{ background:var(--surface-hi); box-shadow:inset 3px 0 0 var(--emerald); }
+html[data-theme="cyberpunk"] .tab-btn{ border-radius:var(--radius-xs); font-family:var(--font-mono); text-transform:uppercase; font-size:11.5px; border:1px solid var(--border-soft); }
+html[data-theme="cyberpunk"] .tab-btn.active{ background:transparent; color:var(--emerald); border-color:var(--emerald); box-shadow:0 0 10px rgba(0,255,194,.35); }
+html[data-theme="cyberpunk"] .modal-backdrop{ backdrop-filter:blur(2px); }
+html[data-theme="cyberpunk"] .empty-state{ font-family:var(--font-mono); }
+html[data-theme="cyberpunk"] .toast{ border-radius:var(--radius-xs); border:1px solid var(--border); font-family:var(--font-mono); box-shadow:0 0 16px rgba(0,255,194,.2); }
+html[data-theme="cyberpunk"] .stat-card .value, html[data-theme="cyberpunk"] .topbar-clock{ font-family:var(--font-mono); }
+html[data-theme="cyberpunk"] .topbar-clock{ border-radius:var(--radius-xs); border:1px solid var(--border-soft); }
+
+/* ---- menu placement: top command bar instead of a side rail ---- */
+@media (min-width:961px){
+  html[data-theme="cyberpunk"] .app{ display:flex; flex-direction:column; min-height:100vh; }
+  html[data-theme="cyberpunk"] .sidebar{
+    position:sticky; top:0; z-index:15; width:100%; height:auto; flex-direction:row; align-items:center;
+    padding:0 26px; gap:26px; border-left:none; border-bottom:1px solid var(--border);
+    background:linear-gradient(180deg, var(--bg-2), var(--bg));
+  }
+  html[data-theme="cyberpunk"] .sidebar-brand{ padding:14px 0; flex-shrink:0; }
+  html[data-theme="cyberpunk"] .nav-tunnel{ flex:1; display:flex; align-items:stretch; overflow-x:auto; overflow-y:hidden; gap:2px; }
+  html[data-theme="cyberpunk"] .nav-tunnel::-webkit-scrollbar{ height:4px; }
+  html[data-theme="cyberpunk"] .nav-section{
+    display:flex; align-items:center; margin:0; padding:0 12px; border-top:none; white-space:nowrap; font-size:9.5px;
+  }
+  html[data-theme="cyberpunk"] .nav-section:first-child{ padding-inline-start:0; }
+  html[data-theme="cyberpunk"] .nav-item{
+    flex-direction:column; gap:4px; padding:14px 13px; margin:0; white-space:nowrap; border-radius:0;
+    border-bottom:2px solid transparent;
+  }
+  html[data-theme="cyberpunk"] .nav-item span:last-child{ font-size:9.5px; text-transform:uppercase; letter-spacing:.04em; }
+  html[data-theme="cyberpunk"] .nav-icon{ border-radius:0; background:transparent; }
+  html[data-theme="cyberpunk"] .nav-item:hover{ background:var(--surface-hi); border-bottom-color:var(--border); }
+  html[data-theme="cyberpunk"] .nav-item.active{
+    color:var(--emerald); background:transparent; border-bottom-color:var(--emerald);
+    text-shadow:0 0 10px rgba(0,255,194,.6);
+  }
+  html[data-theme="cyberpunk"] .nav-item.active .nav-icon{ color:var(--emerald); }
+  html[data-theme="cyberpunk"] .sidebar-footer{
+    flex-shrink:0; display:flex; align-items:center; gap:14px; border-top:none; padding:0; margin:0; width:auto;
+  }
+  html[data-theme="cyberpunk"] .me-card{ padding:0; }
+  html[data-theme="cyberpunk"] .me-info{ display:flex; }
+  html[data-theme="cyberpunk"] #logout-btn{ width:auto; }
+  html[data-theme="cyberpunk"] #logout-btn span:last-child{ display:none; }
+}
+html[data-theme="cyberpunk"] .topbar{ border-bottom:1px solid var(--border-soft); background:transparent; }
+html[data-theme="cyberpunk"] .topbar h2{ font-family:var(--font-mono); font-weight:700; }
+html[data-theme="cyberpunk"] .topbar h2::before{ content:'>_ '; color:var(--emerald); }
+html[data-theme="cyberpunk"] .live-dot{ background:var(--emerald); box-shadow:0 0 8px var(--emerald); }
+
+/* ---- dashboard: cyberpunk ---- */
+html[data-theme="cyberpunk"] .cp-hero{ margin-bottom:18px; }
+html[data-theme="cyberpunk"] .cp-hero-line{ font-family:var(--font-mono); font-size:12px; color:var(--text-dim); margin-bottom:6px; }
+html[data-theme="cyberpunk"] .cp-prompt{ color:var(--emerald); }
+html[data-theme="cyberpunk"] .cp-path{ color:var(--text-muted); }
+html[data-theme="cyberpunk"] .cp-cmd{ color:var(--cyan); }
+html[data-theme="cyberpunk"] .cp-hero h2{ font-size:22px; margin:0; text-shadow:0 0 12px rgba(0,255,194,.35); }
+html[data-theme="cyberpunk"] .cp-cursor{ color:var(--emerald); animation:cp-blink 1s step-end infinite; }
+@keyframes cp-blink{ 50%{ opacity:0; } }
+html[data-theme="cyberpunk"] .cp-hero p{ color:var(--text-muted); font-size:12px; margin-top:4px; }
+html[data-theme="cyberpunk"] .cp-stat-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+html[data-theme="cyberpunk"] .cp-stat{
+  background:var(--surface); border:1px solid var(--border-soft); border-inline-start:3px solid var(--cyan);
+  border-radius:var(--radius); padding:14px 16px; display:flex; flex-direction:column; gap:6px;
+}
+html[data-theme="cyberpunk"] .cp-stat-a{ border-inline-start-color:var(--primary); }
+html[data-theme="cyberpunk"] .cp-stat-label{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-muted); letter-spacing:.06em; }
+html[data-theme="cyberpunk"] .cp-stat-val{ font-size:24px; font-weight:700; color:var(--text); }
+html[data-theme="cyberpunk"] .cp-stat-tag{ font-family:var(--font-mono); font-size:11px; align-self:flex-start; padding:2px 8px; border:1px solid var(--border-soft); }
+html[data-theme="cyberpunk"] .cp-stat-tag.up{ color:var(--emerald); border-color:var(--emerald); }
+html[data-theme="cyberpunk"] .cp-stat-tag.down{ color:var(--rose); border-color:var(--rose); }
+html[data-theme="cyberpunk"] .cp-panel{
+  background:var(--surface); border:1px solid var(--border-soft); border-radius:var(--radius); padding:16px 18px;
+}
+html[data-theme="cyberpunk"] .cp-panel-head{
+  font-family:var(--font-mono); font-size:11.5px; color:var(--emerald); letter-spacing:.05em; margin-bottom:12px;
+  text-transform:uppercase; border-bottom:1px dashed var(--border-soft); padding-bottom:8px;
+}
+html[data-theme="cyberpunk"] .cp-trend{ width:100%; height:160px; display:block; }
+html[data-theme="cyberpunk"] .cp-grid line{ stroke:var(--border-soft); stroke-width:1; }
+html[data-theme="cyberpunk"] .cp-gauge-row{ display:flex; gap:22px; flex-wrap:wrap; justify-content:space-around; }
+html[data-theme="cyberpunk"] .cp-gauge{ display:flex; flex-direction:column; align-items:center; gap:4px; width:110px; }
+html[data-theme="cyberpunk"] .cp-gauge svg{ width:100px; height:100px; }
+html[data-theme="cyberpunk"] .cp-gauge svg circle:first-child{ fill:none; stroke:var(--border-soft); stroke-width:8; }
+html[data-theme="cyberpunk"] .cp-gauge-txt{ display:flex; flex-direction:column; align-items:center; margin-top:-64px; }
+html[data-theme="cyberpunk"] .cp-gauge-txt b{ font-size:16px; }
+html[data-theme="cyberpunk"] .cp-gauge-txt span{ font-size:9px; color:var(--text-muted); letter-spacing:.08em; }
+html[data-theme="cyberpunk"] .cp-gauge-sub{ font-size:9.5px; color:var(--text-dim); margin-top:44px; }
+html[data-theme="cyberpunk"] .cp-cols{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+html[data-theme="cyberpunk"] .cp-bar-row{ display:flex; align-items:center; gap:10px; padding:6px 0; }
+html[data-theme="cyberpunk"] .cp-bar-label{ width:110px; flex-shrink:0; font-size:12px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+html[data-theme="cyberpunk"] .cp-bar-track{ flex:1; height:6px; background:var(--surface-2); position:relative; overflow:hidden; }
+html[data-theme="cyberpunk"] .cp-bar-fill{ position:absolute; inset:0; width:0; background:var(--cyan); box-shadow:0 0 8px var(--cyan); transition:width 1s cubic-bezier(.16,1,.3,1); }
+html[data-theme="cyberpunk"] .cp-bar-val{ font-size:11.5px; color:var(--text-muted); width:64px; text-align:end; flex-shrink:0; }
+html[data-theme="cyberpunk"] .cp-list-row{ display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px dashed var(--border-soft); }
+html[data-theme="cyberpunk"] .cp-list-row:last-child{ border-bottom:none; }
+html[data-theme="cyberpunk"] .cp-list-idx{ color:var(--primary); font-size:11px; width:20px; }
+html[data-theme="cyberpunk"] .cp-list-name{ flex:1; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+html[data-theme="cyberpunk"] .cp-list-val{ color:var(--emerald); font-size:12px; }
+
+@media (max-width:960px){
+  html[data-theme="cyberpunk"] .cp-stat-grid, html[data-theme="cyberpunk"] .cp-cols{ grid-template-columns:1fr; }
+  html[data-theme="cyberpunk"] .cp-gauge-row{ gap:14px; }
+}

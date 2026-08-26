@@ -29,6 +29,15 @@ const THEMES = [
     defaultMode: 'light',
     swatch: ['#FFE600', '#000000', '#FFFFFF'],
   },
+  {
+    id: 'cyberpunk',
+    name: 'Cyberpunk',
+    desc: 'ترمینال نئون، اسکن‌لاین، منوی بالای صفحه',
+    ready: true,
+    supportsMode: false,
+    defaultMode: 'dark',
+    swatch: ['#FF2A6D', '#00FFF0', '#05050A'],
+  },
 ];
 const DEFAULT_THEME = 'bento';
 
@@ -870,6 +879,7 @@ async function renderDashboard() {
   try { sys = await apiGet('/system/stats'); } catch (e) { /* psutil ممکن است نصب نباشد */ }
   const theme = loadTheme().theme;
   if (theme === 'brutalist') await renderDashboardBrutalist(s, sys);
+  else if (theme === 'cyberpunk') await renderDashboardCyberpunk(s, sys);
   else await renderDashboardBento(s, sys);
   const root = content();
   if (root) root.insertAdjacentHTML('afterbegin', dashRangeBarHtml(s));
@@ -965,6 +975,88 @@ function cyberArc(cx, cy, r, pct, color, width) {
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="butt"
       stroke-dasharray="${c}" stroke-dashoffset="${c}" data-final="${off}" transform="rotate(-90 ${cx} ${cy})"
       class="cp-gauge-seg" style="filter:drop-shadow(0 0 6px ${color})"/>`;
+}
+
+function renderDashboardCyberpunk(s, sys) {
+  const trend = cyberSmoothPath(s.daily_series.map(d => d.revenue), 620, 160, 10);
+  const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
+  const gauges = sys ? [
+    { pct: sys.cpu.percent, color: 'var(--cyan)', label: 'CPU', sub: `${sys.cpu.cores} CORES` },
+    { pct: sys.ram.percent, color: 'var(--primary)', label: 'RAM', sub: `${sys.ram.used_gb}/${sys.ram.total_gb} GB` },
+    { pct: sys.disk.percent, color: 'var(--emerald)', label: 'DISK', sub: `${sys.disk.used_gb}/${sys.disk.total_gb} GB` },
+  ] : [];
+  const gaugeHtml = gauges.map(g => `
+    <div class="cp-gauge">
+      <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="50"/>${cyberArc(60, 60, 50, g.pct, g.color, 8)}</svg>
+      <div class="cp-gauge-txt"><b class="mono" style="color:${g.color}">${g.pct}%</b><span>${g.label}</span></div>
+      <span class="cp-gauge-sub mono">${g.sub}</span>
+    </div>`).join('');
+
+  const maxCatRev = Math.max(...s.category_breakdown.map(c => c.revenue), 1);
+  const catRows = s.category_breakdown.map((c, i) => `
+    <div class="cp-bar-row">
+      <span class="cp-bar-label">${esc(c.name)}</span>
+      <span class="cp-bar-track"><span class="cp-bar-fill" data-w="${(c.revenue / maxCatRev) * 100}"></span></span>
+      <span class="cp-bar-val mono">${fmt(c.revenue)}</span>
+    </div>`).join('') || '<span class="card-sub">// NO_DATA</span>';
+
+  const prodRows = s.top_products.map((p, i) => `
+    <div class="cp-list-row">
+      <span class="cp-list-idx mono">${String(i + 1).padStart(2, '0')}</span>
+      <span class="cp-list-name">${esc(p.name)}</span>
+      <span class="cp-list-val mono">${fmt(p.orders)}x</span>
+    </div>`).join('') || '<span class="card-sub">// NO_DATA</span>';
+
+  setContent(`
+    <div class="cp-hero">
+      <div class="cp-hero-line"><span class="cp-prompt">root@shopvpn</span><span class="cp-path">:~$</span> <span class="cp-cmd">whoami</span></div>
+      <h2>${greetingByHour().toUpperCase()}, ${esc(ME.username).toUpperCase()}<span class="cp-cursor">_</span></h2>
+      <p class="mono">RANGE ${fmtDateOnly(s.start_date)} :: ${fmtDateOnly(s.end_date)}</p>
+    </div>
+
+    <div class="cp-stat-grid">
+      <div class="cp-stat cp-stat-a">
+        <span class="cp-stat-label">TOTAL_REVENUE</span>
+        <span class="cp-stat-val mono" data-count="${s.revenue}">0</span>
+        <span class="cp-stat-tag ${deltaUp ? 'up' : 'down'}">${deltaUp ? '▲' : '▼'} ${Math.abs(s.revenue_change_pct ?? 0)}%</span>
+      </div>
+      <div class="cp-stat"><span class="cp-stat-label">ORDERS_OK</span><span class="cp-stat-val mono" data-count="${s.approved}">0</span></div>
+      <div class="cp-stat"><span class="cp-stat-label">USERS_TOTAL</span><span class="cp-stat-val mono" data-count="${s.total_users}">0</span></div>
+      <div class="cp-stat"><span class="cp-stat-label">CONFIGS_LIVE</span><span class="cp-stat-val mono" data-count="${s.active_configs}">0</span><span class="cp-stat-tag">${fmt(s.open_tickets)} OPEN_TICKETS</span></div>
+    </div>
+
+    <div class="cp-panel" style="margin-top:16px">
+      <div class="cp-panel-head">// REVENUE_TREND.LOG</div>
+      <svg class="cp-trend" viewBox="0 0 620 160" preserveAspectRatio="none">
+        <defs><linearGradient id="cpTrendFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--emerald)" stop-opacity=".35"/><stop offset="100%" stop-color="var(--emerald)" stop-opacity="0"/>
+        </linearGradient></defs>
+        <g class="cp-grid">${[0, 40, 80, 120, 160].map(y => `<line x1="0" y1="${y}" x2="620" y2="${y}"/>`).join('')}</g>
+        <path d="${trend.area}" fill="url(#cpTrendFill)"/>
+        <path d="${trend.line}" fill="none" stroke="var(--emerald)" stroke-width="2" style="filter:drop-shadow(0 0 6px var(--emerald))"/>
+      </svg>
+    </div>
+
+    ${gaugeHtml ? `<div class="cp-panel" style="margin-top:16px"><div class="cp-panel-head">// SYS_RESOURCES</div><div class="cp-gauge-row">${gaugeHtml}</div></div>` : ''}
+
+    <div class="cp-cols" style="margin-top:16px">
+      <div class="cp-panel"><div class="cp-panel-head">// REVENUE_BY_CATEGORY</div>${catRows}</div>
+      <div class="cp-panel"><div class="cp-panel-head">// TOP_PRODUCTS</div>${prodRows}</div>
+    </div>
+
+    <div style="margin-top:16px">${serverMapCardHtml()}</div>
+  `);
+
+  const root = content();
+  $$('.cp-stat-val[data-count]', root).forEach(el => animateCount(el, Number(el.dataset.count)));
+  requestAnimationFrame(() => setTimeout(() => {
+    $$('.cp-gauge-seg[data-final]', root).forEach(seg => {
+      seg.style.transition = 'stroke-dashoffset 1.1s cubic-bezier(.16,1,.3,1)';
+      seg.style.strokeDashoffset = seg.dataset.final;
+    });
+    $$('.cp-bar-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
+  }, 60));
+  mountServerMap();
 }
 
 /* ------------------------------------------------ dashboard: brutalist --- */
