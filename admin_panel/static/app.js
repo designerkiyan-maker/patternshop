@@ -21,24 +21,6 @@ const THEMES = [
     swatch: ['#7367F0', '#23253A', '#1B1D2C'],
   },
   {
-    id: 'bento',
-    name: 'Bento Grid',
-    desc: 'کارت‌های نامنظم چندسایز مثل ویجت‌های اپل',
-    ready: true,
-    supportsMode: true,
-    defaultMode: 'light',
-    swatch: ['#0A84FF', '#30D158', '#FF9F0A'],
-  },
-  {
-    id: 'brutalist',
-    name: 'Neo-brutalist',
-    desc: 'کادر ضخیم، بی‌سایه، تایپوگرافی بولد',
-    ready: true,
-    supportsMode: true,
-    defaultMode: 'light',
-    swatch: ['#FFE600', '#000000', '#FFFFFF'],
-  },
-  {
     id: 'glass',
     name: 'Glassmorphism',
     desc: 'شیشه‌ای، بلور، لایه‌ای',
@@ -2493,14 +2475,21 @@ function renderOrdersBento(orders, canAct) {
 /* -------------------------------------------------------- orders: glass -- */
 function renderOrdersGlass(orders, canAct) {
   const total = orders.reduce((sum, o) => sum + Number(o.final_price ?? o.base_price ?? 0), 0);
+  const accentClass = { pending: 'gl-mid', approved: 'gl-ok', rejected: 'gl-no' }[ordersStatus] || '';
   setContent(`
     <div class="gl-hero">
-      <div><h2>سفارش‌ها</h2><p>${fmt(orders.length)} مورد · جمع ${fmt(total)} تومان</p></div>
+      <div>
+        <h2>سفارش‌ها</h2>
+        <div class="gl-orb-strip">
+          <div class="gl-orb"><b>${fmt(orders.length)}</b><span>مورد</span></div>
+          <div class="gl-orb"><b>${fmt(total)}</b><span>تومان</span></div>
+        </div>
+      </div>
       <div class="gl-seg">${['pending', 'approved', 'rejected'].map(s => `<button class="gl-seg-btn ${s === ordersStatus ? 'active' : ''}" data-status="${s}">${ORDERS_STATUS_LABEL[s]}</button>`).join('')}</div>
     </div>
     <div class="gl-list">
       ${orders.map((o, i) => `
-        <div class="gl-row-wrap bn-card-anim" style="animation-delay:${Math.min(i * 30, 260)}ms">
+        <div class="gl-row-wrap ${accentClass} bn-card-anim" style="animation-delay:${Math.min(i * 30, 260)}ms">
           <div class="gl-row">
             ${glAvatar((o.product_name || '?').trim().charAt(0), i)}
             <div class="gl-row-main">
@@ -2930,14 +2919,21 @@ function renderTopupsBento(topups, canAct) {
 
 function renderTopupsGlass(topups, canAct) {
   const total = topups.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  const accentClass = { pending: 'gl-mid', approved: 'gl-ok', rejected: 'gl-no' }[topupsStatus] || '';
   setContent(`
     <div class="gl-hero">
-      <div><h2>شارژ کیف پول</h2><p>${fmt(topups.length)} مورد · جمع ${fmt(total)} تومان</p></div>
+      <div>
+        <h2>شارژ کیف پول</h2>
+        <div class="gl-orb-strip">
+          <div class="gl-orb"><b>${fmt(topups.length)}</b><span>مورد</span></div>
+          <div class="gl-orb"><b>${fmt(total)}</b><span>تومان</span></div>
+        </div>
+      </div>
       <div class="gl-seg">${['pending', 'approved', 'rejected'].map(s => `<button class="gl-seg-btn ${s === topupsStatus ? 'active' : ''}" data-status="${s}">${ORDERS_STATUS_LABEL[s]}</button>`).join('')}</div>
     </div>
     <div class="gl-list">
       ${topups.map((t, i) => `
-        <div class="gl-row-wrap bn-card-anim" style="animation-delay:${Math.min(i * 30, 260)}ms">
+        <div class="gl-row-wrap ${accentClass} bn-card-anim" style="animation-delay:${Math.min(i * 30, 260)}ms">
           <div class="gl-row">
             ${glAvatar((t.username || '؟').trim().charAt(0), i)}
             <div class="gl-row-main">
@@ -4755,19 +4751,21 @@ function renderDiscountsBento(codes) {
 function renderDiscountsGlass(codes) {
   setContent(`
     <div class="gl-hero">
-      <div><h2>کدهای تخفیف</h2><p>${fmt(codes.length)} کد ثبت‌شده</p></div>
+      <div>
+        <h2>کدهای تخفیف</h2>
+        <div class="gl-orb-strip"><div class="gl-orb"><b>${fmt(codes.length)}</b><span>کد ثبت‌شده</span></div></div>
+      </div>
       <button class="gl-btn gl-btn-ok" id="add-code">+ کد جدید</button>
     </div>
     <div class="gl-card-grid">
       ${codes.map((c, i) => `
         <div class="gl-card bn-card-anim" style="animation-delay:${Math.min(i * 30, 260)}ms">
-          <div class="bw ${BN_ACCENTS[i % BN_ACCENTS.length]}" style="border-radius:16px;padding:12px 14px">
-            <span class="bw-value mono" style="font-size:20px">${c.percent ? c.percent + '%' : fmt(c.fixed_amount) + ' ت'}</span>
-          </div>
+          <span class="gl-corner-tag">مصرف ${fmt(c.used_count)}${c.max_uses ? '/' + fmt(c.max_uses) : ''}</span>
+          ${glAvatar(c.percent ? '%' : 'ت', i)}
+          <div class="gl-card-price mono">${c.percent ? c.percent + '%' : fmt(c.fixed_amount) + ' ت'}</div>
           <div class="gl-row-title mono" style="font-size:14px">${esc(c.code)}</div>
-          <div class="gl-row-sub">سقف: ${c.max_uses ? fmt(c.max_uses) : 'نامحدود'} · مصرف: ${fmt(c.used_count)}</div>
           ${glPill(c.is_active ? 'فعال' : 'غیرفعال', c.is_active ? 'ok' : 'no')}
-          <div style="display:flex;gap:8px;margin-top:6px">
+          <div class="gl-card-actions">
             <button class="gl-btn gl-btn-ghost" data-toggle="${c.id}">${c.is_active ? 'غیرفعال' : 'فعال'}</button>
             <button class="gl-btn gl-btn-no" data-del="${c.id}">حذف</button>
           </div>
@@ -9428,10 +9426,10 @@ function renderWebAdminsBrutalist(admins) {
 /* ============================================================= system === */
 async function renderSystem() {
   const jobs = await apiGet('/system/jobs');
+  const backupStatus = await apiGet('/system/backup/status');
   const r = jobs.renewal;
   const stockRows = jobs.stock;
   const lowCount = stockRows.filter(p => p.low).length;
-  const backupStatus = await apiGet('/system/backup/status');
   const isOwner = ME.role === 'owner';
 
   setContent(`
