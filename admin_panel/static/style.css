@@ -1227,18 +1227,11 @@ html[data-theme="glass"] .hero-orbit, html[data-theme="glass"] .hero-net{ displa
 .bru-res-sub{ font-size:11px; font-weight:700; color:var(--text-muted); }
 
 /* --------------------------------------------- shared page kit: glass --- */
-/* زبان طراحی Glass: پنل‌های شیشه‌ای شناور و مجزا با عمق لایه‌ای واقعی (نه فقط
-   رنگ‌آمیزی مشترک با بقیه‌ی تم‌ها). هدر هر صفحه چسبان و محوکننده‌ی پس‌زمینه
-   است، هر ردیف یک "کاشی شیشه‌ای" جداگانه با سایه‌ی شناور و نوار نئونی رنگی
-   کنارشه، و آواتارها حباب شیشه‌ای با هاله‌ی گلو هستند. این عناصر (hero چسبان،
-   استریپ آماری حبابی، کاشی‌های مجزا با گپ، نوار وضعیت رنگی) امضای بصری Glass
-   محسوب می‌شن و در تم‌های دیگه تکرار نمی‌شن. */
 .gl-hero{
-  position:sticky; top:-2px; z-index:5; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
-  padding:18px 20px; border-radius:22px; margin:-2px 0 18px;
-  background:var(--surface-hi); border:1px solid var(--border);
-  backdrop-filter:blur(28px) saturate(160%); -webkit-backdrop-filter:blur(28px) saturate(160%);
-  box-shadow:0 12px 30px -12px rgba(0,0,0,.5);
+  display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
+  padding:18px 20px; border-radius:var(--radius); margin-bottom:16px;
+  background:var(--surface); border:1px solid var(--border);
+  backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px); box-shadow:var(--shadow-card);
 }
 .gl-hero h2{ margin:0 0 4px; font-size:19px; }
 .gl-hero p{ margin:0; font-size:12.5px; color:var(--text-muted); }
@@ -1250,17 +1243,6 @@ html[data-theme="glass"] .hero-orbit, html[data-theme="glass"] .hero-net{ displa
 .gl-seg-btn.active{ background:var(--primary); color:#fff; box-shadow:0 0 14px rgba(139,92,246,.55); }
 .gl-toolbar{ display:flex; justify-content:flex-end; gap:8px; margin-bottom:14px; }
 
-/* استریپ حباب‌های آماری: به‌جای متن ساده‌ی جمع/تعداد زیر عنوان، چند حباب
-   شیشه‌ای مجزا با عدد بزرگ - امضای بصری مخصوص Glass روی هر صفحه‌ی لیستی. */
-.gl-orb-strip{ display:flex; gap:10px; flex-wrap:wrap; margin-top:2px; }
-.gl-orb{
-  display:flex; flex-direction:column; align-items:flex-start; gap:2px; padding:8px 14px; border-radius:16px;
-  background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12);
-  backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
-}
-.gl-orb b{ font-size:14px; font-weight:800; }
-.gl-orb span{ font-size:10px; color:var(--text-muted); }
-
 .gl-btn{
   border:1px solid var(--border); background:rgba(255,255,255,.05); color:var(--text);
   font-size:12px; font-weight:700; padding:7px 14px; border-radius:12px; cursor:pointer; transition:.2s;
@@ -1271,64 +1253,44 @@ html[data-theme="glass"] .hero-orbit, html[data-theme="glass"] .hero-net{ displa
 .gl-btn-no{ color:#FB7185; border-color:rgba(251,113,133,.3); }
 .gl-btn-no:hover{ background:rgba(251,113,133,.12); }
 
-.gl-card-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:16px; }
+.gl-card-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; }
 .gl-card{
-  position:relative; padding:16px; border-radius:20px; background:rgba(255,255,255,.055); border:1px solid rgba(255,255,255,.14);
-  backdrop-filter:blur(20px) saturate(160%); -webkit-backdrop-filter:blur(20px) saturate(160%);
-  box-shadow:0 10px 26px -14px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.18);
-  display:flex; flex-direction:column; gap:8px; transition:.25s;
+  padding:16px; border-radius:var(--radius-sm); background:var(--surface); border:1px solid var(--border);
+  backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); box-shadow:var(--shadow-card);
+  display:flex; flex-direction:column; gap:8px; transition:.2s;
 }
-.gl-card:hover{ transform:translateY(-3px); border-color:rgba(139,92,246,.5); box-shadow:0 16px 32px -14px rgba(0,0,0,.6), 0 0 22px rgba(139,92,246,.28), inset 0 1px 0 rgba(255,255,255,.2); }
+.gl-card:hover{ border-color:rgba(139,92,246,.5); box-shadow:0 0 20px rgba(139,92,246,.25); }
 .gl-card-price{ font-size:17px; font-weight:800; }
 .gl-card-title{ font-size:13.5px; font-weight:700; }
 .gl-card-sub{ font-size:11.5px; color:var(--text-muted); }
 .gl-card-actions{ display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
 
-/* کاشی‌های مجزا با گپ واقعی (نه ردیف‌های چسبیده‌به‌هم) + نوار نئونی وضعیت */
-.gl-list{ display:flex; flex-direction:column; gap:12px; }
+.gl-list{ display:flex; flex-direction:column; gap:8px; }
 .gl-row{
-  display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:18px;
-  background:rgba(255,255,255,.055); border:1px solid rgba(255,255,255,.14);
-  backdrop-filter:blur(20px) saturate(160%); -webkit-backdrop-filter:blur(20px) saturate(160%);
+  display:flex; align-items:center; gap:12px; padding:11px 14px; border-radius:var(--radius-sm);
+  background:var(--surface); border:1px solid var(--border);
+  backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px);
 }
 .gl-row-main{ flex:1; min-width:0; }
 .gl-row-title{ font-size:13.5px; font-weight:700; display:block; }
 .gl-row-sub{ font-size:11.5px; color:var(--text-muted); }
 .gl-row-trail{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 .gl-avatar{
-  position:relative; width:36px; height:36px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center;
-  font-weight:800; font-size:13px; color:#fff;
-  background:radial-gradient(circle at 32% 28%, color-mix(in srgb, var(--c,#8B5CF6) 60%, #fff 40%), var(--c,#8B5CF6) 65%);
-  box-shadow:0 0 0 1px rgba(255,255,255,.25) inset, 0 0 16px color-mix(in srgb, var(--c,#8B5CF6) 70%, transparent);
+  width:34px; height:34px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  font-weight:800; font-size:13px; color:#fff; background:var(--c,#8B5CF6); box-shadow:0 0 10px var(--c,#8B5CF6);
 }
 .gl-pill{ font-size:10.5px; font-weight:700; padding:3px 10px; border-radius:20px; width:fit-content; }
 .gl-pill-ok{ color:#34D399; background:rgba(52,211,153,.14); }
 .gl-pill-no{ color:#FB7185; background:rgba(251,113,133,.14); }
 .gl-pill-mid{ color:#FBBF24; background:rgba(251,191,36,.14); }
-.gl-row-wrap{
-  position:relative; border-radius:18px; background:rgba(255,255,255,.055); border:1px solid rgba(255,255,255,.14);
-  backdrop-filter:blur(20px) saturate(160%); -webkit-backdrop-filter:blur(20px) saturate(160%); overflow:hidden;
-  box-shadow:0 10px 24px -16px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.16);
-}
-.gl-row-wrap::before{
-  content:''; position:absolute; inset-inline-start:0; top:10px; bottom:10px; width:3px; border-radius:3px;
-  background:var(--gl-accent, rgba(255,255,255,.18)); box-shadow:0 0 10px var(--gl-accent, transparent);
-}
-.gl-row-wrap.gl-ok{ --gl-accent:#34D399; }
-.gl-row-wrap.gl-no{ --gl-accent:#FB7185; }
-.gl-row-wrap.gl-mid{ --gl-accent:#FBBF24; }
-.gl-row-wrap .gl-row{ border:none; backdrop-filter:none; -webkit-backdrop-filter:none; background:transparent; border-radius:0; padding-inline-start:18px; }
+.gl-row-wrap{ border-radius:var(--radius-sm); background:var(--surface); border:1px solid var(--border);
+  backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); overflow:hidden; }
+.gl-row-wrap .gl-row{ border:none; backdrop-filter:none; -webkit-backdrop-filter:none; background:transparent; border-radius:0; }
 .gl-row-amount{ font-size:13px; font-weight:800; }
-.gl-row-actions{ display:flex; gap:8px; padding:0 14px 12px 18px; margin-top:-4px; flex-wrap:wrap; }
-.gl-search{ width:100%; border:1px solid rgba(255,255,255,.14); border-radius:999px; padding:10px 16px; background:rgba(255,255,255,.05);
+.gl-row-actions{ display:flex; gap:8px; padding:0 14px 12px; margin-top:-4px; flex-wrap:wrap; }
+.gl-search{ width:100%; border:1px solid var(--border); border-radius:999px; padding:10px 16px; background:var(--surface);
   color:var(--text); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); }
 .gl-search:focus{ outline:none; box-shadow:0 0 0 3px rgba(139,92,246,.35); }
-
-/* بج شناور گوشه‌ی کاشی (شمارنده/برچسب کوچک) */
-.gl-corner-tag{
-  position:absolute; top:10px; inset-inline-end:10px; font-size:9.5px; font-weight:800; padding:2px 8px; border-radius:20px;
-  background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.16); color:var(--text-muted);
-}
 
 /* ---------------------------------------------- shared page kit: cyberpunk (cyb-) --- */
 .cyb-hero{
