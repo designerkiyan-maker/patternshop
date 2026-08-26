@@ -2392,6 +2392,7 @@ let ordersStatus = 'pending';
 async function renderOrders() {
   const canAct = hasPerm('orders');
   const orders = await apiGet(`/orders?status=${ordersStatus}`);
+  if (loadTheme().theme === 'brutalist') return renderOrdersBrutalist(orders, canAct);
   setContent(`
     <div class="tabs">
       ${['pending', 'approved', 'rejected'].map(s => `<button class="tab-btn ${s === ordersStatus ? 'active' : ''}" data-status="${s}">${{ pending: 'در انتظار', approved: 'تایید شده', rejected: 'رد شده' }[s]}</button>`).join('')}
@@ -2434,11 +2435,72 @@ async function renderOrders() {
   }));
 }
 
+/* -------------------------------------------------- orders: brutalist --- */
+// چیدمان «پرونده/تیکت» به‌جای جدول: هر سفارش یه کارت با ته‌برگ شماره‌دار،
+// دکمه‌های تایید/رد به‌شکل مهر (استمپ) که با کلیک می‌کوبن (چرخش+بزرگنمایی).
+const ORDERS_STATUS_LABEL = { pending: 'در انتظار', approved: 'تایید شده', rejected: 'رد شده' };
+function renderOrdersBrutalist(orders, canAct) {
+  const total = orders.reduce((sum, o) => sum + Number(o.final_price ?? o.base_price ?? 0), 0);
+  setContent(`
+    <div class="bru-hero" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div>
+        <h2>پرونده‌های سفارش</h2>
+        <p>${fmt(orders.length)} مورد در وضعیت «${ORDERS_STATUS_LABEL[ordersStatus]}» — جمع مبلغ ${fmt(total)} تومان</p>
+      </div>
+      <div class="bru-seg" role="tablist">
+        ${['pending', 'approved', 'rejected'].map(s => `<button class="bru-seg-btn ${s === ordersStatus ? 'active' : ''}" data-status="${s}">${ORDERS_STATUS_LABEL[s]}</button>`).join('')}
+      </div>
+    </div>
+
+    <div class="bru-ticket-grid">
+      ${orders.map((o, i) => `
+        <div class="bru-ticket bru-card-anim" style="animation-delay:${Math.min(i * 40, 320)}ms">
+          <div class="bru-ticket-stub">
+            <span class="bru-ticket-num mono">#${o.id}</span>
+            ${historyBtn('order', o.id)}
+          </div>
+          <div class="bru-ticket-body">
+            <div class="bru-ticket-row"><span>کاربر</span><b>${esc(o.username || o.user_id)}</b></div>
+            <div class="bru-ticket-row"><span>محصول</span><b>${esc(o.product_name)}</b></div>
+            <div class="bru-ticket-row"><span>تعداد</span><b class="mono">${fmt(o.quantity || 1)}</b></div>
+            <div class="bru-ticket-row"><span>مبلغ</span><b class="mono bru-amount">${fmt(o.final_price ?? o.base_price)} ت</b></div>
+            <div class="bru-ticket-row"><span>تاریخ</span><b class="mono">${fmtDate(o.created_at)}</b></div>
+          </div>
+          <div class="bru-ticket-actions">
+            ${o.receipt_file_id ? `<button class="btn btn-sm" data-receipt="order:${o.id}">رسید</button>` : ''}
+            ${canAct && ordersStatus === 'pending' ? `
+              <button class="bru-stamp bru-stamp-ok" data-approve="${o.id}" style="--r:-6deg">تایید</button>
+              <button class="bru-stamp bru-stamp-no" data-reject="${o.id}" style="--r:4deg">رد</button>
+            ` : ''}
+          </div>
+        </div>
+      `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>سفارشی در این وضعیت نیست</div>`}
+    </div>
+  `);
+  $$('.bru-seg-btn', content()).forEach(b => b.addEventListener('click', () => { ordersStatus = b.dataset.status; renderOrders(); }));
+  $$('[data-receipt]', content()).forEach(b => b.addEventListener('click', () => {
+    const [kind, id] = b.dataset.receipt.split(':');
+    showReceiptModal(kind, id);
+  }));
+  $$('[data-approve]', content()).forEach(b => b.addEventListener('click', async function () {
+    this.classList.add('hit'); this.disabled = true;
+    try { await apiPost(`/orders/${b.dataset.approve}/approve`); toast('سفارش تایید شد.'); setTimeout(() => renderOrders(), 260); }
+    catch (e) { handleErr(e); this.disabled = false; this.classList.remove('hit'); }
+  }));
+  $$('[data-reject]', content()).forEach(b => b.addEventListener('click', async function () {
+    if (!confirm('سفارش رد شود؟')) return;
+    this.classList.add('hit'); this.disabled = true;
+    try { await apiPost(`/orders/${b.dataset.reject}/reject`); toast('سفارش رد شد.'); setTimeout(() => renderOrders(), 260); }
+    catch (e) { handleErr(e); this.disabled = false; this.classList.remove('hit'); }
+  }));
+}
+
 /* ============================================================ topups === */
 let topupsStatus = 'pending';
 async function renderTopups() {
   const canAct = hasPerm('orders');
   const topups = await apiGet(`/topups?status=${topupsStatus}`);
+  if (loadTheme().theme === 'brutalist') return renderTopupsBrutalist(topups, canAct);
   setContent(`
     <div class="tabs">
       ${['pending', 'approved', 'rejected'].map(s => `<button class="tab-btn ${s === topupsStatus ? 'active' : ''}" data-status="${s}">${{ pending: 'در انتظار', approved: 'تایید شده', rejected: 'رد شده' }[s]}</button>`).join('')}
@@ -2472,11 +2534,66 @@ async function renderTopups() {
   }));
 }
 
+/* -------------------------------------------------- topups: brutalist --- */
+function renderTopupsBrutalist(topups, canAct) {
+  const total = topups.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  setContent(`
+    <div class="bru-hero" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div>
+        <h2>پرونده‌های شارژ کیف پول</h2>
+        <p>${fmt(topups.length)} مورد در وضعیت «${ORDERS_STATUS_LABEL[topupsStatus]}» — جمع مبلغ ${fmt(total)} تومان</p>
+      </div>
+      <div class="bru-seg" role="tablist">
+        ${['pending', 'approved', 'rejected'].map(s => `<button class="bru-seg-btn ${s === topupsStatus ? 'active' : ''}" data-status="${s}">${ORDERS_STATUS_LABEL[s]}</button>`).join('')}
+      </div>
+    </div>
+
+    <div class="bru-ticket-grid">
+      ${topups.map((t, i) => `
+        <div class="bru-ticket bru-card-anim" style="animation-delay:${Math.min(i * 40, 320)}ms">
+          <div class="bru-ticket-stub">
+            <span class="bru-ticket-num mono">#${t.id}</span>
+            ${t.receipt_file_id ? `<button class="btn btn-sm" data-receipt="topup:${t.id}" style="background:transparent;color:#fff;border-color:#fff;box-shadow:none">رسید</button>` : ''}
+          </div>
+          <div class="bru-ticket-body">
+            <div class="bru-ticket-row"><span>کاربر</span><b>${esc(t.username || t.user_id)}</b></div>
+            <div class="bru-ticket-row"><span>مبلغ</span><b class="mono bru-amount">${fmt(t.amount)} ت</b></div>
+            <div class="bru-ticket-row"><span>تاریخ</span><b class="mono">${fmtDate(t.created_at)}</b></div>
+          </div>
+          ${canAct && topupsStatus === 'pending' ? `
+          <div class="bru-ticket-actions">
+            <button class="bru-stamp bru-stamp-ok" data-approve="${t.id}" style="--r:-6deg">تایید</button>
+            <button class="bru-stamp bru-stamp-no" data-reject="${t.id}" style="--r:4deg">رد</button>
+          </div>` : ''}
+        </div>
+      `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>درخواستی در این وضعیت نیست</div>`}
+    </div>
+  `);
+  $$('.bru-seg-btn', content()).forEach(b => b.addEventListener('click', () => { topupsStatus = b.dataset.status; renderTopups(); }));
+  $$('[data-receipt]', content()).forEach(b => b.addEventListener('click', () => {
+    const [kind, id] = b.dataset.receipt.split(':');
+    showReceiptModal(kind, id);
+  }));
+  $$('[data-approve]', content()).forEach(b => b.addEventListener('click', async function () {
+    this.classList.add('hit'); this.disabled = true;
+    try { await apiPost(`/topups/${b.dataset.approve}/approve`); toast('شارژ تایید شد.'); setTimeout(() => renderTopups(), 260); }
+    catch (e) { handleErr(e); this.disabled = false; this.classList.remove('hit'); }
+  }));
+  $$('[data-reject]', content()).forEach(b => b.addEventListener('click', async function () {
+    if (!confirm('این شارژ رد شود؟')) return;
+    this.classList.add('hit'); this.disabled = true;
+    try { await apiPost(`/topups/${b.dataset.reject}/reject`); toast('رد شد.'); setTimeout(() => renderTopups(), 260); }
+    catch (e) { handleErr(e); this.disabled = false; this.classList.remove('hit'); }
+  }));
+}
+
 /* ============================================================= users === */
 let usersState = { q: '', status: 'all', page: 1 };
+const USERS_STATUS_LABEL = { all: 'همه', active: 'فعال', expired: 'منقضی', blocked: 'مسدود' };
 async function renderUsers() {
   const res = await apiGet(`/users?q=${encodeURIComponent(usersState.q)}&status=${usersState.status}&page=${usersState.page}`);
   const pages = Math.max(Math.ceil(res.total / res.limit), 1);
+  if (loadTheme().theme === 'brutalist') return renderUsersBrutalist(res, pages);
   setContent(`
     <div class="toolbar">
       <input class="input" id="user-search" placeholder="جستجو (آیدی، یوزرنیم، نام)..." value="${esc(usersState.q)}">
@@ -2504,6 +2621,58 @@ async function renderUsers() {
   `);
   $('#user-search').addEventListener('keydown', e => { if (e.key === 'Enter') { usersState.q = e.target.value; usersState.page = 1; renderUsers(); } });
   $('#user-status').addEventListener('change', e => { usersState.status = e.target.value; usersState.page = 1; renderUsers(); });
+  $$('[data-page]', content()).forEach(b => b.addEventListener('click', () => { usersState.page = Number(b.dataset.page); renderUsers(); }));
+  $$('[data-block]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/users/${b.dataset.block}/block`); toast('کاربر مسدود شد.'); renderUsers(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-unblock]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/users/${b.dataset.unblock}/unblock`); toast('رفع مسدودیت شد.'); renderUsers(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-detail]', content()).forEach(b => b.addEventListener('click', () => showUserDetail(Number(b.dataset.detail))));
+}
+
+/* --------------------------------------------------- users: brutalist --- */
+// چیدمان «دایرکتوری/تابلوی اعلانات» به‌جای جدول: هر کاربر یه کارت با
+// آواتار حرفی درشت و برچسب وضعیت مثل استیکر گوشه‌ی پرونده.
+function renderUsersBrutalist(res, pages) {
+  const activeCount = res.items.filter(u => !u.is_blocked).length;
+  setContent(`
+    <div class="bru-hero" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div>
+        <h2>دایرکتوری کاربران</h2>
+        <p>${fmt(res.total)} کاربر ثبت‌شده — ${fmt(activeCount)} فعال در این صفحه</p>
+      </div>
+    </div>
+
+    <div class="bru-toolbar">
+      <input class="bru-search-input" id="user-search" placeholder="جستجو: آیدی، یوزرنیم، نام..." value="${esc(usersState.q)}">
+      <div class="bru-seg" role="tablist">
+        ${['all', 'active', 'expired', 'blocked'].map(s => `<button class="bru-seg-btn ${s === usersState.status ? 'active' : ''}" data-ustatus="${s}">${USERS_STATUS_LABEL[s]}</button>`).join('')}
+      </div>
+    </div>
+
+    <div class="bru-user-grid">
+      ${res.items.map((u, i) => `
+        <div class="bru-user-card bru-card-anim" style="animation-delay:${Math.min(i * 35, 300)}ms">
+          <span class="bru-flag ${u.is_blocked ? 'bru-flag-no' : 'bru-flag-ok'}">${u.is_blocked ? 'مسدود' : 'فعال'}</span>
+          <div class="bru-user-avatar mono">${esc((u.first_name || u.username || String(u.telegram_id)).trim().charAt(0).toUpperCase())}</div>
+          <div class="bru-user-name">${esc(u.username ? '@' + u.username : (u.first_name || '—'))}</div>
+          <div class="bru-user-id mono">ID: ${u.telegram_id}</div>
+          <div class="bru-user-joined mono">عضویت: ${fmtDate(u.joined_at)}</div>
+          <div class="bru-user-actions">
+            <button class="btn btn-sm btn-ghost" data-detail="${u.telegram_id}">جزئیات</button>
+            ${hasPerm('users') ? (u.is_blocked
+              ? `<button class="btn btn-sm" data-unblock="${u.telegram_id}">رفع مسدودی</button>`
+              : `<button class="btn btn-sm btn-danger" data-block="${u.telegram_id}">مسدودسازی</button>`) : ''}
+          </div>
+        </div>
+      `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>کاربری یافت نشد</div>`}
+    </div>
+
+    <div class="pager" style="margin-top:16px">${Array.from({ length: pages }, (_, i) => i + 1).map(p => `<button class="btn btn-sm ${p === usersState.page ? 'btn-primary' : ''}" data-page="${p}">${p}</button>`).join('')}</div>
+  `);
+  $('#user-search').addEventListener('keydown', e => { if (e.key === 'Enter') { usersState.q = e.target.value; usersState.page = 1; renderUsers(); } });
+  $$('.bru-seg-btn[data-ustatus]', content()).forEach(b => b.addEventListener('click', () => { usersState.status = b.dataset.ustatus; usersState.page = 1; renderUsers(); }));
   $$('[data-page]', content()).forEach(b => b.addEventListener('click', () => { usersState.page = Number(b.dataset.page); renderUsers(); }));
   $$('[data-block]', content()).forEach(b => b.addEventListener('click', async () => {
     try { await apiPost(`/users/${b.dataset.block}/block`); toast('کاربر مسدود شد.'); renderUsers(); } catch (e) { handleErr(e); }
@@ -2572,6 +2741,7 @@ async function showUserDetail(tgId) {
 let catalogTab = 'products';
 async function renderCatalog() {
   const [categories, products] = await Promise.all([apiGet('/categories'), apiGet('/products')]);
+  if (loadTheme().theme === 'brutalist') return renderCatalogBrutalist(categories, products);
   setContent(`
     <div class="tabs">
       <button class="tab-btn ${catalogTab === 'products' ? 'active' : ''}" data-t="products">محصولات</button>
@@ -2656,6 +2826,119 @@ async function renderCatalog() {
   $$('[data-configs]', body).forEach(b => b.addEventListener('click', () => showConfigBank(Number(b.dataset.configs))));
 }
 
+/* -------------------------------------------------- catalog: brutalist -- */
+// محصولات به‌شکل «برچسب قیمت آویزون» (تگ مشکی با سوراخ) و دسته‌بندی‌ها به
+// شکل ردیف‌های فهرست ضخیم‌قاب.
+function renderCatalogBrutalist(categories, products) {
+  setContent(`
+    <div class="bru-hero" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div>
+        <h2>ویترین محصولات</h2>
+        <p>${fmt(products.length)} محصول در ${fmt(categories.length)} دسته‌بندی</p>
+      </div>
+      <div class="bru-seg" role="tablist">
+        <button class="bru-seg-btn ${catalogTab === 'products' ? 'active' : ''}" data-t="products">محصولات</button>
+        <button class="bru-seg-btn ${catalogTab === 'categories' ? 'active' : ''}" data-t="categories">دسته‌بندی‌ها</button>
+      </div>
+    </div>
+    <div id="catalog-body"></div>
+  `);
+  $$('.bru-seg-btn[data-t]', content()).forEach(b => b.addEventListener('click', () => { catalogTab = b.dataset.t; renderCatalog(); }));
+
+  const body = $('#catalog-body');
+  if (catalogTab === 'categories') {
+    body.innerHTML = `
+      <div class="bru-toolbar" style="justify-content:flex-end">
+        <button class="bru-stamp bru-stamp-ok" id="add-cat" style="--r:-3deg">+ دسته‌بندی جدید</button>
+      </div>
+      <div class="bru-cat-list">
+        ${categories.map((c, i) => `
+          <div class="bru-cat-row bru-card-anim" style="animation-delay:${Math.min(i * 30, 250)}ms">
+            <span class="bru-cat-name">${esc(c.name)}</span>
+            <span class="bru-flag ${c.is_active ? 'bru-flag-ok' : 'bru-flag-no'}">${c.is_active ? 'فعال' : 'غیرفعال'}</span>
+            <div class="bru-cat-actions">
+              <button class="btn btn-sm" data-toggle-cat="${c.id}">${c.is_active ? 'غیرفعال کن' : 'فعال کن'}</button>
+              <button class="btn btn-danger btn-sm" data-del-cat="${c.id}">حذف</button>
+            </div>
+          </div>
+        `).join('') || `<div class="empty-state"><div class="icon">${svg('empty')}</div>دسته‌بندی‌ای نیست</div>`}
+      </div>`;
+    $('#add-cat').addEventListener('click', () => openModal('دسته‌بندی جدید', `
+      <div class="form-grid"><input class="input" id="cat-name" placeholder="نام دسته‌بندی">
+      <button class="btn btn-primary" id="cat-save">ثبت</button></div>`, (b, close) => {
+      $('#cat-save', b).addEventListener('click', async () => {
+        const name = $('#cat-name', b).value.trim(); if (!name) return;
+        try { await apiPost('/categories', { name }); toast('اضافه شد.'); close(); renderCatalog(); } catch (e) { handleErr(e); }
+      });
+    }));
+    $$('[data-toggle-cat]', body).forEach(b => b.addEventListener('click', async () => {
+      try { await apiPost(`/categories/${b.dataset.toggleCat}/toggle`); renderCatalog(); } catch (e) { handleErr(e); }
+    }));
+    $$('[data-del-cat]', body).forEach(b => b.addEventListener('click', async () => {
+      if (!confirm('حذف شود؟ (محصولات این دسته هم حذف می‌شوند)')) return;
+      try { await apiDelete(`/categories/${b.dataset.delCat}`); toast('حذف شد.'); renderCatalog(); } catch (e) { handleErr(e); }
+    }));
+    return;
+  }
+
+  body.innerHTML = `
+    <div class="bru-toolbar" style="justify-content:flex-end">
+      <button class="bru-stamp bru-stamp-ok" id="add-prod" style="--r:-3deg">+ محصول جدید</button>
+    </div>
+    <div class="bru-product-grid">
+      ${products.map((p, i) => `
+        <div class="bru-product-card bru-card-anim" style="animation-delay:${Math.min(i * 35, 300)}ms">
+          <div class="bru-product-tag">
+            <span class="bru-product-tag-hole"></span>
+            <span class="bru-product-price mono">${fmt(p.price)} ت</span>
+          </div>
+          <div class="bru-product-body">
+            <div class="bru-product-name">${esc(p.name)}</div>
+            <div class="bru-product-cat">${esc(p.category_name)}</div>
+            <div class="bru-coupon-row"><span>موجودی</span><b class="mono">${p.is_auto_provision ? 'خودکار' : fmt(p.stock)}</b></div>
+            <span class="bru-flag ${p.is_active ? 'bru-flag-ok' : 'bru-flag-no'}" style="align-self:flex-start">${p.is_active ? 'فعال' : 'غیرفعال'}</span>
+          </div>
+          <div class="bru-coupon-actions" style="flex-wrap:wrap">
+            ${!p.is_auto_provision ? `<button class="btn btn-sm" data-configs="${p.id}">بانک کانفیگ</button>` : ''}
+            <button class="btn btn-sm" data-toggle-prod="${p.id}">${p.is_active ? 'غیرفعال' : 'فعال'}</button>
+            <button class="btn btn-danger btn-sm" data-del-prod="${p.id}">حذف</button>
+          </div>
+        </div>
+      `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>محصولی نیست</div>`}
+    </div>`;
+
+  $('#add-prod').addEventListener('click', () => openModal('محصول جدید', `
+    <div class="form-grid">
+      <select class="input" id="prod-cat">${categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+      <input class="input" id="prod-name" placeholder="نام محصول">
+      <div class="form-row"><input class="input" id="prod-price" type="number" placeholder="قیمت (تومان)">
+      <input class="input" id="prod-duration" type="number" placeholder="مدت (روز)" value="30"></div>
+      <textarea class="input" id="prod-desc" placeholder="توضیحات (اختیاری)" rows="2"></textarea>
+      <button class="btn btn-primary" id="prod-save">ثبت</button>
+    </div>`, (b, close) => {
+    $('#prod-save', b).addEventListener('click', async () => {
+      const name = $('#prod-name', b).value.trim();
+      const price = Number($('#prod-price', b).value);
+      if (!name || !price) return toast('نام و قیمت الزامی است.', true);
+      try {
+        await apiPost('/products', {
+          category_id: Number($('#prod-cat', b).value), name, price,
+          description: $('#prod-desc', b).value, duration_days: Number($('#prod-duration', b).value) || 30,
+        });
+        toast('محصول اضافه شد.'); close(); renderCatalog();
+      } catch (e) { handleErr(e); }
+    });
+  }));
+  $$('[data-toggle-prod]', body).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/products/${b.dataset.toggleProd}/toggle`); renderCatalog(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-del-prod]', body).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('این محصول حذف شود؟')) return;
+    try { await apiDelete(`/products/${b.dataset.delProd}`); toast('حذف شد.'); renderCatalog(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-configs]', body).forEach(b => b.addEventListener('click', () => showConfigBank(Number(b.dataset.configs))));
+}
+
 async function showConfigBank(productId) {
   const res = await apiGet(`/products/${productId}/configs`);
   const configs = res.items || [];
@@ -2700,6 +2983,7 @@ async function showConfigBank(productId) {
 /* ========================================================== discounts === */
 async function renderDiscounts() {
   const codes = await apiGet('/discounts');
+  if (loadTheme().theme === 'brutalist') return renderDiscountsBrutalist(codes);
   setContent(`
     <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-code">+ کد تخفیف جدید</button></div>
     <div class="card"><div class="table-wrap"><table>
@@ -2748,10 +3032,76 @@ async function renderDiscounts() {
   }));
 }
 
+/* ------------------------------------------------ discounts: brutalist -- */
+// کدهای تخفیف به‌شکل «بلیط پانچ‌شده» (کوپن) با خط بریدگی دایره‌ای وسط —
+// عدد تخفیف با فونت درشت مثل تگ قیمت.
+function renderDiscountsBrutalist(codes) {
+  setContent(`
+    <div class="bru-hero" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div>
+        <h2>کدهای تخفیف</h2>
+        <p>${fmt(codes.length)} کد ثبت‌شده</p>
+      </div>
+      <button class="bru-stamp bru-stamp-ok" id="add-code" style="--r:-3deg">+ کد جدید</button>
+    </div>
+
+    <div class="bru-coupon-grid">
+      ${codes.map((c, i) => `
+        <div class="bru-coupon bru-card-anim ${c.is_active ? '' : 'bru-coupon-off'}" style="animation-delay:${Math.min(i * 40, 320)}ms">
+          <div class="bru-coupon-value">${c.percent ? c.percent + '%' : fmt(c.fixed_amount) + ' ت'}</div>
+          <div class="bru-coupon-cut"></div>
+          <div class="bru-coupon-body">
+            <div class="bru-coupon-code mono">${esc(c.code)}</div>
+            <div class="bru-coupon-row"><span>سقف مصرف</span><b class="mono">${c.max_uses ? fmt(c.max_uses) : 'نامحدود'}</b></div>
+            <div class="bru-coupon-row"><span>مصرف‌شده</span><b class="mono">${fmt(c.used_count)}</b></div>
+            <span class="bru-flag ${c.is_active ? 'bru-flag-ok' : 'bru-flag-no'}" style="align-self:flex-start">${c.is_active ? 'فعال' : 'غیرفعال'}</span>
+          </div>
+          <div class="bru-coupon-actions">
+            <button class="btn btn-sm" data-toggle="${c.id}">${c.is_active ? 'غیرفعال' : 'فعال'}</button>
+            <button class="btn btn-danger btn-sm" data-del="${c.id}">حذف</button>
+          </div>
+        </div>
+      `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>کدی ثبت نشده</div>`}
+    </div>
+  `);
+  $('#add-code').addEventListener('click', () => openModal('کد تخفیف جدید', `
+    <div class="form-grid">
+      <input class="input" id="code-value" placeholder="کد (مثلا SUMMER20)">
+      <div class="form-row">
+        <input class="input" id="code-percent" type="number" placeholder="درصد تخفیف">
+        <input class="input" id="code-fixed" type="number" placeholder="یا مبلغ ثابت">
+      </div>
+      <input class="input" id="code-maxuses" type="number" placeholder="سقف تعداد استفاده (۰=نامحدود)" value="0">
+      <button class="btn btn-primary" id="code-save">ثبت</button>
+    </div>`, (b, close) => {
+    $('#code-save', b).addEventListener('click', async () => {
+      const code = $('#code-value', b).value.trim();
+      if (!code) return toast('کد را وارد کن.', true);
+      try {
+        await apiPost('/discounts', {
+          code,
+          percent: Number($('#code-percent', b).value) || null,
+          fixed_amount: Number($('#code-fixed', b).value) || null,
+          max_uses: Number($('#code-maxuses', b).value) || 0,
+        });
+        toast('کد اضافه شد.'); close(); renderDiscounts();
+      } catch (e) { handleErr(e); }
+    });
+  }));
+  $$('[data-toggle]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/discounts/${b.dataset.toggle}/toggle`); renderDiscounts(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('حذف شود؟')) return;
+    try { await apiDelete(`/discounts/${b.dataset.del}`); toast('حذف شد.'); renderDiscounts(); } catch (e) { handleErr(e); }
+  }));
+}
+
 /* ============================================================= support === */
 async function renderSupport() {
   stopSupportPoll();
   const convs = await apiGet('/support/conversations');
+  if (loadTheme().theme === 'brutalist') return renderSupportBrutalist(convs);
   setContent(`
     <div class="card"><div class="table-wrap"><table>
       <thead><tr><th>کاربر</th><th>آخرین پیام</th><th>زمان</th><th></th></tr></thead>
@@ -2780,6 +3130,46 @@ function renderSupportRows(convs) {
     <td><button class="btn btn-sm" data-open="${c.user_id}">مشاهده</button></td>
   </tr>`).join('') || '<tr><td colspan="4" class="empty-state">گفتگویی نیست</td></tr>';
   $$('[data-open]', tbody).forEach(b => b.addEventListener('click', () => showSupportChat(Number(b.dataset.open))));
+}
+
+/* -------------------------------------------------- support: brutalist -- */
+// اینباکس گفتگوها به‌شکل ردیف‌های ضخیم با آواتار حرفی و نشان تعداد
+// نخوانده مثل مهر گرد قرمز روی گوشه.
+function renderSupportBrutalist(convs) {
+  setContent(`
+    <div class="bru-hero">
+      <h2>صندوق پشتیبانی</h2>
+      <p>${fmt(convs.length)} گفتگو</p>
+    </div>
+    <div class="bru-inbox-list" id="support-inbox-list">${supportInboxRowsHtml(convs)}</div>
+  `);
+  $$('[data-open]', content()).forEach(b => b.addEventListener('click', () => showSupportChat(Number(b.dataset.open))));
+  SUPPORT_POLL_TIMER = setInterval(async () => {
+    if (CURRENT_TAB !== 'support') return stopSupportPoll();
+    try { const fresh = await apiGet('/support/conversations'); renderSupportRowsBrutalist(fresh); } catch (e) { /* silent */ }
+  }, 5000);
+}
+function supportInboxRowsHtml(convs) {
+  return convs.map((c, i) => `
+    <div class="bru-inbox-row bru-card-anim" style="animation-delay:${Math.min(i * 30, 240)}ms">
+      <div class="bru-inbox-avatar mono">${esc((c.user_name || c.user_username || '#').trim().charAt(0).toUpperCase())}</div>
+      <div class="bru-inbox-main">
+        <div class="bru-inbox-name">${esc(c.user_name || c.user_username || ('#' + c.user_id))}${c.locked_for_me ? ` <span title="${esc(c.locked_by || '')}">🔒</span>` : ''}</div>
+        <div class="bru-inbox-msg">${c.last_sender === 'admin' ? '↩ ' : ''}${esc(c.last_message || '')}</div>
+      </div>
+      <div class="bru-inbox-meta">
+        <span class="mono">${fmtDate(c.last_at)}</span>
+        ${c.unread ? `<span class="bru-inbox-badge">${c.unread}</span>` : ''}
+      </div>
+      <button class="btn btn-sm" data-open="${c.user_id}">مشاهده</button>
+    </div>
+  `).join('') || `<div class="empty-state"><div class="icon">${svg('empty')}</div>گفتگویی نیست</div>`;
+}
+function renderSupportRowsBrutalist(convs) {
+  const list = $('#support-inbox-list', content());
+  if (!list) return;
+  list.innerHTML = supportInboxRowsHtml(convs);
+  $$('[data-open]', list).forEach(b => b.addEventListener('click', () => showSupportChat(Number(b.dataset.open))));
 }
 
 async function showSupportChat(userId) {
@@ -2834,8 +3224,10 @@ async function showSupportChat(userId) {
 
 /* ============================================================= tickets === */
 let ticketsStatusFilter = '';
+const TICKETS_STATUS_LABEL = { '': 'همه', open: 'باز', answered: 'پاسخ‌داده‌شده', closed: 'بسته' };
 async function renderTickets() {
   const tickets = await apiGet(`/tickets${ticketsStatusFilter ? '?status=' + ticketsStatusFilter : ''}`);
+  if (loadTheme().theme === 'brutalist') return renderTicketsBrutalist(tickets);
   setContent(`
     <div class="tabs">
       ${[['', 'همه'], ['open', 'باز'], ['answered', 'پاسخ‌داده‌شده'], ['closed', 'بسته']].map(([v, l]) => `<button class="tab-btn ${v === ticketsStatusFilter ? 'active' : ''}" data-s="${v}">${l}</button>`).join('')}
@@ -2851,6 +3243,42 @@ async function renderTickets() {
     </table></div></div>
   `);
   $$('.tab-btn', content()).forEach(b => b.addEventListener('click', () => { ticketsStatusFilter = b.dataset.s; renderTickets(); }));
+  $$('[data-open]', content()).forEach(b => b.addEventListener('click', () => showTicket(Number(b.dataset.open))));
+}
+
+/* -------------------------------------------------- tickets: brutalist -- */
+// هر تیکت به‌شکل کارت «پرونده‌ی باز» با برچسب وضعیت مثل استیکر گوشه.
+function renderTicketsBrutalist(tickets) {
+  setContent(`
+    <div class="bru-hero" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div>
+        <h2>تیکت‌های پشتیبانی</h2>
+        <p>${fmt(tickets.length)} تیکت در فیلتر «${TICKETS_STATUS_LABEL[ticketsStatusFilter]}»</p>
+      </div>
+      <div class="bru-seg" role="tablist">
+        ${[['', 'همه'], ['open', 'باز'], ['answered', 'پاسخ‌داده‌شده'], ['closed', 'بسته']].map(([v, l]) => `<button class="bru-seg-btn ${v === ticketsStatusFilter ? 'active' : ''}" data-s="${v}">${l}</button>`).join('')}
+      </div>
+    </div>
+    <div class="bru-ticket-grid">
+      ${tickets.map((t, i) => `
+        <div class="bru-ticket bru-card-anim" style="animation-delay:${Math.min(i * 40, 320)}ms">
+          <div class="bru-ticket-stub">
+            <span class="bru-ticket-num mono">#${t.id}</span>
+            <span class="bru-flag ${t.status === 'open' ? 'bru-flag-pending' : t.status === 'answered' ? 'bru-flag-ok' : 'bru-flag-no'}">${TICKETS_STATUS_LABEL[t.status] || t.status}</span>
+          </div>
+          <div class="bru-ticket-body">
+            <div class="bru-ticket-row"><span>کاربر</span><b>${esc(t.username || t.user_id)}</b></div>
+            <div class="bru-ticket-row" style="flex-direction:column;align-items:flex-start;gap:2px"><span>موضوع</span><b style="white-space:normal">${esc(t.subject)}</b></div>
+            <div class="bru-ticket-row"><span>بروزرسانی</span><b class="mono">${fmtDate(t.updated_at)}</b></div>
+          </div>
+          <div class="bru-ticket-actions">
+            <button class="btn btn-sm" data-open="${t.id}">مشاهده</button>
+          </div>
+        </div>
+      `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>تیکتی نیست</div>`}
+    </div>
+  `);
+  $$('.bru-seg-btn[data-s]', content()).forEach(b => b.addEventListener('click', () => { ticketsStatusFilter = b.dataset.s; renderTickets(); }));
   $$('[data-open]', content()).forEach(b => b.addEventListener('click', () => showTicket(Number(b.dataset.open))));
 }
 
@@ -2885,6 +3313,7 @@ async function showTicket(ticketId) {
 
 /* =========================================================== broadcast === */
 async function renderBroadcast() {
+  if (loadTheme().theme === 'brutalist') return renderBroadcastBrutalist();
   setContent(`
     <div class="card" style="max-width:640px">
       <h3 style="margin:0 0 4px">ارسال پیام همگانی</h3>
@@ -2930,12 +3359,66 @@ async function renderBroadcast() {
   });
 }
 
+/* ------------------------------------------------ broadcast: brutalist -- */
+// چیدمان «کنسول بلندگو»: تکست‌ناحیه‌ی درشت با شمارنده‌ی مونو، دکمه‌ی
+// مُهر بزرگ، و نتیجه‌ی ارسال به‌شکل سه بلاک آماری مثل داشبورد.
+function renderBroadcastBrutalist() {
+  setContent(`
+    <div class="bru-hero">
+      <h2>کنسول پیام همگانی</h2>
+      <p>ارسال متنی به همه‌ی کاربران غیرمسدود ربات</p>
+    </div>
+    <div class="bru-panel" style="max-width:680px">
+      <div class="bru-panel-head">متن پیام</div>
+      <textarea class="bru-search-input" id="bc-text" rows="7" maxlength="4000" style="width:100%;resize:vertical" placeholder="متن پیام را بنویس..."></textarea>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+        <span class="mono" id="bc-count" style="font-weight:800;font-size:12px">۰ / ۴۰۰۰</span>
+        <button class="bru-stamp bru-stamp-ok" id="bc-send" style="--r:-3deg">ارسال به همه</button>
+      </div>
+      <div id="bc-result" style="margin-top:16px"></div>
+    </div>
+  `);
+  const ta = $('#bc-text', content());
+  ta.addEventListener('input', () => { $('#bc-count', content()).textContent = `${ta.value.length} / 4000`; });
+
+  $('#bc-send', content()).addEventListener('click', () => {
+    const text = ta.value.trim();
+    if (!text) return toast('متن پیام خالی است.', true);
+    openModal('تایید ارسال همگانی', `
+      <p style="font-size:13px;line-height:1.9">این پیام برای <strong>همه‌ی کاربران</strong> ربات ارسال می‌شود و قابل بازگشت نیست. مطمئنی؟</p>
+      <div style="border:2.5px solid #000;background:var(--surface-2);padding:10px 12px;font-size:13px;white-space:pre-wrap;max-height:160px;overflow-y:auto">${esc(text)}</div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="bc-confirm">بله، ارسال کن</button>
+      </div>
+    `, (body, close) => {
+      $('#bc-confirm', body).addEventListener('click', async () => {
+        const btn = $('#bc-confirm', body);
+        btn.disabled = true; btn.textContent = 'در حال ارسال...';
+        try {
+          const res = await apiPost('/broadcast', { message: text });
+          close();
+          $('#bc-result', content()).innerHTML = `
+            <div class="bru-grid-4" style="grid-template-columns:repeat(3,1fr)">
+              <div class="bru-block bru-white"><span class="bru-block-label">کل</span><span class="bru-block-val mono">${fmt(res.total)}</span></div>
+              <div class="bru-block bru-yellow"><span class="bru-block-label">موفق</span><span class="bru-block-val mono">${fmt(res.success)}</span></div>
+              <div class="bru-block bru-black"><span class="bru-block-label">ناموفق</span><span class="bru-block-val mono">${fmt(res.failed)}</span></div>
+            </div>`;
+          ta.value = ''; $('#bc-count', content()).textContent = '۰ / ۴۰۰۰';
+          toast('پیام همگانی ارسال شد.');
+        } catch (e) { close(); handleErr(e); }
+      });
+    });
+  });
+}
+
 /* =========================================================== resellers === */
 async function renderResellers() {
   const [resellers, cohort] = await Promise.all([
     apiGet('/resellers'),
     apiGet('/resellers/analytics/cohort').catch(() => null),
   ]);
+
+  if (loadTheme().theme === 'brutalist') return renderResellersBrutalist(resellers, cohort);
 
   const cohortHtml = cohort ? renderResellerCohortBlock(cohort) : '';
 
@@ -2974,6 +3457,117 @@ async function renderResellers() {
       box.style.display = box.style.display === 'none' ? '' : 'none';
     }));
   }
+}
+
+/* ------------------------------------------------ resellers: brutalist -- */
+// لیست نمایندگی‌ها به‌شکل «کارت اعتباری» با حجم گیگ درشت مثل موجودی کارت،
+// و آمار کوهورت با همون زبان بلوکی/پنلی داشبورد برutalist.
+function renderResellersBrutalist(resellers, cohort) {
+  const cohortHtml = cohort ? renderResellerCohortBlockBrutalist(cohort) : '';
+  setContent(`
+    <div class="bru-hero">
+      <h2>نمایندگی‌ها</h2>
+      <p>${fmt(resellers.length)} نماینده ثبت‌شده</p>
+    </div>
+    ${cohortHtml}
+    <div class="bru-panel" style="margin-top:16px">
+      <div class="bru-panel-head">لیست نمایندگی‌ها</div>
+      <div class="bru-reseller-grid">
+        ${resellers.map((r, i) => `
+          <div class="bru-reseller-card bru-card-anim" style="animation-delay:${Math.min(i * 35, 300)}ms">
+            <div class="bru-reseller-top">
+              <span class="bru-flag ${r.is_reseller ? 'bru-flag-ok' : 'bru-flag-no'}">${r.is_reseller ? 'فعال' : 'غیرفعال'}</span>
+              <span class="bru-reseller-id mono">#${r.telegram_id}</span>
+            </div>
+            <div class="bru-reseller-name">${esc(r.username || '—')}</div>
+            <div class="bru-reseller-credit"><span class="mono">${fmt(r.reseller_credit_gb)}</span><small>گیگ اعتبار</small></div>
+            <button class="btn btn-sm btn-block" data-credit="${r.telegram_id}">تنظیم اعتبار</button>
+          </div>
+        `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>نماینده‌ای ثبت نشده</div>`}
+      </div>
+    </div>
+  `);
+  $$('[data-credit]', content()).forEach(b => b.addEventListener('click', () => openModal('تنظیم اعتبار حجمی', `
+    <div class="form-grid">
+      <input class="input" id="credit-delta" type="number" placeholder="مقدار (گیگ، منفی=کسر)">
+      <input class="input" id="credit-reason" placeholder="دلیل (اختیاری)">
+      <button class="btn btn-primary" id="credit-save">ثبت</button>
+    </div>`, (body, close) => {
+    $('#credit-save', body).addEventListener('click', async () => {
+      const delta_gb = Number($('#credit-delta', body).value);
+      if (!delta_gb) return;
+      try {
+        await apiPost(`/resellers/${b.dataset.credit}/credit`, { delta_gb, reason: $('#credit-reason', body).value });
+        toast('اعتبار به‌روزرسانی شد.'); close(); renderResellers();
+      } catch (e) { handleErr(e); }
+    });
+  })));
+  if (cohort) {
+    const root = content();
+    requestAnimationFrame(() => setTimeout(() => { $$('.bru-metric-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; }); }, 60));
+    $$('[data-toggle-churn]', root).forEach(el => el.addEventListener('click', () => {
+      const box = $('#churn-list-box', root);
+      box.style.display = box.style.display === 'none' ? '' : 'none';
+    }));
+  }
+}
+
+function renderResellerCohortBlockBrutalist(data) {
+  const c = data.churn;
+  const months = data.cohorts;
+  const allMonths = months.length ? months[months.length - 1].retention.map(r => r.month) : [];
+
+  const heatRows = months.map(co => {
+    const cells = co.retention.map(r => `<td class="mono" style="text-align:center">${co.size ? `${r.pct}٪<div style="font-size:10px;opacity:.7">${fmt(r.active)}</div>` : '—'}</td>`).join('');
+    const pad = allMonths.length - co.retention.length;
+    return `<tr><td class="mono">${co.cohort_month}</td><td class="mono">${fmt(co.size)}</td>${cells}${'<td></td>'.repeat(Math.max(0, pad))}</tr>`;
+  }).join('');
+
+  const churnRows = c.list.slice(0, 30).map(u => `
+    <tr>
+      <td class="mono">${u.telegram_id}</td><td>${esc(u.username || '—')}</td>
+      <td class="mono">${fmt(u.credit_gb)}</td>
+      <td class="mono">${u.last_activity ? fmtDate(u.last_activity) : 'هیچ‌وقت'}</td>
+      <td class="mono">${fmt(u.days_inactive)} روز</td>
+    </tr>`).join('') || '<tr><td colspan="5" class="empty-state">نماینده‌ی ریزش‌کرده‌ای نیست 🎉</td></tr>';
+
+  return `
+    <div class="bru-grid-4">
+      <div class="bru-block bru-white">
+        <span class="bru-block-label">کل نمایندگان فعلی</span>
+        <span class="bru-block-val mono">${fmt(c.total)}</span>
+      </div>
+      <div class="bru-block bru-yellow">
+        <span class="bru-block-label">فعال (${fmt(c.inactivity_days)} روز اخیر)</span>
+        <span class="bru-block-val mono">${fmt(c.active)}</span>
+      </div>
+      <div class="bru-block bru-black" data-toggle-churn style="cursor:pointer">
+        <span class="bru-block-label">ریزش‌کرده — کلیک برای لیست</span>
+        <span class="bru-block-val mono">${fmt(c.churned)}</span>
+        <span class="bru-block-tag">${c.churn_rate}٪ نرخ ریزش</span>
+      </div>
+      <div class="bru-block bru-white">
+        <span class="bru-block-label">مجموع نماینده‌های ${fmt(months.length)} ماه اخیر</span>
+        <span class="bru-block-val mono">${fmt(months.reduce((a, m) => a + m.size, 0))}</span>
+      </div>
+    </div>
+
+    <div class="bru-panel" style="margin-top:16px">
+      <div class="bru-panel-head">کوهورت نگهداشت ماهانه نمایندگان</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>ماه کوهورت</th><th>تعداد</th>${allMonths.map((m, i) => `<th class="mono">M${i}</th>`).join('')}</tr></thead>
+        <tbody>${heatRows || '<tr><td colspan="2" class="empty-state">داده‌ای نیست</td></tr>'}</tbody>
+      </table></div>
+    </div>
+
+    <div class="bru-panel" id="churn-list-box" style="display:none;margin-top:16px">
+      <div class="bru-panel-head">نماینده‌های در آستانه‌ی ریزش / ریزش‌کرده</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>اعتبار (گیگ)</th><th>آخرین فعالیت</th><th>مدت بی‌فعالیتی</th></tr></thead>
+        <tbody>${churnRows}</tbody>
+      </table></div>
+    </div>
+  `;
 }
 
 function renderResellerCohortBlock(data) {

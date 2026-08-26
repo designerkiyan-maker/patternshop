@@ -860,6 +860,139 @@ html[data-theme="brutalist"] .topbar-clock{ border-radius:0; border:2px solid #0
 .bru-prod-name{ flex:1; font-size:13px; font-weight:700; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .bru-prod-val{ font-size:12.5px; font-weight:800; }
 
+/* ---- ورود کارت‌ها: اسلَم (افت با کمی چرخش) به‌جای فید ساده ---------- */
+@keyframes bruSlam{ from{ opacity:0; transform:translateY(16px) rotate(-1.2deg); } to{ opacity:1; transform:translateY(0) rotate(0); } }
+.bru-card-anim{ animation:bruSlam .36s cubic-bezier(.2,.85,.32,1.25) both; }
+@media (prefers-reduced-motion:reduce){ .bru-card-anim{ animation:none; } }
+
+/* ---- کنترل سگمنتی (جایگزین تب/سلکت) --------------------------------- */
+.bru-seg{ display:inline-flex; border:2.5px solid #000; background:#fff; box-shadow:var(--shadow-btn); overflow:hidden; }
+.bru-seg-btn{ font-family:inherit; font-size:12px; font-weight:800; padding:9px 14px; background:#fff; color:#000; border:none;
+  border-inline-end:2.5px solid #000; cursor:pointer; transition:background .1s; }
+.bru-seg-btn:last-child{ border-inline-end:none; }
+.bru-seg-btn:hover{ background:#f2f2f2; }
+.bru-seg-btn.active{ background:var(--primary); }
+
+.bru-toolbar{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin-bottom:16px; }
+.bru-search-input{ flex:1; min-width:220px; font-family:inherit; font-size:13px; font-weight:600; padding:10px 14px;
+  border:2.5px solid #000; background:#fff; box-shadow:var(--shadow-btn); }
+.bru-search-input:focus{ outline:none; box-shadow:0 0 0 3px #000; }
+
+/* ---- برچسب وضعیت (استیکر گوشه) --------------------------------------- */
+.bru-flag{ display:inline-block; font-size:10.5px; font-weight:900; text-transform:uppercase; padding:3px 9px;
+  border:2px solid #000; letter-spacing:.02em; }
+.bru-flag-ok{ background:var(--emerald); color:#000; }
+.bru-flag-no{ background:var(--rose); color:#fff; }
+.bru-flag-pending{ background:var(--primary); color:#000; }
+
+/* ---- سفارش‌ها: کارت «تیکت/پرونده» ------------------------------------ */
+.bru-ticket-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); gap:16px; }
+.bru-ticket{ border:3px solid #000; background:#fff; box-shadow:var(--shadow-card); display:flex; flex-direction:column;
+  transition:transform .12s, box-shadow .12s; }
+.bru-ticket:hover{ transform:translate(-2px,-2px); box-shadow:7px 7px 0 #000; }
+.bru-ticket-stub{ display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:#000;
+  border-bottom:3px dashed var(--primary); }
+.bru-ticket-num{ color:#fff; font-weight:900; font-size:14px; }
+.bru-ticket-stub .btn{ background:transparent; color:#fff; border-color:#fff; box-shadow:none; }
+.bru-ticket-body{ padding:14px; display:flex; flex-direction:column; gap:8px; }
+.bru-ticket-row{ display:flex; align-items:center; justify-content:space-between; font-size:12.5px; gap:10px; }
+.bru-ticket-row span{ color:var(--text-muted); font-weight:700; flex-shrink:0; }
+.bru-ticket-row b{ font-weight:800; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bru-amount{ font-size:14px; }
+.bru-ticket-actions{ display:flex; gap:8px; flex-wrap:wrap; padding:12px 14px; border-top:2.5px solid #000; margin-top:auto; }
+
+/* ---- دکمه‌ی مُهر (تایید/رد) ------------------------------------------- */
+.bru-stamp{ font-family:inherit; font-size:12px; font-weight:900; text-transform:uppercase; letter-spacing:.03em;
+  padding:7px 14px; background:#fff; border:2.5px solid currentColor; cursor:pointer; border-radius:3px;
+  transform:rotate(var(--r,0deg)); transition:transform .12s, background .12s; }
+.bru-stamp-ok{ color:#00893F; }
+.bru-stamp-no{ color:#C4001D; }
+.bru-stamp:hover{ transform:rotate(0deg) scale(1.05); }
+.bru-stamp-ok:hover{ background:var(--emerald); color:#000; }
+.bru-stamp-no:hover{ background:var(--rose); color:#fff; }
+.bru-stamp:disabled{ opacity:.5; cursor:default; }
+@keyframes bruStampHit{ 0%{ transform:rotate(var(--r,0deg)) scale(1); } 45%{ transform:rotate(0deg) scale(1.25); } 100%{ transform:rotate(0deg) scale(1.08); } }
+.bru-stamp.hit{ animation:bruStampHit .32s ease forwards; }
+
+/* ---- کاربران: گرید دایرکتوری ------------------------------------------ */
+.bru-user-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:16px; }
+.bru-user-card{ position:relative; border:3px solid #000; background:#fff; box-shadow:var(--shadow-card); padding:16px;
+  display:flex; flex-direction:column; align-items:center; text-align:center; gap:4px;
+  transition:transform .12s, box-shadow .12s; }
+.bru-user-card:hover{ transform:translate(-2px,-2px); box-shadow:7px 7px 0 #000; }
+.bru-user-card .bru-flag{ position:absolute; top:-2px; inset-inline-end:-2px; }
+.bru-user-avatar{ width:52px; height:52px; display:flex; align-items:center; justify-content:center; font-size:22px;
+  font-weight:900; background:var(--primary); border:2.5px solid #000; margin-bottom:6px; }
+.bru-user-name{ font-size:14px; font-weight:800; }
+.bru-user-id, .bru-user-joined{ font-size:11px; color:var(--text-muted); font-weight:700; }
+.bru-user-actions{ display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; justify-content:center; }
+
+/* ---- تخفیف‌ها: کارت «کوپن پانچ‌شده» ------------------------------------ */
+.bru-coupon-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:18px; }
+.bru-coupon{ position:relative; border:3px solid #000; background:#fff; box-shadow:var(--shadow-card);
+  display:flex; flex-direction:column; transition:transform .12s, box-shadow .12s, opacity .12s; }
+.bru-coupon:hover{ transform:translate(-2px,-2px); box-shadow:7px 7px 0 #000; }
+.bru-coupon-off{ opacity:.55; }
+.bru-coupon-value{ background:var(--primary); color:#000; font-size:26px; font-weight:900; text-align:center;
+  padding:16px 10px 20px; }
+.bru-coupon-cut{ height:0; border-top:3px dashed #000; position:relative; }
+.bru-coupon-cut::before, .bru-coupon-cut::after{ content:''; position:absolute; top:-9px; width:18px; height:18px;
+  background:var(--bg); border:3px solid #000; border-radius:50%; }
+.bru-coupon-cut::before{ inset-inline-start:-12px; }
+.bru-coupon-cut::after{ inset-inline-end:-12px; }
+.bru-coupon-body{ padding:16px; display:flex; flex-direction:column; gap:8px; }
+.bru-coupon-code{ font-size:16px; font-weight:900; letter-spacing:.03em; }
+.bru-coupon-row{ display:flex; align-items:center; justify-content:space-between; font-size:12px; }
+.bru-coupon-row span{ color:var(--text-muted); font-weight:700; }
+.bru-coupon-row b{ font-weight:800; }
+.bru-coupon-actions{ display:flex; gap:8px; padding:12px 16px; border-top:2.5px solid #000; margin-top:auto; }
+
+/* ---- دسته‌بندی‌ها: ردیف فهرست ضخیم‌قاب ------------------------------- */
+.bru-cat-list{ display:flex; flex-direction:column; gap:10px; }
+.bru-cat-row{ display:flex; align-items:center; gap:14px; border:3px solid #000; background:#fff;
+  box-shadow:var(--shadow-btn); padding:12px 16px; flex-wrap:wrap; transition:transform .12s, box-shadow .12s; }
+.bru-cat-row:hover{ transform:translate(-2px,-2px); box-shadow:6px 6px 0 #000; }
+.bru-cat-name{ font-weight:800; font-size:14px; flex:1; min-width:120px; }
+.bru-cat-actions{ display:flex; gap:8px; margin-inline-start:auto; }
+
+/* ---- محصولات: کارت «برچسب قیمت آویزون» -------------------------------- */
+.bru-product-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:18px; }
+.bru-product-card{ border:3px solid #000; background:#fff; box-shadow:var(--shadow-card); display:flex;
+  flex-direction:column; transition:transform .12s, box-shadow .12s; }
+.bru-product-card:hover{ transform:translate(-2px,-2px); box-shadow:7px 7px 0 #000; }
+.bru-product-tag{ background:#000; color:var(--primary); padding:12px 16px; display:flex; align-items:center; gap:10px; }
+.bru-product-tag-hole{ width:11px; height:11px; border-radius:50%; background:var(--bg); border:2px solid var(--primary); flex-shrink:0; }
+.bru-product-price{ font-size:17px; font-weight:900; }
+.bru-product-body{ padding:14px 16px; display:flex; flex-direction:column; gap:7px; }
+.bru-product-name{ font-size:14.5px; font-weight:800; }
+.bru-product-cat{ font-size:11.5px; color:var(--text-muted); font-weight:700; text-transform:uppercase; }
+
+/* ---- پشتیبانی: ردیف‌های اینباکس ---------------------------------------- */
+.bru-inbox-list{ display:flex; flex-direction:column; gap:10px; }
+.bru-inbox-row{ display:flex; align-items:center; gap:12px; border:3px solid #000; background:#fff;
+  box-shadow:var(--shadow-btn); padding:10px 14px; transition:transform .12s, box-shadow .12s; }
+.bru-inbox-row:hover{ transform:translate(-2px,-2px); box-shadow:6px 6px 0 #000; }
+.bru-inbox-avatar{ width:38px; height:38px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  font-size:16px; font-weight:900; background:var(--primary); border:2.5px solid #000; }
+.bru-inbox-main{ flex:1; min-width:0; }
+.bru-inbox-name{ font-size:13px; font-weight:800; }
+.bru-inbox-msg{ font-size:12px; color:var(--text-muted); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bru-inbox-meta{ display:flex; flex-direction:column; align-items:flex-end; gap:4px; font-size:10.5px; flex-shrink:0; }
+.bru-inbox-badge{ display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:20px; padding:0 5px;
+  border-radius:50%; background:var(--rose); color:#fff; font-size:11px; font-weight:900; border:2px solid #000; }
+
+/* ---- نمایندگی‌ها: کارت اعتباری ------------------------------------------ */
+.bru-reseller-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px; }
+.bru-reseller-card{ border:2.5px solid #000; background:#fff; box-shadow:var(--shadow-btn); padding:14px;
+  display:flex; flex-direction:column; gap:8px; transition:transform .12s, box-shadow .12s; }
+.bru-reseller-card:hover{ transform:translate(-2px,-2px); box-shadow:6px 6px 0 #000; }
+.bru-reseller-top{ display:flex; align-items:center; justify-content:space-between; }
+.bru-reseller-id{ font-size:11px; font-weight:800; color:var(--text-muted); }
+.bru-reseller-name{ font-size:13.5px; font-weight:800; }
+.bru-reseller-credit{ background:#000; color:var(--primary); padding:8px 10px; display:flex; align-items:baseline; gap:6px; }
+.bru-reseller-credit .mono{ font-size:19px; font-weight:900; }
+.bru-reseller-credit small{ font-size:10.5px; font-weight:700; opacity:.8; }
+
 /* ===================================================================
    تم Glassmorphism — پس‌زمینه‌ی تیره با بلوب‌های نوری محو، کارت‌های
    شیشه‌ای بلوردار، اکسنت‌های نئون ملایم، دونات/دایال به‌جای بار/رادار.
