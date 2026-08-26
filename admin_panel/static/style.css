@@ -418,6 +418,15 @@ tbody tr:hover{ background:var(--surface-hi); }
 .chip-row{ display:flex; flex-wrap:wrap; gap:8px; }
 .chip{ background:var(--surface-2); border:1px solid var(--border-soft); border-radius:20px; padding:6px 13px; font-size:12px; }
 
+/* ---------------------------------------------- dashboard range bar ---- */
+.dash-range-row{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+.dash-range-chips{ display:flex; flex-wrap:wrap; gap:8px; }
+.dash-range-chip{ background:var(--surface-2); border:1px solid var(--border); color:var(--text-muted); }
+.dash-range-chip.active{ background:var(--primary); color:var(--primary-ink); border-color:transparent; }
+.dash-range-custom{ display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap; }
+.dash-range-custom input[type="date"]{ padding:7px 10px; font-size:12.5px; max-width:150px; }
+.dash-range-custom span{ font-size:12px; color:var(--text-muted); }
+
 .loading{ text-align:center; padding:48px; color:var(--text-muted); }
 
 /* transition ملایم هنگام تعویض تیره/روشن */

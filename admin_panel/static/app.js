@@ -260,6 +260,14 @@ const ICONS = {
 const svg = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
 const fmt = n => (n === null || n === undefined) ? '—' : Number(n).toLocaleString('fa-IR');
 const fmtDate = iso => iso ? new Date(iso.replace(' ', 'T') + (iso.includes('Z') ? '' : 'Z')).toLocaleString('fa-IR') : '—';
+// برای تاریخ‌های خالص بدون ساعت (مثل start_date/end_date بازه‌ی آمار که به
+// شکل 'YYYY-MM-DD' میلادی از سرور میاد) — به تاریخ شمسی تبدیل می‌کنه.
+const fmtDateOnly = iso => {
+  if (!iso) return '—';
+  try {
+    return new Date(iso + 'T00:00:00Z').toLocaleDateString('fa-IR', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' });
+  } catch (e) { return iso; }
+};
 const esc = s => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ==================================================== micro-animation === */
@@ -934,8 +942,80 @@ function resRingHtml(pct, colorVar, title, sub) {
     </div>`;
 }
 
+// بازه‌ی زمانی داشبورد — به انتخاب ادمین، بین صفحات نگه داشته می‌شه
+// (localStorage). خالی/null یعنی پیش‌فرض سرور (۱۴ روز اخیر).
+const DASH_RANGE_PRESETS = [
+  { key: '7', label: '۷ روز', days: 7 },
+  { key: '14', label: '۱۴ روز', days: 14 },
+  { key: '30', label: '۳۰ روز', days: 30 },
+  { key: '90', label: '۹۰ روز', days: 90 },
+];
+function getDashRange() {
+  try { return JSON.parse(localStorage.getItem('sv-dash-range')) || null; } catch (e) { return null; }
+}
+function setDashRange(range) {
+  try {
+    if (range) localStorage.setItem('sv-dash-range', JSON.stringify(range));
+    else localStorage.removeItem('sv-dash-range');
+  } catch (e) {}
+}
+function isoDaysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function dashRangeBarHtml(s) {
+  const saved = getDashRange();
+  const activePreset = saved && saved.preset ? saved.preset : '14';
+  const chips = DASH_RANGE_PRESETS.map(p => `
+    <button class="btn btn-sm dash-range-chip ${p.key === activePreset ? 'active' : ''}" data-preset="${p.key}">${p.label}</button>
+  `).join('');
+  const customStart = saved && !saved.preset ? saved.start : '';
+  const customEnd = saved && !saved.preset ? saved.end : '';
+  return `
+    <div class="card dash-range-bar" style="margin-bottom:16px">
+      <div class="dash-range-row">
+        <div class="dash-range-chips">${chips}
+          <button class="btn btn-sm dash-range-chip ${saved && !saved.preset ? 'active' : ''}" id="dash-range-custom-toggle">بازه‌ی دلخواه</button>
+        </div>
+        <span class="card-sub">${fmtDateOnly(s.start_date)} تا ${fmtDateOnly(s.end_date)}</span>
+      </div>
+      <div class="dash-range-custom" id="dash-range-custom" ${saved && !saved.preset ? '' : 'hidden'}>
+        <input type="date" class="input" id="dash-range-start" value="${customStart}">
+        <span>تا</span>
+        <input type="date" class="input" id="dash-range-end" value="${customEnd}">
+        <button class="btn btn-primary btn-sm" id="dash-range-apply">اعمال</button>
+      </div>
+    </div>`;
+}
+function wireDashRangeBar() {
+  const root = content();
+  if (!root) return;
+  $$('.dash-range-chip[data-preset]', root).forEach(btn => btn.addEventListener('click', () => {
+    const days = Number(btn.dataset.preset);
+    setDashRange({ preset: btn.dataset.preset, start: isoDaysAgo(days - 1), end: isoDaysAgo(0) });
+    renderDashboard();
+  }));
+  const customToggle = $('#dash-range-custom-toggle', root);
+  const customBox = $('#dash-range-custom', root);
+  if (customToggle && customBox) {
+    customToggle.addEventListener('click', () => { customBox.hidden = !customBox.hidden; });
+  }
+  const applyBtn = $('#dash-range-apply', root);
+  if (applyBtn) applyBtn.addEventListener('click', () => {
+    const start = $('#dash-range-start', root).value;
+    const end = $('#dash-range-end', root).value;
+    if (!start || !end) { toast('هر دو تاریخ رو انتخاب کن.'); return; }
+    if (start > end) { toast('تاریخ شروع نباید بعد از تاریخ پایان باشه.'); return; }
+    setDashRange({ preset: null, start, end });
+    renderDashboard();
+  });
+}
 async function renderDashboard() {
-  const s = await apiGet('/dashboard');
+  const range = getDashRange();
+  const q = range ? `?start=${range.start}&end=${range.end}` : '';
+  const s = await apiGet('/dashboard' + q);
   let sys = null;
   try { sys = await apiGet('/system/stats'); } catch (e) { /* psutil ممکن است نصب نباشد */ }
   const theme = loadTheme().theme;
@@ -948,6 +1028,9 @@ async function renderDashboard() {
   else if (theme === 'obsidian') await renderDashboardObsidian(s, sys);
   else if (theme === 'warp') await renderDashboardWarp(s, sys);
   else await renderDashboardFlat(s, sys);
+  const root = content();
+  if (root) root.insertAdjacentHTML('afterbegin', dashRangeBarHtml(s));
+  wireDashRangeBar();
   appendExtraStatsPanel(s);
 }
 
@@ -974,7 +1057,7 @@ function appendExtraStatsPanel(s) {
   el.id = 'extra-stats-panel';
   el.style.marginTop = '16px';
   el.innerHTML = `
-    <div class="card-head"><h3>موجودی و پشتیبانی</h3><span class="card-sub">${s.start_date} تا ${s.end_date}</span></div>
+    <div class="card-head"><h3>موجودی و پشتیبانی</h3><span class="card-sub">${fmtDateOnly(s.start_date)} تا ${fmtDateOnly(s.end_date)}</span></div>
     <div class="grid grid-2" style="gap:16px;align-items:start">
       <div>
         <div class="card-sub" style="margin-bottom:8px">موجودی انبار محصولات فعال</div>
@@ -1061,7 +1144,7 @@ function renderDashboardGlass(s, sys) {
     <div class="hero">
       <div class="hero-text">
         <h2>${greetingByHour()}، ${esc(ME.username)} ✨</h2>
-        <p>وضعیت فروشگاه در ${s.start_date} تا ${s.end_date}</p>
+        <p>وضعیت فروشگاه در ${fmtDateOnly(s.start_date)} تا ${fmtDateOnly(s.end_date)}</p>
       </div>
       <div class="hero-net"><canvas id="hero-net-canvas"></canvas></div>
     </div>
@@ -1088,7 +1171,7 @@ function renderDashboardGlass(s, sys) {
     </div>
 
     <div class="card" style="margin-top:16px">
-      <div class="card-head"><h3>روند فروش روزانه</h3><span class="card-sub">${s.start_date} تا ${s.end_date}</span></div>
+      <div class="card-head"><h3>روند فروش روزانه</h3><span class="card-sub">${fmtDateOnly(s.start_date)} تا ${fmtDateOnly(s.end_date)}</span></div>
       <div class="glass-eq">${eqBars}</div>
     </div>
 
@@ -1209,7 +1292,7 @@ function renderDashboardCyberpunk(s, sys) {
   setContent(`
     <div class="cp-hero">
       <div class="cp-hero-text">
-        <span class="cp-tag">// SYSTEM_ONLINE :: ${s.start_date} → ${s.end_date}</span>
+        <span class="cp-tag">// SYSTEM_ONLINE :: ${fmtDateOnly(s.start_date)} → ${fmtDateOnly(s.end_date)}</span>
         <h2 class="cp-glitch" data-text="${greetingByHour()}، ${esc(ME.username)}">${greetingByHour()}، ${esc(ME.username)}</h2>
         <p>وضعیت شبکه فروش تحت پایش قرار دارد</p>
       </div>
@@ -1371,7 +1454,7 @@ function renderDashboardBrutalist(s, sys) {
   setContent(`
     <div class="bru-hero">
       <h2>${greetingByHour()}، ${esc(ME.username).toUpperCase()}</h2>
-      <p>${s.start_date} تا ${s.end_date}</p>
+      <p>${fmtDateOnly(s.start_date)} تا ${fmtDateOnly(s.end_date)}</p>
     </div>
 
     ${resHtml}
@@ -1621,7 +1704,7 @@ async function renderDashboardFlat(s, sys) {
     <div class="hero">
       <div class="hero-text">
         <h2>${greetingByHour()}، ${esc(ME.username)} 👋</h2>
-        <p>وضعیت فروشگاه در ${s.start_date} تا ${s.end_date} — همه چیز آنلاین و در حال گزارش‌دهی زنده است.</p>
+        <p>وضعیت فروشگاه در ${fmtDateOnly(s.start_date)} تا ${fmtDateOnly(s.end_date)} — همه چیز آنلاین و در حال گزارش‌دهی زنده است.</p>
       </div>
       <div class="hero-net"><canvas id="hero-net-canvas"></canvas></div>
     </div>
@@ -1661,7 +1744,7 @@ async function renderDashboardFlat(s, sys) {
 
     <div class="bento" style="margin-top:18px">
       <div class="card span-4 rows-2">
-        <div class="card-head"><h3>روند فروش روزانه</h3><span class="card-sub">${s.start_date} تا ${s.end_date}</span></div>
+        <div class="card-head"><h3>روند فروش روزانه</h3><span class="card-sub">${fmtDateOnly(s.start_date)} تا ${fmtDateOnly(s.end_date)}</span></div>
         <div class="spark" style="flex:1">${spark}</div>
       </div>
 
@@ -1726,7 +1809,7 @@ function renderDashboardClay(s, sys){
   const prodRows = s.top_products.map((p,i)=>`<div class="clay-row"><span class="clay-row-num" style="background:${clayColors[i%clayColors.length]}">${i+1}</span><span class="clay-row-name">${esc(p.name)}</span><span class="mono" style="font-size:12px;color:var(--text-muted)">${fmt(p.orders)} فروش</span></div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
   const resHtml = sys ? `<div class="clay-res-grid" style="margin-bottom:16px"><div class="clay-res-card" style="background:#FFF7ED"><span class="clay-stat-label">CPU</span><b class="mono" style="font-size:20px">${sys.cpu.percent}٪</b><span class="clay-res-track"><span class="clay-res-fill" data-w="${sys.cpu.percent}" style="background:#F97316"></span></span><span style="font-size:11px;color:var(--text-muted)">${sys.cpu.cores} هسته</span></div><div class="clay-res-card" style="background:#FFFBEB"><span class="clay-stat-label">RAM</span><b class="mono" style="font-size:20px">${sys.ram.percent}٪</b><span class="clay-res-track"><span class="clay-res-fill" data-w="${sys.ram.percent}" style="background:#F59E0B"></span></span><span style="font-size:11px;color:var(--text-muted)">${sys.ram.used_gb}/${sys.ram.total_gb} گیگ</span></div><div class="clay-res-card" style="background:#ECFDF5"><span class="clay-stat-label">DISK</span><b class="mono" style="font-size:20px">${sys.disk.percent}٪</b><span class="clay-res-track"><span class="clay-res-fill" data-w="${sys.disk.percent}" style="background:#10B981"></span></span><span style="font-size:11px;color:var(--text-muted)">${sys.disk.used_gb}/${sys.disk.total_gb} گیگ</span></div></div>` : '';
   setContent(`
-    <div class="clay-hero"><div><h2>${greetingByHour()}، ${esc(ME.username)} ☀️</h2><p>${s.start_date} تا ${s.end_date} — روزی گرم و پر از فروش!</p></div><div class="clay-hero-orb"></div></div>
+    <div class="clay-hero"><div><h2>${greetingByHour()}، ${esc(ME.username)} ☀️</h2><p>${fmtDateOnly(s.start_date)} تا ${fmtDateOnly(s.end_date)} — روزی گرم و پر از فروش!</p></div><div class="clay-hero-orb"></div></div>
     ${resHtml}
     <div class="grid grid-4">
       <div class="card clay-stat"><span class="clay-stat-label">درآمد ۱۴ روز</span><span class="clay-stat-val mono" data-count="${s.revenue}">۰</span><span class="clay-pill ${deltaUp?'up':'down'}">${deltaUp?'▲':'▼'} ${Math.abs(s.revenue_change_pct??0)}٪</span></div>
@@ -1760,7 +1843,7 @@ function renderDashboardPaper(s, sys){
   const prodRows = s.top_products.map(p=>`<div class="paper-row"><span class="paper-row-name">${esc(p.name)}</span><span class="mono" style="font-size:11.5px;color:var(--text-muted)">${fmt(p.orders)} فروش</span></div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
   const resHtml = sys ? `<div class="paper-res-grid" style="margin-bottom:16px"><div class="paper-res-card"><span class="paper-res-label">CPU</span><span class="paper-res-val mono">${sys.cpu.percent}٪</span><span style="font-size:11px;color:var(--text-muted)">${sys.cpu.cores} هسته</span></div><div class="paper-res-card"><span class="paper-res-label">RAM</span><span class="paper-res-val mono">${sys.ram.percent}٪</span><span style="font-size:11px;color:var(--text-muted)">${sys.ram.used_gb}/${sys.ram.total_gb} گیگ</span></div><div class="paper-res-card"><span class="paper-res-label">DISK</span><span class="paper-res-val mono">${sys.disk.percent}٪</span><span style="font-size:11px;color:var(--text-muted)">${sys.disk.used_gb}/${sys.disk.total_gb} گیگ</span></div></div>` : '';
   setContent(`
-    <div class="paper-hero"><h2>${greetingByHour()}، ${esc(ME.username)}</h2><p>گزارش فروش ${s.start_date} تا ${s.end_date}</p><div class="paper-hero-meta"><span>${fmt(s.revenue)} تومان درآمد</span><span>·</span><span>${fmt(s.approved)} سفارش</span><span>·</span><span>${fmt(s.total_users)} کاربر</span></div><div class="paper-hero-rule"></div></div>
+    <div class="paper-hero"><h2>${greetingByHour()}، ${esc(ME.username)}</h2><p>گزارش فروش ${fmtDateOnly(s.start_date)} تا ${fmtDateOnly(s.end_date)}</p><div class="paper-hero-meta"><span>${fmt(s.revenue)} تومان درآمد</span><span>·</span><span>${fmt(s.approved)} سفارش</span><span>·</span><span>${fmt(s.total_users)} کاربر</span></div><div class="paper-hero-rule"></div></div>
     ${resHtml}
     <div class="paper-stats">
       <div class="paper-stat"><span class="paper-stat-label">درآمد ۱۴ روز</span><span class="paper-stat-val mono" data-count="${s.revenue}">۰</span><span class="paper-delta ${deltaUp?'up':'down'}">${deltaUp?'▲':'▼'} ${Math.abs(s.revenue_change_pct??0)}٪ نسبت به قبل</span></div>
@@ -1768,7 +1851,7 @@ function renderDashboardPaper(s, sys){
       <div class="paper-stat"><span class="paper-stat-label">کاربران کل</span><span class="paper-stat-val mono" data-count="${s.total_users}">۰</span><span class="paper-stat-sub">${fmt(s.new_users)} جدید در این بازه</span></div>
       <div class="paper-stat"><span class="paper-stat-label">کانفیگ فعال</span><span class="paper-stat-val mono" data-count="${s.active_configs}">۰</span><span class="paper-stat-sub">${fmt(s.open_tickets)} تیکت باز</span></div>
     </div>
-    <div class="paper-panel" style="margin-top:16px"><div class="paper-panel-head">روند فروش روزانه — ${s.start_date} تا ${s.end_date}</div><div class="paper-spark">${spark}</div></div>
+    <div class="paper-panel" style="margin-top:16px"><div class="paper-panel-head">روند فروش روزانه — ${fmtDateOnly(s.start_date)} تا ${fmtDateOnly(s.end_date)}</div><div class="paper-spark">${spark}</div></div>
     <div class="grid grid-2" style="margin-top:16px">
       <div class="paper-panel"><div class="paper-panel-head">تفکیک درآمد</div>${catRows}</div>
       <div class="paper-panel"><div class="paper-panel-head">پرفروش‌ترین محصولات</div>${prodRows}</div>
@@ -1799,7 +1882,7 @@ function renderDashboardObsidian(s, sys){
   const catRows = s.category_breakdown.map(c=>`<div class="obs-meter"><span class="obs-meter-label">${esc(c.name)}</span><span class="obs-meter-track"><span class="obs-meter-fill" data-w="${(c.revenue/Math.max(...s.category_breakdown.map(x=>x.revenue),1))*100}" style="background:var(--text-muted)"></span></span><b class="mono" style="font-size:11px">${fmt(c.revenue)}</b></div>`).join('') || '<span class="card-sub">داده‌ای نیست</span>';
   const resHtml = sys ? `<div class="obs-res-grid" style="margin-bottom:14px"><div class="obs-res-card"><span class="obs-res-label">CPU</span><span class="obs-res-val mono">${sys.cpu.percent}٪</span><span class="obs-meter-track"><span class="obs-meter-fill" data-w="${sys.cpu.percent}" style="background:var(--emerald)"></span></span><span class="mono" style="font-size:10.5px;color:var(--text-muted)">${sys.cpu.cores} cores</span></div><div class="obs-res-card"><span class="obs-res-label">RAM</span><span class="obs-res-val mono">${sys.ram.percent}٪</span><span class="obs-meter-track"><span class="obs-meter-fill" data-w="${sys.ram.percent}" style="background:var(--amber)"></span></span><span class="mono" style="font-size:10.5px;color:var(--text-muted)">${sys.ram.used_gb}/${sys.ram.total_gb} GB</span></div><div class="obs-res-card"><span class="obs-res-label">DISK</span><span class="obs-res-val mono">${sys.disk.percent}٪</span><span class="obs-meter-track"><span class="obs-meter-fill" data-w="${sys.disk.percent}" style="background:var(--text-muted)"></span></span><span class="mono" style="font-size:10.5px;color:var(--text-muted)">${sys.disk.used_gb}/${sys.disk.total_gb} GB</span></div></div>` : '';
   setContent(`
-    <div class="obs-hero"><div><span class="obs-hero-tag">● SYSTEM ONLINE — ${s.start_date} → ${s.end_date}</span><h2>${greetingByHour()}، ${esc(ME.username)}</h2><p>${fmt(s.revenue)} تومان · ${fmt(s.approved)} سفارش · ${fmt(s.total_users)} کاربر</p></div></div>
+    <div class="obs-hero"><div><span class="obs-hero-tag">● SYSTEM ONLINE — ${fmtDateOnly(s.start_date)} → ${fmtDateOnly(s.end_date)}</span><h2>${greetingByHour()}، ${esc(ME.username)}</h2><p>${fmt(s.revenue)} تومان · ${fmt(s.approved)} سفارش · ${fmt(s.total_users)} کاربر</p></div></div>
     ${resHtml}
     <div class="obs-grid4">
       <div class="obs-stat accent"><span class="obs-stat-label">Revenue / 14d</span><span class="obs-stat-val mono" data-count="${s.revenue}">۰</span><span class="obs-stat-sub" style="color:${deltaUp?'var(--emerald)':'var(--rose)'}">${deltaUp?'▲':'▼'} ${Math.abs(s.revenue_change_pct??0)}%</span></div>
@@ -1870,7 +1953,7 @@ function renderDashboardWarp(s, sys) {
       <div class="warp-stack-ghost g2"></div>
       <div class="warp-stack-ghost g1"></div>
       <div class="warp-hero-text">
-        <span class="warp-hero-tag">◆ ${s.start_date} — ${s.end_date}</span>
+        <span class="warp-hero-tag">◆ ${fmtDateOnly(s.start_date)} — ${fmtDateOnly(s.end_date)}</span>
         <h2>${greetingByHour()}، ${esc(ME.username)}</h2>
         <p>نمای زنده‌ی فروشگاه؛ هرچه پایین‌تر بری، عمق بیشتری از داده‌ها می‌بینی.</p>
       </div>
