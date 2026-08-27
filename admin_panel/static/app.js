@@ -4150,8 +4150,13 @@ function onMenuOrderDragStart(e) {
   row.classList.add('dragging');
   menuOrderDragState = { startIdx, currentIdx: startIdx };
 
+  const onContextMenu = (ctxEvt) => ctxEvt.preventDefault();
+  document.body.classList.add('menu-order-dragging-lock');
+  document.addEventListener('contextmenu', onContextMenu);
+
   const onMove = (moveEvt) => {
     if (!menuOrderDragState) return;
+    moveEvt.preventDefault();
     const target = document.elementFromPoint(moveEvt.clientX, moveEvt.clientY);
     const overRow = target && target.closest('.menu-order-row');
     rows.forEach(r => r.classList.remove('drag-over'));
@@ -4163,6 +4168,8 @@ function onMenuOrderDragStart(e) {
   const onUp = () => {
     document.removeEventListener('pointermove', onMove);
     document.removeEventListener('pointerup', onUp);
+    document.removeEventListener('contextmenu', onContextMenu);
+    document.body.classList.remove('menu-order-dragging-lock');
     if (menuOrderDragState && menuOrderDragState.currentIdx !== menuOrderDragState.startIdx) {
       const { startIdx: s, currentIdx: c } = menuOrderDragState;
       const [moved] = menuOrderItems.splice(s, 1);
@@ -4171,7 +4178,7 @@ function onMenuOrderDragStart(e) {
     menuOrderDragState = null;
     renderMenuOrderList();
   };
-  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointermove', onMove, { passive: false });
   document.addEventListener('pointerup', onUp);
 }
 
