@@ -1,29 +1,29 @@
 #!/bin/bash
 # ============================================================================
+# Text management panel for the V2Ray config sales bot
 # پنل مدیریت متنی بات فروش کانفیگ V2Ray
 #
-# اجرای مستقیم (بدون نصب قبلی):
+# Run directly (no prior install):
 #   bash <(curl -fsSL https://raw.githubusercontent.com/USERNAME/v2ray-bot/main/manage.sh)
 #
-# اجرای بعد از نصب:
+# Run after install:
 #   bash ~/v2ray_bot/manage.sh
 # ============================================================================
 
 # ---------------------------------------------------------------------------
-# تنظیمات قابل شخصی‌سازی
+# Customizable settings / تنظیمات قابل شخصی‌سازی
 # ---------------------------------------------------------------------------
 REPO_URL="https://github.com/mehdirafatpanah/Shopvpn.git"
 INSTALL_DIR="$HOME/v2ray_bot"
 SERVICE_NAME="v2raybot"
 BRAND_NAME="SHOP VPN"
 
-# نسخه به‌صورت خودکار از روی گیت محاسبه می‌شود (شماره‌ی کامیت + هش کوتاه)
-# تا با هر آپدیت (پول جدید از گیت‌هاب)، نسخه‌ی نمایش داده‌شده هم خودکار عوض شود
-# و همیشه مشخص باشد که آخرین نسخه در حال اجراست یا نه.
-# نسخه از فایل VERSION خوانده می‌شود (عددی که فقط با تغییرات واقعی و قابل‌توجه
-# بالا می‌رود، نه با هر کامیت خام). هش کوتاه گیت هم برای شناسایی دقیق build
-# کنارش نمایش داده می‌شود. اگر فایل VERSION نبود، به همان روش قدیمی
-# (شماره‌ی کامیت) برمی‌گردد تا هیچ‌وقت بنر خالی نماند.
+# Version is computed automatically from git (commit count + short hash)
+# so that every update (git pull) shows the correct running version.
+# It's read from the VERSION file (bumped only for real, notable changes,
+# not for every raw commit). The short git hash is shown next to it for
+# exact build identification. If VERSION is missing, falls back to the
+# old commit-count method so the banner is never empty.
 get_version() {
     local base hash
     if [ -f "$INSTALL_DIR/VERSION" ]; then
@@ -40,13 +40,13 @@ get_version() {
     echo "$base"
 }
 
-# جلوگیری از گیر کردن apt پشت پنجره‌های تعاملی (مثل پرسش needrestart برای ری‌استارت سرویس‌ها)
+# Avoid apt getting stuck behind interactive prompts (e.g. needrestart)
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 export NEEDRESTART_SUSPEND=1
 
 # ---------------------------------------------------------------------------
-# رنگ‌ها
+# Colors / رنگ‌ها
 # ---------------------------------------------------------------------------
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -59,15 +59,298 @@ DIM='\033[2m'
 RESET='\033[0m'
 
 # ---------------------------------------------------------------------------
-# نوار عنوان / بنر
+# Language / زبان
+# Default language is English. It can be switched to Persian from the menu
+# ([L]) and the choice is remembered for next time.
+# ---------------------------------------------------------------------------
+LANG_FILE="$HOME/.shopvpn_manage_lang"
+APP_LANG="en"
+if [ -f "$LANG_FILE" ]; then
+    _saved_lang=$(tr -d '[:space:]' < "$LANG_FILE" 2>/dev/null)
+    [ "$_saved_lang" = "fa" ] && APP_LANG="fa"
+fi
+
+toggle_lang() {
+    if [ "$APP_LANG" = "en" ]; then
+        APP_LANG="fa"
+    else
+        APP_LANG="en"
+    fi
+    echo "$APP_LANG" > "$LANG_FILE" 2>/dev/null
+}
+
+declare -A MSG_EN
+declare -A MSG_FA
+
+# Status / وضعیت
+MSG_EN[not_installed]="Not installed"
+MSG_FA[not_installed]="نصب نشده"
+MSG_EN[system_running]="Engine Ready ✅ (Bot is running)"
+MSG_FA[system_running]="آماده به کار ✅ (بات در حال اجراست)"
+MSG_EN[system_stopped]="Stopped ⛔️"
+MSG_FA[system_stopped]="متوقف ⛔️"
+MSG_EN[service_running]="Running ✅"
+MSG_FA[service_running]="در حال اجراست ✅"
+MSG_EN[service_stopped]="Stopped ⛔️"
+MSG_FA[service_stopped]="متوقف ⛔️"
+MSG_EN[pause_prompt]="Press Enter to return to the menu..."
+MSG_FA[pause_prompt]="برای بازگشت به منو، Enter را بزن..."
+
+# ensure_figlet
+MSG_EN[preparing_font]="🔤 Preparing display font (first time only, a few seconds)..."
+MSG_FA[preparing_font]="🔤 در حال آماده‌سازی فونت نمایش (فقط بار اول، چند ثانیه طول می‌کشد)..."
+MSG_EN[figlet_failed]="⚠️ figlet installation failed, showing a simple banner instead."
+MSG_FA[figlet_failed]="⚠️ نصب figlet انجام نشد، بنر ساده نمایش داده می‌شود."
+
+# install_bot
+MSG_EN[installing_prereqs]="📦 Checking and installing prerequisites (git, python3, pip, venv, figlet)..."
+MSG_FA[installing_prereqs]="📦 بررسی و نصب پیش‌نیازها (git, python3, pip, venv, figlet)..."
+MSG_EN[already_installed_pulling]="⚠️ Project is already installed. Fetching the latest version..."
+MSG_FA[already_installed_pulling]="⚠️ پروژه از قبل نصب شده است. در حال دریافت آخرین نسخه..."
+MSG_EN[cloning_project]="📥 Cloning the project from GitHub..."
+MSG_FA[cloning_project]="📥 دریافت پروژه از گیت‌هاب..."
+MSG_EN[preparing_python]="🐍 Preparing the Python environment..."
+MSG_FA[preparing_python]="🐍 آماده‌سازی محیط پایتون..."
+MSG_EN[enter_bot_info]="🔑 Enter the bot info:"
+MSG_FA[enter_bot_info]="🔑 اطلاعات بات را وارد کن:"
+MSG_EN[prompt_bot_token]="Bot token (from BotFather): "
+MSG_FA[prompt_bot_token]="توکن بات (از BotFather): "
+MSG_EN[prompt_owner_id]="Admin numeric ID: "
+MSG_FA[prompt_owner_id]="آیدی عددی ادمین: "
+MSG_EN[env_created]="✅ .env file created."
+MSG_FA[env_created]="✅ فایل .env ساخته شد."
+MSG_EN[env_exists]="✅ .env file already exists, left unchanged."
+MSG_FA[env_exists]="✅ فایل .env از قبل موجود است، دست‌نخورده باقی می‌ماند."
+MSG_EN[creating_service]="⚙️ Creating the systemd service..."
+MSG_FA[creating_service]="⚙️ ساخت سرویس systemd..."
+MSG_EN[install_done]="✅ Installation complete, the bot is running."
+MSG_FA[install_done]="✅ نصب کامل شد و بات در حال اجراست."
+MSG_EN[install_failed]="⚠️ Bot did not start. To check the error: sudo journalctl -u %s -n 50 --no-pager"
+MSG_FA[install_failed]="⚠️ بات اجرا نشد. برای بررسی خطا: sudo journalctl -u %s -n 50 --no-pager"
+
+# update_bot / update_miniapp
+MSG_EN[bot_not_installed]="⛔️ Bot not installed yet. Run option 1 (install) first."
+MSG_FA[bot_not_installed]="⛔️ بات هنوز نصب نشده. اول گزینه ۱ (نصب) را بزن."
+MSG_EN[fetching_latest]="🔄 Fetching the latest changes from GitHub..."
+MSG_FA[fetching_latest]="🔄 دریافت آخرین تغییرات از گیت‌هاب..."
+MSG_EN[updating_packages]="🐍 Updating packages..."
+MSG_FA[updating_packages]="🐍 آپدیت پکیج‌ها..."
+MSG_EN[restarting_bot_service]="♻️ Restarting the bot service..."
+MSG_FA[restarting_bot_service]="♻️ ری‌استارت سرویس بات..."
+MSG_EN[update_done]="✅ Bot updated."
+MSG_FA[update_done]="✅ آپدیت بات انجام شد."
+MSG_EN[miniapp_not_installed]="⛔️ Mini App not installed yet. Run option 10 (setup Mini App) first."
+MSG_FA[miniapp_not_installed]="⛔️ مینی‌اپ هنوز نصب نشده. اول گزینه ۱۰ (نصب/تنظیم مینی‌اپ) را بزن."
+MSG_EN[restarting_miniapp_service]="♻️ Restarting the Mini App service..."
+MSG_FA[restarting_miniapp_service]="♻️ ری‌استارت سرویس مینی‌اپ..."
+MSG_EN[miniapp_update_done]="✅ Mini App updated."
+MSG_FA[miniapp_update_done]="✅ آپدیت مینی‌اپ انجام شد."
+
+# uninstall_bot
+MSG_EN[uninstall_warning]="⚠️ This will completely remove the bot service."
+MSG_FA[uninstall_warning]="⚠️ این کار سرویس بات را کاملاً حذف می‌کند."
+MSG_EN[confirm_prompt]="Are you sure? (type yes to confirm): "
+MSG_FA[confirm_prompt]="آیا مطمئن هستی؟ (yes برای تایید): "
+MSG_EN[cancelled]="Cancelled."
+MSG_FA[cancelled]="لغو شد."
+MSG_EN[service_removed]="✅ Service removed."
+MSG_FA[service_removed]="✅ سرویس حذف شد."
+MSG_EN[confirm_delete_files]="Also delete the project files (including the customer database)? (type yes to confirm): "
+MSG_FA[confirm_delete_files]="آیا فایل‌های پروژه (شامل دیتابیس مشتری‌ها) هم پاک شود؟ (yes برای تایید): "
+MSG_EN[files_removed]="✅ Project files removed too."
+MSG_FA[files_removed]="✅ فایل‌های پروژه هم حذف شدند."
+MSG_EN[files_kept]="Project files kept at %s."
+MSG_FA[files_kept]="فایل‌های پروژه در %s باقی ماندند."
+
+# view_logs / restart / stop
+MSG_EN[logs_exit_hint]="To exit live log view: Ctrl+C"
+MSG_FA[logs_exit_hint]="برای خروج از حالت لاگ زنده: Ctrl+C"
+MSG_EN[bot_restarted]="✅ Bot restarted."
+MSG_FA[bot_restarted]="✅ بات ری‌استارت شد."
+MSG_EN[bot_stopped]="⛔️ Bot stopped."
+MSG_FA[bot_stopped]="⛔️ بات متوقف شد."
+
+# show_stats
+MSG_EN[no_database]="No database found."
+MSG_FA[no_database]="دیتابیسی پیدا نشد."
+
+# edit_env
+MSG_EN[prompt_new_token]="New bot token (press Enter to keep current): "
+MSG_FA[prompt_new_token]="توکن جدید بات (اگر تغییری نیست Enter بزن): "
+MSG_EN[prompt_new_owner]="New admin numeric ID (press Enter to keep current): "
+MSG_FA[prompt_new_owner]="آیدی عددی جدید ادمین (اگر تغییری نیست Enter بزن): "
+MSG_EN[saved_restarting]="✅ Saved. Restarting..."
+MSG_FA[saved_restarting]="✅ ذخیره شد. در حال ری‌استارت..."
+
+# setup_miniapp / setup_admin_panel (shared)
+MSG_EN[miniapp_dir_missing]="⛔️ miniapp folder not found. Update the project code first (git pull/update)."
+MSG_FA[miniapp_dir_missing]="⛔️ پوشه miniapp پیدا نشد. اول باید کد مینی‌اپ را داخل پروژه بیاوری (git pull/آپدیت)."
+MSG_EN[panel_dir_missing]="⛔️ admin_panel folder not found. Update the project code first (option 2)."
+MSG_FA[panel_dir_missing]="⛔️ پوشه admin_panel پیدا نشد. اول باید کد پروژه را آپدیت کنی (گزینه ۲)."
+MSG_EN[prompt_domain_miniapp]="Enter the domain pointing to this server's IP (e.g. shop.example.com): "
+MSG_FA[prompt_domain_miniapp]="دامنه‌ای که به IP همین سرور اشاره می‌کند را وارد کن (مثلاً shop.example.com): "
+MSG_EN[prompt_domain_panel]="Enter the domain pointing to this server's IP (e.g. panel.example.com): "
+MSG_FA[prompt_domain_panel]="دامنه‌ای که به IP همین سرور اشاره می‌کند را وارد کن (مثلاً panel.example.com): "
+MSG_EN[domain_empty]="Domain is empty, cancelled."
+MSG_FA[domain_empty]="دامنه خالی است، لغو شد."
+MSG_EN[checking_dns]="🔎 Checking domain DNS..."
+MSG_FA[checking_dns]="🔎 بررسی DNS دامنه..."
+MSG_EN[dns_mismatch_warn]="⚠️ Warning: the domain does not point to this server's IP (%s) (currently %s)."
+MSG_FA[dns_mismatch_warn]="⚠️ هشدار: دامنه به IP این سرور (%s) اشاره نمی‌کند (الان %s است)."
+MSG_EN[continue_prompt]="Continue anyway? (type yes to continue): "
+MSG_FA[continue_prompt]="همچنان ادامه بدهم؟ (yes برای ادامه): "
+MSG_EN[installing_nginx]="📦 Installing nginx and certbot..."
+MSG_FA[installing_nginx]="📦 نصب nginx و certbot..."
+MSG_EN[installing_miniapp_pkgs]="🐍 Installing Mini App packages (fastapi, uvicorn)..."
+MSG_FA[installing_miniapp_pkgs]="🐍 نصب پکیج‌های مینی‌اپ (fastapi, uvicorn)..."
+MSG_EN[installing_panel_pkgs]="🐍 Installing admin panel packages (fastapi, uvicorn)..."
+MSG_FA[installing_panel_pkgs]="🐍 نصب پکیج‌های پنل (fastapi, uvicorn)..."
+MSG_EN[creating_miniapp_service]="⚙️ Creating the systemd service for the Mini App backend..."
+MSG_FA[creating_miniapp_service]="⚙️ ساخت سرویس systemd برای بک‌اند مینی‌اپ..."
+MSG_EN[creating_panel_service]="⚙️ Creating the systemd service for the admin panel..."
+MSG_FA[creating_panel_service]="⚙️ ساخت سرویس systemd برای پنل مدیریت وب..."
+MSG_EN[configuring_nginx]="🌐 Configuring nginx for %s..."
+MSG_FA[configuring_nginx]="🌐 تنظیم nginx برای %s..."
+MSG_EN[nginx_error]="⛔️ nginx config has an error. Details: %s"
+MSG_FA[nginx_error]="⛔️ کانفیگ nginx خطا دارد. جزئیات: %s"
+MSG_EN[getting_ssl]="🔐 Obtaining a free SSL certificate (Let's Encrypt)..."
+MSG_FA[getting_ssl]="🔐 دریافت گواهی SSL رایگان (Let's Encrypt)..."
+MSG_EN[ssl_failed]="⛔️ Getting the SSL certificate failed. Make sure the domain correctly points to this server and ports 80/443 are open."
+MSG_FA[ssl_failed]="⛔️ دریافت SSL ناموفق بود. مطمئن شو دامنه درست به این سرور اشاره می‌کند و پورت 80/443 باز است."
+MSG_EN[saving_miniapp_url]="📝 Saving the Mini App URL in .env..."
+MSG_FA[saving_miniapp_url]="📝 ثبت آدرس مینی‌اپ در .env..."
+MSG_EN[miniapp_ready]="✅ Mini App is ready: %s"
+MSG_FA[miniapp_ready]="✅ مینی‌اپ آماده است: %s"
+MSG_EN[miniapp_button_hint]="The «✨ Store Mini App» button will now appear in the bot menu."
+MSG_FA[miniapp_button_hint]="دکمه «✨ مینی‌اپ فروشگاه» از الان در منوی بات دیده می‌شود."
+MSG_EN[panel_ready]="✅ Admin panel is ready: %s"
+MSG_FA[panel_ready]="✅ پنل مدیریت آماده است: %s"
+MSG_EN[panel_login_hint]="Log in with the username/password you created."
+MSG_FA[panel_login_hint]="با یوزرنیم/پسوردی که ساختی وارد شو."
+MSG_EN[restarting_bot_for_panel_url]="🔁 Restarting the main bot so it picks up the panel address (ADMIN_PANEL_URL)..."
+MSG_FA[restarting_bot_for_panel_url]="🔁 ری‌استارت بات اصلی تا آدرس پنل (ADMIN_PANEL_URL) را بشناسد..."
+MSG_EN[enter_owner_account]="🔑 Create the panel owner account:"
+MSG_FA[enter_owner_account]="🔑 حساب مالک (owner) پنل را بساز:"
+MSG_EN[prompt_username]="Username: "
+MSG_FA[prompt_username]="یوزرنیم: "
+MSG_EN[prompt_password]="Password (min 8 characters): "
+MSG_FA[prompt_password]="پسورد (حداقل ۸ کاراکتر): "
+
+# remove_miniapp
+MSG_EN[remove_miniapp_warn]="⚠️ This will remove the Mini App service and its nginx config (the SSL certificate is kept)."
+MSG_FA[remove_miniapp_warn]="⚠️ این کار سرویس و کانفیگ nginx مینی‌اپ را حذف می‌کند (گواهی SSL نگه داشته می‌شود)."
+MSG_EN[prompt_domain_used_miniapp]="What domain did you use for the Mini App? (to remove its nginx config): "
+MSG_FA[prompt_domain_used_miniapp]="دامنه‌ای که برای مینی‌اپ استفاده کرده بودی چه بود؟ (برای حذف کانفیگ nginx): "
+MSG_EN[miniapp_removed]="✅ Mini App removed."
+MSG_FA[miniapp_removed]="✅ مینی‌اپ حذف شد."
+
+# update_admin_panel / remove_admin_panel
+MSG_EN[panel_not_installed_yet]="⛔️ Admin panel not installed yet. Run option 13 (setup admin panel) first."
+MSG_FA[panel_not_installed_yet]="⛔️ پنل مدیریت هنوز نصب نشده. اول گزینه ۱۳ (نصب/تنظیم پنل مدیریت) را بزن."
+MSG_EN[restarting_panel_service]="♻️ Restarting the admin panel service..."
+MSG_FA[restarting_panel_service]="♻️ ری‌استارت سرویس پنل مدیریت..."
+MSG_EN[panel_update_done]="✅ Admin panel updated."
+MSG_FA[panel_update_done]="✅ آپدیت پنل مدیریت انجام شد."
+MSG_EN[remove_panel_warn]="⚠️ This will remove the admin panel service and its nginx config (SSL certificate is kept; panel accounts in the database are untouched)."
+MSG_FA[remove_panel_warn]="⚠️ این کار سرویس و کانفیگ nginx پنل مدیریت را حذف می‌کند (گواهی SSL نگه داشته می‌شود؛ حساب‌های پنل در دیتابیس دست‌نخورده می‌مانند)."
+MSG_EN[prompt_domain_used_panel]="What domain did you use for the admin panel? (to remove its nginx config): "
+MSG_FA[prompt_domain_used_panel]="دامنه‌ای که برای پنل مدیریت استفاده کرده بودی چه بود؟ (برای حذف کانفیگ nginx): "
+MSG_EN[panel_removed]="✅ Admin panel removed."
+MSG_FA[panel_removed]="✅ پنل مدیریت حذف شد."
+
+# setup_vapid_keys
+MSG_EN[admin_panel_folder_missing]="⛔️ admin_panel folder not found. Update the project code first (option 2)."
+MSG_FA[admin_panel_folder_missing]="⛔️ پوشه admin_panel پیدا نشد. اول باید کد پروژه را آپدیت کنی (گزینه ۲)."
+MSG_EN[vapid_already_set_warn1]="⚠️ VAPID keys are already set."
+MSG_FA[vapid_already_set_warn1]="⚠️ کلیدهای VAPID از قبل تنظیم شده‌اند."
+MSG_EN[vapid_already_set_warn2]="If you regenerate them, every device that already enabled notifications will stop working and will need to re-enable them."
+MSG_FA[vapid_already_set_warn2]="اگر دوباره بسازی، تمام دستگاه‌هایی که قبلاً اعلان را فعال کرده‌اند از کار می‌افتند و باید دوباره فعال‌سازی کنند."
+MSG_EN[confirm_regenerate]="Generate and replace with new keys anyway? (type yes to confirm): "
+MSG_FA[confirm_regenerate]="همچنان کلید جدید بسازم و جایگزین کنم؟ (yes برای تایید): "
+MSG_EN[prompt_vapid_email]="Contact email for VAPID (optional, press Enter for admin@example.com): "
+MSG_FA[prompt_vapid_email]="ایمیل تماس برای VAPID (اختیاری، Enter بزن برای پیش‌فرض admin@example.com): "
+MSG_EN[generating_vapid]="🔑 Generating VAPID keys..."
+MSG_FA[generating_vapid]="🔑 در حال ساخت کلیدهای VAPID..."
+MSG_EN[vapid_generation_failed]="⛔️ Key generation failed."
+MSG_FA[vapid_generation_failed]="⛔️ ساخت کلیدها ناموفق بود."
+MSG_EN[vapid_saved]="✅ VAPID keys generated and saved to .env."
+MSG_FA[vapid_saved]="✅ کلیدهای VAPID ساخته و در .env ذخیره شدند."
+MSG_EN[panel_restarted_hint]="✅ Service restarted. Now log into the panel and click \"Enable\" notifications."
+MSG_FA[panel_restarted_hint]="✅ سرویس ری‌استارت شد. حالا وارد پنل شو و روی «فعال‌سازی» اعلان بزن."
+MSG_EN[panel_not_installed_vapid_hint]="Admin panel not installed yet. These keys will be used automatically once installed (option 13)."
+MSG_FA[panel_not_installed_vapid_hint]="پنل مدیریت هنوز نصب نشده. بعد از نصب (گزینه ۱۳) این کلیدها خودکار استفاده می‌شوند."
+
+# Main menu / منوی اصلی
+MSG_EN[menu_1]="Full bot install (first time)"
+MSG_FA[menu_1]="نصب کامل بات (اولین بار)"
+MSG_EN[menu_2]="Update bot"
+MSG_FA[menu_2]="آپدیت بات"
+MSG_EN[menu_3]="Completely remove bot from server"
+MSG_FA[menu_3]="حذف کامل بات از سرور"
+MSG_EN[menu_4]="View bot status"
+MSG_FA[menu_4]="مشاهده وضعیت بات"
+MSG_EN[menu_5]="View live logs"
+MSG_FA[menu_5]="مشاهده لاگ زنده"
+MSG_EN[menu_6]="Restart bot"
+MSG_FA[menu_6]="ری‌استارت بات"
+MSG_EN[menu_7]="Stop bot"
+MSG_FA[menu_7]="توقف بات"
+MSG_EN[menu_8]="View sales stats"
+MSG_FA[menu_8]="مشاهده آمار فروش"
+MSG_EN[menu_9]="Change admin token or ID"
+MSG_FA[menu_9]="تغییر توکن یا آیدی ادمین"
+MSG_EN[menu_10]="Setup Mini App (auto: domain + SSL + service)"
+MSG_FA[menu_10]="نصب/تنظیم مینی‌اپ (خودکار: دامنه + SSL + سرویس)"
+MSG_EN[menu_11]="Remove Mini App"
+MSG_FA[menu_11]="حذف مینی‌اپ"
+MSG_EN[menu_12]="Update Mini App"
+MSG_FA[menu_12]="آپدیت مینی‌اپ"
+MSG_EN[menu_13]="Setup standalone admin panel (auto: domain + SSL + service)"
+MSG_FA[menu_13]="نصب/تنظیم پنل مدیریت وب مستقل (خودکار: دامنه + SSL + سرویس)"
+MSG_EN[menu_14]="Remove admin panel"
+MSG_FA[menu_14]="حذف پنل مدیریت وب"
+MSG_EN[menu_15]="Update admin panel"
+MSG_FA[menu_15]="آپدیت پنل مدیریت وب"
+MSG_EN[menu_16]="Auto-generate VAPID key (admin panel push notifications)"
+MSG_FA[menu_16]="ساخت خودکار کلید VAPID (اعلان Push پنل مدیریت)"
+MSG_EN[menu_lang]="Language / زبان (English ⇄ فارسی)"
+MSG_FA[menu_lang]="Language / زبان (English ⇄ فارسی)"
+MSG_EN[menu_0]="Exit"
+MSG_FA[menu_0]="خروج"
+MSG_EN[enter_choice_prompt]="Enter choice [0-16, L]: "
+MSG_FA[enter_choice_prompt]="یک گزینه انتخاب کن [0-16, L]: "
+MSG_EN[invalid_choice]="Invalid option."
+MSG_FA[invalid_choice]="گزینه نامعتبر است."
+MSG_EN[goodbye]="Goodbye 👋"
+MSG_FA[goodbye]="خدانگهدار 👋"
+
+# t <key> [args...] -> prints the localized, formatted string for the
+# current APP_LANG (falls back to English if a key is somehow missing).
+t() {
+    local key="$1"; shift
+    local fmt
+    if [ "$APP_LANG" = "fa" ]; then
+        fmt="${MSG_FA[$key]:-${MSG_EN[$key]}}"
+    else
+        fmt="${MSG_EN[$key]}"
+    fi
+    if [ "$#" -gt 0 ]; then
+        printf -- "$fmt" "$@"
+    else
+        printf '%s' "$fmt"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Title bar / banner / نوار عنوان / بنر
 # ---------------------------------------------------------------------------
 ensure_figlet() {
     if ! command -v figlet &> /dev/null; then
-        echo -e "${CYAN}🔤 در حال آماده‌سازی فونت نمایش (فقط بار اول، چند ثانیه طول می‌کشد)...${RESET}"
+        echo -e "${CYAN}$(t preparing_font)${RESET}"
         sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
         timeout 60 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get install -y -qq figlet
         if ! command -v figlet &> /dev/null; then
-            echo -e "${YELLOW}⚠️ نصب figlet انجام نشد، بنر ساده نمایش داده می‌شود.${RESET}"
+            echo -e "${YELLOW}$(t figlet_failed)${RESET}"
             sleep 1
         fi
     fi
@@ -88,33 +371,33 @@ print_banner() {
 
 print_status_line() {
     if [ ! -d "$INSTALL_DIR" ]; then
-        echo -e "System Status: ${YELLOW}نصب نشده${RESET}"
+        echo -e "System Status: ${YELLOW}$(t not_installed)${RESET}"
     elif systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-        echo -e "System Status: ${GREEN}${BOLD}Engine Ready ✅ (بات در حال اجراست)${RESET}"
+        echo -e "System Status: ${GREEN}${BOLD}$(t system_running)${RESET}"
     else
-        echo -e "System Status: ${RED}${BOLD}متوقف ⛔️${RESET}"
+        echo -e "System Status: ${RED}${BOLD}$(t system_stopped)${RESET}"
     fi
 
     MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
     if systemctl list-units --type=service --all 2>/dev/null | grep -q "${MINIAPP_SERVICE}.service"; then
         if systemctl is-active --quiet "$MINIAPP_SERVICE" 2>/dev/null; then
-            echo -e "Mini App Status: ${GREEN}${BOLD}در حال اجراست ✅${RESET}"
+            echo -e "Mini App Status: ${GREEN}${BOLD}$(t service_running)${RESET}"
         else
-            echo -e "Mini App Status: ${RED}${BOLD}متوقف ⛔️${RESET}"
+            echo -e "Mini App Status: ${RED}${BOLD}$(t service_stopped)${RESET}"
         fi
     else
-        echo -e "Mini App Status: ${YELLOW}نصب نشده${RESET}"
+        echo -e "Mini App Status: ${YELLOW}$(t not_installed)${RESET}"
     fi
 
     PANEL_SERVICE="${SERVICE_NAME}-adminpanel"
     if systemctl list-units --type=service --all 2>/dev/null | grep -q "${PANEL_SERVICE}.service"; then
         if systemctl is-active --quiet "$PANEL_SERVICE" 2>/dev/null; then
-            echo -e "Admin Panel Status: ${GREEN}${BOLD}در حال اجراست ✅${RESET}"
+            echo -e "Admin Panel Status: ${GREEN}${BOLD}$(t service_running)${RESET}"
         else
-            echo -e "Admin Panel Status: ${RED}${BOLD}متوقف ⛔️${RESET}"
+            echo -e "Admin Panel Status: ${RED}${BOLD}$(t service_stopped)${RESET}"
         fi
     else
-        echo -e "Admin Panel Status: ${YELLOW}نصب نشده${RESET}"
+        echo -e "Admin Panel Status: ${YELLOW}$(t not_installed)${RESET}"
     fi
 
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
@@ -122,28 +405,28 @@ print_status_line() {
 
 pause() {
     echo ""
-    read -rp "برای بازگشت به منو، Enter را بزن..." _
+    read -rp "$(t pause_prompt)" _
 }
 
 # ---------------------------------------------------------------------------
-# عملیات: نصب اولیه کامل
+# Action: full initial install / عملیات: نصب اولیه کامل
 # ---------------------------------------------------------------------------
 install_bot() {
-    echo -e "${CYAN}📦 بررسی و نصب پیش‌نیازها (git, python3, pip, venv, figlet)...${RESET}"
+    echo -e "${CYAN}$(t installing_prereqs)${RESET}"
     sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
     timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get install -y -qq git python3 python3-pip python3-venv figlet > /dev/null
 
     if [ -d "$INSTALL_DIR/.git" ]; then
-        echo -e "${YELLOW}⚠️ پروژه از قبل نصب شده است. در حال دریافت آخرین نسخه...${RESET}"
+        echo -e "${YELLOW}$(t already_installed_pulling)${RESET}"
         cd "$INSTALL_DIR"
         git pull
     else
-        echo -e "${CYAN}📥 دریافت پروژه از گیت‌هاب...${RESET}"
+        echo -e "${CYAN}$(t cloning_project)${RESET}"
         git clone "$REPO_URL" "$INSTALL_DIR"
         cd "$INSTALL_DIR"
     fi
 
-    echo -e "${CYAN}🐍 آماده‌سازی محیط پایتون...${RESET}"
+    echo -e "${CYAN}$(t preparing_python)${RESET}"
     if [ ! -d "venv" ]; then
         python3 -m venv venv
     fi
@@ -153,19 +436,19 @@ install_bot() {
 
     if [ ! -f "$INSTALL_DIR/.env" ]; then
         echo ""
-        echo -e "${YELLOW}${BOLD}🔑 اطلاعات بات را وارد کن:${RESET}"
-        read -rp "توکن بات (از BotFather): " BOT_TOKEN_INPUT
-        read -rp "آیدی عددی ادمین: " OWNER_ID_INPUT
+        echo -e "${YELLOW}${BOLD}$(t enter_bot_info)${RESET}"
+        read -rp "$(t prompt_bot_token)" BOT_TOKEN_INPUT
+        read -rp "$(t prompt_owner_id)" OWNER_ID_INPUT
         cat > "$INSTALL_DIR/.env" <<EOF
 BOT_TOKEN=$BOT_TOKEN_INPUT
 OWNER_ID=$OWNER_ID_INPUT
 EOF
-        echo -e "${GREEN}✅ فایل .env ساخته شد.${RESET}"
+        echo -e "${GREEN}$(t env_created)${RESET}"
     else
-        echo -e "${GREEN}✅ فایل .env از قبل موجود است، دست‌نخورده باقی می‌ماند.${RESET}"
+        echo -e "${GREEN}$(t env_exists)${RESET}"
     fi
 
-    echo -e "${CYAN}⚙️ ساخت سرویس systemd...${RESET}"
+    echo -e "${CYAN}$(t creating_service)${RESET}"
     SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
     sudo bash -c "cat > $SERVICE_FILE" <<EOF
 [Unit]
@@ -189,85 +472,86 @@ EOF
     sleep 2
 
     if systemctl is-active --quiet "$SERVICE_NAME"; then
-        echo -e "${GREEN}${BOLD}✅ نصب کامل شد و بات در حال اجراست.${RESET}"
+        echo -e "${GREEN}${BOLD}$(t install_done)${RESET}"
     else
-        echo -e "${RED}⚠️ بات اجرا نشد. برای بررسی خطا: sudo journalctl -u $SERVICE_NAME -n 50 --no-pager${RESET}"
+        echo -e "${RED}$(t install_failed "$SERVICE_NAME")${RESET}"
     fi
 }
 
 # ---------------------------------------------------------------------------
-# عملیات: آپدیت
+# Action: update / عملیات: آپدیت
 # ---------------------------------------------------------------------------
 update_bot() {
     if [ ! -d "$INSTALL_DIR/.git" ]; then
-        echo -e "${RED}⛔️ بات هنوز نصب نشده. اول گزینه ۱ (نصب) را بزن.${RESET}"
+        echo -e "${RED}$(t bot_not_installed)${RESET}"
         return
     fi
     cd "$INSTALL_DIR"
-    echo -e "${CYAN}🔄 دریافت آخرین تغییرات از گیت‌هاب...${RESET}"
+    echo -e "${CYAN}$(t fetching_latest)${RESET}"
     git pull
-    echo -e "${CYAN}🐍 آپدیت پکیج‌ها...${RESET}"
+    echo -e "${CYAN}$(t updating_packages)${RESET}"
     source venv/bin/activate
     pip install -r requirements.txt --quiet
     deactivate
-    echo -e "${CYAN}♻️ ری‌استارت سرویس بات...${RESET}"
+    echo -e "${CYAN}$(t restarting_bot_service)${RESET}"
     sudo systemctl restart "$SERVICE_NAME"
     sleep 2
-    echo -e "${GREEN}✅ آپدیت بات انجام شد.${RESET}"
+    echo -e "${GREEN}$(t update_done)${RESET}"
 }
 
 # ---------------------------------------------------------------------------
-# عملیات: آپدیت مینی‌اپ
+# Action: update Mini App / عملیات: آپدیت مینی‌اپ
 # ---------------------------------------------------------------------------
 update_miniapp() {
     MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
     if ! systemctl list-units --full -all | grep -q "${MINIAPP_SERVICE}.service"; then
-        echo -e "${RED}⛔️ مینی‌اپ هنوز نصب نشده. اول گزینه ۱۰ (نصب/تنظیم مینی‌اپ) را بزن.${RESET}"
+        echo -e "${RED}$(t miniapp_not_installed)${RESET}"
         return
     fi
     if [ ! -d "$INSTALL_DIR/.git" ]; then
-        echo -e "${RED}⛔️ بات هنوز نصب نشده. اول گزینه ۱ (نصب) را بزن.${RESET}"
+        echo -e "${RED}$(t bot_not_installed)${RESET}"
         return
     fi
     cd "$INSTALL_DIR"
-    echo -e "${CYAN}🔄 دریافت آخرین تغییرات از گیت‌هاب...${RESET}"
+    echo -e "${CYAN}$(t fetching_latest)${RESET}"
     git pull
-    echo -e "${CYAN}🐍 آپدیت پکیج‌ها...${RESET}"
+    echo -e "${CYAN}$(t updating_packages)${RESET}"
     source venv/bin/activate
     pip install -r requirements.txt --quiet
     deactivate
-    echo -e "${CYAN}♻️ ری‌استارت سرویس مینی‌اپ...${RESET}"
+    echo -e "${CYAN}$(t restarting_miniapp_service)${RESET}"
     sudo systemctl restart "$MINIAPP_SERVICE"
     sleep 2
-    echo -e "${GREEN}✅ آپدیت مینی‌اپ انجام شد.${RESET}"
+    echo -e "${GREEN}$(t miniapp_update_done)${RESET}"
 }
 
 # ---------------------------------------------------------------------------
-# عملیات: حذف کامل
+# Action: full removal / عملیات: حذف کامل
 # ---------------------------------------------------------------------------
 uninstall_bot() {
-    echo -e "${RED}${BOLD}⚠️ این کار سرویس بات را کاملاً حذف می‌کند.${RESET}"
-    read -rp "آیا مطمئن هستی؟ (yes برای تایید): " CONFIRM
+    echo -e "${RED}${BOLD}$(t uninstall_warning)${RESET}"
+    read -rp "$(t confirm_prompt)" CONFIRM
     if [ "$CONFIRM" != "yes" ]; then
-        echo -e "${YELLOW}لغو شد.${RESET}"
+        echo -e "${YELLOW}$(t cancelled)${RESET}"
         return
     fi
     sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
     sudo systemctl disable "$SERVICE_NAME" 2>/dev/null || true
     sudo rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
     sudo systemctl daemon-reload
-    echo -e "${GREEN}✅ سرویس حذف شد.${RESET}"
+    echo -e "${GREEN}$(t service_removed)${RESET}"
 
-    read -rp "آیا فایل‌های پروژه (شامل دیتابیس مشتری‌ها) هم پاک شود؟ (yes برای تایید): " CONFIRM2
+    read -rp "$(t confirm_delete_files)" CONFIRM2
     if [ "$CONFIRM2" == "yes" ]; then
         rm -rf "$INSTALL_DIR"
-        echo -e "${GREEN}✅ فایل‌های پروژه هم حذف شدند.${RESET}"
+        echo -e "${GREEN}$(t files_removed)${RESET}"
     else
-        echo -e "${CYAN}فایل‌های پروژه در $INSTALL_DIR باقی ماندند.${RESET}"
+        echo -e "${CYAN}$(t files_kept "$INSTALL_DIR")${RESET}"
     fi
 }
 
 # ---------------------------------------------------------------------------
+# Action: status / logs / restart / stop
 # عملیات: وضعیت / لاگ / ری‌استارت / توقف
 # ---------------------------------------------------------------------------
 view_status() {
@@ -275,7 +559,7 @@ view_status() {
 }
 
 view_logs() {
-    echo -e "${CYAN}برای خروج از حالت لاگ زنده: Ctrl+C${RESET}"
+    echo -e "${CYAN}$(t logs_exit_hint)${RESET}"
     sleep 1
     sudo journalctl -u "$SERVICE_NAME" -f
 }
@@ -283,42 +567,54 @@ view_logs() {
 restart_bot() {
     sudo systemctl restart "$SERVICE_NAME"
     sleep 1
-    echo -e "${GREEN}✅ بات ری‌استارت شد.${RESET}"
+    echo -e "${GREEN}$(t bot_restarted)${RESET}"
 }
 
 stop_bot() {
     sudo systemctl stop "$SERVICE_NAME"
-    echo -e "${YELLOW}⛔️ بات متوقف شد.${RESET}"
+    echo -e "${YELLOW}$(t bot_stopped)${RESET}"
 }
 
 # ---------------------------------------------------------------------------
+# Action: quick sales stats (direct from DB, bot doesn't need to be running)
 # عملیات: آمار فروش سریع (مستقیم از دیتابیس، بدون نیاز به روشن بودن بات)
 # ---------------------------------------------------------------------------
 show_stats() {
     if [ ! -f "$INSTALL_DIR/bot_database.db" ]; then
-        echo -e "${RED}دیتابیسی پیدا نشد.${RESET}"
+        echo -e "${RED}$(t no_database)${RESET}"
         return
     fi
     cd "$INSTALL_DIR"
     source venv/bin/activate
-    python3 - <<'PYEOF'
+    SHOPVPN_STATS_LANG="$APP_LANG" python3 - <<'PYEOF'
+import os
 import database as db
+
+lang = os.environ.get("SHOPVPN_STATS_LANG", "en")
 s = db.get_stats()
-print(f"\n👥 تعداد کاربران: {s['users']}")
-print(f"⏳ سفارش‌های در انتظار: {s['pending']}")
-print(f"✅ سفارش‌های تایید شده: {s['approved']}")
-print(f"❌ سفارش‌های رد شده: {s['rejected']}")
-print(f"💰 مجموع فروش: {s['revenue']:,} تومان\n")
+
+if lang == "fa":
+    print(f"\n👥 تعداد کاربران: {s['users']}")
+    print(f"⏳ سفارش‌های در انتظار: {s['pending']}")
+    print(f"✅ سفارش‌های تایید شده: {s['approved']}")
+    print(f"❌ سفارش‌های رد شده: {s['rejected']}")
+    print(f"💰 مجموع فروش: {s['revenue']:,} تومان\n")
+else:
+    print(f"\n👥 Users: {s['users']}")
+    print(f"⏳ Pending orders: {s['pending']}")
+    print(f"✅ Approved orders: {s['approved']}")
+    print(f"❌ Rejected orders: {s['rejected']}")
+    print(f"💰 Total revenue: {s['revenue']:,} Toman\n")
 PYEOF
     deactivate
 }
 
 # ---------------------------------------------------------------------------
-# عملیات: تغییر توکن یا آیدی ادمین
+# Action: change admin token or ID / عملیات: تغییر توکن یا آیدی ادمین
 # ---------------------------------------------------------------------------
 edit_env() {
-    read -rp "توکن جدید بات (اگر تغییری نیست Enter بزن): " NEW_TOKEN
-    read -rp "آیدی عددی جدید ادمین (اگر تغییری نیست Enter بزن): " NEW_OWNER
+    read -rp "$(t prompt_new_token)" NEW_TOKEN
+    read -rp "$(t prompt_new_owner)" NEW_OWNER
 
     CUR_TOKEN=$(grep BOT_TOKEN "$INSTALL_DIR/.env" | cut -d '=' -f2)
     CUR_OWNER=$(grep OWNER_ID "$INSTALL_DIR/.env" | cut -d '=' -f2)
@@ -330,46 +626,47 @@ edit_env() {
 BOT_TOKEN=$CUR_TOKEN
 OWNER_ID=$CUR_OWNER
 EOF
-    echo -e "${GREEN}✅ ذخیره شد. در حال ری‌استارت...${RESET}"
+    echo -e "${GREEN}$(t saved_restarting)${RESET}"
     sudo systemctl restart "$SERVICE_NAME"
 }
 
 # ---------------------------------------------------------------------------
+# Action: full Mini App setup (domain + SSL + nginx + service, all automatic)
 # عملیات: نصب/تنظیم کامل مینی‌اپ (دامنه + SSL + nginx + سرویس، همه خودکار)
 # ---------------------------------------------------------------------------
 setup_miniapp() {
     if [ ! -d "$INSTALL_DIR/miniapp" ]; then
-        echo -e "${RED}⛔️ پوشه miniapp پیدا نشد. اول باید کد مینی‌اپ را داخل پروژه بیاوری (git pull/آپدیت).${RESET}"
+        echo -e "${RED}$(t miniapp_dir_missing)${RESET}"
         return
     fi
 
-    read -rp "دامنه‌ای که به IP همین سرور اشاره می‌کند را وارد کن (مثلاً shop.example.com): " DOMAIN
+    read -rp "$(t prompt_domain_miniapp)" DOMAIN
     if [ -z "$DOMAIN" ]; then
-        echo -e "${RED}دامنه خالی است، لغو شد.${RESET}"
+        echo -e "${RED}$(t domain_empty)${RESET}"
         return
     fi
 
-    echo -e "${CYAN}🔎 بررسی DNS دامنه...${RESET}"
+    echo -e "${CYAN}$(t checking_dns)${RESET}"
     SERVER_IP=$(curl -fsSL ifconfig.me || echo "")
     DOMAIN_IP=$(getent ahosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -1)
     if [ -n "$SERVER_IP" ] && [ -n "$DOMAIN_IP" ] && [ "$SERVER_IP" != "$DOMAIN_IP" ]; then
-        echo -e "${YELLOW}⚠️ هشدار: دامنه به IP این سرور ($SERVER_IP) اشاره نمی‌کند (الان $DOMAIN_IP است).${RESET}"
-        read -rp "همچنان ادامه بدهم؟ (yes برای ادامه): " CONT
+        echo -e "${YELLOW}$(t dns_mismatch_warn "$SERVER_IP" "$DOMAIN_IP")${RESET}"
+        read -rp "$(t continue_prompt)" CONT
         [ "$CONT" != "yes" ] && return
     fi
 
-    echo -e "${CYAN}📦 نصب nginx و certbot...${RESET}"
+    echo -e "${CYAN}$(t installing_nginx)${RESET}"
     sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
     timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 \
         apt-get install -y -qq nginx certbot python3-certbot-nginx > /dev/null
 
-    echo -e "${CYAN}🐍 نصب پکیج‌های مینی‌اپ (fastapi, uvicorn)...${RESET}"
+    echo -e "${CYAN}$(t installing_miniapp_pkgs)${RESET}"
     cd "$INSTALL_DIR"
     source venv/bin/activate
     pip install -r requirements.txt --quiet
     deactivate
 
-    echo -e "${CYAN}⚙️ ساخت سرویس systemd برای بک‌اند مینی‌اپ...${RESET}"
+    echo -e "${CYAN}$(t creating_miniapp_service)${RESET}"
     MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
     sudo bash -c "cat > /etc/systemd/system/${MINIAPP_SERVICE}.service" <<EOF
 [Unit]
@@ -391,7 +688,7 @@ EOF
     sudo systemctl enable "$MINIAPP_SERVICE" > /dev/null 2>&1
     sudo systemctl restart "$MINIAPP_SERVICE"
 
-    echo -e "${CYAN}🌐 تنظیم nginx برای $DOMAIN...${RESET}"
+    echo -e "${CYAN}$(t configuring_nginx "$DOMAIN")${RESET}"
     sudo bash -c "cat > /etc/nginx/sites-available/${DOMAIN}.conf" <<EOF
 server {
     listen 80;
@@ -408,20 +705,20 @@ server {
 EOF
     sudo ln -sf "/etc/nginx/sites-available/${DOMAIN}.conf" "/etc/nginx/sites-enabled/${DOMAIN}.conf"
     if ! sudo nginx -t > /dev/null 2>&1; then
-        echo -e "${RED}⛔️ کانفیگ nginx خطا دارد. جزئیات: $(sudo nginx -t 2>&1)${RESET}"
+        echo -e "${RED}$(t nginx_error "$(sudo nginx -t 2>&1)")${RESET}"
         return
     fi
     sudo systemctl reload nginx
 
-    echo -e "${CYAN}🔐 دریافت گواهی SSL رایگان (Let's Encrypt)...${RESET}"
+    echo -e "${CYAN}$(t getting_ssl)${RESET}"
     sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos \
         --register-unsafely-without-email --redirect
     if [ $? -ne 0 ]; then
-        echo -e "${RED}⛔️ دریافت SSL ناموفق بود. مطمئن شو دامنه درست به این سرور اشاره می‌کند و پورت 80/443 باز است.${RESET}"
+        echo -e "${RED}$(t ssl_failed)${RESET}"
         return
     fi
 
-    echo -e "${CYAN}📝 ثبت آدرس مینی‌اپ در .env...${RESET}"
+    echo -e "${CYAN}$(t saving_miniapp_url)${RESET}"
     if grep -q "^MINIAPP_URL=" "$INSTALL_DIR/.env" 2>/dev/null; then
         sed -i "s|^MINIAPP_URL=.*|MINIAPP_URL=https://$DOMAIN|" "$INSTALL_DIR/.env"
     else
@@ -430,17 +727,17 @@ EOF
 
     sudo systemctl restart "$SERVICE_NAME"
 
-    echo -e "${GREEN}${BOLD}✅ مینی‌اپ آماده است: https://$DOMAIN${RESET}"
-    echo -e "${GREEN}دکمه «✨ مینی‌اپ فروشگاه» از الان در منوی بات دیده می‌شود.${RESET}"
+    echo -e "${GREEN}${BOLD}$(t miniapp_ready "https://$DOMAIN")${RESET}"
+    echo -e "${GREEN}$(t miniapp_button_hint)${RESET}"
 }
 
 # ---------------------------------------------------------------------------
-# عملیات: حذف کامل مینی‌اپ
+# Action: full Mini App removal / عملیات: حذف کامل مینی‌اپ
 # ---------------------------------------------------------------------------
 remove_miniapp() {
-    echo -e "${RED}${BOLD}⚠️ این کار سرویس و کانفیگ nginx مینی‌اپ را حذف می‌کند (گواهی SSL نگه داشته می‌شود).${RESET}"
-    read -rp "آیا مطمئن هستی؟ (yes برای تایید): " CONFIRM
-    [ "$CONFIRM" != "yes" ] && { echo -e "${YELLOW}لغو شد.${RESET}"; return; }
+    echo -e "${RED}${BOLD}$(t remove_miniapp_warn)${RESET}"
+    read -rp "$(t confirm_prompt)" CONFIRM
+    [ "$CONFIRM" != "yes" ] && { echo -e "${YELLOW}$(t cancelled)${RESET}"; return; }
 
     MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
     sudo systemctl stop "$MINIAPP_SERVICE" 2>/dev/null || true
@@ -448,7 +745,7 @@ remove_miniapp() {
     sudo rm -f "/etc/systemd/system/${MINIAPP_SERVICE}.service"
     sudo systemctl daemon-reload
 
-    read -rp "دامنه‌ای که برای مینی‌اپ استفاده کرده بودی چه بود؟ (برای حذف کانفیگ nginx): " DOMAIN
+    read -rp "$(t prompt_domain_used_miniapp)" DOMAIN
     if [ -n "$DOMAIN" ]; then
         sudo rm -f "/etc/nginx/sites-enabled/${DOMAIN}.conf" "/etc/nginx/sites-available/${DOMAIN}.conf"
         sudo systemctl reload nginx 2>/dev/null || true
@@ -458,39 +755,40 @@ remove_miniapp() {
         sed -i "/^MINIAPP_URL=/d" "$INSTALL_DIR/.env"
     fi
     sudo systemctl restart "$SERVICE_NAME" 2>/dev/null || true
-    echo -e "${GREEN}✅ مینی‌اپ حذف شد.${RESET}"
+    echo -e "${GREEN}$(t miniapp_removed)${RESET}"
 }
 
 # ---------------------------------------------------------------------------
+# Action: full standalone admin panel setup (domain + SSL + nginx + service)
 # عملیات: نصب/تنظیم کامل پنل مدیریت وب مستقل (دامنه + SSL + nginx + سرویس)
 # ---------------------------------------------------------------------------
 setup_admin_panel() {
     if [ ! -d "$INSTALL_DIR/admin_panel" ]; then
-        echo -e "${RED}⛔️ پوشه admin_panel پیدا نشد. اول باید کد پروژه را آپدیت کنی (گزینه ۲).${RESET}"
+        echo -e "${RED}$(t panel_dir_missing)${RESET}"
         return
     fi
 
-    read -rp "دامنه‌ای که به IP همین سرور اشاره می‌کند را وارد کن (مثلاً panel.example.com): " DOMAIN
+    read -rp "$(t prompt_domain_panel)" DOMAIN
     if [ -z "$DOMAIN" ]; then
-        echo -e "${RED}دامنه خالی است، لغو شد.${RESET}"
+        echo -e "${RED}$(t domain_empty)${RESET}"
         return
     fi
 
-    echo -e "${CYAN}🔎 بررسی DNS دامنه...${RESET}"
+    echo -e "${CYAN}$(t checking_dns)${RESET}"
     SERVER_IP=$(curl -fsSL ifconfig.me || echo "")
     DOMAIN_IP=$(getent ahosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -1)
     if [ -n "$SERVER_IP" ] && [ -n "$DOMAIN_IP" ] && [ "$SERVER_IP" != "$DOMAIN_IP" ]; then
-        echo -e "${YELLOW}⚠️ هشدار: دامنه به IP این سرور ($SERVER_IP) اشاره نمی‌کند (الان $DOMAIN_IP است).${RESET}"
-        read -rp "همچنان ادامه بدهم؟ (yes برای ادامه): " CONT
+        echo -e "${YELLOW}$(t dns_mismatch_warn "$SERVER_IP" "$DOMAIN_IP")${RESET}"
+        read -rp "$(t continue_prompt)" CONT
         [ "$CONT" != "yes" ] && return
     fi
 
-    echo -e "${CYAN}📦 نصب nginx و certbot...${RESET}"
+    echo -e "${CYAN}$(t installing_nginx)${RESET}"
     sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
     timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 \
         apt-get install -y -qq nginx certbot python3-certbot-nginx > /dev/null
 
-    echo -e "${CYAN}🐍 نصب پکیج‌های پنل (fastapi, uvicorn)...${RESET}"
+    echo -e "${CYAN}$(t installing_panel_pkgs)${RESET}"
     cd "$INSTALL_DIR"
     source venv/bin/activate
     pip install -r requirements.txt --quiet
@@ -499,9 +797,10 @@ setup_admin_panel() {
         echo "ADMIN_PANEL_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')" >> "$INSTALL_DIR/.env"
     fi
 
-    # آدرس نهایی پنل (بعد از SSL روی https) را در .env ذخیره کن تا هم بات اصلی
-    # بتواند لینک راه‌اندازی پنل وب نماینده‌های کامل را بسازد و هم اگر این
-    # عملیات دوباره روی همین دامنه اجرا شد، مقدار قبلی تمیز جایگزین شود.
+    # Save the final panel address (over https, once SSL is on) in .env so
+    # the main bot can build activation links for full reseller web panels,
+    # and so that re-running this on the same domain cleanly replaces the
+    # previous value.
     if grep -q "^ADMIN_PANEL_URL=" "$INSTALL_DIR/.env" 2>/dev/null; then
         sudo sed -i "s#^ADMIN_PANEL_URL=.*#ADMIN_PANEL_URL=https://$DOMAIN#" "$INSTALL_DIR/.env"
     else
@@ -509,14 +808,14 @@ setup_admin_panel() {
     fi
 
     echo ""
-    echo -e "${YELLOW}${BOLD}🔑 حساب مالک (owner) پنل را بساز:${RESET}"
-    read -rp "یوزرنیم: " PANEL_USER
-    read -rsp "پسورد (حداقل ۸ کاراکتر): " PANEL_PASS
+    echo -e "${YELLOW}${BOLD}$(t enter_owner_account)${RESET}"
+    read -rp "$(t prompt_username)" PANEL_USER
+    read -rsp "$(t prompt_password)" PANEL_PASS
     echo ""
     python3 -m admin_panel.create_admin "$PANEL_USER" "$PANEL_PASS"
     deactivate
 
-    echo -e "${CYAN}⚙️ ساخت سرویس systemd برای پنل مدیریت وب...${RESET}"
+    echo -e "${CYAN}$(t creating_panel_service)${RESET}"
     PANEL_SERVICE="${SERVICE_NAME}-adminpanel"
     sudo bash -c "cat > /etc/systemd/system/${PANEL_SERVICE}.service" <<EOF
 [Unit]
@@ -538,7 +837,7 @@ EOF
     sudo systemctl enable "$PANEL_SERVICE" > /dev/null 2>&1
     sudo systemctl restart "$PANEL_SERVICE"
 
-    echo -e "${CYAN}🌐 تنظیم nginx برای $DOMAIN...${RESET}"
+    echo -e "${CYAN}$(t configuring_nginx "$DOMAIN")${RESET}"
     sudo bash -c "cat > /etc/nginx/sites-available/${DOMAIN}.conf" <<EOF
 server {
     listen 80;
@@ -555,59 +854,60 @@ server {
 EOF
     sudo ln -sf "/etc/nginx/sites-available/${DOMAIN}.conf" "/etc/nginx/sites-enabled/${DOMAIN}.conf"
     if ! sudo nginx -t > /dev/null 2>&1; then
-        echo -e "${RED}⛔️ کانفیگ nginx خطا دارد. جزئیات: $(sudo nginx -t 2>&1)${RESET}"
+        echo -e "${RED}$(t nginx_error "$(sudo nginx -t 2>&1)")${RESET}"
         return
     fi
     sudo systemctl reload nginx
 
-    echo -e "${CYAN}🔐 دریافت گواهی SSL رایگان (Let's Encrypt)...${RESET}"
+    echo -e "${CYAN}$(t getting_ssl)${RESET}"
     sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos \
         --register-unsafely-without-email --redirect
     if [ $? -ne 0 ]; then
-        echo -e "${RED}⛔️ دریافت SSL ناموفق بود. مطمئن شو دامنه درست به این سرور اشاره می‌کند و پورت 80/443 باز است.${RESET}"
+        echo -e "${RED}$(t ssl_failed)${RESET}"
         return
     fi
 
-    echo -e "${GREEN}${BOLD}✅ پنل مدیریت آماده است: https://$DOMAIN${RESET}"
-    echo -e "${GREEN}با یوزرنیم/پسوردی که ساختی وارد شو.${RESET}"
+    echo -e "${GREEN}${BOLD}$(t panel_ready "https://$DOMAIN")${RESET}"
+    echo -e "${GREEN}$(t panel_login_hint)${RESET}"
 
-    echo -e "${CYAN}🔁 ری‌استارت بات اصلی تا آدرس پنل (ADMIN_PANEL_URL) را بشناسد...${RESET}"
+    echo -e "${CYAN}$(t restarting_bot_for_panel_url)${RESET}"
     sudo systemctl restart "$SERVICE_NAME" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
-# عملیات: آپدیت پنل مدیریت وب مستقل
+# Action: update standalone admin panel / عملیات: آپدیت پنل مدیریت وب مستقل
 # ---------------------------------------------------------------------------
 update_admin_panel() {
     PANEL_SERVICE="${SERVICE_NAME}-adminpanel"
     if ! systemctl list-units --full -all | grep -q "${PANEL_SERVICE}.service"; then
-        echo -e "${RED}⛔️ پنل مدیریت هنوز نصب نشده. اول گزینه ۱۳ (نصب/تنظیم پنل مدیریت) را بزن.${RESET}"
+        echo -e "${RED}$(t panel_not_installed_yet)${RESET}"
         return
     fi
     if [ ! -d "$INSTALL_DIR/.git" ]; then
-        echo -e "${RED}⛔️ بات هنوز نصب نشده. اول گزینه ۱ (نصب) را بزن.${RESET}"
+        echo -e "${RED}$(t bot_not_installed)${RESET}"
         return
     fi
     cd "$INSTALL_DIR"
-    echo -e "${CYAN}🔄 دریافت آخرین تغییرات از گیت‌هاب...${RESET}"
+    echo -e "${CYAN}$(t fetching_latest)${RESET}"
     git pull
-    echo -e "${CYAN}🐍 آپدیت پکیج‌ها...${RESET}"
+    echo -e "${CYAN}$(t updating_packages)${RESET}"
     source venv/bin/activate
     pip install -r requirements.txt --quiet
     deactivate
-    echo -e "${CYAN}♻️ ری‌استارت سرویس پنل مدیریت...${RESET}"
+    echo -e "${CYAN}$(t restarting_panel_service)${RESET}"
     sudo systemctl restart "$PANEL_SERVICE"
     sleep 2
-    echo -e "${GREEN}✅ آپدیت پنل مدیریت انجام شد.${RESET}"
+    echo -e "${GREEN}$(t panel_update_done)${RESET}"
 }
 
 # ---------------------------------------------------------------------------
+# Action: full standalone admin panel removal
 # عملیات: حذف کامل پنل مدیریت وب مستقل
 # ---------------------------------------------------------------------------
 remove_admin_panel() {
-    echo -e "${RED}${BOLD}⚠️ این کار سرویس و کانفیگ nginx پنل مدیریت را حذف می‌کند (گواهی SSL نگه داشته می‌شود؛ حساب‌های پنل در دیتابیس دست‌نخورده می‌مانند).${RESET}"
-    read -rp "آیا مطمئن هستی؟ (yes برای تایید): " CONFIRM
-    [ "$CONFIRM" != "yes" ] && { echo -e "${YELLOW}لغو شد.${RESET}"; return; }
+    echo -e "${RED}${BOLD}$(t remove_panel_warn)${RESET}"
+    read -rp "$(t confirm_prompt)" CONFIRM
+    [ "$CONFIRM" != "yes" ] && { echo -e "${YELLOW}$(t cancelled)${RESET}"; return; }
 
     PANEL_SERVICE="${SERVICE_NAME}-adminpanel"
     sudo systemctl stop "$PANEL_SERVICE" 2>/dev/null || true
@@ -615,20 +915,21 @@ remove_admin_panel() {
     sudo rm -f "/etc/systemd/system/${PANEL_SERVICE}.service"
     sudo systemctl daemon-reload
 
-    read -rp "دامنه‌ای که برای پنل مدیریت استفاده کرده بودی چه بود؟ (برای حذف کانفیگ nginx): " DOMAIN
+    read -rp "$(t prompt_domain_used_panel)" DOMAIN
     if [ -n "$DOMAIN" ]; then
         sudo rm -f "/etc/nginx/sites-enabled/${DOMAIN}.conf" "/etc/nginx/sites-available/${DOMAIN}.conf"
         sudo systemctl reload nginx 2>/dev/null || true
     fi
-    echo -e "${GREEN}✅ پنل مدیریت حذف شد.${RESET}"
+    echo -e "${GREEN}$(t panel_removed)${RESET}"
 }
 
 # ---------------------------------------------------------------------------
+# Action: auto-generate VAPID keys for admin panel push notifications
 # عملیات: ساخت خودکار کلیدهای VAPID برای اعلان Push پنل مدیریت وب
 # ---------------------------------------------------------------------------
 setup_vapid_keys() {
     if [ ! -d "$INSTALL_DIR/admin_panel" ]; then
-        echo -e "${RED}⛔️ پوشه admin_panel پیدا نشد. اول باید کد پروژه را آپدیت کنی (گزینه ۲).${RESET}"
+        echo -e "${RED}$(t admin_panel_folder_missing)${RESET}"
         return
     fi
 
@@ -636,17 +937,17 @@ setup_vapid_keys() {
     touch "$ENV_FILE"
 
     if grep -q "^VAPID_PUBLIC_KEY=" "$ENV_FILE" 2>/dev/null && [ -n "$(grep '^VAPID_PUBLIC_KEY=' "$ENV_FILE" | cut -d= -f2-)" ]; then
-        echo -e "${YELLOW}⚠️ کلیدهای VAPID از قبل تنظیم شده‌اند.${RESET}"
-        echo -e "${YELLOW}اگر دوباره بسازی، تمام دستگاه‌هایی که قبلاً اعلان را فعال کرده‌اند از کار می‌افتند و باید دوباره فعال‌سازی کنند.${RESET}"
-        read -rp "همچنان کلید جدید بسازم و جایگزین کنم؟ (yes برای تایید): " CONFIRM
-        [ "$CONFIRM" != "yes" ] && { echo -e "${YELLOW}لغو شد.${RESET}"; return; }
+        echo -e "${YELLOW}$(t vapid_already_set_warn1)${RESET}"
+        echo -e "${YELLOW}$(t vapid_already_set_warn2)${RESET}"
+        read -rp "$(t confirm_regenerate)" CONFIRM
+        [ "$CONFIRM" != "yes" ] && { echo -e "${YELLOW}$(t cancelled)${RESET}"; return; }
     fi
 
     echo ""
-    read -rp "ایمیل تماس برای VAPID (اختیاری، Enter بزن برای پیش‌فرض admin@example.com): " CLAIM_EMAIL
+    read -rp "$(t prompt_vapid_email)" CLAIM_EMAIL
     CLAIM_EMAIL=${CLAIM_EMAIL:-admin@example.com}
 
-    echo -e "${CYAN}🔑 در حال ساخت کلیدهای VAPID...${RESET}"
+    echo -e "${CYAN}$(t generating_vapid)${RESET}"
     cd "$INSTALL_DIR"
     source venv/bin/activate
     KEYS_OUTPUT=$(python3 -m admin_panel.generate_vapid_keys 2>/dev/null | grep -E "^VAPID_(PUBLIC|PRIVATE)_KEY=")
@@ -656,11 +957,11 @@ setup_vapid_keys() {
     VAPID_PRIV=$(echo "$KEYS_OUTPUT" | grep "^VAPID_PRIVATE_KEY=" | cut -d= -f2-)
 
     if [ -z "$VAPID_PUB" ] || [ -z "$VAPID_PRIV" ]; then
-        echo -e "${RED}⛔️ ساخت کلیدها ناموفق بود.${RESET}"
+        echo -e "${RED}$(t vapid_generation_failed)${RESET}"
         return
     fi
 
-    # حذف مقادیر قبلی (اگر بودند) و افزودن مقادیر جدید به .env
+    # Remove any previous values and append the new ones to .env
     sed -i '/^VAPID_PUBLIC_KEY=/d; /^VAPID_PRIVATE_KEY=/d; /^VAPID_CLAIM_EMAIL=/d' "$ENV_FILE"
     {
         echo "VAPID_PUBLIC_KEY=$VAPID_PUB"
@@ -668,20 +969,20 @@ setup_vapid_keys() {
         echo "VAPID_CLAIM_EMAIL=$CLAIM_EMAIL"
     } >> "$ENV_FILE"
 
-    echo -e "${GREEN}✅ کلیدهای VAPID ساخته و در .env ذخیره شدند.${RESET}"
+    echo -e "${GREEN}$(t vapid_saved)${RESET}"
 
     PANEL_SERVICE="${SERVICE_NAME}-adminpanel"
     if systemctl list-units --full -all | grep -q "${PANEL_SERVICE}.service"; then
-        echo -e "${CYAN}♻️ ری‌استارت سرویس پنل مدیریت...${RESET}"
+        echo -e "${CYAN}$(t restarting_panel_service)${RESET}"
         sudo systemctl restart "$PANEL_SERVICE"
-        echo -e "${GREEN}✅ سرویس ری‌استارت شد. حالا وارد پنل شو و روی «فعال‌سازی» اعلان بزن.${RESET}"
+        echo -e "${GREEN}$(t panel_restarted_hint)${RESET}"
     else
-        echo -e "${YELLOW}پنل مدیریت هنوز نصب نشده. بعد از نصب (گزینه ۱۳) این کلیدها خودکار استفاده می‌شوند.${RESET}"
+        echo -e "${YELLOW}$(t panel_not_installed_vapid_hint)${RESET}"
     fi
 }
 
 # ---------------------------------------------------------------------------
-# منوی اصلی
+# Main menu / منوی اصلی
 # ---------------------------------------------------------------------------
 ensure_figlet
 
@@ -689,31 +990,32 @@ while true; do
     print_banner
     print_status_line
     echo ""
-    echo -e "${BLUE}[1]${RESET} » ${GREEN}نصب کامل بات (اولین بار)${RESET}"
-    echo -e "${BLUE}[2]${RESET} » ${GREEN}آپدیت بات${RESET}"
-    echo -e "${BLUE}[3]${RESET} » ${GREEN}حذف کامل بات از سرور${RESET}"
+    echo -e "${BLUE}[1]${RESET} » ${GREEN}$(t menu_1)${RESET}"
+    echo -e "${BLUE}[2]${RESET} » ${GREEN}$(t menu_2)${RESET}"
+    echo -e "${BLUE}[3]${RESET} » ${GREEN}$(t menu_3)${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
-    echo -e "${BLUE}[4]${RESET} » ${GREEN}مشاهده وضعیت بات${RESET}"
-    echo -e "${BLUE}[5]${RESET} » ${GREEN}مشاهده لاگ زنده${RESET}"
-    echo -e "${BLUE}[6]${RESET} » ${GREEN}ری‌استارت بات${RESET}"
-    echo -e "${BLUE}[7]${RESET} » ${GREEN}توقف بات${RESET}"
+    echo -e "${BLUE}[4]${RESET} » ${GREEN}$(t menu_4)${RESET}"
+    echo -e "${BLUE}[5]${RESET} » ${GREEN}$(t menu_5)${RESET}"
+    echo -e "${BLUE}[6]${RESET} » ${GREEN}$(t menu_6)${RESET}"
+    echo -e "${BLUE}[7]${RESET} » ${GREEN}$(t menu_7)${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
-    echo -e "${YELLOW}[8]${RESET} » ${GREEN}مشاهده آمار فروش${RESET}"
-    echo -e "${YELLOW}[9]${RESET} » ${GREEN}تغییر توکن یا آیدی ادمین${RESET}"
+    echo -e "${YELLOW}[8]${RESET} » ${GREEN}$(t menu_8)${RESET}"
+    echo -e "${YELLOW}[9]${RESET} » ${GREEN}$(t menu_9)${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
-    echo -e "${YELLOW}[10]${RESET} » ${GREEN}نصب/تنظیم مینی‌اپ (خودکار: دامنه + SSL + سرویس)${RESET}"
-    echo -e "${YELLOW}[11]${RESET} » ${GREEN}حذف مینی‌اپ${RESET}"
-    echo -e "${YELLOW}[12]${RESET} » ${GREEN}آپدیت مینی‌اپ${RESET}"
+    echo -e "${YELLOW}[10]${RESET} » ${GREEN}$(t menu_10)${RESET}"
+    echo -e "${YELLOW}[11]${RESET} » ${GREEN}$(t menu_11)${RESET}"
+    echo -e "${YELLOW}[12]${RESET} » ${GREEN}$(t menu_12)${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
-    echo -e "${YELLOW}[13]${RESET} » ${GREEN}نصب/تنظیم پنل مدیریت وب مستقل (خودکار: دامنه + SSL + سرویس)${RESET}"
-    echo -e "${YELLOW}[14]${RESET} » ${GREEN}حذف پنل مدیریت وب${RESET}"
-    echo -e "${YELLOW}[15]${RESET} » ${GREEN}آپدیت پنل مدیریت وب${RESET}"
-    echo -e "${YELLOW}[16]${RESET} » ${GREEN}ساخت خودکار کلید VAPID (اعلان Push پنل مدیریت)${RESET}"
+    echo -e "${YELLOW}[13]${RESET} » ${GREEN}$(t menu_13)${RESET}"
+    echo -e "${YELLOW}[14]${RESET} » ${GREEN}$(t menu_14)${RESET}"
+    echo -e "${YELLOW}[15]${RESET} » ${GREEN}$(t menu_15)${RESET}"
+    echo -e "${YELLOW}[16]${RESET} » ${GREEN}$(t menu_16)${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
-    echo -e "${RED}[0]${RESET} » ${GREEN}خروج${RESET}"
+    echo -e "${MAGENTA}[L]${RESET} » ${GREEN}$(t menu_lang)${RESET}"
+    echo -e "${RED}[0]${RESET} » ${GREEN}$(t menu_0)${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo ""
-    read -rp "$(echo -e ${MAGENTA}${BOLD}"Enter choice [0-16]: "${RESET})" choice
+    read -rp "$(echo -e ${MAGENTA}${BOLD}"$(t enter_choice_prompt)"${RESET})" choice
 
     case $choice in
         1) install_bot; pause ;;
@@ -732,7 +1034,8 @@ while true; do
         14) remove_admin_panel; pause ;;
         15) update_admin_panel; pause ;;
         16) setup_vapid_keys; pause ;;
-        0) echo -e "${CYAN}خدانگهدار 👋${RESET}"; exit 0 ;;
-        *) echo -e "${RED}گزینه نامعتبر است.${RESET}"; sleep 1 ;;
+        [Ll]) toggle_lang ;;
+        0) echo -e "${CYAN}$(t goodbye)${RESET}"; exit 0 ;;
+        *) echo -e "${RED}$(t invalid_choice)${RESET}"; sleep 1 ;;
     esac
 done
