@@ -2306,10 +2306,47 @@ async function showUserDetail(tgId) {
 
 /* ============================================================ catalog === */
 let catalogTab = 'products';
+/* منبع کانفیگ محصول: بانک کانفیگ (پیش‌فرض) یا اتصال مستقیم به یک پنل مشخص.
+   این سه تابع بین هر سه تم کاتالوگ (پیش‌فرض/بنتو/برتالیست) مشترک است. */
+function productProvisionFieldsHtml(panelServers) {
+  if (!panelServers || !panelServers.length) return '';
+  return `
+    <div class="form-row" style="gap:12px;align-items:center">
+      <label style="display:flex;align-items:center;gap:4px"><input type="radio" name="prod-source" value="bank" checked> بانک کانفیگ</label>
+      <label style="display:flex;align-items:center;gap:4px"><input type="radio" name="prod-source" value="direct"> اتصال مستقیم به پنل</label>
+    </div>
+    <div id="prod-direct-fields" class="form-row" style="display:none">
+      <select class="input" id="prod-server">${panelServers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+      <input class="input" id="prod-volume" type="number" placeholder="حجم (گیگابایت)">
+    </div>`;
+}
+
+function wireProductProvisionToggle(b) {
+  $$('input[name="prod-source"]', b).forEach(r => r.addEventListener('change', () => {
+    const df = $('#prod-direct-fields', b);
+    if (df) df.style.display = $('input[name="prod-source"]:checked', b).value === 'direct' ? '' : 'none';
+  }));
+}
+
+function readProductProvisionFields(b) {
+  const sourceEl = $('input[name="prod-source"]:checked', b);
+  const source = sourceEl ? sourceEl.value : 'bank';
+  if (source !== 'direct') return { ok: true, provision_server_id: null, auto_provision_volume_gb: null };
+  const provision_server_id = Number($('#prod-server', b).value);
+  const auto_provision_volume_gb = Number($('#prod-volume', b).value);
+  if (!provision_server_id || !auto_provision_volume_gb) {
+    toast('برای اتصال مستقیم به پنل، پنل و حجم (گیگابایت) را مشخص کنید.', true);
+    return { ok: false };
+  }
+  return { ok: true, provision_server_id, auto_provision_volume_gb };
+}
+
 async function renderCatalog() {
-  const [categories, products] = await Promise.all([apiGet('/categories'), apiGet('/products')]);
-  if (loadTheme().theme === 'brutalist') return renderCatalogBrutalist(categories, products);
-  if (loadTheme().theme === 'bento') return renderCatalogBento(categories, products);
+  const [categories, products, panelServers] = await Promise.all([
+    apiGet('/categories'), apiGet('/products'), apiGet('/panel-servers-lite'),
+  ]);
+  if (loadTheme().theme === 'brutalist') return renderCatalogBrutalist(categories, products, panelServers);
+  if (loadTheme().theme === 'bento') return renderCatalogBento(categories, products, panelServers);
   setContent(`
     <div class="tabs">
       <button class="tab-btn ${catalogTab === 'products' ? 'active' : ''}" data-t="products">محصولات</button>
@@ -2369,16 +2406,21 @@ async function renderCatalog() {
       <div class="form-row"><input class="input" id="prod-price" type="number" placeholder="قیمت (تومان)">
       <input class="input" id="prod-duration" type="number" placeholder="مدت (روز)" value="30"></div>
       <textarea class="input" id="prod-desc" placeholder="توضیحات (اختیاری)" rows="2"></textarea>
+      ${productProvisionFieldsHtml(panelServers)}
       <button class="btn btn-primary" id="prod-save">ثبت</button>
     </div>`, (b, close) => {
+    wireProductProvisionToggle(b);
     $('#prod-save', b).addEventListener('click', async () => {
       const name = $('#prod-name', b).value.trim();
       const price = Number($('#prod-price', b).value);
       if (!name || !price) return toast('نام و قیمت الزامی است.', true);
+      const prov = readProductProvisionFields(b);
+      if (!prov.ok) return;
       try {
         await apiPost('/products', {
           category_id: Number($('#prod-cat', b).value), name, price,
           description: $('#prod-desc', b).value, duration_days: Number($('#prod-duration', b).value) || 30,
+          provision_server_id: prov.provision_server_id, auto_provision_volume_gb: prov.auto_provision_volume_gb,
         });
         toast('محصول اضافه شد.'); close(); renderCatalog();
       } catch (e) { handleErr(e); }
@@ -2395,7 +2437,7 @@ async function renderCatalog() {
 }
 
 /* ---------------------------------------------------------- catalog: bento */
-function renderCatalogBento(categories, products) {
+function renderCatalogBento(categories, products, panelServers) {
   setContent(`
     <div class="bn-hero">
       <div><h2>ویترین محصولات</h2><p>${fmt(products.length)} محصول در ${fmt(categories.length)} دسته‌بندی</p></div>
@@ -2470,16 +2512,21 @@ function renderCatalogBento(categories, products) {
       <div class="form-row"><input class="input" id="prod-price" type="number" placeholder="قیمت (تومان)">
       <input class="input" id="prod-duration" type="number" placeholder="مدت (روز)" value="30"></div>
       <textarea class="input" id="prod-desc" placeholder="توضیحات (اختیاری)" rows="2"></textarea>
+      ${productProvisionFieldsHtml(panelServers)}
       <button class="btn btn-primary" id="prod-save">ثبت</button>
     </div>`, (b, close) => {
+    wireProductProvisionToggle(b);
     $('#prod-save', b).addEventListener('click', async () => {
       const name = $('#prod-name', b).value.trim();
       const price = Number($('#prod-price', b).value);
       if (!name || !price) return toast('نام و قیمت الزامی است.', true);
+      const prov = readProductProvisionFields(b);
+      if (!prov.ok) return;
       try {
         await apiPost('/products', {
           category_id: Number($('#prod-cat', b).value), name, price,
           description: $('#prod-desc', b).value, duration_days: Number($('#prod-duration', b).value) || 30,
+          provision_server_id: prov.provision_server_id, auto_provision_volume_gb: prov.auto_provision_volume_gb,
         });
         toast('محصول اضافه شد.'); close(); renderCatalog();
       } catch (e) { handleErr(e); }
@@ -2498,7 +2545,7 @@ function renderCatalogBento(categories, products) {
 /* -------------------------------------------------- catalog: brutalist -- */
 // محصولات به‌شکل «برچسب قیمت آویزون» (تگ مشکی با سوراخ) و دسته‌بندی‌ها به
 // شکل ردیف‌های فهرست ضخیم‌قاب.
-function renderCatalogBrutalist(categories, products) {
+function renderCatalogBrutalist(categories, products, panelServers) {
   setContent(`
     <div class="bru-hero" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
       <div>
@@ -2583,16 +2630,21 @@ function renderCatalogBrutalist(categories, products) {
       <div class="form-row"><input class="input" id="prod-price" type="number" placeholder="قیمت (تومان)">
       <input class="input" id="prod-duration" type="number" placeholder="مدت (روز)" value="30"></div>
       <textarea class="input" id="prod-desc" placeholder="توضیحات (اختیاری)" rows="2"></textarea>
+      ${productProvisionFieldsHtml(panelServers)}
       <button class="btn btn-primary" id="prod-save">ثبت</button>
     </div>`, (b, close) => {
+    wireProductProvisionToggle(b);
     $('#prod-save', b).addEventListener('click', async () => {
       const name = $('#prod-name', b).value.trim();
       const price = Number($('#prod-price', b).value);
       if (!name || !price) return toast('نام و قیمت الزامی است.', true);
+      const prov = readProductProvisionFields(b);
+      if (!prov.ok) return;
       try {
         await apiPost('/products', {
           category_id: Number($('#prod-cat', b).value), name, price,
           description: $('#prod-desc', b).value, duration_days: Number($('#prod-duration', b).value) || 30,
+          provision_server_id: prov.provision_server_id, auto_provision_volume_gb: prov.auto_provision_volume_gb,
         });
         toast('محصول اضافه شد.'); close(); renderCatalog();
       } catch (e) { handleErr(e); }
