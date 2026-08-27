@@ -264,7 +264,7 @@ async function api(path, opts = {}) {
   });
   if (res.status === 401) { showLogin(); throw new Error('unauthorized'); }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(formatApiError(data.detail));
+  if (!res.ok) { const err = new Error(formatApiError(data.detail)); err.status = res.status; throw err; }
   return data;
 }
 function formatApiError(detail) {
@@ -3996,7 +3996,15 @@ async function renderPanels() {
   }));
   $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
     if (!confirm('حذف شود؟')) return;
-    try { await apiDelete(`/panel-servers/${b.dataset.del}`); toast('حذف شد.'); renderPanels(); } catch (e) { handleErr(e); }
+    try {
+      await apiDelete(`/panel-servers/${b.dataset.del}`); toast('حذف شد.'); renderPanels();
+    } catch (e) {
+      if (e.status === 409) {
+        if (confirm(e.message + '\n\nحذف کامل (همراه با کانفیگ‌های مرتبط) انجام شود؟')) {
+          try { await apiDelete(`/panel-servers/${b.dataset.del}?force=true`); toast('حذف شد.'); renderPanels(); } catch (e2) { handleErr(e2); }
+        }
+      } else handleErr(e);
+    }
   }));
 }
 
