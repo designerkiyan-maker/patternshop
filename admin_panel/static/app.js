@@ -293,7 +293,8 @@ function handleErr(e) { if (e.message !== 'unauthorized') toast(e.message, true)
 
 /* ==================================================== receipt viewer === */
 function showReceiptModal(kind, id) {
-  const url = `/api/${kind === 'order' ? 'orders' : 'topups'}/${id}/receipt`;
+  const paths = { order: `orders/${id}`, topup: `topups/${id}`, 'reseller-request': `reseller-requests/${id}` };
+  const url = `/api/${paths[kind] || `orders/${id}`}/receipt`;
   openModal('رسید پرداخت', `
     <div class="receipt-view" style="text-align:center">
       <img src="${url}" alt="رسید پرداخت" style="max-width:100%;max-height:70vh;border-radius:10px" />
@@ -3327,52 +3328,234 @@ function renderBroadcastBrutalist() {
 }
 
 /* =========================================================== resellers === */
-function levelLabel(level) { return level === 1 ? 'کامل' : 'سطح ۲'; }
+let resellersSubTab = 'bots'; // 'bots' | 'credit' | 'requests'
+let resellerReqFilter = 'open';
 
-function renderFullResellersBlock(bots) {
-  return `
-    <div class="card"><div class="card-head"><h3>نمایندگی‌های کامل (بات مستقل)</h3></div><div class="table-wrap"><table>
-      <thead><tr><th>آیدی بات</th><th>یوزرنیم بات</th><th>مالک</th><th>آیدی مالک</th><th>سطح</th><th>وضعیت</th><th>پنل وب</th><th>کاربران</th><th>سفارش تایید‌شده</th><th>درآمد (تومان)</th></tr></thead>
-      <tbody>${bots.map(b => `<tr>
-        <td class="mono">${b.id}</td>
-        <td>@${esc(b.bot_username || '—')}</td>
-        <td>${esc(b.owner_name || '—')}</td>
-        <td class="mono">${b.owner_telegram_id}</td>
-        <td>${levelLabel(b.reseller_level)}</td>
-        <td>${b.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
-        <td>${b.web_panel_enabled ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
-        <td class="mono">${fmt(b.stats.users)}</td>
-        <td class="mono">${fmt(b.stats.approved)}</td>
-        <td class="mono">${fmt(b.stats.revenue)}</td>
-      </tr>`).join('') || '<tr><td colspan="10" class="empty-state">نمایندگی کاملی ثبت نشده</td></tr>'}</tbody>
-    </table></div></div>
-  `;
+const RESELLERS_SUBTABS = [
+  ['bots', 'نماینده‌های کامل'],
+  ['credit', 'نمایندگی اعتباری'],
+  ['requests', 'درخواست‌های نمایندگی'],
+];
+
+const RESELLER_REQ_OPEN = new Set(['pending_review', 'awaiting_payment', 'awaiting_payment_review', 'awaiting_bot_info']);
+const RESELLER_REQ_STATUS_LABEL = {
+  pending_review: 'در انتظار بررسی', awaiting_payment: 'در انتظار پرداخت',
+  awaiting_payment_review: 'در انتظار تایید رسید', awaiting_bot_info: 'در انتظار توکن بات',
+  completed: 'تکمیل‌شده', rejected: 'ردشده', payment_rejected: 'پرداخت ردشده', cancelled: 'کنسل‌شده',
+};
+const RESELLER_REQ_STATUS_BADGE = {
+  pending_review: 'badge-pending', awaiting_payment: 'badge-pending',
+  awaiting_payment_review: 'badge-pending', awaiting_bot_info: 'badge-pending',
+  completed: 'badge-approved', rejected: 'badge-rejected', payment_rejected: 'badge-rejected', cancelled: 'badge-rejected',
+};
+
+function resellersSubtabsHtml() {
+  return `<div class="tabs">${RESELLERS_SUBTABS.map(([v, l]) =>
+    `<button class="tab-btn ${v === resellersSubTab ? 'active' : ''}" data-sub="${v}">${l}</button>`).join('')}</div>`;
+}
+function bindResellersSubtabs(root) {
+  $$('.tab-btn[data-sub]', root).forEach(b => b.addEventListener('click', () => {
+    resellersSubTab = b.dataset.sub; renderResellers();
+  }));
 }
 
 async function renderResellers() {
-  const [resellers, cohort, fullResellers] = await Promise.all([
+  try {
+    if (resellersSubTab === 'bots') await renderResellersBotsTab();
+    else if (resellersSubTab === 'requests') await renderResellersRequestsTab();
+    else await renderResellersCreditTab();
+  } catch (e) { handleErr(e); }
+}
+
+/* --------------------------------------------- سطح ۱: نماینده‌های کامل (بات) -- */
+async function renderResellersBotsTab() {
+  const bots = await apiGet('/reseller-bots');
+  setContent(`
+    ${resellersSubtabsHtml()}
+    <div class="card">
+      <div class="card-head"><h3>نماینده‌های صاحب بات مستقل</h3>
+        <span class="card-sub">نماینده‌ی «کامل» بات و (در صورت فعال‌سازی) پنل وب اختصاصی خودش را دارد؛ نماینده‌ی «سطح ۲» فقط از داخل همین بات با اعتبار حجمی کار می‌کند.</span>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>مالک</th><th>بات</th><th>سطح</th><th>وضعیت</th><th>پنل وب</th><th>تاریخ ثبت</th><th>عملیات</th></tr></thead>
+        <tbody>${bots.map(b => `<tr>
+          <td class="mono">#${b.id}</td>
+          <td>${esc(b.owner_name || '—')}<div class="mono" style="opacity:.65;font-size:12px">${b.owner_telegram_id}</div></td>
+          <td>${b.bot_username ? '@' + esc(b.bot_username) : '<span style="opacity:.5">—</span>'}</td>
+          <td>${b.reseller_level === 1 ? '<span class="badge badge-approved">کامل</span>' : '<span class="badge badge-pending">سطح ۲</span>'}</td>
+          <td>${b.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
+          <td>${b.reseller_level === 1
+            ? (b.web_panel_enabled ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>')
+            : '<span style="opacity:.5">—</span>'}</td>
+          <td class="mono">${fmtDate(b.created_at)}</td>
+          <td><button class="btn btn-sm" data-manage="${b.id}">مدیریت</button></td>
+        </tr>`).join('') || `<tr><td colspan="8" class="empty-state">${svg('empty')}<div>هیچ بات نمایندگی‌ای ثبت نشده</div></td></tr>`}</tbody>
+      </table></div>
+    </div>
+  `);
+  bindResellersSubtabs(content());
+  $$('[data-manage]', content()).forEach(btn =>
+    btn.addEventListener('click', () => openResellerBotManageModal(bots.find(b => b.id === Number(btn.dataset.manage)))));
+}
+
+function openResellerBotManageModal(bot) {
+  const isFull = bot.reseller_level === 1;
+  openModal(`مدیریت نماینده #${bot.id}`, `
+    <div class="form-grid">
+      <div><b>بات:</b> ${bot.bot_username ? '@' + esc(bot.bot_username) : '—'}</div>
+      <div><b>وضعیت فعلی:</b> ${bot.is_active ? 'فعال' : 'غیرفعال'}
+        <span style="opacity:.6;font-size:12px">(اعمال واقعی تغییر وضعیت روی پروسه‌ی بات تا حدود ۱۰ ثانیه طول می‌کشد)</span>
+      </div>
+      <button class="btn btn-sm" id="rb-toggle">${bot.is_active ? '⏸ غیرفعال کردن' : '▶️ فعال کردن'}</button>
+      <hr>
+      <div><b>نام مالک</b></div>
+      <input class="input" id="rb-owner-name" value="${esc(bot.owner_name || '')}" placeholder="نام مالک">
+      <div><b>آیدی عددی مالک (تلگرام)</b></div>
+      <input class="input" id="rb-owner-id" type="number" value="${bot.owner_telegram_id}" placeholder="آیدی تلگرام مالک">
+      <button class="btn btn-sm" id="rb-save-owner">ذخیره مشخصات مالک</button>
+      <hr>
+      <div><b>سطح نمایندگی</b></div>
+      <button class="btn btn-sm" id="rb-level">تغییر به «${isFull ? 'سطح ۲ (محدود)' : 'کامل'}»</button>
+      <hr>
+      ${isFull ? `
+        <div><b>پنل وب اختصاصی</b></div>
+        ${bot.web_panel_enabled ? `
+          <button class="btn btn-sm" id="rb-wp-link">🔗 نمایش لینک ورود ثابت</button>
+          <button class="btn btn-sm" id="rb-wp-regen">🔁 ساخت لینک راه‌اندازی جدید (ارسال به نماینده)</button>
+          <button class="btn btn-sm btn-danger" id="rb-wp-off">⛔️ غیرفعال کردن پنل وب</button>
+        ` : `
+          <button class="btn btn-sm btn-primary" id="rb-wp-on">🌐 فعال‌سازی پنل وب (ارسال لینک به نماینده)</button>
+        `}
+        <hr>
+      ` : ''}
+      <button class="btn btn-sm btn-danger" id="rb-delete">🗑 حذف این نماینده</button>
+    </div>
+  `, (body, close) => {
+    $('#rb-toggle', body).addEventListener('click', async () => {
+      try { await apiPost(`/reseller-bots/${bot.id}/toggle`); toast('وضعیت تغییر کرد.'); close(); renderResellers(); }
+      catch (e) { handleErr(e); }
+    });
+    $('#rb-save-owner', body).addEventListener('click', async () => {
+      try {
+        await apiPut(`/reseller-bots/${bot.id}`, {
+          owner_name: $('#rb-owner-name', body).value || null,
+          owner_telegram_id: Number($('#rb-owner-id', body).value) || null,
+        });
+        toast('ذخیره شد.'); close(); renderResellers();
+      } catch (e) { handleErr(e); }
+    });
+    $('#rb-level', body).addEventListener('click', async () => {
+      try {
+        await apiPost(`/reseller-bots/${bot.id}/level`, { level: isFull ? 2 : 1 });
+        toast('سطح نمایندگی تغییر کرد.'); close(); renderResellers();
+      } catch (e) { handleErr(e); }
+    });
+    if (isFull) {
+      const linkBtn = $('#rb-wp-link', body);
+      if (linkBtn) linkBtn.addEventListener('click', async () => {
+        try {
+          const r = await apiGet(`/reseller-bots/${bot.id}/web-panel/login-link`);
+          openModal('لینک ورود ثابت پنل وب', `
+            <div class="form-grid"><input class="input" readonly value="${esc(r.login_link)}" onclick="this.select()"></div>
+          `);
+        } catch (e) { handleErr(e); }
+      });
+      const regenBtn = $('#rb-wp-regen', body);
+      if (regenBtn) regenBtn.addEventListener('click', async () => {
+        try {
+          const r = await apiPost(`/reseller-bots/${bot.id}/web-panel/regenerate`);
+          toast(r.sent_to_owner ? 'لینک جدید ساخته و برای نماینده ارسال شد.' : 'لینک ساخته شد ولی ارسال به نماینده ناموفق بود.');
+        } catch (e) { handleErr(e); }
+      });
+      const offBtn = $('#rb-wp-off', body);
+      if (offBtn) offBtn.addEventListener('click', async () => {
+        try { await apiPost(`/reseller-bots/${bot.id}/web-panel/disable`); toast('پنل وب غیرفعال شد.'); close(); renderResellers(); }
+        catch (e) { handleErr(e); }
+      });
+      const onBtn = $('#rb-wp-on', body);
+      if (onBtn) onBtn.addEventListener('click', async () => {
+        try {
+          const r = await apiPost(`/reseller-bots/${bot.id}/web-panel/enable`);
+          toast(r.sent_to_owner ? 'پنل وب فعال شد و لینک راه‌اندازی برای نماینده ارسال شد.' : 'پنل وب فعال شد ولی ارسال لینک ناموفق بود.');
+          close(); renderResellers();
+        } catch (e) { handleErr(e); }
+      });
+    }
+    $('#rb-delete', body).addEventListener('click', () => {
+      openModal('حذف نماینده', `
+        <div class="form-grid">
+          <div>⚠️ آیا از حذف نماینده #${bot.id} مطمئنی؟ این کار برگشت‌پذیر نیست.</div>
+          <label style="display:flex;gap:6px;align-items:center;cursor:pointer">
+            <input type="checkbox" id="rb-del-purge"> دیتابیس این نماینده هم کامل پاک شود
+          </label>
+          <button class="btn btn-danger" id="rb-del-confirm">حذف قطعی</button>
+        </div>
+      `, (b2, close2) => {
+        $('#rb-del-confirm', b2).addEventListener('click', async () => {
+          try {
+            const purge = $('#rb-del-purge', b2).checked;
+            await apiDelete(`/reseller-bots/${bot.id}?purge_db=${purge}`);
+            toast('نماینده حذف شد.'); close2(); close(); renderResellers();
+          } catch (e) { handleErr(e); }
+        });
+      });
+    });
+  }, { wide: true });
+}
+
+/* --------------------------------------- سطح ۲: نمایندگی اعتباری (استخر حجم) -- */
+async function renderResellersCreditTab() {
+  const [resellers, cohort, orphans] = await Promise.all([
     apiGet('/resellers'),
     apiGet('/resellers/analytics/cohort').catch(() => null),
-    apiGet('/resellers/full').catch(() => []),
+    apiGet('/resellers/orphans').catch(() => []),
   ]);
 
-  if (loadTheme().theme === 'brutalist') return renderResellersBrutalist(resellers, cohort, fullResellers);
-  if (loadTheme().theme === 'bento') return renderResellersBento(resellers, cohort, fullResellers);
   const cohortHtml = cohort ? renderResellerCohortBlock(cohort) : '';
+  const orphansHtml = orphans.length ? `
+    <div class="card">
+      <div class="card-head"><h3>کاربران با رد پای نمایندگی بدون بات (Orphan)</h3>
+        <span class="card-sub">پرچم/اعتبار/پنل نمایندگی روی رکورد این کاربران باقی مانده ولی هیچ بات نمایندگی‌ای برایشان ثبت نیست؛ معمولاً بعد از حذف دستی یک نماینده در سطح دیتابیس رخ می‌دهد.</span>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>آیدی</th><th>نام/یوزرنیم</th><th>وضعیت</th><th>اعتبار</th><th>عملیات</th></tr></thead>
+        <tbody>${orphans.map(o => `<tr>
+          <td class="mono">${o.telegram_id}</td>
+          <td>${esc(o.first_name || o.username || '—')}</td>
+          <td>${o.is_reseller ? '<span class="badge badge-pending">پرچم نماینده روشن</span>' : '<span style="opacity:.5">—</span>'}</td>
+          <td class="mono">${fmt(o.reseller_credit_gb)} گیگ</td>
+          <td><button class="btn btn-sm" data-purge="${o.telegram_id}">پاکسازی</button></td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </div>` : '';
 
   setContent(`
-    ${renderFullResellersBlock(fullResellers)}
+    ${resellersSubtabsHtml()}
     ${cohortHtml}
-    <div class="card"><div class="card-head"><h3>لیست نمایندگی‌های سطح ۲ (اعتبار حجمی)</h3></div><div class="table-wrap"><table>
-      <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>اعتبار (گیگ)</th><th>وضعیت</th><th>عملیات</th></tr></thead>
-      <tbody>${resellers.map(r => `<tr>
-        <td class="mono">${r.telegram_id}</td><td>${esc(r.username || '—')}</td>
-        <td class="mono">${fmt(r.reseller_credit_gb)}</td>
-        <td>${r.is_reseller ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
-        <td><button class="btn btn-sm" data-credit="${r.telegram_id}">تنظیم اعتبار</button></td>
-      </tr>`).join('') || '<tr><td colspan="5" class="empty-state">نماینده‌ای ثبت نشده</td></tr>'}</tbody>
-    </table></div></div>
+    ${orphansHtml}
+    <div class="card">
+      <div class="card-head"><h3>لیست نمایندگی‌های اعتباری (سطح ۲)</h3>
+        <span class="card-sub">کاربرانی که از داخل همین بات، با اعتبار حجمی دریافتی، برای مشتری‌های خودشان کانفیگ می‌سازند.</span>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>اعتبار (گیگ)</th><th>پنل اختصاصی</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+        <tbody>${resellers.map(r => `<tr>
+          <td class="mono">${r.telegram_id}</td><td>${esc(r.username || '—')}</td>
+          <td class="mono">${fmt(r.reseller_credit_gb)}</td>
+          <td>${r.reseller_panel_id ? `<span class="mono">#${r.reseller_panel_id}</span>` : '<span style="opacity:.5">پیش‌فرض خودکار</span>'}</td>
+          <td>${r.is_reseller ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
+          <td>
+            <button class="btn btn-sm" data-credit="${r.telegram_id}">تنظیم اعتبار</button>
+            <button class="btn btn-sm" data-panel="${r.telegram_id}" data-panel-cur="${r.reseller_panel_id || ''}">پنل</button>
+            <button class="btn btn-sm" data-toggle-status="${r.telegram_id}" data-cur="${r.is_reseller ? 1 : 0}">${r.is_reseller ? 'غیرفعال کردن' : 'فعال کردن'}</button>
+            <button class="btn btn-sm" data-log="${r.telegram_id}">تاریخچه</button>
+          </td>
+        </tr>`).join('') || `<tr><td colspan="6" class="empty-state">${svg('empty')}<div>نماینده‌ی اعتباری ثبت نشده</div></td></tr>`}</tbody>
+      </table></div>
+    </div>
   `);
+  bindResellersSubtabs(content());
+
   $$('[data-credit]', content()).forEach(b => b.addEventListener('click', () => openModal('تنظیم اعتبار حجمی', `
     <div class="form-grid">
       <input class="input" id="credit-delta" type="number" placeholder="مقدار (گیگ، منفی=کسر)">
@@ -3388,6 +3571,58 @@ async function renderResellers() {
       } catch (e) { handleErr(e); }
     });
   })));
+
+  $$('[data-toggle-status]', content()).forEach(b => b.addEventListener('click', async () => {
+    try {
+      await apiPost(`/resellers/${b.dataset.toggleStatus}/status`, { enabled: b.dataset.cur !== '1' });
+      toast('وضعیت تغییر کرد.'); renderResellers();
+    } catch (e) { handleErr(e); }
+  }));
+
+  $$('[data-log]', content()).forEach(b => b.addEventListener('click', async () => {
+    try {
+      const log = await apiGet(`/resellers/${b.dataset.log}/log`);
+      openModal(`تاریخچه اعتبار #${b.dataset.log}`, `
+        <div class="table-wrap"><table>
+          <thead><tr><th>تاریخ</th><th>تغییر</th><th>دلیل</th></tr></thead>
+          <tbody>${log.map(l => `<tr>
+            <td class="mono">${fmtDate(l.created_at)}</td>
+            <td class="mono">${l.delta_gb > 0 ? '+' : ''}${fmt(l.delta_gb)}</td>
+            <td>${esc(l.reason || '—')}</td>
+          </tr>`).join('') || '<tr><td colspan="3" class="empty-state">رکوردی نیست</td></tr>'}</tbody>
+        </table></div>
+      `, null, { wide: true });
+    } catch (e) { handleErr(e); }
+  }));
+
+  $$('[data-panel]', content()).forEach(b => b.addEventListener('click', async () => {
+    try {
+      const panels = await apiGet('/reseller-panels-lite');
+      const cur = b.dataset.panelCur;
+      openModal('پنل اختصاصی این نماینده', `
+        <div class="form-grid">
+          <select class="input" id="rp-panel">
+            <option value="">پیش‌فرض خودکار (اولین پنل نمایندگی فعال)</option>
+            ${panels.map(p => `<option value="${p.id}" ${String(p.id) === cur ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+          </select>
+          <button class="btn btn-primary" id="rp-save">ذخیره</button>
+        </div>
+      `, (body, close) => {
+        $('#rp-save', body).addEventListener('click', async () => {
+          const val = $('#rp-panel', body).value;
+          try {
+            await apiPost(`/resellers/${b.dataset.panel}/panel`, { panel_server_id: val ? Number(val) : null });
+            toast('ذخیره شد.'); close(); renderResellers();
+          } catch (e) { handleErr(e); }
+        });
+      });
+    } catch (e) { handleErr(e); }
+  }));
+
+  $$('[data-purge]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/resellers/${b.dataset.purge}/purge`); toast('پاکسازی شد.'); renderResellers(); }
+    catch (e) { handleErr(e); }
+  }));
 
   if (cohort) {
     activateRings(content());
@@ -3398,223 +3633,125 @@ async function renderResellers() {
   }
 }
 
-/* ------------------------------------------------------ resellers: bento */
-function renderResellersBento(resellers, cohort, fullResellers = []) {
-  const cohortHtml = cohort ? renderResellerCohortBlockBento(cohort) : '';
+/* ------------------------------------------------------ درخواست‌های نمایندگی -- */
+async function renderResellersRequestsTab() {
+  const all = await apiGet('/reseller-requests');
+  const filtered = resellerReqFilter === 'open' ? all.filter(r => RESELLER_REQ_OPEN.has(r.status))
+    : resellerReqFilter === 'all' ? all
+    : all.filter(r => r.status === resellerReqFilter);
+
   setContent(`
-    <div class="bn-hero"><div><h2>نمایندگی‌ها</h2><p>${fmt(resellers.length)} نماینده سطح ۲ / ${fmt(fullResellers.length)} نماینده کامل</p></div></div>
-    ${renderFullResellersBlock(fullResellers)}
-    ${cohortHtml}
-    <div class="bn-card-grid" style="margin-top:16px">
-      ${resellers.map((r, i) => `
-        <div class="bn-card bn-card-anim" style="animation-delay:${Math.min(i * 30, 260)}ms">
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            ${bnAvatar((r.username || '؟').trim().charAt(0), i)}
-            ${bnPill(r.is_reseller ? 'فعال' : 'غیرفعال', r.is_reseller ? 'ok' : 'no')}
-          </div>
-          <div class="bn-row-title">${esc(r.username || '—')}</div>
-          <div class="bn-row-sub mono">#${r.telegram_id}</div>
-          <div class="bw w-purple" style="border-radius:16px;padding:10px 14px;margin-top:4px">
-            <span class="bw-value mono" style="font-size:18px">${fmt(r.reseller_credit_gb)} گیگ</span>
-          </div>
-          <button class="bn-btn bn-btn-ghost" data-credit="${r.telegram_id}" style="width:100%;margin-top:6px">تنظیم اعتبار</button>
-        </div>
-      `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>نماینده‌ای ثبت نشده</div>`}
+    ${resellersSubtabsHtml()}
+    <div class="tabs">
+      ${[['open', 'باز'], ['all', 'همه'], ['completed', 'تکمیل‌شده'], ['rejected', 'ردشده'], ['cancelled', 'کنسل‌شده']].map(([v, l]) =>
+        `<button class="tab-btn ${v === resellerReqFilter ? 'active' : ''}" data-rf="${v}">${l}</button>`).join('')}
     </div>
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>کاربر</th><th>حجم</th><th>هزینه</th><th>وضعیت</th><th>تاریخ</th><th>عملیات</th></tr></thead>
+      <tbody>${filtered.map(r => `<tr>
+        <td class="mono">#${r.id}</td>
+        <td>${esc(r.username ? '@' + r.username : ('#' + r.user_id))}</td>
+        <td class="mono">${fmt(r.volume_gb)} گیگ</td>
+        <td class="mono">${r.price_toman ? fmt(r.price_toman) + ' تومان' : '—'}</td>
+        <td><span class="badge ${RESELLER_REQ_STATUS_BADGE[r.status] || ''}">${RESELLER_REQ_STATUS_LABEL[r.status] || r.status}</span></td>
+        <td class="mono">${fmtDate(r.created_at)}</td>
+        <td><button class="btn btn-sm" data-req="${r.id}">مدیریت</button></td>
+      </tr>`).join('') || `<tr><td colspan="7" class="empty-state">${svg('empty')}<div>درخواستی در این وضعیت نیست</div></td></tr>`}</tbody>
+    </table></div></div>
   `);
-  $$('[data-credit]', content()).forEach(b => b.addEventListener('click', () => openModal('تنظیم اعتبار حجمی', `
+  bindResellersSubtabs(content());
+  $$('[data-rf]', content()).forEach(b => b.addEventListener('click', () => {
+    resellerReqFilter = b.dataset.rf; renderResellersRequestsTab();
+  }));
+  $$('[data-req]', content()).forEach(b => b.addEventListener('click', () =>
+    openResellerRequestModal(all.find(r => r.id === Number(b.dataset.req)))));
+}
+
+function openResellerRequestModal(req) {
+  const isOpen = RESELLER_REQ_OPEN.has(req.status);
+  let actionsHtml = '';
+  if (req.status === 'pending_review') {
+    actionsHtml = `
+      <div><b>هزینه‌ی نمایندگی (تومان)</b></div>
+      <input class="input" id="rq-price" type="number" placeholder="مبلغ به تومان">
+      <div><b>پنل اختصاصی (اختیاری)</b></div>
+      <select class="input" id="rq-panel"><option value="">پیش‌فرض خودکار</option></select>
+      <button class="btn btn-primary" id="rq-quote">✅ تایید و ارسال هزینه به کاربر</button>
+      <button class="btn btn-danger" id="rq-reject">❌ رد درخواست</button>
+    `;
+  } else if (req.status === 'awaiting_payment_review') {
+    actionsHtml = `
+      <button class="btn btn-sm" id="rq-receipt">🧾 نمایش رسید پرداخت</button>
+      <button class="btn btn-primary" id="rq-payok">✅ تایید پرداخت</button>
+      <button class="btn btn-danger" id="rq-payreject">❌ رد پرداخت</button>
+    `;
+  }
+  const cancelHtml = isOpen ? `<hr><button class="btn btn-sm" id="rq-cancel">لغو دستی این درخواست</button>` : '';
+
+  openModal(`درخواست نمایندگی #${req.id}`, `
     <div class="form-grid">
-      <input class="input" id="credit-delta" type="number" placeholder="مقدار (گیگ، منفی=کسر)">
-      <input class="input" id="credit-reason" placeholder="دلیل (اختیاری)">
-      <button class="btn btn-primary" id="credit-save">ثبت</button>
-    </div>`, (body, close) => {
-    $('#credit-save', body).addEventListener('click', async () => {
-      const delta_gb = Number($('#credit-delta', body).value);
-      if (!delta_gb) return;
+      <div><b>کاربر:</b> ${esc(req.username ? '@' + req.username : '—')} (<span class="mono">${req.user_id}</span>)</div>
+      <div><b>حجم درخواستی:</b> ${fmt(req.volume_gb)} گیگ</div>
+      ${req.request_text ? `<div><b>توضیحات کاربر:</b> ${esc(req.request_text)}</div>` : ''}
+      <div><b>وضعیت:</b> ${RESELLER_REQ_STATUS_LABEL[req.status] || req.status}</div>
+      ${req.price_toman ? `<div><b>هزینه‌ی ثبت‌شده:</b> ${fmt(req.price_toman)} تومان</div>` : ''}
+      ${req.reject_reason ? `<div><b>دلیل رد:</b> ${esc(req.reject_reason)}</div>` : ''}
+      <hr>
+      ${actionsHtml || '<div style="opacity:.6">در وضعیت فعلی، عملیاتی جز لغو دستی روی این درخواست ممکن نیست.</div>'}
+      ${cancelHtml}
+    </div>
+  `, (body, close) => {
+    if (req.status === 'pending_review') {
+      apiGet('/reseller-panels-lite').then(panels => {
+        const sel = $('#rq-panel', body);
+        if (sel) sel.insertAdjacentHTML('beforeend', panels.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join(''));
+      }).catch(() => {});
+      $('#rq-quote', body).addEventListener('click', async () => {
+        const price_toman = Number($('#rq-price', body).value);
+        const panelVal = $('#rq-panel', body).value;
+        if (!price_toman || price_toman <= 0) { toast('مبلغ نامعتبر است.', true); return; }
+        try {
+          await apiPost(`/reseller-requests/${req.id}/quote`, { price_toman, panel_server_id: panelVal ? Number(panelVal) : null });
+          toast('هزینه برای کاربر ارسال شد.'); close(); renderResellers();
+        } catch (e) { handleErr(e); }
+      });
+      $('#rq-reject', body).addEventListener('click', () => openResellerRequestRejectModal(req.id, 'rejected', close));
+    } else if (req.status === 'awaiting_payment_review') {
+      $('#rq-receipt', body).addEventListener('click', () => showReceiptModal('reseller-request', req.id));
+      $('#rq-payok', body).addEventListener('click', async () => {
+        try { await apiPost(`/reseller-requests/${req.id}/approve-payment`); toast('پرداخت تایید شد.'); close(); renderResellers(); }
+        catch (e) { handleErr(e); }
+      });
+      $('#rq-payreject', body).addEventListener('click', () => openResellerRequestRejectModal(req.id, 'payment_rejected', close));
+    }
+    if (isOpen) {
+      $('#rq-cancel', body).addEventListener('click', async () => {
+        try { await apiPost(`/reseller-requests/${req.id}/cancel`); toast('درخواست کنسل شد.'); close(); renderResellers(); }
+        catch (e) { handleErr(e); }
+      });
+    }
+  }, { wide: true });
+}
+
+function openResellerRequestRejectModal(requestId, kind, parentClose) {
+  openModal('دلیل رد', `
+    <div class="form-grid">
+      <textarea class="input" id="rq-reject-reason" rows="3" placeholder="دلیل رد (برای کاربر ارسال می‌شود)"></textarea>
+      <button class="btn btn-danger" id="rq-reject-confirm">ثبت رد</button>
+    </div>
+  `, (body, close) => {
+    $('#rq-reject-confirm', body).addEventListener('click', async () => {
+      const reason = $('#rq-reject-reason', body).value.trim();
+      if (!reason) { toast('دلیل رد الزامی است.', true); return; }
       try {
-        await apiPost(`/resellers/${b.dataset.credit}/credit`, { delta_gb, reason: $('#credit-reason', body).value });
-        toast('اعتبار به‌روزرسانی شد.'); close(); renderResellers();
+        await apiPost(`/reseller-requests/${requestId}/reject`, { reason, kind });
+        toast('ثبت شد.'); close(); parentClose(); renderResellers();
       } catch (e) { handleErr(e); }
     });
-  })));
-  if (cohort) {
-    const root = content();
-    requestAnimationFrame(() => setTimeout(() => { $$('.bw-res-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; }); }, 60));
-    $$('[data-toggle-churn]', root).forEach(el => el.addEventListener('click', () => {
-      const box = $('#churn-list-box', root);
-      box.style.display = box.style.display === 'none' ? '' : 'none';
-    }));
-  }
+  });
 }
 
-
-/* -------------------------------------------------- cyberpunk --- */
-
-/* -------------------------------------------------- clay --- */
-
-/* -------------------------------------------------- paper --- */
-
-/* -------------------------------------------------- obsidian --- */
-
-/* -------------------------------------------------- warp --- */
-function renderResellerCohortBlockBento(data) {
-  const c = data.churn;
-  const months = data.cohorts;
-  const allMonths = months.length ? months[months.length - 1].retention.map(r => r.month) : [];
-  const heatRows = months.map(co => {
-    const cells = co.retention.map(r => `<td class="mono" style="text-align:center">${co.size ? `${r.pct}٪<div style="font-size:10px;opacity:.7">${fmt(r.active)}</div>` : '—'}</td>`).join('');
-    const pad = allMonths.length - co.retention.length;
-    return `<tr><td class="mono">${co.cohort_month}</td><td class="mono">${fmt(co.size)}</td>${cells}${'<td></td>'.repeat(Math.max(0, pad))}</tr>`;
-  }).join('');
-  const churnRows = c.list.slice(0, 30).map(u => `
-    <tr><td class="mono">${u.telegram_id}</td><td>${esc(u.username || '—')}</td>
-      <td class="mono">${fmt(u.credit_gb)}</td><td class="mono">${u.last_activity ? fmtDate(u.last_activity) : 'هیچ‌وقت'}</td>
-      <td class="mono">${fmt(u.days_inactive)} روز</td></tr>`).join('') || '<tr><td colspan="5" class="empty-state">نماینده‌ی ریزش‌کرده‌ای نیست 🎉</td></tr>';
-  return `
-    <div class="bento-grid" style="grid-auto-rows:minmax(90px,auto)">
-      <div class="bw w-blue"><span class="bw-label">کل نمایندگان</span><span class="bw-value mono">${fmt(c.total)}</span></div>
-      <div class="bw w-green"><span class="bw-label">فعال (${fmt(c.inactivity_days)}روز)</span><span class="bw-value mono">${fmt(c.active)}</span></div>
-      <div class="bw w-orange" data-toggle-churn style="cursor:pointer"><span class="bw-label">ریزش‌کرده — کلیک</span><span class="bw-value mono">${fmt(c.churned)}</span><span class="bw-sub">${c.churn_rate}٪ نرخ ریزش</span></div>
-    </div>
-    <div class="bn-card" style="margin-top:14px">
-      <div class="bn-row-title" style="margin-bottom:10px">کوهورت نگهداشت ماهانه</div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>ماه کوهورت</th><th>تعداد</th>${allMonths.map((m, i) => `<th class="mono">M${i}</th>`).join('')}</tr></thead>
-        <tbody>${heatRows || '<tr><td colspan="2" class="empty-state">داده‌ای نیست</td></tr>'}</tbody>
-      </table></div>
-    </div>
-    <div class="bn-card" id="churn-list-box" style="display:none;margin-top:14px">
-      <div class="bn-row-title" style="margin-bottom:10px">نماینده‌های در آستانه‌ی ریزش / ریزش‌کرده</div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>اعتبار</th><th>آخرین فعالیت</th><th>بی‌فعالیتی</th></tr></thead>
-        <tbody>${churnRows}</tbody>
-      </table></div>
-    </div>`;
-}
-
-
-/* -------------------------------------------------- cyberpunk --- */
-
-/* -------------------------------------------------- clay --- */
-
-/* -------------------------------------------------- paper --- */
-
-/* -------------------------------------------------- obsidian --- */
-
-/* -------------------------------------------------- warp --- */
-
-/* ------------------------------------------------ resellers: brutalist -- */
-// لیست نمایندگی‌ها به‌شکل «کارت اعتباری» با حجم گیگ درشت مثل موجودی کارت،
-// و آمار کوهورت با همون زبان بلوکی/پنلی داشبورد برutalist.
-function renderResellersBrutalist(resellers, cohort, fullResellers = []) {
-  const cohortHtml = cohort ? renderResellerCohortBlockBrutalist(cohort) : '';
-  setContent(`
-    <div class="bru-hero">
-      <h2>نمایندگی‌ها</h2>
-      <p>${fmt(resellers.length)} نماینده سطح ۲ / ${fmt(fullResellers.length)} نماینده کامل</p>
-    </div>
-    ${renderFullResellersBlock(fullResellers)}
-    ${cohortHtml}
-    <div class="bru-panel" style="margin-top:16px">
-      <div class="bru-panel-head">لیست نمایندگی‌ها</div>
-      <div class="bru-reseller-grid">
-        ${resellers.map((r, i) => `
-          <div class="bru-reseller-card bru-card-anim" style="animation-delay:${Math.min(i * 35, 300)}ms">
-            <div class="bru-reseller-top">
-              <span class="bru-flag ${r.is_reseller ? 'bru-flag-ok' : 'bru-flag-no'}">${r.is_reseller ? 'فعال' : 'غیرفعال'}</span>
-              <span class="bru-reseller-id mono">#${r.telegram_id}</span>
-            </div>
-            <div class="bru-reseller-name">${esc(r.username || '—')}</div>
-            <div class="bru-reseller-credit"><span class="mono">${fmt(r.reseller_credit_gb)}</span><small>گیگ اعتبار</small></div>
-            <button class="btn btn-sm btn-block" data-credit="${r.telegram_id}">تنظیم اعتبار</button>
-          </div>
-        `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>نماینده‌ای ثبت نشده</div>`}
-      </div>
-    </div>
-  `);
-  $$('[data-credit]', content()).forEach(b => b.addEventListener('click', () => openModal('تنظیم اعتبار حجمی', `
-    <div class="form-grid">
-      <input class="input" id="credit-delta" type="number" placeholder="مقدار (گیگ، منفی=کسر)">
-      <input class="input" id="credit-reason" placeholder="دلیل (اختیاری)">
-      <button class="btn btn-primary" id="credit-save">ثبت</button>
-    </div>`, (body, close) => {
-    $('#credit-save', body).addEventListener('click', async () => {
-      const delta_gb = Number($('#credit-delta', body).value);
-      if (!delta_gb) return;
-      try {
-        await apiPost(`/resellers/${b.dataset.credit}/credit`, { delta_gb, reason: $('#credit-reason', body).value });
-        toast('اعتبار به‌روزرسانی شد.'); close(); renderResellers();
-      } catch (e) { handleErr(e); }
-    });
-  })));
-  if (cohort) {
-    const root = content();
-    requestAnimationFrame(() => setTimeout(() => { $$('.bru-metric-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; }); }, 60));
-    $$('[data-toggle-churn]', root).forEach(el => el.addEventListener('click', () => {
-      const box = $('#churn-list-box', root);
-      box.style.display = box.style.display === 'none' ? '' : 'none';
-    }));
-  }
-}
-
-function renderResellerCohortBlockBrutalist(data) {
-  const c = data.churn;
-  const months = data.cohorts;
-  const allMonths = months.length ? months[months.length - 1].retention.map(r => r.month) : [];
-
-  const heatRows = months.map(co => {
-    const cells = co.retention.map(r => `<td class="mono" style="text-align:center">${co.size ? `${r.pct}٪<div style="font-size:10px;opacity:.7">${fmt(r.active)}</div>` : '—'}</td>`).join('');
-    const pad = allMonths.length - co.retention.length;
-    return `<tr><td class="mono">${co.cohort_month}</td><td class="mono">${fmt(co.size)}</td>${cells}${'<td></td>'.repeat(Math.max(0, pad))}</tr>`;
-  }).join('');
-
-  const churnRows = c.list.slice(0, 30).map(u => `
-    <tr>
-      <td class="mono">${u.telegram_id}</td><td>${esc(u.username || '—')}</td>
-      <td class="mono">${fmt(u.credit_gb)}</td>
-      <td class="mono">${u.last_activity ? fmtDate(u.last_activity) : 'هیچ‌وقت'}</td>
-      <td class="mono">${fmt(u.days_inactive)} روز</td>
-    </tr>`).join('') || '<tr><td colspan="5" class="empty-state">نماینده‌ی ریزش‌کرده‌ای نیست 🎉</td></tr>';
-
-  return `
-    <div class="bru-grid-4">
-      <div class="bru-block bru-white">
-        <span class="bru-block-label">کل نمایندگان فعلی</span>
-        <span class="bru-block-val mono">${fmt(c.total)}</span>
-      </div>
-      <div class="bru-block bru-yellow">
-        <span class="bru-block-label">فعال (${fmt(c.inactivity_days)} روز اخیر)</span>
-        <span class="bru-block-val mono">${fmt(c.active)}</span>
-      </div>
-      <div class="bru-block bru-black" data-toggle-churn style="cursor:pointer">
-        <span class="bru-block-label">ریزش‌کرده — کلیک برای لیست</span>
-        <span class="bru-block-val mono">${fmt(c.churned)}</span>
-        <span class="bru-block-tag">${c.churn_rate}٪ نرخ ریزش</span>
-      </div>
-      <div class="bru-block bru-white">
-        <span class="bru-block-label">مجموع نماینده‌های ${fmt(months.length)} ماه اخیر</span>
-        <span class="bru-block-val mono">${fmt(months.reduce((a, m) => a + m.size, 0))}</span>
-      </div>
-    </div>
-
-    <div class="bru-panel" style="margin-top:16px">
-      <div class="bru-panel-head">کوهورت نگهداشت ماهانه نمایندگان</div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>ماه کوهورت</th><th>تعداد</th>${allMonths.map((m, i) => `<th class="mono">M${i}</th>`).join('')}</tr></thead>
-        <tbody>${heatRows || '<tr><td colspan="2" class="empty-state">داده‌ای نیست</td></tr>'}</tbody>
-      </table></div>
-    </div>
-
-    <div class="bru-panel" id="churn-list-box" style="display:none;margin-top:16px">
-      <div class="bru-panel-head">نماینده‌های در آستانه‌ی ریزش / ریزش‌کرده</div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>اعتبار (گیگ)</th><th>آخرین فعالیت</th><th>مدت بی‌فعالیتی</th></tr></thead>
-        <tbody>${churnRows}</tbody>
-      </table></div>
-    </div>
-  `;
-}
-
+/* -------------------------------------------------- کوهورت نگهداشت (مشترک) -- */
 function renderResellerCohortBlock(data) {
   const c = data.churn;
   const months = data.cohorts;
