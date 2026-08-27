@@ -1809,9 +1809,14 @@ class PanelServerBody(BaseModel):
     name: str
     panel_type: str
     api_url: str
-    api_username: str
+    api_username: str = ""
     api_password: str
     default_group: Optional[str] = None
+
+
+class PanelServerUpdateBody(BaseModel):
+    xui_inbound_id: Optional[int] = None
+    xui_sub_base_url: Optional[str] = None
 
 
 @app.get("/api/panel-servers")
@@ -1824,9 +1829,38 @@ def api_panel_servers(admin=Depends(require_permission("panels"))):
 
 @app.post("/api/panel-servers")
 def api_add_panel_server(body: PanelServerBody, admin=Depends(require_permission("panels"))):
-    sid = db.add_panel_server(body.name, body.panel_type, body.api_url, body.api_username, body.api_password, body.default_group)
+    username = body.api_username
+    if body.panel_type == "3xui":
+        # 3X-UI جدید فقط با API Token (فیلد پسورد) کار می‌کند؛ یوزرنیم استفاده نمی‌شود.
+        username = "3xui"
+    sid = db.add_panel_server(body.name, body.panel_type, body.api_url, username, body.api_password, body.default_group)
     db.log_admin_action(admin["id"], "panel_add", body.name, "panel", sid)
     return {"id": sid}
+
+
+@app.get("/api/panel-servers/{server_id}/inbounds")
+async def api_panel_server_inbounds(server_id: int, admin=Depends(require_permission("panels"))):
+    server = db.get_panel_server(server_id)
+    if not server:
+        raise HTTPException(404, "یافت نشد.")
+    try:
+        provider = get_provider(server)
+        inbounds = await provider.list_inbounds()
+    except PanelError as e:
+        raise HTTPException(400, str(e))
+    return inbounds
+
+
+@app.put("/api/panel-servers/{server_id}")
+def api_update_panel_server(server_id: int, body: PanelServerUpdateBody, admin=Depends(require_permission("panels"))):
+    server = db.get_panel_server(server_id)
+    if not server:
+        raise HTTPException(404, "یافت نشد.")
+    fields = {k: v for k, v in body.dict().items() if v is not None}
+    if fields:
+        db.update_panel_server(server_id, **fields)
+    db.log_admin_action(admin["id"], "panel_update", str(server_id), "panel", server_id)
+    return {"ok": True}
 
 
 @app.delete("/api/panel-servers/{server_id}")
