@@ -139,7 +139,7 @@ class ThreeXUIProvider(BasePanelProvider):
             "totalGB": data_limit_bytes,
             "limitIp": 0,
             "subId": sub_id,
-            "tgId": "",
+            "tgId": 0,
         }
         if protocol in ("vless", "vmess"):
             client["id"] = client_uuid
