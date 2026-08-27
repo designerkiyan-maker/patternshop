@@ -32,6 +32,20 @@ Provider پنل 3X-UI (MHSanaei/3x-ui).
   می‌شود.
 - شناسه‌ی یکتای کاربر «email» است (اینجا از همان username پروژه استفاده
   می‌شود)؛ خود کلاینت هم یک UUID جدا دارد که برای عملیات حذف لازم است.
+
+بروزرسانی (بعد از خطای «کد 404» روی addClient):
+نسخه‌های جدیدتر 3X-UI یک API کاملاً جدا و client-محور دارند:
+  /panel/api/clients/add ، /panel/api/clients/del/{username} ،
+  /panel/api/clients/traffic/{username} و ...
+که با API قدیمیِ inbound-محور (/panel/api/inbounds/addClient که کلاینت را
+داخل settings یک inbound تزریق می‌کرد) فرق دارد. مسیرهای فقط-خواندنیِ
+inbound (list / get) در هر دو نسخه هنوز کار می‌کنند، به همین دلیل آن دو
+درخواست موفق می‌شدند ولی addClient با 404 رد می‌شد. پروژه‌ی mirzabot
+(x-ui_single.php) برای پنل‌های 3X-UI دقیقاً از همین API جدید (clients/*)
+استفاده می‌کند؛ این provider هم برای هماهنگی با آن بازنویسی شد.
+لیست/جزئیات inbound همچنان از /panel/api/inbounds/* خوانده می‌شود (چون
+هنوز برای انتخاب inbound موقع افزودن سرور و برای فهمیدن پروتکل لازم است)،
+ولی ساخت/حذف/مصرف کاربر حالا از /panel/api/clients/* استفاده می‌کند.
 """
 import json
 import secrets
@@ -106,7 +120,14 @@ class ThreeXUIProvider(BasePanelProvider):
         return obj
 
     def _build_client(self, username: str, protocol: str, volume_gb: int, duration_days: int) -> tuple:
-        """کلاینت مناسب پروتکل را می‌سازد؛ خروجی: (client_dict, sub_id)"""
+        """کلاینت مناسب پروتکل را می‌سازد؛ خروجی: (client_dict, sub_id)
+
+        نکته: API جدید /panel/api/clients/add خودش هم می‌تواند id/uuid را
+        اتومات بسازد (مثل mirzabot که اصلاً id نمی‌فرستد)، ولی ما همچنان
+        صریح می‌فرستیم تا برای پروتکل‌هایی که به «password» نیاز دارند
+        (trojan/shadowsocks) هم مطمئن باشیم مقدار درست ساخته می‌شود، و
+        چون این uuid را برای عملیات‌های دیگر (مثلاً ساخت لینک کانفیگ
+        دستی به‌جای subscription) هم می‌توان استفاده کرد."""
         sub_id = secrets.token_hex(8)
         client_uuid = str(uuid.uuid4())
         expiry_ms = int((time.time() + duration_days * 86400) * 1000)
@@ -137,11 +158,13 @@ class ThreeXUIProvider(BasePanelProvider):
             raise PanelError("این سرور هنوز کامل تنظیم نشده (inbound یا آدرس Subscription خالی است).")
 
         async with self._session() as session:
+            # فقط برای فهمیدن پروتکل (vless/vmess/trojan/...) لازم است؛
+            # ساخت کاربر خودش دیگر به /panel/api/inbounds نیازی ندارد.
             inbound = await self._get_inbound(session, inbound_id)
             client, sub_id = self._build_client(username, inbound.get("protocol", "vless"), volume_gb, duration_days)
-            payload = {"id": inbound_id, "settings": json.dumps({"clients": [client]})}
+            payload = {"inboundIds": [inbound_id], "client": client}
             try:
-                async with session.post(f"{self._base_url()}/panel/api/inbounds/addClient", json=payload) as resp:
+                async with session.post(f"{self._base_url()}/panel/api/clients/add", json=payload) as resp:
                     if resp.status in (401, 403):
                         raise PanelError(f"خطا در احراز هویت (کد {resp.status}): API Token را بررسی کن.")
                     if resp.status >= 400:
@@ -160,21 +183,13 @@ class ThreeXUIProvider(BasePanelProvider):
         return PanelUserResult(username=username, subscription_url=sub_url, raw=client)
 
     async def delete_user(self, username: str) -> bool:
-        inbound_id = self.server["xui_inbound_id"]
+        """با API جدید دیگر نیازی به خواندن inbound و پیدا کردن client_id
+        نیست؛ همان username (email) مستقیماً به مسیر حذف فرستاده می‌شود."""
         async with self._session() as session:
-            inbound = await self._get_inbound(session, inbound_id)
-            settings = json.loads(inbound.get("settings") or "{}")
-            client_id = None
-            for c in settings.get("clients", []):
-                if c.get("email") == username:
-                    client_id = c.get("id") or c.get("password")
-                    break
-            if not client_id:
-                return False
             try:
-                async with session.post(
-                    f"{self._base_url()}/panel/api/inbounds/{inbound_id}/delClient/{client_id}"
-                ) as resp:
+                async with session.post(f"{self._base_url()}/panel/api/clients/del/{username}") as resp:
+                    if resp.status == 404:
+                        return False
                     return resp.status < 400
             except aiohttp.ClientError as e:
                 raise PanelError(f"خطا در اتصال به پنل: {e}") from e
@@ -182,7 +197,7 @@ class ThreeXUIProvider(BasePanelProvider):
     async def get_user_usage(self, username: str) -> dict:
         async with self._session() as session:
             try:
-                async with session.get(f"{self._base_url()}/panel/api/inbounds/getClientTraffics/{username}") as resp:
+                async with session.get(f"{self._base_url()}/panel/api/clients/traffic/{username}") as resp:
                     if resp.status in (401, 403):
                         raise PanelError(f"خطا در احراز هویت (کد {resp.status}): API Token را بررسی کن.")
                     if resp.status >= 400:
