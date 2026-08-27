@@ -3950,6 +3950,136 @@ function renderResellerCohortBlock(data) {
 
 
 /* ============================================================== panels === */
+const PANEL_TYPE_OPTIONS_HTML = [
+  ['pasarguard', 'PasarGuard'], ['3xui', '3X-UI'], ['marzban', 'Marzban'],
+  ['marzneshin', 'Marzneshin'], ['hiddify', 'Hiddify'],
+].map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+const PANEL_INBOUND_SELECT_TYPES = ['3xui'];
+const PANEL_SUB_BASE_URL_TYPES = ['3xui', 'hiddify'];
+
+function panelAddFormHtml() {
+  return `
+    <div class="form-grid">
+      <input class="input" id="p-name" placeholder="نام (مثلا سرور آلمان)">
+      <select class="input" id="p-type">${PANEL_TYPE_OPTIONS_HTML}</select>
+      <input class="input" id="p-url" placeholder="آدرس پنل (https://...)">
+      <div class="form-row"><input class="input" id="p-user" placeholder="یوزرنیم"><input class="input" id="p-pass" type="password" placeholder="پسورد"></div>
+      <p id="p-hint" style="display:none;font-size:12px;color:var(--muted,#8892a6);margin:0"></p>
+      <button class="btn btn-primary" id="p-save">ثبت</button>
+    </div>`;
+}
+
+function wirePanelAddForm(body, close) {
+  const typeSel = $('#p-type', body), userInp = $('#p-user', body), passInp = $('#p-pass', body), hint = $('#p-hint', body);
+  function syncTypeUI() {
+    const t = typeSel.value;
+    if (t === '3xui') {
+      userInp.style.display = 'none'; userInp.value = '';
+      passInp.placeholder = 'API Token (Settings ← Security در پنل)';
+      hint.style.display = 'block';
+      hint.textContent = '3X-UI جدید فقط با API Token کار می‌کند؛ یوزرنیم لازم نیست. بعد از ثبت باید inbound و لینک Subscription را هم تنظیم کنی.';
+    } else if (t === 'hiddify') {
+      userInp.style.display = ''; userInp.placeholder = 'هر مقداری (استفاده نمی‌شود)';
+      passInp.placeholder = 'Hiddify API Key (UUID ادمین)';
+      hint.style.display = 'block';
+      hint.textContent = 'Hiddify یوزر/پس ندارد؛ فقط API Key لازم است. بعد از ثبت لینک Subscription را هم می‌پرسیم.';
+    } else {
+      userInp.style.display = ''; userInp.placeholder = 'یوزرنیم';
+      passInp.placeholder = 'پسورد';
+      hint.style.display = 'none';
+    }
+  }
+  typeSel.addEventListener('change', syncTypeUI);
+  syncTypeUI();
+
+  $('#p-save', body).addEventListener('click', async () => {
+    const name = $('#p-name', body).value.trim(), api_url = $('#p-url', body).value.trim();
+    const panel_type = typeSel.value;
+    if (!name || !api_url) return toast('نام و آدرس الزامی است.', true);
+    if (!passInp.value.trim()) return toast(panel_type === '3xui' ? 'API Token الزامی است.' : 'رمز/کلید الزامی است.', true);
+    let serverId;
+    try {
+      const r = await apiPost('/panel-servers', {
+        name, panel_type, api_url,
+        api_username: userInp.value, api_password: passInp.value,
+      });
+      serverId = r.id;
+    } catch (e) { return handleErr(e); }
+
+    if (PANEL_INBOUND_SELECT_TYPES.includes(panel_type)) return finishXuiInboundSetup(serverId, close);
+    if (PANEL_SUB_BASE_URL_TYPES.includes(panel_type)) return askPanelSubBaseUrl(serverId, close);
+    toast('پنل اضافه شد.'); close(); renderPanels();
+  });
+}
+
+async function finishXuiInboundSetup(serverId, closeParent) {
+  let inbounds;
+  try {
+    inbounds = await apiGet(`/panel-servers/${serverId}/inbounds`);
+  } catch (e) {
+    toast('پنل ذخیره شد ولی دریافت لیست inbound ناموفق بود: ' + e.message, true);
+    closeParent(); renderPanels();
+    return;
+  }
+  if (!inbounds.length) {
+    toast('این پنل هیچ inbound ای ندارد؛ اول از داخل پنل یک inbound بساز، بعد دوباره تلاش کن.', true);
+    try { await apiDelete(`/panel-servers/${serverId}?force=true`); } catch (e) { /* ignore */ }
+    closeParent(); renderPanels();
+    return;
+  }
+  closeParent();
+  openModal('انتخاب Inbound', `
+    <div class="form-grid">
+      <p style="margin:0">کدام inbound برای ساخت کاربرهای جدید استفاده شود؟</p>
+      <select class="input" id="p-inbound">${inbounds.map(ib => `<option value="${ib.id}">#${ib.id} ${esc(ib.remark || '')} (${esc(ib.protocol)}:${ib.port})</option>`).join('')}</select>
+      <input class="input" id="p-suburl" placeholder="لینک پایه‌ی Subscription (https://...)">
+      <button class="btn btn-primary" id="p-inbound-save">ثبت</button>
+    </div>`, (body2, close2) => {
+    $('#p-inbound-save', body2).addEventListener('click', async () => {
+      const suburl = $('#p-suburl', body2).value.trim();
+      if (!suburl) return toast('لینک Subscription الزامی است.', true);
+      try {
+        await apiPut(`/panel-servers/${serverId}`, { xui_inbound_id: parseInt($('#p-inbound', body2).value, 10), xui_sub_base_url: suburl });
+        toast('پنل تنظیم شد.'); close2(); renderPanels();
+      } catch (e) { handleErr(e); }
+    });
+  });
+}
+
+function askPanelSubBaseUrl(serverId, closeParent) {
+  closeParent();
+  openModal('لینک Subscription', `
+    <div class="form-grid">
+      <p style="margin:0">لینک پایه‌ی Subscription این پنل را وارد کن:</p>
+      <input class="input" id="p-suburl" placeholder="https://...">
+      <button class="btn btn-primary" id="p-suburl-save">ثبت</button>
+    </div>`, (body2, close2) => {
+    $('#p-suburl-save', body2).addEventListener('click', async () => {
+      const suburl = $('#p-suburl', body2).value.trim();
+      if (!suburl) return toast('لینک Subscription الزامی است.', true);
+      try {
+        await apiPut(`/panel-servers/${serverId}`, { xui_sub_base_url: suburl });
+        toast('پنل تنظیم شد.'); close2(); renderPanels();
+      } catch (e) { handleErr(e); }
+    });
+  });
+}
+
+function wirePanelDeleteButtons() {
+  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('حذف شود؟')) return;
+    try {
+      await apiDelete(`/panel-servers/${b.dataset.del}`); toast('حذف شد.'); renderPanels();
+    } catch (e) {
+      if (e.status === 409) {
+        if (confirm(e.message + '\n\nحذف کامل (همراه با کانفیگ‌های مرتبط) انجام شود؟')) {
+          try { await apiDelete(`/panel-servers/${b.dataset.del}?force=true`); toast('حذف شد.'); renderPanels(); } catch (e2) { handleErr(e2); }
+        }
+      } else handleErr(e);
+    }
+  }));
+}
+
 async function renderPanels() {
   const servers = await apiGet('/panel-servers');
   if (loadTheme().theme === 'brutalist') return renderPanelsBrutalist(servers);
@@ -3966,26 +4096,7 @@ async function renderPanels() {
       </tr>`).join('') || '<tr><td colspan="5" class="empty-state">پنلی ثبت نشده</td></tr>'}</tbody>
     </table></div></div>
   `);
-  $('#add-panel').addEventListener('click', () => openModal('پنل جدید', `
-    <div class="form-grid">
-      <input class="input" id="p-name" placeholder="نام (مثلا سرور آلمان)">
-      <select class="input" id="p-type"><option value="pasarguard">PasarGuard</option><option value="3xui">3X-UI</option></select>
-      <input class="input" id="p-url" placeholder="آدرس پنل (https://...)">
-      <div class="form-row"><input class="input" id="p-user" placeholder="یوزرنیم"><input class="input" id="p-pass" type="password" placeholder="پسورد"></div>
-      <button class="btn btn-primary" id="p-save">ثبت</button>
-    </div>`, (body, close) => {
-    $('#p-save', body).addEventListener('click', async () => {
-      const name = $('#p-name', body).value.trim(), api_url = $('#p-url', body).value.trim();
-      if (!name || !api_url) return toast('نام و آدرس الزامی است.', true);
-      try {
-        await apiPost('/panel-servers', {
-          name, panel_type: $('#p-type', body).value, api_url,
-          api_username: $('#p-user', body).value, api_password: $('#p-pass', body).value,
-        });
-        toast('پنل اضافه شد.'); close(); renderPanels();
-      } catch (e) { handleErr(e); }
-    });
-  }));
+  $('#add-panel').addEventListener('click', () => openModal('پنل جدید', panelAddFormHtml(), wirePanelAddForm));
   $$('[data-test]', content()).forEach(b => b.addEventListener('click', async () => {
     b.textContent = 'در حال تست...'; b.disabled = true;
     try {
@@ -3994,18 +4105,7 @@ async function renderPanels() {
     } catch (e) { handleErr(e); }
     finally { b.textContent = 'تست اتصال'; b.disabled = false; }
   }));
-  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
-    if (!confirm('حذف شود؟')) return;
-    try {
-      await apiDelete(`/panel-servers/${b.dataset.del}`); toast('حذف شد.'); renderPanels();
-    } catch (e) {
-      if (e.status === 409) {
-        if (confirm(e.message + '\n\nحذف کامل (همراه با کانفیگ‌های مرتبط) انجام شود؟')) {
-          try { await apiDelete(`/panel-servers/${b.dataset.del}?force=true`); toast('حذف شد.'); renderPanels(); } catch (e2) { handleErr(e2); }
-        }
-      } else handleErr(e);
-    }
-  }));
+  wirePanelDeleteButtons();
 }
 
 /* ------------------------------------------------------------ panels: bento */
@@ -4032,26 +4132,7 @@ function renderPanelsBento(servers) {
       `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>پنلی ثبت نشده</div>`}
     </div>
   `);
-  $('#add-panel').addEventListener('click', () => openModal('پنل جدید', `
-    <div class="form-grid">
-      <input class="input" id="p-name" placeholder="نام (مثلا سرور آلمان)">
-      <select class="input" id="p-type"><option value="pasarguard">PasarGuard</option><option value="3xui">3X-UI</option></select>
-      <input class="input" id="p-url" placeholder="آدرس پنل (https://...)">
-      <div class="form-row"><input class="input" id="p-user" placeholder="یوزرنیم"><input class="input" id="p-pass" type="password" placeholder="پسورد"></div>
-      <button class="btn btn-primary" id="p-save">ثبت</button>
-    </div>`, (body, close) => {
-    $('#p-save', body).addEventListener('click', async () => {
-      const name = $('#p-name', body).value.trim(), api_url = $('#p-url', body).value.trim();
-      if (!name || !api_url) return toast('نام و آدرس الزامی است.', true);
-      try {
-        await apiPost('/panel-servers', {
-          name, panel_type: $('#p-type', body).value, api_url,
-          api_username: $('#p-user', body).value, api_password: $('#p-pass', body).value,
-        });
-        toast('پنل اضافه شد.'); close(); renderPanels();
-      } catch (e) { handleErr(e); }
-    });
-  }));
+  $('#add-panel').addEventListener('click', () => openModal('پنل جدید', panelAddFormHtml(), wirePanelAddForm));
   $$('[data-test]', content()).forEach(b => b.addEventListener('click', async () => {
     b.textContent = 'در حال تست...'; b.disabled = true;
     try {
@@ -4060,10 +4141,7 @@ function renderPanelsBento(servers) {
     } catch (e) { handleErr(e); }
     finally { b.textContent = 'تست اتصال'; b.disabled = false; }
   }));
-  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
-    if (!confirm('حذف شود؟')) return;
-    try { await apiDelete(`/panel-servers/${b.dataset.del}`); toast('حذف شد.'); renderPanels(); } catch (e) { handleErr(e); }
-  }));
+  wirePanelDeleteButtons();
 }
 
 
@@ -4106,26 +4184,7 @@ function renderPanelsBrutalist(servers) {
       `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>پنلی ثبت نشده</div>`}
     </div>
   `);
-  $('#add-panel').addEventListener('click', () => openModal('پنل جدید', `
-    <div class="form-grid">
-      <input class="input" id="p-name" placeholder="نام (مثلا سرور آلمان)">
-      <select class="input" id="p-type"><option value="pasarguard">PasarGuard</option><option value="3xui">3X-UI</option></select>
-      <input class="input" id="p-url" placeholder="آدرس پنل (https://...)">
-      <div class="form-row"><input class="input" id="p-user" placeholder="یوزرنیم"><input class="input" id="p-pass" type="password" placeholder="پسورد"></div>
-      <button class="btn btn-primary" id="p-save">ثبت</button>
-    </div>`, (body, close) => {
-    $('#p-save', body).addEventListener('click', async () => {
-      const name = $('#p-name', body).value.trim(), api_url = $('#p-url', body).value.trim();
-      if (!name || !api_url) return toast('نام و آدرس الزامی است.', true);
-      try {
-        await apiPost('/panel-servers', {
-          name, panel_type: $('#p-type', body).value, api_url,
-          api_username: $('#p-user', body).value, api_password: $('#p-pass', body).value,
-        });
-        toast('پنل اضافه شد.'); close(); renderPanels();
-      } catch (e) { handleErr(e); }
-    });
-  }));
+  $('#add-panel').addEventListener('click', () => openModal('پنل جدید', panelAddFormHtml(), wirePanelAddForm));
   $$('[data-test]', content()).forEach(b => b.addEventListener('click', async () => {
     b.classList.add('bru-testing'); b.textContent = 'در حال تست...'; b.disabled = true;
     try {
@@ -4134,10 +4193,7 @@ function renderPanelsBrutalist(servers) {
     } catch (e) { handleErr(e); }
     finally { b.classList.remove('bru-testing'); b.textContent = 'تست اتصال'; b.disabled = false; }
   }));
-  $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
-    if (!confirm('حذف شود؟')) return;
-    try { await apiDelete(`/panel-servers/${b.dataset.del}`); toast('حذف شد.'); renderPanels(); } catch (e) { handleErr(e); }
-  }));
+  wirePanelDeleteButtons();
 }
 
 /* ============================================================ settings === */
