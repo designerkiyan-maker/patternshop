@@ -3370,26 +3370,51 @@ async function renderResellers() {
 /* --------------------------------------------- سطح ۱: نماینده‌های کامل (بات) -- */
 async function renderResellersBotsTab() {
   const bots = await apiGet('/reseller-bots');
+  const totalRevenue = bots.reduce((a, b) => a + (b.revenue_toman || 0), 0);
+  const totalOrders = bots.reduce((a, b) => a + (b.paid_orders || 0), 0);
   setContent(`
     ${resellersSubtabsHtml()}
+    <div class="grid grid-4">
+      <div class="card stat-card">
+        <div class="stat-top"><span class="stat-icon stat-icon-1">${svg('resellers')}</span></div>
+        <span class="value mono">${fmt(bots.length)}</span>
+        <span class="label">تعداد نماینده‌های صاحب بات</span>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-top"><span class="stat-icon stat-icon-2">${svg('check')}</span></div>
+        <span class="value mono">${fmt(bots.filter(b => b.is_active).length)}</span>
+        <span class="label">فعال</span>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-top"><span class="stat-icon stat-icon-3">${svg('users')}</span></div>
+        <span class="value mono">${fmt(totalOrders)}</span>
+        <span class="label">سفارش تاییدشده (مجموع همه)</span>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-top"><span class="stat-icon stat-icon-4">${svg('tickets')}</span></div>
+        <span class="value mono">${fmt(totalRevenue)} <span style="font-size:12px;font-weight:600">تومان</span></span>
+        <span class="label">مجموع فروش همه‌ی نماینده‌های کامل</span>
+      </div>
+    </div>
     <div class="card">
       <div class="card-head"><h3>نماینده‌های صاحب بات مستقل</h3>
-        <span class="card-sub">نماینده‌ی «کامل» بات و (در صورت فعال‌سازی) پنل وب اختصاصی خودش را دارد؛ نماینده‌ی «سطح ۲» فقط از داخل همین بات با اعتبار حجمی کار می‌کند.</span>
+        <span class="card-sub">نماینده‌ی «کامل» بات و (در صورت فعال‌سازی) پنل وب اختصاصی خودش را دارد؛ نماینده‌ی «سطح ۲» فقط از داخل همین بات با اعتبار حجمی کار می‌کند. مبلغ فروش از سفارش‌های تاییدشده‌ی همان دیتابیس مستقل نماینده محاسبه شده است.</span>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>#</th><th>مالک</th><th>بات</th><th>سطح</th><th>وضعیت</th><th>پنل وب</th><th>تاریخ ثبت</th><th>عملیات</th></tr></thead>
+        <thead><tr><th>#</th><th>مالک</th><th>بات</th><th>سطح</th><th>فروش</th><th>وضعیت</th><th>پنل وب</th><th>تاریخ ثبت</th><th>عملیات</th></tr></thead>
         <tbody>${bots.map(b => `<tr>
           <td class="mono">#${b.id}</td>
           <td>${esc(b.owner_name || '—')}<div class="mono" style="opacity:.65;font-size:12px">${b.owner_telegram_id}</div></td>
           <td>${b.bot_username ? '@' + esc(b.bot_username) : '<span style="opacity:.5">—</span>'}</td>
           <td>${b.reseller_level === 1 ? '<span class="badge badge-approved">کامل</span>' : '<span class="badge badge-pending">سطح ۲</span>'}</td>
+          <td><span class="mono">${fmt(b.revenue_toman)} تومان</span><div style="opacity:.6;font-size:11.5px">${fmt(b.paid_orders)} سفارش</div></td>
           <td>${b.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
           <td>${b.reseller_level === 1
             ? (b.web_panel_enabled ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>')
             : '<span style="opacity:.5">—</span>'}</td>
           <td class="mono">${fmtDate(b.created_at)}</td>
           <td><button class="btn btn-sm" data-manage="${b.id}">مدیریت</button></td>
-        </tr>`).join('') || `<tr><td colspan="8" class="empty-state">${svg('empty')}<div>هیچ بات نمایندگی‌ای ثبت نشده</div></td></tr>`}</tbody>
+        </tr>`).join('') || `<tr><td colspan="9" class="empty-state">${svg('empty')}<div>هیچ بات نمایندگی‌ای ثبت نشده</div></td></tr>`}</tbody>
       </table></div>
     </div>
   `);
@@ -3511,7 +3536,36 @@ async function renderResellersCreditTab() {
     apiGet('/resellers/orphans').catch(() => []),
   ]);
 
-  const cohortHtml = cohort ? renderResellerCohortBlock(cohort) : '';
+  const hasResellers = resellers.length > 0;
+  const totalSoldGb = resellers.reduce((a, r) => a + (r.sold_volume_gb || 0), 0);
+  const totalSoldConfigs = resellers.reduce((a, r) => a + (r.sold_configs || 0), 0);
+  const introHtml = `
+    <div class="card" style="padding:18px 20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
+        <div style="min-width:240px">
+          <h3 style="margin:0 0 6px">نمایندگی اعتباری (سطح ۲)</h3>
+          <span class="card-sub">کاربرانی که بدون داشتن بات یا پنل مستقل، از یک «اعتبار حجمی» (گیگ) که خودت بهشون تخصیص می‌دی، داخل همین بات برای مشتری‌های خودشون کانفیگ می‌سازن. هر کانفیگ به‌اندازه‌ی حجمش از اعتبارشون کم می‌شه — پول این فروش‌ها بین خودشون و مشتری‌هاشونه و توی این بات ثبت نمی‌شه، فقط حجم فروخته‌شده قابل ردیابیه.</span>
+        </div>
+        <button class="btn btn-primary btn-sm" id="cres-add" style="white-space:nowrap">🔍 جستجو / فعال‌سازی نماینده با آیدی</button>
+      </div>
+      ${hasResellers ? `
+      <div style="display:flex;gap:22px;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);flex-wrap:wrap">
+        <div><span class="value mono" style="font-size:18px">${fmt(totalSoldGb)}</span> <span class="label">گیگ فروخته‌شده (مجموع)</span></div>
+        <div><span class="value mono" style="font-size:18px">${fmt(totalSoldConfigs)}</span> <span class="label">کانفیگ ساخته‌شده (مجموع)</span></div>
+      </div>` : ''}
+    </div>
+  `;
+
+  const cohortHtml = hasResellers && cohort ? renderResellerCohortBlock(cohort) : (hasResellers ? '' : `
+    <div class="card empty-state" style="padding:40px 20px">
+      ${svg('resellers')}
+      <div style="font-weight:700;margin-top:10px">هنوز هیچ نمایندگی اعتباری‌ای فعال نیست</div>
+      <div style="opacity:.7;font-size:13px;margin-top:4px;max-width:420px;margin-inline:auto">
+        از دکمه‌ی «جستجو / فعال‌سازی نماینده با آیدی» بالا، آیدی عددی یک کاربر (که قبلاً بات را استارت کرده) را وارد کن تا برایش نمایندگی فعال و اعتبار تخصیص بدی.
+      </div>
+    </div>
+  `);
+
   const orphansHtml = orphans.length ? `
     <div class="card">
       <div class="card-head"><h3>کاربران با رد پای نمایندگی بدون بات (Orphan)</h3>
@@ -3529,48 +3583,48 @@ async function renderResellersCreditTab() {
       </table></div>
     </div>` : '';
 
-  setContent(`
-    ${resellersSubtabsHtml()}
-    ${cohortHtml}
-    ${orphansHtml}
+  const listHtml = `
     <div class="card">
-      <div class="card-head"><h3>لیست نمایندگی‌های اعتباری (سطح ۲)</h3>
-        <span class="card-sub">کاربرانی که از داخل همین بات، با اعتبار حجمی دریافتی، برای مشتری‌های خودشان کانفیگ می‌سازند.</span>
+      <div class="card-head"><h3>لیست نمایندگان (${fmt(resellers.length)} نفر)</h3>
+        <span class="card-sub">برای تغییر اعتبار، پنل اختصاصی یا وضعیت هرکدام، از دکمه‌های همان ردیف استفاده کن.</span>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>اعتبار (گیگ)</th><th>پنل اختصاصی</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+        <thead><tr><th>کاربر</th><th>اعتبار باقی‌مانده</th><th>فروش</th><th>پنل اختصاصی</th><th>وضعیت</th><th>عملیات</th></tr></thead>
         <tbody>${resellers.map(r => `<tr>
-          <td class="mono">${r.telegram_id}</td><td>${esc(r.username || '—')}</td>
-          <td class="mono">${fmt(r.reseller_credit_gb)}</td>
+          <td>
+            ${r.username ? `<div>@${esc(r.username)}</div>` : ''}
+            <div class="mono" style="${r.username ? 'opacity:.6;font-size:12px' : ''}">${r.telegram_id}</div>
+          </td>
+          <td><span class="badge ${r.reseller_credit_gb > 0 ? 'badge-approved' : 'badge-rejected'}">${fmt(r.reseller_credit_gb)} گیگ</span></td>
+          <td class="mono">${fmt(r.sold_volume_gb)} گیگ<div style="opacity:.6;font-size:11.5px">${fmt(r.sold_configs)} کانفیگ</div></td>
           <td>${r.reseller_panel_id ? `<span class="mono">#${r.reseller_panel_id}</span>` : '<span style="opacity:.5">پیش‌فرض خودکار</span>'}</td>
           <td>${r.is_reseller ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
           <td>
-            <button class="btn btn-sm" data-credit="${r.telegram_id}">تنظیم اعتبار</button>
-            <button class="btn btn-sm" data-panel="${r.telegram_id}" data-panel-cur="${r.reseller_panel_id || ''}">پنل</button>
-            <button class="btn btn-sm" data-toggle-status="${r.telegram_id}" data-cur="${r.is_reseller ? 1 : 0}">${r.is_reseller ? 'غیرفعال کردن' : 'فعال کردن'}</button>
-            <button class="btn btn-sm" data-log="${r.telegram_id}">تاریخچه</button>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn btn-sm" data-credit="${r.telegram_id}">💳 اعتبار</button>
+              <button class="btn btn-sm" data-panel="${r.telegram_id}" data-panel-cur="${r.reseller_panel_id || ''}">🌐 پنل</button>
+              <button class="btn btn-sm" data-toggle-status="${r.telegram_id}" data-cur="${r.is_reseller ? 1 : 0}">${r.is_reseller ? '⛔️ غیرفعال' : '✅ فعال'}</button>
+              <button class="btn btn-sm" data-log="${r.telegram_id}">📜 تاریخچه</button>
+            </div>
           </td>
         </tr>`).join('') || `<tr><td colspan="6" class="empty-state">${svg('empty')}<div>نماینده‌ی اعتباری ثبت نشده</div></td></tr>`}</tbody>
       </table></div>
     </div>
+  `;
+
+  setContent(`
+    ${resellersSubtabsHtml()}
+    ${introHtml}
+    ${cohortHtml}
+    ${orphansHtml}
+    ${listHtml}
   `);
   bindResellersSubtabs(content());
 
-  $$('[data-credit]', content()).forEach(b => b.addEventListener('click', () => openModal('تنظیم اعتبار حجمی', `
-    <div class="form-grid">
-      <input class="input" id="credit-delta" type="number" placeholder="مقدار (گیگ، منفی=کسر)">
-      <input class="input" id="credit-reason" placeholder="دلیل (اختیاری)">
-      <button class="btn btn-primary" id="credit-save">ثبت</button>
-    </div>`, (body, close) => {
-    $('#credit-save', body).addEventListener('click', async () => {
-      const delta_gb = Number($('#credit-delta', body).value);
-      if (!delta_gb) return;
-      try {
-        await apiPost(`/resellers/${b.dataset.credit}/credit`, { delta_gb, reason: $('#credit-reason', body).value });
-        toast('اعتبار به‌روزرسانی شد.'); close(); renderResellers();
-      } catch (e) { handleErr(e); }
-    });
-  })));
+  $('#cres-add', content()).addEventListener('click', openResellerFindModal);
+
+  $$('[data-credit]', content()).forEach(b =>
+    b.addEventListener('click', () => openResellerCreditModal(b.dataset.credit)));
 
   $$('[data-toggle-status]', content()).forEach(b => b.addEventListener('click', async () => {
     try {
@@ -3624,13 +3678,82 @@ async function renderResellersCreditTab() {
     catch (e) { handleErr(e); }
   }));
 
-  if (cohort) {
+  if (hasResellers && cohort) {
     activateRings(content());
     $$('[data-toggle-churn]', content()).forEach(el => el.addEventListener('click', () => {
       const box = $('#churn-list-box', content());
       box.style.display = box.style.display === 'none' ? '' : 'none';
     }));
   }
+}
+
+function openResellerCreditModal(tgId, parentClose) {
+  openModal(`تنظیم اعتبار حجمی #${tgId}`, `
+    <div class="form-grid">
+      <input class="input" id="credit-delta" type="number" placeholder="مقدار (گیگ، منفی برای کسر)">
+      <input class="input" id="credit-reason" placeholder="دلیل (اختیاری)">
+      <button class="btn btn-primary" id="credit-save">ثبت</button>
+    </div>`, (body, close) => {
+    $('#credit-save', body).addEventListener('click', async () => {
+      const delta_gb = Number($('#credit-delta', body).value);
+      if (!delta_gb) { toast('مقدار نامعتبر است.', true); return; }
+      try {
+        await apiPost(`/resellers/${tgId}/credit`, { delta_gb, reason: $('#credit-reason', body).value });
+        toast('اعتبار به‌روزرسانی شد.'); close(); if (parentClose) parentClose(); renderResellers();
+      } catch (e) { handleErr(e); }
+    });
+  });
+}
+
+function openResellerFindModal() {
+  openModal('جستجوی کاربر برای نمایندگی', `
+    <div class="form-grid">
+      <div style="opacity:.7;font-size:12.5px">آیدی عددی تلگرام کاربر را وارد کن؛ کاربر باید قبلاً حداقل یک‌بار بات را استارت کرده باشد.</div>
+      <input class="input" id="cres-find-id" type="number" placeholder="آیدی عددی تلگرام">
+      <button class="btn btn-primary" id="cres-find-go">جستجو</button>
+      <div id="cres-find-result"></div>
+    </div>
+  `, (body, close) => {
+    const doSearch = async () => {
+      const id = Number($('#cres-find-id', body).value);
+      const box = $('#cres-find-result', body);
+      if (!id) { toast('آیدی نامعتبر است.', true); return; }
+      box.innerHTML = `<div style="opacity:.6;font-size:13px">در حال جستجو...</div>`;
+      try {
+        const data = await apiGet(`/users/${id}`);
+        const name = data.user.first_name || data.user.username || `#${id}`;
+        box.innerHTML = `
+          <div class="card" style="padding:14px;margin-top:6px">
+            <div style="font-weight:700">${esc(name)} ${data.user.username ? `<span style="opacity:.6;font-weight:400">@${esc(data.user.username)}</span>` : ''}</div>
+            <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <span class="badge ${data.is_reseller ? 'badge-approved' : 'badge-rejected'}">${data.is_reseller ? 'نماینده‌ی فعال' : 'نماینده نیست'}</span>
+              <span class="mono" style="font-size:12.5px;opacity:.8">اعتبار فعلی: ${fmt(data.reseller_credit)} گیگ</span>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+              <button class="btn btn-sm ${data.is_reseller ? 'btn-danger' : 'btn-primary'}" id="cres-find-toggle">
+                ${data.is_reseller ? '⛔️ غیرفعال کردن نمایندگی' : '✅ فعال‌سازی نمایندگی'}
+              </button>
+              <button class="btn btn-sm" id="cres-find-credit">💳 تنظیم اعتبار</button>
+            </div>
+          </div>
+        `;
+        $('#cres-find-toggle', box).addEventListener('click', async () => {
+          try {
+            await apiPost(`/resellers/${id}/status`, { enabled: !data.is_reseller });
+            toast('وضعیت تغییر کرد.'); close(); renderResellers();
+          } catch (e) { handleErr(e); }
+        });
+        $('#cres-find-credit', box).addEventListener('click', () => openResellerCreditModal(id, close));
+      } catch (e) {
+        box.innerHTML = `
+          <div class="empty-state" style="padding:20px 0">
+            ${svg('empty')}<div>کاربری با این آیدی پیدا نشد؛ باید حداقل یک‌بار بات را استارت کرده باشد.</div>
+          </div>`;
+      }
+    };
+    $('#cres-find-go', body).addEventListener('click', doSearch);
+    $('#cres-find-id', body).addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+  });
 }
 
 /* ------------------------------------------------------ درخواست‌های نمایندگی -- */
@@ -3754,7 +3877,7 @@ function openResellerRequestRejectModal(requestId, kind, parentClose) {
 /* -------------------------------------------------- کوهورت نگهداشت (مشترک) -- */
 function renderResellerCohortBlock(data) {
   const c = data.churn;
-  const months = data.cohorts;
+  const months = data.cohorts.filter(m => m.size > 0);
   const allMonths = months.length ? months[months.length - 1].retention.map(r => r.month) : [];
 
   const heatRows = months.map(co => {
@@ -3762,7 +3885,7 @@ function renderResellerCohortBlock(data) {
       const pct = r.pct;
       const alpha = Math.max(0.08, Math.min(1, pct / 100));
       return `<td class="mono" style="text-align:center;background:rgba(139,92,246,${alpha.toFixed(2)});border-radius:6px">
-        ${co.size ? `${pct}٪<div style="font-size:10px;opacity:.75">${fmt(r.active)}</div>` : '—'}
+        ${pct}٪<div style="font-size:10px;opacity:.75">${fmt(r.active)} نفر</div>
       </td>`;
     }).join('');
     const pad = allMonths.length - co.retention.length;
@@ -3787,7 +3910,7 @@ function renderResellerCohortBlock(data) {
       <div class="card stat-card">
         <div class="stat-top"><span class="stat-icon stat-icon-2">${svg('check')}</span></div>
         <span class="value mono">${fmt(c.active)}</span>
-        <span class="label">فعال (${fmt(c.inactivity_days)} روز اخیر)</span>
+        <span class="label">فعال (${fmt(c.inactivity_days)} روز اخیر فعالیت داشته‌اند)</span>
       </div>
       <div class="card stat-card" data-toggle-churn style="cursor:pointer">
         <div class="stat-top">
@@ -3795,24 +3918,25 @@ function renderResellerCohortBlock(data) {
           <div class="ring" style="--ring-a:var(--rose)" data-pct="${c.churn_rate}"><span>${c.churn_rate}٪</span></div>
         </div>
         <span class="value mono">${fmt(c.churned)}</span>
-        <span class="label">ریزش‌کرده (churn) — برای لیست کلیک کنید</span>
+        <span class="label">ریزش‌کرده (بی‌فعالیت) — کلیک کن تا لیستش را ببینی</span>
       </div>
       <div class="card stat-card">
         <div class="stat-top"><span class="stat-icon stat-icon-3">${svg('users')}</span></div>
         <span class="value mono">${fmt(months.reduce((a, m) => a + m.size, 0))}</span>
-        <span class="label">مجموع نماینده‌های ${fmt(months.length)} ماه اخیر</span>
+        <span class="label">نماینده‌ی جدید در ${fmt(data.cohorts.length)} ماه اخیر</span>
       </div>
     </div>
 
+    ${months.length ? `
     <div class="card">
       <div class="card-head"><h3>کوهورت نگهداشت ماهانه نمایندگان</h3>
-        <span class="card-sub">هر ردیف یک کوهورت (ماه فعال‌سازی) — درصد نماینده‌های همان کوهورت که در هر ماه بعد هم فعالیت (شارژ/مصرف) داشته‌اند.</span>
+        <span class="card-sub">هر ردیف، نماینده‌هایی هستند که در همان ماه فعال شدند. ستون‌های M0, M1, ... یعنی چند درصد از همان گروه در ماه‌های بعدی هم فعالیت (شارژ/مصرف اعتبار) داشته‌اند — رنگ پررنگ‌تر یعنی نگهداشت بهتر.</span>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>ماه کوهورت</th><th>تعداد</th>${allMonths.map((m, i) => `<th class="mono">M${i}</th>`).join('')}</tr></thead>
-        <tbody>${heatRows || '<tr><td colspan="2" class="empty-state">داده‌ای نیست</td></tr>'}</tbody>
+        <thead><tr><th>ماه فعال‌سازی</th><th>تعداد</th>${allMonths.map((m, i) => `<th class="mono">M${i}</th>`).join('')}</tr></thead>
+        <tbody>${heatRows}</tbody>
       </table></div>
-    </div>
+    </div>` : ''}
 
     <div class="card" id="churn-list-box" style="display:none">
       <div class="card-head"><h3>نماینده‌های در آستانه‌ی ریزش / ریزش‌کرده</h3></div>
@@ -3823,6 +3947,7 @@ function renderResellerCohortBlock(data) {
     </div>
   `;
 }
+
 
 /* ============================================================== panels === */
 async function renderPanels() {
