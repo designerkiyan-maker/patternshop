@@ -1466,6 +1466,12 @@ def api_reseller_panels_lite(admin=Depends(require_permission("resellers"))):
 def api_reseller_bots(admin=Depends(require_permission("resellers"))):
     bots = rows_to_list(db.list_reseller_bots())
     for b in bots:
+        try:
+            rdb = Database(resolve_db_path(b["db_path"]))
+            b.update(rdb.get_bot_revenue_summary())
+        except Exception:
+            b["revenue_toman"] = 0
+            b["paid_orders"] = 0
         b.pop("bot_token", None)
         b.pop("web_panel_setup_token", None)
     return bots
@@ -1604,7 +1610,13 @@ def api_reseller_webpanel_login_link(bot_id: int, request: Request, admin=Depend
 
 @app.get("/api/resellers")
 def api_resellers(admin=Depends(require_permission("resellers"))):
-    return rows_to_list(db.get_resellers())
+    rows = rows_to_list(db.get_resellers())
+    sales = db.get_reseller_sales_map()
+    for r in rows:
+        s = sales.get(r["telegram_id"], {"configs": 0, "volume_gb": 0})
+        r["sold_configs"] = s["configs"]
+        r["sold_volume_gb"] = s["volume_gb"]
+    return rows
 
 
 class ResellerCreditBody(BaseModel):
