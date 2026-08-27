@@ -3394,7 +3394,17 @@ class Database:
 
     def create_reseller_request(self, user_id: int, volume_gb: int, request_text: str) -> int:
         with self._get_conn() as conn:
-            known = {"user_id": user_id, "volume_gb": volume_gb, "request_text": request_text}
+            # status را صراحتاً اینجا ست می‌کنیم و به مقدار پیش‌فرض ستون در schema
+            # تکیه نمی‌کنیم. روی دیتابیس‌های قدیمی‌تر که ستون status از قبل (قبل از
+            # اضافه‌شدن DEFAULT 'pending_review') با ALTER TABLE ساخته شده بود، تکیه
+            # به دیفالت باعث می‌شد status درخواست‌های تازه NULL بماند و دکمه‌ی
+            # «تایید و تعیین هزینه» همیشه با خطای «این درخواست دیگر معتبر نیست»
+            # مواجه شود (چون NULL != 'pending_review'). ست‌کردن صریح این مشکل را
+            # مستقل از تاریخچه‌ی دیتابیس برای همیشه حل می‌کند.
+            known = {
+                "user_id": user_id, "volume_gb": volume_gb, "request_text": request_text,
+                "status": "pending_review",
+            }
             fields = list(known.keys())
             values = list(known.values())
             # بعضی نصب‌های خیلی قدیمی ممکن است ستون‌های اضافی/الزامی (NOT NULL بدون
@@ -3405,7 +3415,7 @@ class Database:
             # و برایشان یک مقدار بی‌ضرر بر اساس نوعشان می‌فرستیم.
             for row in conn.execute("PRAGMA table_info(reseller_requests)").fetchall():
                 name = row["name"]
-                if name in known or name in ("id", "status", "created_at", "updated_at"):
+                if name in known or name in ("id", "created_at", "updated_at"):
                     continue
                 if row["notnull"] and row["dflt_value"] is None:
                     col_type = (row["type"] or "").upper()
