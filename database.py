@@ -2315,6 +2315,27 @@ class Database:
                 return conn.execute("SELECT * FROM reseller_bots WHERE is_active=1 ORDER BY id").fetchall()
             return conn.execute("SELECT * FROM reseller_bots ORDER BY id").fetchall()
 
+    def get_bot_revenue_summary(self):
+        """جمع فروش (سفارش‌های تاییدشده) روی همین دیتابیس - برای نمایش میزان فروش هر
+        نماینده‌ی کامل (سطح ۱) که دیتابیس/باتِ مستقل خودش را دارد، از پنل وب اصلی."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(CASE WHEN o.status='approved' THEN COALESCE(o.final_price, p.price) ELSE 0 END),0) revenue, "
+                "COUNT(CASE WHEN o.status='approved' THEN 1 END) cnt "
+                "FROM orders o LEFT JOIN products p ON p.id=o.product_id"
+            ).fetchone()
+        return {"revenue_toman": row["revenue"] or 0, "paid_orders": row["cnt"] or 0}
+
+    def get_reseller_sales_map(self):
+        """برای هر نماینده‌ی اعتباری (سطح ۲)، تعداد و مجموع حجم کانفیگ‌هایی که از اعتبار
+        حجمی خودش برای مشتری‌هایش ساخته (source='reseller' در custom_configs)."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT user_id, COUNT(*) cnt, COALESCE(SUM(volume_gb),0) gb "
+                "FROM custom_configs WHERE source='reseller' GROUP BY user_id"
+            ).fetchall()
+        return {r["user_id"]: {"configs": r["cnt"], "volume_gb": r["gb"]} for r in rows}
+
     def get_reseller_bot(self, bot_id: int):
         with self._get_conn() as conn:
             return conn.execute("SELECT * FROM reseller_bots WHERE id=?", (bot_id,)).fetchone()
