@@ -28,8 +28,16 @@ class ThreeXUIProvider(BasePanelProvider):
 
     async def _login_session(self) -> aiohttp.ClientSession:
         """یک ClientSession با کوکی سشن معتبر برمی‌گرداند (باید بعد از استفاده
-        توسط فراخواننده بسته شود)."""
-        session = aiohttp.ClientSession()
+        توسط فراخواننده بسته شود).
+
+        نکته: پنل‌های 3X-UI تقریباً همیشه با گواهی self-signed یا روی
+        http بالا می‌آیند (خودِ نصب‌کننده‌ی رسمی هم گزینه‌ی رد کردن SSL را
+        می‌دهد). دقیقاً مثل پروژه‌ی mirzabot (که در CurlRequest همه‌جا
+        CURLOPT_SSL_VERIFYPEER را false می‌گذارد)، اینجا هم verify گواهی
+        را غیرفعال می‌کنیم؛ در غیر این‌صورت با گواهی خودامضا اتصال با خطای
+        SSL شکست می‌خورد و کاربر آن را «متصل نمی‌شود» می‌بیند."""
+        connector = aiohttp.TCPConnector(ssl=False)
+        session = aiohttp.ClientSession(connector=connector)
         try:
             async with session.post(
                 f"{self._base_url()}/login",
