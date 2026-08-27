@@ -33,6 +33,7 @@ from admin_panel.telegram_notify import send_message as tg_send, send_document a
 from admin_panel.config_delivery_web import deliver_config_to_user_web
 from admin_panel.webpush import PUSH_ENABLED, send_push
 from reseller_auto_provision import provision_auto_config, ProvisionError
+from direct_panel_provision import provision_direct, ProvisionError as DirectProvisionError
 from stock_alerts import check_and_notify_low_stock
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS
 from renewal_reminders import STATUS_KEY_LAST_RUN, STATUS_KEY_LAST_DATE_SENT, STATUS_KEY_LAST_VOLUME_SENT
@@ -903,8 +904,11 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
 
     if product and product["is_auto_provision"]:
         try:
-            results = await provision_auto_config(db, product, quantity)
-        except ProvisionError as e:
+            if product["provision_server_id"]:
+                results = await provision_direct(db, product, quantity)
+            else:
+                results = await provision_auto_config(db, product, quantity)
+        except (ProvisionError, DirectProvisionError) as e:
             raise HTTPException(400, str(e))
         db.approve_order_auto(order_id)
         db.log_admin_action(
@@ -1106,6 +1110,7 @@ class ProductBody(BaseModel):
     duration_days: int = 30
     is_auto_provision: bool = False
     auto_provision_volume_gb: Optional[int] = None
+    provision_server_id: Optional[int] = None
 
 
 @app.get("/api/products")
@@ -1116,11 +1121,20 @@ def api_products(admin=Depends(get_current_admin)):
     return products
 
 
+@app.get("/api/panel-servers-lite")
+def api_panel_servers_lite(admin=Depends(require_permission("catalog"))):
+    """لیست سبک پنل‌ها (فقط id/name) برای انتخاب پنل موقع ساخت محصول اتصال مستقیم."""
+    return [{"id": s["id"], "name": s["name"]} for s in db.get_panel_servers(active_only=True)]
+
+
 @app.post("/api/products")
 def api_add_product(body: ProductBody, admin=Depends(require_permission("catalog"))):
+    if body.provision_server_id and not body.auto_provision_volume_gb:
+        raise HTTPException(400, "برای اتصال مستقیم به پنل باید حجم (گیگابایت) را مشخص کنید.")
     pid = db.add_product(
         body.category_id, body.name, body.price, body.description, body.duration_days,
-        body.is_auto_provision, body.auto_provision_volume_gb,
+        body.is_auto_provision or bool(body.provision_server_id), body.auto_provision_volume_gb,
+        body.provision_server_id,
     )
     db.log_admin_action(admin["id"], "product_add", f"{body.name} (پنل وب - {admin['username']})", "product", pid)
     return {"id": pid}
