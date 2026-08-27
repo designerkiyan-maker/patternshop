@@ -62,6 +62,7 @@ from states import (
     AdminRestoreBackup,
     AdminAddPanelServer,
     AdminSetPanelTemplate,
+    AdminSetPanelSubUrl,
     AdminAddPricingTier,
     AdminCustomConfigSettings,
     AdminResetTestConfig,
@@ -1601,16 +1602,23 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("آدرس باید با http:// یا https:// شروع شود.")
             return
         await state.update_data(url=url)
-        await state.set_state(AdminAddPanelServer.waiting_username)
         data = await state.get_data()
+        if data.get("panel_type") == "3xui":
+            # 3X-UI فقط با API Token احراز هویت می‌شود و اصلاً یوزرنیم ندارد؛
+            # پس دیگر لازم نیست از ادمین یک مقدار الکی برای «نام کاربری» بپرسیم -
+            # همینجا یک مقدار ثابت داخلی ذخیره می‌شود و مستقیم سراغ API Token می‌رویم.
+            await state.update_data(username="3xui")
+            await state.set_state(AdminAddPanelServer.waiting_password)
+            await message.answer(
+                "API Token پنل را بفرست (نه پسورد ادمین!):\n"
+                "از داخل پنل 3X-UI برو به Settings ← Security ← API Token، یکی بساز و همان را اینجا بفرست.\n"
+                "(نسخه‌های جدید 3X-UI لاگین با یوزر/پس را برای بات‌ها قبول نمی‌کنند و فقط با API Token کار می‌کنند.)"
+            )
+            return
+        await state.set_state(AdminAddPanelServer.waiting_username)
         if data.get("panel_type") == "hiddify":
             await message.answer(
                 "هیدیفای یوزر/پس ندارد؛ این فیلد استفاده نمی‌شود - فقط هر متنی (مثلاً «hiddify») بفرست:"
-            )
-        elif data.get("panel_type") == "3xui":
-            await message.answer(
-                "این پنل با API Token وصل می‌شود، نه یوزر/پس؛ این فیلد استفاده نمی‌شود - "
-                "فقط هر متنی (مثلاً «3xui») بفرست:"
             )
         else:
             await message.answer("نام کاربری ادمین پنل را بفرست:")
@@ -1622,12 +1630,6 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         data = await state.get_data()
         if data.get("panel_type") == "hiddify":
             await message.answer("Hiddify-API-Key (همان UUID ادمین از داخل پنل: تنظیمات ← API) را بفرست:")
-        elif data.get("panel_type") == "3xui":
-            await message.answer(
-                "API Token پنل را بفرست (نه پسورد ادمین!):\n"
-                "از داخل پنل 3X-UI برو به Settings ← Security ← API Token، یکی بساز و همان را اینجا بفرست.\n"
-                "(نسخه‌های جدید 3X-UI لاگین با یوزر/پس را برای بات‌ها قبول نمی‌کنند و فقط با API Token کار می‌کنند.)"
-            )
         else:
             await message.answer("رمز عبور ادمین پنل را بفرست:")
 
@@ -1818,6 +1820,46 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await state.clear()
         db.log_admin_action(message.from_user.id, "panel_server_template_update", f"سرور #{server['id']} ← «{message.text.strip()}»")
         await message.answer("✅ قالب جدید ذخیره شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    @router.callback_query(F.data.startswith("adm_panel_server_suburl:"))
+    async def cb_admin_panel_server_suburl(call: CallbackQuery, state: FSMContext):
+        if not db.is_full_access_bot(is_main_bot):
+            return await deny_reseller_panel_access(call)
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        server_id = callback_id(call.data, "adm_panel_server_suburl")
+        server = db.get_panel_server(server_id)
+        if not server:
+            await call.answer("سرور یافت نشد.", show_alert=True)
+            return
+        await state.update_data(panel_server_id=server_id)
+        await state.set_state(AdminSetPanelSubUrl.waiting_url)
+        current = server["xui_sub_base_url"] or "—"
+        await safe_edit(
+            call,
+            f"آدرس فعلی Subscription:\n{current}\n\n"
+            "آدرس جدید Subscription پنل را بفرست (همان چیزی که پنل موقع ساخت کاربر دستی نشانت می‌دهد، "
+            "مثلاً https://domain:2096/sub یا https://domain/sub - بدون / انتهایی):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminSetPanelSubUrl.waiting_url)
+    async def process_panel_server_suburl_update(message: Message, state: FSMContext):
+        url = message.text.strip()
+        if not url.startswith("http://") and not url.startswith("https://"):
+            await message.answer("آدرس باید با http:// یا https:// شروع شود.")
+            return
+        data = await state.get_data()
+        server = db.get_panel_server(data["panel_server_id"])
+        if not server:
+            await state.clear()
+            await message.answer("سرور یافت نشد.")
+            return
+        db.update_panel_server(server["id"], xui_sub_base_url=url)
+        await state.clear()
+        db.log_admin_action(message.from_user.id, "panel_server_suburl_update", f"سرور #{server['id']} ← {url}")
+        await message.answer("✅ آدرس Subscription جدید ذخیره شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
     @router.callback_query(F.data.startswith("adm_panel_server_test:"))
     async def cb_admin_panel_server_test(call: CallbackQuery):

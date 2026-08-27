@@ -159,6 +159,10 @@ class AdminSetPanelTemplate(StatesGroup):
     waiting_username = State()
 
 
+class AdminSetPanelSubUrl(StatesGroup):
+    waiting_url = State()
+
+
 class AdminAddPricingTier(StatesGroup):
     waiting_from_gb = State()
     waiting_to_gb = State()
