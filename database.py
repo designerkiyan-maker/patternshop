@@ -664,6 +664,7 @@ class Database:
             ("panel_servers", "xui_sub_base_url", "TEXT"),
             ("products", "is_auto_provision", "INTEGER DEFAULT 0"),
             ("products", "auto_provision_volume_gb", "INTEGER"),
+            ("products", "provision_server_id", "INTEGER"),
             ("users", "is_reseller", "INTEGER DEFAULT 0"),
             ("users", "reseller_credit_gb", "INTEGER DEFAULT 0"),
             ("custom_configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
@@ -1358,13 +1359,14 @@ class Database:
     # -----------------------------------------------------------------------
 
     def add_product(self, category_id: int, name: str, price: int, description: str = "", duration_days: int = 30,
-                     is_auto_provision: bool = False, auto_provision_volume_gb: int = None) -> int:
+                     is_auto_provision: bool = False, auto_provision_volume_gb: int = None,
+                     provision_server_id: int = None) -> int:
         with self._get_conn() as conn:
             cur = conn.execute(
                 "INSERT INTO products (category_id, name, price, description, duration_days, "
-                "is_auto_provision, auto_provision_volume_gb) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "is_auto_provision, auto_provision_volume_gb, provision_server_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (category_id, name, price, description, duration_days,
-                 1 if is_auto_provision else 0, auto_provision_volume_gb),
+                 1 if is_auto_provision else 0, auto_provision_volume_gb, provision_server_id),
             )
             return cur.lastrowid
 
@@ -1400,7 +1402,9 @@ class Database:
                 conn.execute("UPDATE products SET is_active=? WHERE id=?", (new_val, product_id))
 
     def edit_product(self, product_id: int, name: str = None, price: int = None,
-                      description: str = None, duration_days: int = None):
+                      description: str = None, duration_days: int = None,
+                      is_auto_provision: bool = None, auto_provision_volume_gb: int = None,
+                      provision_server_id: int = None):
         fields, values = [], []
         if name is not None:
             fields.append("name=?"); values.append(name)
@@ -1410,6 +1414,12 @@ class Database:
             fields.append("description=?"); values.append(description)
         if duration_days is not None:
             fields.append("duration_days=?"); values.append(duration_days)
+        if is_auto_provision is not None:
+            fields.append("is_auto_provision=?"); values.append(1 if is_auto_provision else 0)
+        if auto_provision_volume_gb is not None:
+            fields.append("auto_provision_volume_gb=?"); values.append(auto_provision_volume_gb)
+        if provision_server_id is not None:
+            fields.append("provision_server_id=?"); values.append(provision_server_id)
         if not fields:
             return
         values.append(product_id)

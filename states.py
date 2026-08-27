@@ -33,6 +33,8 @@ class AdminAddProduct(StatesGroup):
     waiting_price = State()
     waiting_desc = State()
     waiting_duration = State()
+    waiting_provision_choice = State()
+    waiting_provision_server = State()
     waiting_auto_provision_volume = State()
 
 

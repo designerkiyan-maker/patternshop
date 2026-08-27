@@ -31,6 +31,7 @@ from stock_alerts import check_and_notify_low_stock
 import crypto_payment
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
 from reseller_auto_provision import provision_auto_config, provision_test_config, ProvisionError
+from direct_panel_provision import provision_direct, ProvisionError as DirectProvisionError
 
 
 async def _send_admin_notification(bot, admin_id, send_coro_factory, context_label: str, ref_id: int):
@@ -458,8 +459,11 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
             if product["is_auto_provision"]:
                 try:
-                    prov_results = await provision_auto_config(db, product, quantity)
-                except ProvisionError as e:
+                    if product["provision_server_id"]:
+                        prov_results = await provision_direct(db, product, quantity)
+                    else:
+                        prov_results = await provision_auto_config(db, product, quantity)
+                except (ProvisionError, DirectProvisionError) as e:
                     db.reject_order(order_id)
                     await _notify_admins_of_order(bot, order_id)
                     await call.message.edit_text(

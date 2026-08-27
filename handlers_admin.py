@@ -34,6 +34,7 @@ from panel_providers import (
     SUB_BASE_URL_PANEL_TYPES, INBOUND_SELECT_PANEL_TYPES,
 )
 from reseller_auto_provision import provision_auto_config, ProvisionError
+from direct_panel_provision import provision_direct, ProvisionError as DirectProvisionError
 from states import (
     AdminAddCategory,
     AdminAddProduct,
@@ -499,16 +500,51 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await state.update_data(duration_days=int(text))
 
         if db.is_full_access_bot(is_main_bot):
-            data = await state.get_data()
-            db.add_product(data["category_id"], data["name"], data["price"], data["description"], data["duration_days"])
-            db.log_admin_action(message.from_user.id, "product_add", f"محصول «{data['name']}» | قیمت: {data['price']:,}")
-            await state.clear()
-            await message.answer("✅ محصول با موفقیت اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+            await state.set_state(AdminAddProduct.waiting_provision_choice)
+            await message.answer(
+                "منبع کانفیگ این محصول چیست؟\n\n"
+                "📦 بانک کانفیگ: از لینک‌های از پیش آماده‌شده تحویل داده می‌شود.\n"
+                "🔌 اتصال مستقیم به پنل: هر بار خرید، همان لحظه یک کاربر واقعی روی پنل انتخابی ساخته می‌شود "
+                "(نیازی به پر کردن بانک کانفیگ نیست).",
+                reply_markup=kb.admin_new_product_source_kb(),
+            )
             return
 
         # نمایندگی سطح ۲: به پنل/بانک لینک دسترسی ندارد، همیشه خودکار از اعتبار حجمی است - سوالی پرسیده نمی‌شود
         await state.set_state(AdminAddProduct.waiting_auto_provision_volume)
         await message.answer("این محصول چند گیگابایت باشد؟ فقط عدد وارد کنید (مثال: 30):")
+
+    @router.callback_query(AdminAddProduct.waiting_provision_choice, F.data.startswith("adm_newprod_src:"))
+    async def cb_pick_product_source(call: CallbackQuery, state: FSMContext):
+        source = call.data.split(":", 1)[1]
+        if source == "bank":
+            data = await state.get_data()
+            db.add_product(data["category_id"], data["name"], data["price"], data["description"], data["duration_days"])
+            db.log_admin_action(call.from_user.id, "product_add", f"محصول «{data['name']}» | قیمت: {data['price']:,}")
+            await state.clear()
+            await safe_edit(call, "✅ محصول با موفقیت اضافه شد.\nحالا از «بانک کانفیگ» می‌تونی لینک‌ها رو براش اضافه کنی.")
+            await call.answer()
+            return
+
+        # اتصال مستقیم به پنل
+        servers = db.get_panel_servers(active_only=True)
+        if not servers:
+            await call.answer("ابتدا باید حداقل یک پنل فعال در بخش «مدیریت پنل‌ها» تعریف کنید.", show_alert=True)
+            return
+        await state.set_state(AdminAddProduct.waiting_provision_server)
+        await safe_edit(call, "این محصول به کدام پنل وصل شود؟", reply_markup=kb.admin_pick_provision_server_kb(servers))
+        await call.answer()
+
+    @router.callback_query(AdminAddProduct.waiting_provision_server, F.data.startswith("adm_newprod_srv:"))
+    async def cb_pick_provision_server(call: CallbackQuery, state: FSMContext):
+        server_id = callback_id(call.data, "adm_newprod_srv")
+        if server_id is None:
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
+        await state.update_data(provision_server_id=server_id)
+        await state.set_state(AdminAddProduct.waiting_auto_provision_volume)
+        await safe_edit(call, "این محصول چند گیگابایت باشد؟ فقط عدد وارد کنید (مثال: 30):", reply_markup=None)
+        await call.answer()
 
     @router.message(AdminAddProduct.waiting_auto_provision_volume)
     async def process_product_auto_provision_volume(message: Message, state: FSMContext):
@@ -517,21 +553,33 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("لطفاً فقط عدد صحیح و بزرگ‌تر از صفر وارد کنید. مثال: 30")
             return
         data = await state.get_data()
+        provision_server_id = data.get("provision_server_id")
         db.add_product(
             data["category_id"], data["name"], data["price"], data["description"], data["duration_days"],
             is_auto_provision=True, auto_provision_volume_gb=int(text),
+            provision_server_id=provision_server_id,
         )
         db.log_admin_action(
             message.from_user.id, "product_add",
-            f"محصول «{data['name']}» (خودکار، {text} گیگ) | قیمت: {data['price']:,}",
+            f"محصول «{data['name']}» (خودکار"
+            + (" - اتصال مستقیم به پنل" if provision_server_id else "")
+            + f"، {text} گیگ) | قیمت: {data['price']:,}",
         )
         await state.clear()
-        await message.answer(
-            "✅ محصول با موفقیت اضافه شد.\n"
-            "⚠️ برای این‌که این محصول واقعاً کار کند، باید توسط ادمین بات اصلی برایت «نماینده» فعال شده و "
-            "اعتبار حجمی و پنل نمایندگی برایت تنظیم شده باشد.",
-            reply_markup=kb.admin_panel_kb(db, is_main_bot),
-        )
+        if provision_server_id:
+            await message.answer(
+                "✅ محصول با موفقیت اضافه شد.\n"
+                "هر بار خرید این محصول، خودکار روی پنل انتخابی یک کاربر واقعی ساخته می‌شود؛ "
+                "نیازی به اضافه کردن لینک به بانک کانفیگ نیست.",
+                reply_markup=kb.admin_panel_kb(db, is_main_bot),
+            )
+        else:
+            await message.answer(
+                "✅ محصول با موفقیت اضافه شد.\n"
+                "⚠️ برای این‌که این محصول واقعاً کار کند، باید توسط ادمین بات اصلی برایت «نماینده» فعال شده و "
+                "اعتبار حجمی و پنل نمایندگی برایت تنظیم شده باشد.",
+                reply_markup=kb.admin_panel_kb(db, is_main_bot),
+            )
 
     # -------------------------------------------------------------------
     # افزودن کانفیگ (بانک لینک) به محصول
@@ -887,8 +935,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if product and product["is_auto_provision"]:
             quantity = order["quantity"] or 1
             try:
-                prov_results = await provision_auto_config(db, product, quantity)
-            except ProvisionError as e:
+                if product["provision_server_id"]:
+                    prov_results = await provision_direct(db, product, quantity)
+                else:
+                    prov_results = await provision_auto_config(db, product, quantity)
+            except (ProvisionError, DirectProvisionError) as e:
                 await call.answer(f"⛔️ {e}", show_alert=True)
                 return
             db.approve_order_auto(order_id)

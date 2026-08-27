@@ -605,6 +605,23 @@ def admin_pick_category_kb(categories, prefix) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def admin_new_product_source_kb() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="📦 بانک کانفیگ (لینک‌های آماده)", callback_data="adm_newprod_src:bank")],
+        [InlineKeyboardButton(text="🔌 اتصال مستقیم به پنل", callback_data="adm_newprod_src:direct")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_pick_provision_server_kb(servers) -> InlineKeyboardMarkup:
+    rows = []
+    for s in servers:
+        rows.append([InlineKeyboardButton(text=f"🖥 {s['name']}", callback_data=f"adm_newprod_srv:{s['id']}")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def admin_pick_product_kb(products, prefix) -> InlineKeyboardMarkup:
     rows = []
     for p in products:
