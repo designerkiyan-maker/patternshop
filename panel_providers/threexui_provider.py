@@ -1,8 +1,29 @@
 """
 Provider پنل 3X-UI (MHSanaei/3x-ui).
 
-تفاوت کلیدی با PasarGuard:
-- احراز هویت با کوکی سشن (لاگین با یوزر/پس روی /login)، نه Bearer token.
+روش احراز هویت: Bearer API Token (نه لاگین با یوزر/پس روی /login).
+
+چرا این تغییر لازم بود:
+- نسخه‌های جدید 3X-UI (v3.x به بعد) یک لایه‌ی CSRF hardening روی /login
+  اضافه کرده‌اند که لاگین برنامه‌نویسی (بدون مرورگر/کوکی از قبل) را با
+  خطای 403 رد می‌کند (باگ شناخته‌شده‌ی خودِ پروژه‌ی 3x-ui، مثلاً ایشوهای
+  #4227 و #5622). یعنی روش قدیمی «لاگین با یوزر/پس و گرفتن کوکی سشن» روی
+  پنل‌های امروزی اصلاً کار نمی‌کند.
+- خودِ 3X-UI رسمی برای همین حالت یک روش جایگزین دارد: از داخل پنل
+  Settings ← Security یک «API Token» بساز و آن را به‌جای پسورد به‌صورت
+  هدر Authorization: Bearer بفرست. تمام مسیرهای /panel/api/* هر دو روش
+  (کوکی سشن یا Bearer Token) را قبول می‌کنند.
+- پروژه‌ی mirzabot (فایل x-ui_single.php) هم دقیقاً همین روش را استفاده
+  می‌کند: هیچ‌وقت /login صدا زده نمی‌شود؛ همان مقدار پسورد مستقیم به‌عنوان
+  Bearer token فرستاده می‌شود. این provider هم برای هماهنگی و برای این‌که
+  واقعاً کار کند، از همین روش پیروی می‌کند.
+
+نکته‌ی مهم برای ادمین: توی فیلد «رمز عبور ادمین پنل» موقع افزودن سرور،
+باید API Token (از Settings ← Security پنل 3X-UI) وارد شود، نه پسورد
+واقعی ادمین. فیلد «نام کاربری» برای این نوع پنل استفاده نمی‌شود (هر
+مقداری قابل قبول است).
+
+بقیه‌ی جزئیات مثل قبل:
 - هر «کلاینت» باید داخل یک inbound مشخص اضافه شود (نه مستقل)؛ به همین دلیل
   روی هر سرور یک xui_inbound_id ذخیره می‌کنیم (ادمین موقع افزودن سرور از
   بین inbound های موجود روی پنل انتخاب می‌کند).
@@ -26,54 +47,45 @@ class ThreeXUIProvider(BasePanelProvider):
     def _base_url(self) -> str:
         return self.server["api_url"].rstrip("/")
 
-    async def _login_session(self) -> aiohttp.ClientSession:
-        """یک ClientSession با کوکی سشن معتبر برمی‌گرداند (باید بعد از استفاده
-        توسط فراخواننده بسته شود).
+    def _session(self) -> aiohttp.ClientSession:
+        """یک ClientSession با هدر Bearer token می‌سازد (بدون کوکی/لاگین).
 
-        نکته: پنل‌های 3X-UI تقریباً همیشه با گواهی self-signed یا روی
-        http بالا می‌آیند (خودِ نصب‌کننده‌ی رسمی هم گزینه‌ی رد کردن SSL را
-        می‌دهد). دقیقاً مثل پروژه‌ی mirzabot (که در CurlRequest همه‌جا
-        CURLOPT_SSL_VERIFYPEER را false می‌گذارد)، اینجا هم verify گواهی
-        را غیرفعال می‌کنیم؛ در غیر این‌صورت با گواهی خودامضا اتصال با خطای
-        SSL شکست می‌خورد و کاربر آن را «متصل نمی‌شود» می‌بیند."""
+        نکته: پنل‌های 3X-UI تقریباً همیشه با گواهی self-signed یا روی http
+        بالا می‌آیند (خودِ نصب‌کننده‌ی رسمی هم گزینه‌ی رد کردن SSL را می‌دهد؛
+        مثل mirzabot که در CurlRequest همه‌جا CURLOPT_SSL_VERIFYPEER را
+        false می‌گذارد)، پس اینجا هم verify گواهی را غیرفعال می‌کنیم."""
+        token = self.server["api_password"]
         connector = aiohttp.TCPConnector(ssl=False)
-        session = aiohttp.ClientSession(connector=connector)
-        try:
-            async with session.post(
-                f"{self._base_url()}/login",
-                json={"username": self.server["api_username"], "password": self.server["api_password"]},
-                headers={"Content-Type": "application/json", "Accept": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=20),
-            ) as resp:
-                if resp.status >= 400:
-                    text = await resp.text()
-                    raise PanelError(f"خطا در ورود به پنل (کد {resp.status}): {text[:300]}")
-                data = await resp.json()
-                if data.get("success") is False:
-                    raise PanelError(data.get("msg") or "ورود به پنل ناموفق بود؛ یوزر/پس را بررسی کن.")
-        except aiohttp.ClientError as e:
-            await session.close()
-            raise PanelError(f"خطا در اتصال به پنل: {e}") from e
-        return session
+        return aiohttp.ClientSession(
+            connector=connector,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            timeout=aiohttp.ClientTimeout(total=20),
+        )
 
     async def list_inbounds(self) -> list:
         """برای فلوی افزودن سرور: لیست inbound های پنل را برمی‌گرداند تا ادمین
         یکی را انتخاب کند. هر آیتم: {id, remark, protocol, port}."""
-        session = await self._login_session()
-        try:
-            async with session.get(
-                f"{self._base_url()}/panel/api/inbounds/list",
-                timeout=aiohttp.ClientTimeout(total=20),
-            ) as resp:
-                if resp.status >= 400:
-                    text = await resp.text()
-                    raise PanelError(f"خطا در دریافت لیست inbound (کد {resp.status}): {text[:300]}")
-                data = await resp.json()
-        except aiohttp.ClientError as e:
-            raise PanelError(f"خطا در اتصال به پنل: {e}") from e
-        finally:
-            await session.close()
+        async with self._session() as session:
+            try:
+                async with session.get(f"{self._base_url()}/panel/api/inbounds/list") as resp:
+                    if resp.status in (401, 403):
+                        raise PanelError(
+                            f"خطا در احراز هویت (کد {resp.status}): API Token اشتباه است یا "
+                            "هنوز از داخل پنل (Settings ← Security) API Token نساخته‌ای."
+                        )
+                    if resp.status >= 400:
+                        text = await resp.text()
+                        raise PanelError(f"خطا در دریافت لیست inbound (کد {resp.status}): {text[:300]}")
+                    data = await resp.json()
+            except aiohttp.ClientError as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
 
+        if data.get("success") is False:
+            raise PanelError(data.get("msg") or "دریافت لیست inbound ناموفق بود.")
         inbounds = data.get("obj") or []
         return [
             {"id": ib["id"], "remark": ib.get("remark", ""), "protocol": ib.get("protocol", ""), "port": ib.get("port")}
@@ -81,10 +93,9 @@ class ThreeXUIProvider(BasePanelProvider):
         ]
 
     async def _get_inbound(self, session: aiohttp.ClientSession, inbound_id: int) -> dict:
-        async with session.get(
-            f"{self._base_url()}/panel/api/inbounds/get/{inbound_id}",
-            timeout=aiohttp.ClientTimeout(total=20),
-        ) as resp:
+        async with session.get(f"{self._base_url()}/panel/api/inbounds/get/{inbound_id}") as resp:
+            if resp.status in (401, 403):
+                raise PanelError(f"خطا در احراز هویت (کد {resp.status}): API Token را بررسی کن.")
             if resp.status >= 400:
                 text = await resp.text()
                 raise PanelError(f"خطا در دریافت inbound (کد {resp.status}): {text[:300]}")
@@ -125,34 +136,32 @@ class ThreeXUIProvider(BasePanelProvider):
         if not inbound_id or not sub_base_url:
             raise PanelError("این سرور هنوز کامل تنظیم نشده (inbound یا آدرس Subscription خالی است).")
 
-        session = await self._login_session()
-        try:
+        async with self._session() as session:
             inbound = await self._get_inbound(session, inbound_id)
             client, sub_id = self._build_client(username, inbound.get("protocol", "vless"), volume_gb, duration_days)
             payload = {"id": inbound_id, "settings": json.dumps({"clients": [client]})}
-            async with session.post(
-                f"{self._base_url()}/panel/api/inbounds/addClient",
-                json=payload, timeout=aiohttp.ClientTimeout(total=20),
-            ) as resp:
-                if resp.status >= 400:
-                    text = await resp.text()
-                    raise PanelError(f"خطا در ساخت کاربر (کد {resp.status}): {text[:300]}")
-                data = await resp.json()
-                if data.get("success") is False:
-                    msg = data.get("msg") or ""
-                    if "duplicate" in msg.lower() or "exist" in msg.lower():
-                        raise PanelUsernameTakenError(f"نام کاربری «{username}» روی پنل تکراری است")
-                    raise PanelError(msg or "ساخت کاربر روی پنل ناموفق بود.")
-        finally:
-            await session.close()
+            try:
+                async with session.post(f"{self._base_url()}/panel/api/inbounds/addClient", json=payload) as resp:
+                    if resp.status in (401, 403):
+                        raise PanelError(f"خطا در احراز هویت (کد {resp.status}): API Token را بررسی کن.")
+                    if resp.status >= 400:
+                        text = await resp.text()
+                        raise PanelError(f"خطا در ساخت کاربر (کد {resp.status}): {text[:300]}")
+                    data = await resp.json()
+            except aiohttp.ClientError as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            if data.get("success") is False:
+                msg = data.get("msg") or ""
+                if "duplicate" in msg.lower() or "exist" in msg.lower():
+                    raise PanelUsernameTakenError(f"نام کاربری «{username}» روی پنل تکراری است")
+                raise PanelError(msg or "ساخت کاربر روی پنل ناموفق بود.")
 
         sub_url = f"{sub_base_url.rstrip('/')}/{sub_id}"
         return PanelUserResult(username=username, subscription_url=sub_url, raw=client)
 
     async def delete_user(self, username: str) -> bool:
         inbound_id = self.server["xui_inbound_id"]
-        session = await self._login_session()
-        try:
+        async with self._session() as session:
             inbound = await self._get_inbound(session, inbound_id)
             settings = json.loads(inbound.get("settings") or "{}")
             client_id = None
@@ -162,31 +171,26 @@ class ThreeXUIProvider(BasePanelProvider):
                     break
             if not client_id:
                 return False
-            async with session.post(
-                f"{self._base_url()}/panel/api/inbounds/{inbound_id}/delClient/{client_id}",
-                timeout=aiohttp.ClientTimeout(total=20),
-            ) as resp:
-                return resp.status < 400
-        except aiohttp.ClientError as e:
-            raise PanelError(f"خطا در اتصال به پنل: {e}") from e
-        finally:
-            await session.close()
+            try:
+                async with session.post(
+                    f"{self._base_url()}/panel/api/inbounds/{inbound_id}/delClient/{client_id}"
+                ) as resp:
+                    return resp.status < 400
+            except aiohttp.ClientError as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
 
     async def get_user_usage(self, username: str) -> dict:
-        session = await self._login_session()
-        try:
-            async with session.get(
-                f"{self._base_url()}/panel/api/inbounds/getClientTraffics/{username}",
-                timeout=aiohttp.ClientTimeout(total=20),
-            ) as resp:
-                if resp.status >= 400:
-                    text = await resp.text()
-                    raise PanelError(f"خطا در دریافت اطلاعات کاربر (کد {resp.status}): {text[:300]}")
-                data = await resp.json()
-        except aiohttp.ClientError as e:
-            raise PanelError(f"خطا در اتصال به پنل: {e}") from e
-        finally:
-            await session.close()
+        async with self._session() as session:
+            try:
+                async with session.get(f"{self._base_url()}/panel/api/inbounds/getClientTraffics/{username}") as resp:
+                    if resp.status in (401, 403):
+                        raise PanelError(f"خطا در احراز هویت (کد {resp.status}): API Token را بررسی کن.")
+                    if resp.status >= 400:
+                        text = await resp.text()
+                        raise PanelError(f"خطا در دریافت اطلاعات کاربر (کد {resp.status}): {text[:300]}")
+                    data = await resp.json()
+            except aiohttp.ClientError as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
 
         obj = data.get("obj") or {}
         used = (obj.get("up") or 0) + (obj.get("down") or 0)
@@ -198,8 +202,13 @@ class ThreeXUIProvider(BasePanelProvider):
 
     async def test_connection(self) -> bool:
         try:
-            session = await self._login_session()
-            await session.close()
-            return True
-        except PanelError:
+            async with self._session() as session:
+                async with session.get(f"{self._base_url()}/panel/api/inbounds/list") as resp:
+                    if resp.status in (401, 403):
+                        return False
+                    if resp.status >= 400:
+                        return False
+                    data = await resp.json()
+                    return bool(data.get("success", True))
+        except (aiohttp.ClientError, PanelError):
             return False
