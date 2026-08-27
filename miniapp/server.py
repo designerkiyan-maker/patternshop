@@ -56,6 +56,7 @@ from panel_providers import (
     SUB_BASE_URL_PANEL_TYPES, INBOUND_SELECT_PANEL_TYPES,
 )
 from reseller_auto_provision import provision_auto_config, provision_test_config, ProvisionError
+from direct_panel_provision import provision_direct, ProvisionError as DirectProvisionError
 
 app = FastAPI(title="V2Ray Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -859,8 +860,11 @@ async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
     if order["final_price"] <= 0:
         if product["is_auto_provision"]:
             try:
-                prov_results = await provision_auto_config(db, product, quantity)
-            except ProvisionError as e:
+                if product["provision_server_id"]:
+                    prov_results = await provision_direct(db, product, quantity)
+                else:
+                    prov_results = await provision_auto_config(db, product, quantity)
+            except (ProvisionError, DirectProvisionError) as e:
                 db.reject_order(order_id)
                 raise HTTPException(status_code=409, detail=str(e))
             db.approve_order_auto(order_id)
@@ -1035,8 +1039,11 @@ async def api_plisio_webhook(request: Request, tenant: Tenant = Depends(get_tena
             if product and product["is_auto_provision"]:
                 quantity = order["quantity"] or 1
                 try:
-                    prov_results = await provision_auto_config(db, product, quantity)
-                except ProvisionError as e:
+                    if product["provision_server_id"]:
+                        prov_results = await provision_direct(db, product, quantity)
+                    else:
+                        prov_results = await provision_auto_config(db, product, quantity)
+                except (ProvisionError, DirectProvisionError) as e:
                     admin_ids = db.list_admins()
                     async with aiohttp.ClientSession() as session:
                         for admin_id in admin_ids:
