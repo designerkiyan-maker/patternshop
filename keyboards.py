@@ -983,6 +983,13 @@ def panel_server_view_kb(server) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def panel_server_delete_confirm_kb(server_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚠️ بله، همه چیز حذف شود", callback_data=f"adm_panel_server_delete_force:{server_id}")],
+        [InlineKeyboardButton(text="⬅️ انصراف", callback_data=f"adm_panel_server_view:{server_id}")],
+    ])
+
+
 def pricing_tiers_kb(db) -> InlineKeyboardMarkup:
     tiers = db.get_pricing_tiers()
     rows = []

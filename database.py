@@ -3047,9 +3047,31 @@ class Database:
         with self._get_conn() as conn:
             conn.execute(f"UPDATE panel_servers SET {', '.join(sets)} WHERE id=?", values)
 
-    def delete_panel_server(self, server_id: int):
+    def count_custom_configs_by_panel(self, server_id: int) -> int:
+        """چند کانفیگ شخصی (custom_configs) به این پنل وصل هستند. چون panel_server_id
+        در custom_configs یک FOREIGN KEY (بدون CASCADE) است، حذف مستقیم پنل در صورت
+        وجود چنین رکوردهایی با IntegrityError شکست می‌خورد."""
         with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM custom_configs WHERE panel_server_id=?", (server_id,)
+            ).fetchone()
+            return row["c"] if row else 0
+
+    def delete_panel_server(self, server_id: int, force: bool = False) -> int:
+        """پنل را حذف می‌کند. اگر کانفیگ شخصی مرتبط وجود داشته باشد و force=False
+        باشد، به‌جای شکست خوردن با IntegrityError، ValueError با پیام قابل‌فهم می‌دهد.
+        با force=True، رکوردهای custom_configs مرتبط هم حذف می‌شوند (غیرقابل بازگشت)
+        و تعداد رکوردهای حذف‌شده برگردانده می‌شود."""
+        dependent = self.count_custom_configs_by_panel(server_id)
+        if dependent and not force:
+            raise ValueError(
+                f"این پنل {dependent} کانفیگ شخصی ثبت‌شده دارد و به همین دلیل قابل حذف نیست."
+            )
+        with self._get_conn() as conn:
+            if dependent:
+                conn.execute("DELETE FROM custom_configs WHERE panel_server_id=?", (server_id,))
             conn.execute("DELETE FROM panel_servers WHERE id=?", (server_id,))
+        return dependent
 
     def get_panel_server(self, server_id: int):
         with self._get_conn() as conn:

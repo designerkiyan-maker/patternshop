@@ -1943,10 +1943,46 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_delete")
+        server = db.get_panel_server(server_id)
+        if not server:
+            await call.answer("سرور یافت نشد.", show_alert=True)
+            return
+        dependent = db.count_custom_configs_by_panel(server_id)
+        if dependent:
+            await safe_edit(
+                call,
+                f"⚠️ پنل «{server['name']}» {dependent} کانفیگ شخصی ثبت‌شده دارد.\n"
+                "حذف کامل، رکورد این کانفیگ‌ها را هم برای همیشه پاک می‌کند و دیگر در "
+                "لیست کانفیگ‌های کاربران و یادآوری‌های تمدید/حجم دیده نمی‌شوند "
+                "(اتصال واقعی روی خود پنل VPN جداگانه است و با این کار قطع نمی‌شود).\n\n"
+                "مطمئنید؟",
+                reply_markup=kb.panel_server_delete_confirm_kb(server_id),
+            )
+            await call.answer()
+            return
         db.delete_panel_server(server_id)
         db.log_admin_action(call.from_user.id, "panel_server_delete", f"سرور #{server_id}")
         await replace_admin_view(call, "🖥 سرورهای پنل VPN متصل:", reply_markup=kb.panel_servers_list_kb(db))
         await call.answer("سرور حذف شد.")
+
+    @router.callback_query(F.data.startswith("adm_panel_server_delete_force:"))
+    async def cb_admin_panel_server_delete_force(call: CallbackQuery):
+        if not db.is_full_access_bot(is_main_bot):
+            return await deny_reseller_panel_access(call)
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        server_id = callback_id(call.data, "adm_panel_server_delete_force")
+        server = db.get_panel_server(server_id)
+        if not server:
+            await call.answer("سرور یافت نشد.", show_alert=True)
+            return
+        removed = db.delete_panel_server(server_id, force=True)
+        db.log_admin_action(
+            call.from_user.id, "panel_server_delete",
+            f"سرور #{server_id} ({server['name']}) + {removed} کانفیگ شخصی مرتبط",
+        )
+        await replace_admin_view(call, "🖥 سرورهای پنل VPN متصل:", reply_markup=kb.panel_servers_list_kb(db))
+        await call.answer("سرور و کانفیگ‌های مرتبط حذف شدند.")
 
     @router.callback_query(F.data == "adm_pricing_tiers")
     async def cb_admin_pricing_tiers(call: CallbackQuery):
