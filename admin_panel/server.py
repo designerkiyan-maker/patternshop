@@ -1830,10 +1830,17 @@ def api_add_panel_server(body: PanelServerBody, admin=Depends(require_permission
 
 
 @app.delete("/api/panel-servers/{server_id}")
-def api_delete_panel_server(server_id: int, admin=Depends(require_permission("panels"))):
-    db.delete_panel_server(server_id)
-    db.log_admin_action(admin["id"], "panel_delete", str(server_id), "panel", server_id)
-    return {"ok": True}
+def api_delete_panel_server(server_id: int, force: bool = False, admin=Depends(require_permission("panels"))):
+    try:
+        removed = db.delete_panel_server(server_id, force=force)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    db.log_admin_action(
+        admin["id"], "panel_delete",
+        str(server_id) + (f" + {removed} کانفیگ شخصی مرتبط" if removed else ""),
+        "panel", server_id,
+    )
+    return {"ok": True, "removed_custom_configs": removed}
 
 
 @app.post("/api/panel-servers/{server_id}/test")
