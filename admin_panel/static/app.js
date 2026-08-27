@@ -3327,19 +3327,43 @@ function renderBroadcastBrutalist() {
 }
 
 /* =========================================================== resellers === */
+function levelLabel(level) { return level === 1 ? 'کامل' : 'سطح ۲'; }
+
+function renderFullResellersBlock(bots) {
+  return `
+    <div class="card"><div class="card-head"><h3>نمایندگی‌های کامل (بات مستقل)</h3></div><div class="table-wrap"><table>
+      <thead><tr><th>آیدی بات</th><th>یوزرنیم بات</th><th>مالک</th><th>آیدی مالک</th><th>سطح</th><th>وضعیت</th><th>پنل وب</th><th>کاربران</th><th>سفارش تایید‌شده</th><th>درآمد (تومان)</th></tr></thead>
+      <tbody>${bots.map(b => `<tr>
+        <td class="mono">${b.id}</td>
+        <td>@${esc(b.bot_username || '—')}</td>
+        <td>${esc(b.owner_name || '—')}</td>
+        <td class="mono">${b.owner_telegram_id}</td>
+        <td>${levelLabel(b.reseller_level)}</td>
+        <td>${b.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
+        <td>${b.web_panel_enabled ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
+        <td class="mono">${fmt(b.stats.users)}</td>
+        <td class="mono">${fmt(b.stats.approved)}</td>
+        <td class="mono">${fmt(b.stats.revenue)}</td>
+      </tr>`).join('') || '<tr><td colspan="10" class="empty-state">نمایندگی کاملی ثبت نشده</td></tr>'}</tbody>
+    </table></div></div>
+  `;
+}
+
 async function renderResellers() {
-  const [resellers, cohort] = await Promise.all([
+  const [resellers, cohort, fullResellers] = await Promise.all([
     apiGet('/resellers'),
     apiGet('/resellers/analytics/cohort').catch(() => null),
+    apiGet('/resellers/full').catch(() => []),
   ]);
 
-  if (loadTheme().theme === 'brutalist') return renderResellersBrutalist(resellers, cohort);
-  if (loadTheme().theme === 'bento') return renderResellersBento(resellers, cohort);
+  if (loadTheme().theme === 'brutalist') return renderResellersBrutalist(resellers, cohort, fullResellers);
+  if (loadTheme().theme === 'bento') return renderResellersBento(resellers, cohort, fullResellers);
   const cohortHtml = cohort ? renderResellerCohortBlock(cohort) : '';
 
   setContent(`
+    ${renderFullResellersBlock(fullResellers)}
     ${cohortHtml}
-    <div class="card"><div class="card-head"><h3>لیست نمایندگی‌ها</h3></div><div class="table-wrap"><table>
+    <div class="card"><div class="card-head"><h3>لیست نمایندگی‌های سطح ۲ (اعتبار حجمی)</h3></div><div class="table-wrap"><table>
       <thead><tr><th>آیدی</th><th>یوزرنیم</th><th>اعتبار (گیگ)</th><th>وضعیت</th><th>عملیات</th></tr></thead>
       <tbody>${resellers.map(r => `<tr>
         <td class="mono">${r.telegram_id}</td><td>${esc(r.username || '—')}</td>
@@ -3375,10 +3399,11 @@ async function renderResellers() {
 }
 
 /* ------------------------------------------------------ resellers: bento */
-function renderResellersBento(resellers, cohort) {
+function renderResellersBento(resellers, cohort, fullResellers = []) {
   const cohortHtml = cohort ? renderResellerCohortBlockBento(cohort) : '';
   setContent(`
-    <div class="bn-hero"><div><h2>نمایندگی‌ها</h2><p>${fmt(resellers.length)} نماینده ثبت‌شده</p></div></div>
+    <div class="bn-hero"><div><h2>نمایندگی‌ها</h2><p>${fmt(resellers.length)} نماینده سطح ۲ / ${fmt(fullResellers.length)} نماینده کامل</p></div></div>
+    ${renderFullResellersBlock(fullResellers)}
     ${cohortHtml}
     <div class="bn-card-grid" style="margin-top:16px">
       ${resellers.map((r, i) => `
@@ -3481,13 +3506,14 @@ function renderResellerCohortBlockBento(data) {
 /* ------------------------------------------------ resellers: brutalist -- */
 // لیست نمایندگی‌ها به‌شکل «کارت اعتباری» با حجم گیگ درشت مثل موجودی کارت،
 // و آمار کوهورت با همون زبان بلوکی/پنلی داشبورد برutalist.
-function renderResellersBrutalist(resellers, cohort) {
+function renderResellersBrutalist(resellers, cohort, fullResellers = []) {
   const cohortHtml = cohort ? renderResellerCohortBlockBrutalist(cohort) : '';
   setContent(`
     <div class="bru-hero">
       <h2>نمایندگی‌ها</h2>
-      <p>${fmt(resellers.length)} نماینده ثبت‌شده</p>
+      <p>${fmt(resellers.length)} نماینده سطح ۲ / ${fmt(fullResellers.length)} نماینده کامل</p>
     </div>
+    ${renderFullResellersBlock(fullResellers)}
     ${cohortHtml}
     <div class="bru-panel" style="margin-top:16px">
       <div class="bru-panel-head">لیست نمایندگی‌ها</div>
