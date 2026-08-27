@@ -11,8 +11,10 @@
 import asyncio
 import contextvars
 import hmac
+import json
 import logging
 import os
+import sqlite3
 import time
 import tempfile
 from dataclasses import dataclass
@@ -1386,6 +1388,220 @@ async def api_support_send(user_id: int, body: SupportReplyBody, admin=Depends(g
 # -------------------------------------------------------------- resellers --
 
 
+def _resolved_admin_panel_url(request: Request) -> str:
+    saved = (db.get_setting("admin_panel_url", "") or "").strip().rstrip("/")
+    if saved:
+        return saved
+    return f"{request.url.scheme}://{request.url.netloc}"
+
+
+async def _deliver_reseller_webpanel_link(bot_id: int, request: Request) -> bool:
+    reseller_bot = db.get_reseller_bot(bot_id)
+    if not reseller_bot or not reseller_bot["web_panel_setup_token"]:
+        return False
+    panel_url = _resolved_admin_panel_url(request)
+    b_value = reseller_bot["link_slug"] or str(bot_id)
+    link = f"{panel_url}/setup?b={b_value}&t={reseller_bot['web_panel_setup_token']}"
+    text = (
+        "🌐 لینک راه‌اندازی پنل وب نمایندگی شما:\n\n"
+        f"{link}\n\n"
+        "این لینک یک‌بارمصرف است؛ با باز کردنش یک یوزرنیم/پسورد دلخواه برای پنل وب "
+        "خودت (مستقل از پنل بات اصلی) تنظیم می‌کنی."
+    )
+    return await tg_send(reseller_bot["bot_token"], reseller_bot["owner_telegram_id"], text)
+
+
+def _set_main_bot_fsm_state(chat_id: int, state: Optional[str], data: Optional[dict] = None) -> bool:
+    """مستقیم روی فایل SQLite استوریج FSM بات اصلی می‌نویسد - چون این پروسه‌ی پنل وب
+    مستقل است و به Dispatcher زنده‌ی بات اصلی دسترسی ندارد. دقیقاً همان اسکیمای
+    fsm_storage.SQLiteStorage را می‌سازد/به‌روزرسانی می‌کند (bot_manager.reconcile
+    هم دقیقاً به همین شکل با پروسه‌های جدا هماهنگ می‌شود)."""
+    try:
+        bot_id = int(BOT_TOKEN.split(":")[0])
+        conn = sqlite3.connect(f"{DB_PATH}.fsm.sqlite3", timeout=10)
+        try:
+            conn.execute("PRAGMA busy_timeout=4000")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fsm_storage (
+                    bot_id INTEGER NOT NULL,
+                    chat_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    thread_id INTEGER,
+                    business_connection_id TEXT,
+                    destiny TEXT NOT NULL DEFAULT 'default',
+                    state TEXT,
+                    data TEXT,
+                    PRIMARY KEY (bot_id, chat_id, user_id, thread_id, business_connection_id, destiny)
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO fsm_storage "
+                "(bot_id, chat_id, user_id, thread_id, business_connection_id, destiny, state, data) "
+                "VALUES (?, ?, ?, 0, '', 'default', ?, ?) "
+                "ON CONFLICT (bot_id, chat_id, user_id, thread_id, business_connection_id, destiny) "
+                "DO UPDATE SET state=excluded.state, data=excluded.data",
+                (bot_id, chat_id, chat_id, state, json.dumps(data or {}, ensure_ascii=False)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return True
+    except Exception:
+        logger.exception("تنظیم FSM state بات اصلی برای %s ناموفق بود.", chat_id)
+        return False
+
+
+@app.get("/api/reseller-panels-lite")
+def api_reseller_panels_lite(admin=Depends(require_permission("resellers"))):
+    """لیست سبک پنل‌ها (فقط id/name) برای انتخاب‌گرها؛ بدون نیاز به مجوز «panels»."""
+    return [{"id": s["id"], "name": s["name"]} for s in db.get_panel_servers(active_only=True)]
+
+
+# ------------------------------------------------- reseller bots (سطح ۱/کامل) --
+
+
+@app.get("/api/reseller-bots")
+def api_reseller_bots(admin=Depends(require_permission("resellers"))):
+    bots = rows_to_list(db.list_reseller_bots())
+    for b in bots:
+        b.pop("bot_token", None)
+        b.pop("web_panel_setup_token", None)
+    return bots
+
+
+@app.post("/api/reseller-bots/{bot_id}/toggle")
+def api_toggle_reseller_bot(bot_id: int, admin=Depends(require_permission("resellers"))):
+    reseller_bot = db.get_reseller_bot(bot_id)
+    if not reseller_bot:
+        raise HTTPException(404, "یافت نشد.")
+    db.toggle_reseller_bot(bot_id)
+    db.log_admin_action(
+        admin["id"], "reseller_bot_toggle", f"نماینده #{bot_id} (پنل وب - {admin['username']})", "reseller_bot", bot_id
+    )
+    return {"ok": True}
+
+
+class ResellerBotLevelBody(BaseModel):
+    level: int
+
+
+@app.post("/api/reseller-bots/{bot_id}/level")
+def api_set_reseller_bot_level(bot_id: int, body: ResellerBotLevelBody, admin=Depends(require_permission("resellers"))):
+    if body.level not in (1, 2):
+        raise HTTPException(400, "سطح نامعتبر است.")
+    reseller_bot = db.get_reseller_bot(bot_id)
+    if not reseller_bot:
+        raise HTTPException(404, "یافت نشد.")
+    db.set_reseller_level(bot_id, body.level)
+    try:
+        reseller_db = Database(resolve_db_path(reseller_bot["db_path"]))
+        reseller_db.set_setting("reseller_level", str(body.level))
+        if body.level == 2:
+            reseller_db.set_setting("custom_config_enabled", "0")
+    except Exception:
+        logger.exception("همگام‌سازی سطح نمایندگی روی دیتابیس نماینده #%s ناموفق بود.", bot_id)
+    db.log_admin_action(
+        admin["id"], "reseller_bot_level", f"نماینده #{bot_id} -> سطح {body.level} (پنل وب - {admin['username']})",
+        "reseller_bot", bot_id,
+    )
+    return {"ok": True}
+
+
+class ResellerBotEditBody(BaseModel):
+    owner_name: Optional[str] = None
+    owner_telegram_id: Optional[int] = None
+
+
+@app.put("/api/reseller-bots/{bot_id}")
+def api_edit_reseller_bot(bot_id: int, body: ResellerBotEditBody, admin=Depends(require_permission("resellers"))):
+    reseller_bot = db.get_reseller_bot(bot_id)
+    if not reseller_bot:
+        raise HTTPException(404, "یافت نشد.")
+    db.edit_reseller_bot(bot_id, owner_telegram_id=body.owner_telegram_id, owner_name=body.owner_name)
+    db.log_admin_action(
+        admin["id"], "reseller_bot_edit", f"نماینده #{bot_id} (پنل وب - {admin['username']})", "reseller_bot", bot_id
+    )
+    return {"ok": True}
+
+
+@app.delete("/api/reseller-bots/{bot_id}")
+def api_delete_reseller_bot(bot_id: int, purge_db: bool = False, admin=Depends(require_permission("resellers"))):
+    reseller_bot = db.get_reseller_bot(bot_id)
+    if not reseller_bot:
+        raise HTTPException(404, "یافت نشد.")
+    db.delete_reseller_bot(bot_id)
+    db.purge_reseller_leftovers(reseller_bot["owner_telegram_id"])
+    if purge_db:
+        db.queue_db_purge(reseller_bot["bot_token"], resolve_db_path(reseller_bot["db_path"]))
+    db.log_admin_action(
+        admin["id"], "reseller_bot_delete",
+        f"نماینده #{bot_id} (@{reseller_bot['bot_username'] or ''}) (پنل وب - {admin['username']})",
+        "reseller_bot", bot_id,
+    )
+    return {"ok": True}
+
+
+@app.post("/api/reseller-bots/{bot_id}/web-panel/enable")
+async def api_enable_reseller_webpanel(bot_id: int, request: Request, admin=Depends(require_permission("resellers"))):
+    reseller_bot = db.get_reseller_bot(bot_id)
+    if not reseller_bot:
+        raise HTTPException(404, "یافت نشد.")
+    level = reseller_bot["reseller_level"] if "reseller_level" in reseller_bot.keys() else 2
+    if level != 1:
+        raise HTTPException(400, "پنل وب فقط برای نمایندگی «کامل» قابل فعال‌سازی است.")
+    if reseller_bot["web_panel_enabled"]:
+        raise HTTPException(400, "قبلاً فعال است؛ برای لینک جدید از «ساخت لینک جدید» استفاده کنید.")
+    db.enable_reseller_web_panel(bot_id)
+    db.log_admin_action(
+        admin["id"], "reseller_webpanel_enable", f"نماینده #{bot_id} (پنل وب - {admin['username']})",
+        "reseller_bot", bot_id,
+    )
+    sent = await _deliver_reseller_webpanel_link(bot_id, request)
+    return {"ok": True, "sent_to_owner": sent}
+
+
+@app.post("/api/reseller-bots/{bot_id}/web-panel/regenerate")
+async def api_regen_reseller_webpanel(bot_id: int, request: Request, admin=Depends(require_permission("resellers"))):
+    reseller_bot = db.get_reseller_bot(bot_id)
+    if not reseller_bot:
+        raise HTTPException(404, "یافت نشد.")
+    db.regenerate_reseller_web_panel_token(bot_id)
+    db.log_admin_action(
+        admin["id"], "reseller_webpanel_regen", f"نماینده #{bot_id} (پنل وب - {admin['username']})",
+        "reseller_bot", bot_id,
+    )
+    sent = await _deliver_reseller_webpanel_link(bot_id, request)
+    return {"ok": True, "sent_to_owner": sent}
+
+
+@app.post("/api/reseller-bots/{bot_id}/web-panel/disable")
+def api_disable_reseller_webpanel(bot_id: int, admin=Depends(require_permission("resellers"))):
+    reseller_bot = db.get_reseller_bot(bot_id)
+    if not reseller_bot:
+        raise HTTPException(404, "یافت نشد.")
+    db.disable_reseller_web_panel(bot_id)
+    db.log_admin_action(
+        admin["id"], "reseller_webpanel_disable", f"نماینده #{bot_id} (پنل وب - {admin['username']})",
+        "reseller_bot", bot_id,
+    )
+    return {"ok": True}
+
+
+@app.get("/api/reseller-bots/{bot_id}/web-panel/login-link")
+def api_reseller_webpanel_login_link(bot_id: int, request: Request, admin=Depends(require_permission("resellers"))):
+    reseller_bot = db.get_reseller_bot(bot_id)
+    if not reseller_bot:
+        raise HTTPException(404, "یافت نشد.")
+    panel_url = _resolved_admin_panel_url(request)
+    b_value = reseller_bot["link_slug"] or str(bot_id)
+    return {"login_link": f"{panel_url}/?b={b_value}"}
+
+
+# --------------------------------------------- resellers (سطح ۲ / اعتبار حجمی) --
+
+
 @app.get("/api/resellers")
 def api_resellers(admin=Depends(require_permission("resellers"))):
     return rows_to_list(db.get_resellers())
@@ -1424,6 +1640,21 @@ def api_reseller_status(tg_id: int, body: ResellerToggleBody, admin=Depends(requ
     return {"ok": True}
 
 
+class ResellerPanelBody(BaseModel):
+    panel_server_id: Optional[int] = None
+
+
+@app.post("/api/resellers/{tg_id}/panel")
+def api_set_reseller_panel(tg_id: int, body: ResellerPanelBody, admin=Depends(require_permission("resellers"))):
+    db.set_reseller_panel(tg_id, body.panel_server_id)
+    db.log_admin_action(
+        admin["id"], "reseller_panel_set",
+        f"نماینده {tg_id} -> پنل {body.panel_server_id or 'پیش‌فرض خودکار'} (پنل وب - {admin['username']})",
+        "reseller", tg_id,
+    )
+    return {"ok": True}
+
+
 @app.get("/api/resellers/analytics/cohort")
 def api_reseller_cohort(days: int = 30, months: int = 6, admin=Depends(require_permission("resellers"))):
     """تحلیل کوهورت (نگهداشت ماهانه) و ریزش (churn) نمایندگی‌ها."""
@@ -1432,28 +1663,131 @@ def api_reseller_cohort(days: int = 30, months: int = 6, admin=Depends(require_p
     return db.get_reseller_cohort_churn(inactivity_days=days, months=months)
 
 
-@app.get("/api/resellers/full")
-def api_resellers_full(admin=Depends(require_permission("resellers"))):
-    """نمایندگی‌های «کامل» (بات مستقل، جدول reseller_bots) به‌همراه آمار دیتابیس خودشان."""
-    out = []
-    for b in main_db.list_reseller_bots():
-        row = row_to_dict(b)
-        row["reseller_level"] = b["reseller_level"] if "reseller_level" in b.keys() else 2
-        stats = {"users": 0, "pending": 0, "approved": 0, "rejected": 0, "revenue": 0}
-        try:
-            resolved = resolve_db_path(b["db_path"])
-            if os.path.exists(resolved):
-                stats = Database(resolved).get_stats()
-        except Exception:
-            logger.exception("خطا هنگام خواندن آمار دیتابیس نماینده %s", b["id"])
-        row["stats"] = stats
-        out.append(row)
-    return out
+@app.get("/api/resellers/orphans")
+def api_reseller_orphans(admin=Depends(require_permission("resellers"))):
+    return rows_to_list(db.list_orphaned_reseller_users())
+
+
+@app.post("/api/resellers/{tg_id}/purge")
+def api_purge_reseller_leftovers(tg_id: int, admin=Depends(require_permission("resellers"))):
+    db.purge_reseller_leftovers(tg_id)
+    db.log_admin_action(
+        admin["id"], "reseller_orphan_purge", f"کاربر {tg_id} (پنل وب - {admin['username']})", "reseller", tg_id
+    )
+    return {"ok": True}
+
+
+# ------------------------------------------------------------ reseller requests --
 
 
 @app.get("/api/reseller-requests")
 def api_reseller_requests(status: Optional[str] = None, admin=Depends(require_permission("resellers"))):
-    return rows_to_list(db.list_reseller_requests(status))
+    rows = db.list_reseller_requests(status)
+    out = []
+    for r in rows:
+        r = dict(r)
+        user = row_to_dict(db.get_user(r["user_id"]))
+        r["username"] = user["username"] if user else None
+        out.append(r)
+    return out
+
+
+@app.get("/api/reseller-requests/{request_id}/receipt")
+async def api_reseller_request_receipt(request_id: int, admin=Depends(require_permission("resellers"))):
+    req = db.get_reseller_request(request_id)
+    if not req or not req["receipt_file_id"]:
+        raise HTTPException(404, "رسیدی برای این درخواست ثبت نشده است.")
+    result = await fetch_telegram_file(_bot_token(), req["receipt_file_id"])
+    if not result:
+        raise HTTPException(502, "دریافت رسید از تلگرام ناموفق بود.")
+    content, content_type = result
+    return Response(content=content, media_type=content_type)
+
+
+class ResellerRequestQuoteBody(BaseModel):
+    price_toman: int
+    panel_server_id: Optional[int] = None
+
+
+@app.post("/api/reseller-requests/{request_id}/quote")
+async def api_quote_reseller_request(request_id: int, body: ResellerRequestQuoteBody, admin=Depends(require_permission("resellers"))):
+    req = db.get_reseller_request(request_id)
+    if not req or req["status"] != "pending_review":
+        raise HTTPException(400, "این درخواست دیگر معتبر نیست.")
+    if body.price_toman <= 0:
+        raise HTTPException(400, "هزینه باید عددی مثبت باشد.")
+    db.quote_reseller_request(request_id, body.price_toman, body.panel_server_id, admin["id"])
+    db.log_admin_action(
+        admin["id"], "reseller_request_quote",
+        f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {body.price_toman:,} (پنل وب - {admin['username']})",
+    )
+    await tg_send(
+        _bot_token(), req["user_id"],
+        f"🏪 درخواست نمایندگی #{request_id} شما تایید شد!\n\n"
+        f"💰 هزینه‌ی نمایندگی: {body.price_toman:,} تومان\n"
+        f"📦 حجم: {req['volume_gb']:,} گیگ\n\n"
+        f"در صورت موافقت روی «پرداخت می‌کنم» بزنید:",
+        reply_markup={"inline_keyboard": [[{"text": "✅ پرداخت می‌کنم", "callback_data": f"resreq_pay:{request_id}"}]]},
+    )
+    return {"ok": True}
+
+
+@app.post("/api/reseller-requests/{request_id}/approve-payment")
+async def api_approve_reseller_request_payment(request_id: int, admin=Depends(require_permission("resellers"))):
+    req = db.get_reseller_request(request_id)
+    if not req or req["status"] != "awaiting_payment_review":
+        raise HTTPException(400, "این درخواست دیگر معتبر نیست.")
+    db.approve_reseller_request_payment(request_id, admin["id"])
+    db.log_admin_action(
+        admin["id"], "reseller_request_payment_approve",
+        f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {(req['price_toman'] or 0):,} (پنل وب - {admin['username']})",
+    )
+    _set_main_bot_fsm_state(req["user_id"], "ResellerRequestFlow:waiting_bot_token", {"resreq_request_id": request_id})
+    await notify_user(
+        req["user_id"],
+        "✅ پرداخت شما تایید شد!\n\nحالا توکن بات نماینده‌ی خودتان را ارسال کنید (همانی که از @BotFather گرفته‌اید):",
+    )
+    return {"ok": True}
+
+
+class ResellerRequestRejectBody(BaseModel):
+    reason: str
+    kind: str = "rejected"
+
+
+@app.post("/api/reseller-requests/{request_id}/reject")
+async def api_reject_reseller_request(request_id: int, body: ResellerRequestRejectBody, admin=Depends(require_permission("resellers"))):
+    if body.kind not in ("rejected", "payment_rejected"):
+        raise HTTPException(400, "نوع رد نامعتبر است.")
+    req = db.get_reseller_request(request_id)
+    if not req or not db.is_reseller_request_open(req["status"]):
+        raise HTTPException(400, "این درخواست دیگر باز نیست.")
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(400, "دلیل رد الزامی است.")
+    db.reject_reseller_request(request_id, body.kind, admin["id"], reason)
+    db.log_admin_action(
+        admin["id"], "reseller_request_reject",
+        f"درخواست #{request_id} | کاربر {req['user_id']} | وضعیت: {body.kind} | دلیل: {reason} (پنل وب - {admin['username']})",
+    )
+    label = "درخواست نمایندگی" if body.kind == "rejected" else "پرداخت درخواست نمایندگی"
+    await notify_user(req["user_id"], f"❌ متاسفانه {label} شما (#{request_id}) رد شد.\n\nدلیل: {reason}")
+    return {"ok": True}
+
+
+@app.post("/api/reseller-requests/{request_id}/cancel")
+async def api_cancel_reseller_request(request_id: int, admin=Depends(require_permission("resellers"))):
+    req = db.get_reseller_request(request_id)
+    if not req or not db.is_reseller_request_open(req["status"]):
+        raise HTTPException(400, "این درخواست دیگر باز نیست.")
+    db.admin_cancel_reseller_request(request_id, admin["id"])
+    if req["status"] == "awaiting_bot_info":
+        _set_main_bot_fsm_state(req["user_id"], None, {})
+    db.log_admin_action(
+        admin["id"], "reseller_request_admin_cancel", f"درخواست #{request_id} | کاربر {req['user_id']} (پنل وب - {admin['username']})",
+    )
+    await notify_user(req["user_id"], f"⚪️ درخواست نمایندگی شما (#{request_id}) توسط مدیریت کنسل شد.")
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- panels --

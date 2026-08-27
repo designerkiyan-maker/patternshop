@@ -3,6 +3,7 @@
 و شارژ کیف پول وقتی این کارها از داخل پنل وب مستقل (نه خودِ بات) انجام می‌شوند."""
 
 import os
+import json
 import logging
 
 import aiohttp
@@ -10,13 +11,15 @@ import aiohttp
 logger = logging.getLogger("admin_panel.telegram_notify")
 
 
-async def send_message(bot_token: str, chat_id: int, text: str, parse_mode: str = None) -> bool:
+async def send_message(bot_token: str, chat_id: int, text: str, parse_mode: str = None, reply_markup: dict = None) -> bool:
     if not bot_token:
         return False
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {"chat_id": chat_id, "text": text}
     if parse_mode:
         payload["parse_mode"] = parse_mode
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
