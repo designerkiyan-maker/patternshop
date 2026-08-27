@@ -1432,6 +1432,25 @@ def api_reseller_cohort(days: int = 30, months: int = 6, admin=Depends(require_p
     return db.get_reseller_cohort_churn(inactivity_days=days, months=months)
 
 
+@app.get("/api/resellers/full")
+def api_resellers_full(admin=Depends(require_permission("resellers"))):
+    """نمایندگی‌های «کامل» (بات مستقل، جدول reseller_bots) به‌همراه آمار دیتابیس خودشان."""
+    out = []
+    for b in main_db.list_reseller_bots():
+        row = row_to_dict(b)
+        row["reseller_level"] = b["reseller_level"] if "reseller_level" in b.keys() else 2
+        stats = {"users": 0, "pending": 0, "approved": 0, "rejected": 0, "revenue": 0}
+        try:
+            resolved = resolve_db_path(b["db_path"])
+            if os.path.exists(resolved):
+                stats = Database(resolved).get_stats()
+        except Exception:
+            logger.exception("خطا هنگام خواندن آمار دیتابیس نماینده %s", b["id"])
+        row["stats"] = stats
+        out.append(row)
+    return out
+
+
 @app.get("/api/reseller-requests")
 def api_reseller_requests(status: Optional[str] = None, admin=Depends(require_permission("resellers"))):
     return rows_to_list(db.list_reseller_requests(status))
