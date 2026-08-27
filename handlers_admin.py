@@ -1607,6 +1607,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer(
                 "هیدیفای یوزر/پس ندارد؛ این فیلد استفاده نمی‌شود - فقط هر متنی (مثلاً «hiddify») بفرست:"
             )
+        elif data.get("panel_type") == "3xui":
+            await message.answer(
+                "این پنل با API Token وصل می‌شود، نه یوزر/پس؛ این فیلد استفاده نمی‌شود - "
+                "فقط هر متنی (مثلاً «3xui») بفرست:"
+            )
         else:
             await message.answer("نام کاربری ادمین پنل را بفرست:")
 
@@ -1617,6 +1622,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         data = await state.get_data()
         if data.get("panel_type") == "hiddify":
             await message.answer("Hiddify-API-Key (همان UUID ادمین از داخل پنل: تنظیمات ← API) را بفرست:")
+        elif data.get("panel_type") == "3xui":
+            await message.answer(
+                "API Token پنل را بفرست (نه پسورد ادمین!):\n"
+                "از داخل پنل 3X-UI برو به Settings ← Security ← API Token، یکی بساز و همان را اینجا بفرست.\n"
+                "(نسخه‌های جدید 3X-UI لاگین با یوزر/پس را برای بات‌ها قبول نمی‌کنند و فقط با API Token کار می‌کنند.)"
+            )
         else:
             await message.answer("رمز عبور ادمین پنل را بفرست:")
 
