@@ -299,18 +299,7 @@ async function renderReferral() {
       return;
     }
     content.innerHTML = `
-      <div class="eyebrow">زیرمجموعه‌گیری</div>
-      <div class="card">
-        <h3><span class="ic">🤝</span>دعوت از دوستان</h3>
-        <p class="hint-text">دوستانتان را با لینک زیر دعوت کنید و از اولین خریدشان پورسانت بگیرید.</p>
-        <div class="stat-row"><span>پورسانت شما</span><b>${r.percent}٪ از اولین خرید</b></div>
-        <div class="stat-row"><span>تعداد زیرمجموعه‌ها</span><b>${fmt(r.count)}</b></div>
-        <div class="stat-row"><span>اعتبار کسب‌شده</span><b>${fmt(r.credit)} تومان</b></div>
-        ${r.link ? `
-        <div class="link-box" style="margin-top:8px">${r.link}</div>
-        <button class="btn small outline" id="copy-referral-btn" style="width:100%;margin-top:8px">📋 کپی لینک دعوت</button>
-        ` : ""}
-      </div>
+      ${referralCard(r)}
     `;
     const copyBtn = document.getElementById("copy-referral-btn");
     if (copyBtn) copyBtn.onclick = () => {
@@ -858,11 +847,23 @@ async function claimTestConfig(btn) {
 }
 
 function referralCard(r) {
+  const rows = [];
+  if (r.commission_enabled) {
+    const cap = r.commission_max_count > 0 ? ` (تا ${fmt(r.commission_max_count)} نفر)` : "";
+    rows.push(`<div class="stat-row"><span>پورسانت خرید</span><b>${r.percent}٪ از اولین خرید${cap}</b></div>`);
+  }
+  if (r.free_config_enabled) {
+    rows.push(`<div class="stat-row"><span>کانفیگ رایگان</span><b>با دعوت ${fmt(r.free_config_threshold)} نفر</b></div>`);
+  }
+  if (r.invite_bonus_enabled) {
+    const cap = r.invite_bonus_max_count > 0 ? ` (تا ${fmt(r.invite_bonus_max_count)} دعوت)` : "";
+    rows.push(`<div class="stat-row"><span>شارژ به‌ازای دعوت</span><b>${fmt(r.invite_bonus_amount)} تومان${cap}</b></div>`);
+  }
   return `
     <div class="eyebrow">زیرمجموعه‌گیری</div>
     <div class="card">
       <h3><span class="ic">🤝</span>دعوت از دوستان</h3>
-      <div class="stat-row"><span>پورسانت شما</span><b>${r.percent}٪ از اولین خرید</b></div>
+      ${rows.join("")}
       <div class="stat-row"><span>تعداد زیرمجموعه‌ها</span><b>${fmt(r.count)}</b></div>
       <div class="stat-row"><span>اعتبار کسب‌شده</span><b>${fmt(r.credit)} تومان</b></div>
       ${r.link ? `
@@ -4129,27 +4130,64 @@ async function renderAdminSalesSection() {
   const body = document.getElementById("admin-section-body");
   body.innerHTML = skeleton(4);
   try {
-    const [referral, wheel, renewal, volumeRem, crypto, discounts] = await Promise.all([
+    const [referral, wheel, renewal, volumeRem, crypto, discounts, allProducts] = await Promise.all([
       api("/api/admin/settings/referral"),
       api("/api/admin/settings/wheel"),
       api("/api/admin/settings/renewal"),
       api("/api/admin/settings/volume-reminder"),
       api("/api/admin/settings/crypto"),
       api("/api/admin/discounts"),
+      api("/api/admin/products/all").catch(() => []),
     ]);
+
+    const eligibleProducts = (allProducts || []).filter((p) => p.is_auto_provision && p.provision_server_id);
+    const fcProductOptions = eligibleProducts
+      .map((p) => `<option value="${p.id}" ${referral.free_config_product_id === p.id ? "selected" : ""}>${p.name} (${p.category_name})${p.is_active ? "" : " - غیرفعال"}</option>`)
+      .join("");
 
     body.innerHTML = `
       <div class="card">
-        <div class="eyebrow" style="margin-top:0">🤝 زیرمجموعه‌گیری (رفرال)</div>
-        <p class="hint-text">وقتی کاربری با لینک دعوت یکی دیگه وارد بشه و خرید کنه، درصدی از خریدش به‌عنوان اعتبار کیف‌پول به دعوت‌کننده تعلق می‌گیره.</p>
+        <div class="eyebrow" style="margin-top:0">🤝 زیرمجموعه‌گیری (رفرال) — سه مدل مستقل</div>
+        <p class="hint-text">هر کدام از این سه مدل جدا فعال/غیرفعال می‌شود و هم‌زمان می‌توانند فعال باشند.</p>
+
+        <div class="eyebrow" style="margin-top:14px">① پورسانت درصدی از خرید</div>
+        <p class="hint-text">وقتی کاربری با لینک دعوت یکی دیگه وارد بشه و اولین خریدش تایید بشه، درصدی از خریدش به‌عنوان اعتبار کیف‌پول به دعوت‌کننده تعلق می‌گیره.</p>
         <div class="field-switch-row">
-          <span>سیستم رفرال فعال باشد</span>
+          <span>فعال باشد</span>
           <label class="switch"><input type="checkbox" id="ref-enabled" ${referral.enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
         </div>
         <label class="field-label">درصد پاداش دعوت‌کننده از هر خرید زیرمجموعه (۰ تا ۱۰۰)</label>
-        <input class="input" id="ref-percent" type="number" placeholder="مثال: 10" value="${referral.percent}" style="margin-bottom:4px" />
+        <input class="input" id="ref-percent" type="number" placeholder="مثال: 10" value="${referral.percent}" style="margin-bottom:10px" />
+        <label class="field-label">سقف تعداد نفراتی که پورسانت خریدشان تعلق می‌گیرد (۰ = نامحدود)</label>
+        <input class="input" id="ref-commission-max" type="number" placeholder="مثال: 5" value="${referral.commission_max_count}" style="margin-bottom:4px" />
+
+        <div class="eyebrow" style="margin-top:18px">② کانفیگ رایگان با تعداد دعوت مشخص</div>
+        <p class="hint-text">با رسیدن تعداد کل دعوت‌شده‌ها (بدون نیاز به خرید آن‌ها) به یک آستانه، محصول انتخابی به‌صورت خودکار روی پنل ساخته و برای دعوت‌کننده ارسال می‌شود.</p>
+        <div class="field-switch-row">
+          <span>فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="ref-fc-enabled" ${referral.free_config_enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">تعداد دعوت لازم</label>
+        <input class="input" id="ref-fc-threshold" type="number" placeholder="مثال: 10" value="${referral.free_config_threshold}" style="margin-bottom:10px" />
+        <label class="field-label">محصول جایزه (فقط محصولات با تحویل خودکار و متصل به پنل)</label>
+        <select class="input" id="ref-fc-product" style="margin-bottom:4px">
+          <option value="">— انتخاب کنید —</option>
+          ${fcProductOptions}
+        </select>
+
+        <div class="eyebrow" style="margin-top:18px">③ شارژ ثابت کیف پول به‌ازای هر دعوت</div>
+        <p class="hint-text">با ورود هر نفر از طریق لینک دعوت (بدون نیاز به خرید)، مبلغ ثابتی بلافاصله به کیف پول دعوت‌کننده اضافه می‌شود.</p>
+        <div class="field-switch-row">
+          <span>فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="ref-ib-enabled" ${referral.invite_bonus_enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">مبلغ شارژ به‌ازای هر دعوت (تومان)</label>
+        <input class="input" id="ref-ib-amount" type="number" placeholder="مثال: 5000" value="${referral.invite_bonus_amount}" style="margin-bottom:10px" />
+        <label class="field-label">سقف تعداد دعوت‌های مشمول (۰ = نامحدود)</label>
+        <input class="input" id="ref-ib-max" type="number" placeholder="مثال: 10" value="${referral.invite_bonus_max_count}" style="margin-bottom:4px" />
+
         <div class="field-error" id="ref-error"></div>
-        <button class="btn" id="ref-save" style="margin-top:8px">💾 ذخیره</button>
+        <button class="btn" id="ref-save" style="margin-top:8px">💾 ذخیره همه‌ی تنظیمات رفرال</button>
       </div>
 
       <div class="card">
@@ -4273,10 +4311,36 @@ async function renderAdminSalesSection() {
       if (percentRaw === "") { errBox.textContent = "درصد پاداش را وارد کن."; return; }
       const percent = Number(percentRaw);
       if (isNaN(percent) || percent < 0 || percent > 100) { errBox.textContent = "درصد باید عددی بین ۰ تا ۱۰۰ باشد."; return; }
+
+      const commissionMax = Number(document.getElementById("ref-commission-max").value.trim() || "0");
+      if (isNaN(commissionMax) || commissionMax < 0) { errBox.textContent = "سقف تعداد نفرات نمی‌تواند منفی باشد."; return; }
+
+      const fcEnabled = document.getElementById("ref-fc-enabled").checked;
+      const fcThreshold = Number(document.getElementById("ref-fc-threshold").value.trim() || "0");
+      const fcProductRaw = document.getElementById("ref-fc-product").value;
+      const fcProductId = fcProductRaw ? Number(fcProductRaw) : null;
+      if (fcEnabled && (!fcProductId || fcThreshold < 1)) { errBox.textContent = "برای فعال‌سازی کانفیگ رایگان، محصول جایزه و تعداد دعوت معتبر لازم است."; return; }
+
+      const ibEnabled = document.getElementById("ref-ib-enabled").checked;
+      const ibAmount = Number(document.getElementById("ref-ib-amount").value.trim() || "0");
+      const ibMax = Number(document.getElementById("ref-ib-max").value.trim() || "0");
+      if (ibEnabled && ibAmount <= 0) { errBox.textContent = "برای فعال‌سازی شارژ به‌ازای دعوت، مبلغ باید بزرگ‌تر از صفر باشد."; return; }
+      if (isNaN(ibAmount) || ibAmount < 0 || isNaN(ibMax) || ibMax < 0) { errBox.textContent = "مقادیر عددی نمی‌توانند منفی باشند."; return; }
+
       try {
         await api("/api/admin/settings/referral", {
           method: "POST",
-          body: JSON.stringify({ enabled: document.getElementById("ref-enabled").checked, percent }),
+          body: JSON.stringify({
+            enabled: document.getElementById("ref-enabled").checked,
+            percent,
+            commission_max_count: commissionMax,
+            free_config_enabled: fcEnabled,
+            free_config_threshold: fcThreshold,
+            free_config_product_id: fcProductId,
+            invite_bonus_enabled: ibEnabled,
+            invite_bonus_amount: ibAmount,
+            invite_bonus_max_count: ibMax,
+          }),
         });
         tg.HapticFeedback.notificationOccurred("success");
         notify("تنظیمات رفرال ذخیره شد.");
