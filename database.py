@@ -855,6 +855,31 @@ class Database:
                 clean.append(k)
         self.set_setting("menu_order", json.dumps(clean, ensure_ascii=False))
 
+    def get_menu_row_breaks(self):
+        """کلیدهایی که باید *قبل* از آن‌ها یک ردیف جدید در منو شروع شود.
+        این یعنی چیدمان منو دیگر محدود به «همه‌ی دکمه‌ها زیر هم» یا «۲تا-۲تا»
+        نیست: هر دکمه‌ای که اینجا نباشد به ردیف دکمه‌ی قبلی‌اش می‌چسبد، پس با
+        همین یک لیست می‌شود مثلاً «یک دکمه تمام‌عرض، بعد دو دکمه کنار هم»
+        ساخت. مقدار None یعنی کاربر هنوز چیدمان سفارشی نساخته - در این حالت
+        فراخوان باید برای سازگاری با نصب‌های قدیمی از main_menu_columns
+        استفاده کند (رفتار قبلی)."""
+        import json
+        raw = self.get_setting("main_menu_row_breaks", "")
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(data, list):
+            return None
+        return [k for k in data if isinstance(k, str) and k in DEFAULT_MENU_ORDER]
+
+    def set_menu_row_breaks(self, keys: list):
+        import json
+        clean = [k for k in keys if k in DEFAULT_MENU_ORDER]
+        self.set_setting("main_menu_row_breaks", json.dumps(clean, ensure_ascii=False))
+
     # -----------------------------------------------------------------------
     # بنرهای کاروسل بالای صفحه‌ی خانه‌ی مینی‌اپ
     # -----------------------------------------------------------------------

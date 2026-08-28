@@ -156,6 +156,33 @@ def _chunk_row(buttons: list, columns: int) -> list:
     return [buttons[i:i + columns] for i in range(0, len(buttons), columns)]
 
 
+def _menu_item_rows(db, items: list) -> list:
+    """آیتم‌های منو (لیست تخت (key, text, style)) را بر اساس چیدمان دلخواه
+    کاربر (main_menu_row_breaks) به ردیف‌ها تقسیم می‌کند: هر دکمه‌ای که کلیدش
+    در لیست breaks باشد، یک ردیف تازه شروع می‌کند؛ بقیه به ردیف دکمه‌ی قبلی
+    خودشان می‌چسبند. یعنی چیدمان دیگر به تعداد ستون ثابت محدود نیست - مثلاً
+    می‌شود یک دکمه تمام‌عرض بالا، بعد چند دکمه کنار هم پایینش داشت.
+    اگر کاربر هنوز چیدمان سفارشی نساخته باشد (breaks is None)، برای سازگاری
+    با نصب‌های قدیمی از تنظیم main_menu_columns (۱ یا ۲ ستون ثابت) استفاده
+    می‌شود."""
+    breaks = db.get_menu_row_breaks()
+    if breaks is None:
+        columns = _menu_columns(db)
+        return _chunk_row(items, columns)
+
+    break_set = set(breaks)
+    rows, current = [], []
+    for item in items:
+        key = item[0]
+        if current and key in break_set:
+            rows.append(current)
+            current = []
+        current.append(item)
+    if current:
+        rows.append(current)
+    return rows
+
+
 def main_menu_kb(db, is_admin: bool, is_reseller: bool = False, is_main_bot: bool = True,
                   show_reseller_request: bool = False):
     """منوی پایین (Reply Keyboard). اگر از تنظیمات غیرفعال شده باشد،
@@ -164,9 +191,8 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False, is_main_bot: boo
         return ReplyKeyboardRemove()
 
     items = _menu_items(db, is_admin, is_reseller, is_main_bot, show_reseller_request)
-    columns = _menu_columns(db)
-    buttons = [_styled_button(text, style) for _key, text, style in items]
-    rows = _chunk_row(buttons, columns)
+    item_rows = _menu_item_rows(db, items)
+    rows = [[_styled_button(text, style) for _key, text, style in row] for row in item_rows]
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
@@ -176,18 +202,16 @@ def main_menu_inline_kb(db, is_admin: bool, is_reseller: bool = False, is_main_b
     روی کلیک هر دکمه، callback_data به‌صورت 'mm:<key>' ارسال می‌شود که در
     handlers_user.py / handlers_admin.py به همان هندلر متنی متناظرش وصل شده."""
     items = _menu_items(db, is_admin, is_reseller, is_main_bot, show_reseller_request)
-    columns = _menu_columns(db)
+    item_rows = _menu_item_rows(db, items)
     miniapp_url = _miniapp_url(db)
 
-    buttons = []
-    for key, text, style in items:
+    def _build_button(key, text, style):
         if key == "miniapp" and miniapp_url:
-            buttons.append(InlineKeyboardButton(text=text, web_app=WebAppInfo(url=miniapp_url)))
-            continue
+            return InlineKeyboardButton(text=text, web_app=WebAppInfo(url=miniapp_url))
         s = style if style in ("primary", "success", "danger") else None
-        buttons.append(InlineKeyboardButton(text=text, callback_data=f"mm:{key}", style=s))
+        return InlineKeyboardButton(text=text, callback_data=f"mm:{key}", style=s)
 
-    rows = _chunk_row(buttons, columns)
+    rows = [[_build_button(key, text, style) for key, text, style in row] for row in item_rows]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
