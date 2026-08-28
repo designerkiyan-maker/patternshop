@@ -3433,18 +3433,43 @@ function _val(root, key) { return $(`[data-fkey="${key}"]`, root)?.value; }
 function _num(root, key) { return Number(_val(root, key)) || 0; }
 
 async function renderSalesSettings() {
-  const [referral, wheel, crypto, renewal, volumeReminder, testConfig, forceJoin, stockAlert] = await Promise.all([
+  const [referral, wheel, crypto, renewal, volumeReminder, testConfig, forceJoin, stockAlert, products] = await Promise.all([
     apiGet('/settings/referral'), apiGet('/settings/wheel'), apiGet('/settings/crypto'),
     apiGet('/settings/renewal'), apiGet('/settings/volume-reminder'), apiGet('/settings/test-config'),
-    apiGet('/settings/force-join'), apiGet('/settings/stock-alert'),
+    apiGet('/settings/force-join'), apiGet('/settings/stock-alert'), apiGet('/products'),
   ]);
+
+  const eligibleProducts = (products || []).filter(p => p.is_auto_provision && p.provision_server_id);
+  const productOptions = eligibleProducts.map(p =>
+    `<option value="${p.id}" ${referral.free_config_product_id === p.id ? 'selected' : ''}>${esc(p.name)}${p.is_active ? '' : ' (غیرفعال)'}</option>`
+  ).join('');
 
   setContent(`
     <div class="card">
-      <h3>🔗 رفرال</h3>
+      <h3>🔗 رفرال — سه مدل مستقل زیرمجموعه‌گیری</h3>
+
+      <div class="card-sub" style="margin:8px 0 4px"><b>① پورسانت درصدی از خرید</b></div>
       <label class="field field-row"><span>فعال</span>${_swSpan('ref_enabled', referral.enabled)}</label>
       <label class="field"><span>درصد پورسانت</span><input class="input" data-fkey="ref_percent" type="number" value="${referral.percent}"></label>
-      <button class="btn btn-primary btn-sm" id="save-referral">ذخیره</button>
+      <label class="field"><span>سقف تعداد نفرات پورسانت‌دار (۰ = نامحدود)</span><input class="input" data-fkey="ref_commission_max" type="number" value="${referral.commission_max_count}"></label>
+
+      <div class="card-sub" style="margin:16px 0 4px"><b>② کانفیگ رایگان با تعداد دعوت مشخص</b></div>
+      <label class="field field-row"><span>فعال</span>${_swSpan('ref_fc_enabled', referral.free_config_enabled)}</label>
+      <label class="field"><span>تعداد دعوت لازم</span><input class="input" data-fkey="ref_fc_threshold" type="number" value="${referral.free_config_threshold}"></label>
+      <label class="field"><span>محصول جایزه</span>
+        <select class="input" data-fkey="ref_fc_product">
+          <option value="">— انتخاب کنید —</option>
+          ${productOptions}
+        </select>
+      </label>
+      <div class="card-sub">فقط محصولاتی که «تحویل خودکار» دارند و به یک پنل وصل‌اند نمایش داده می‌شوند؛ می‌توانید محصولی غیرفعال (که در فروشگاه نمایش داده نمی‌شود) مخصوص همین جایزه بسازید.</div>
+
+      <div class="card-sub" style="margin:16px 0 4px"><b>③ شارژ ثابت کیف پول به‌ازای هر دعوت</b></div>
+      <label class="field field-row"><span>فعال</span>${_swSpan('ref_ib_enabled', referral.invite_bonus_enabled)}</label>
+      <label class="field"><span>مبلغ شارژ (تومان)</span><input class="input" data-fkey="ref_ib_amount" type="number" value="${referral.invite_bonus_amount}"></label>
+      <label class="field"><span>سقف تعداد دعوت‌های مشمول (۰ = نامحدود)</span><input class="input" data-fkey="ref_ib_max" type="number" value="${referral.invite_bonus_max_count}"></label>
+
+      <button class="btn btn-primary btn-sm" id="save-referral" style="margin-top:12px">ذخیره همه‌ی تنظیمات رفرال</button>
     </div>
 
     <div class="card">
@@ -3526,7 +3551,17 @@ async function renderSalesSettings() {
 
   $('#save-referral').addEventListener('click', async () => {
     try {
-      await apiPost('/settings/referral', { enabled: _swOn(root, 'ref_enabled'), percent: _num(root, 'ref_percent') });
+      await apiPost('/settings/referral', {
+        enabled: _swOn(root, 'ref_enabled'),
+        percent: _num(root, 'ref_percent'),
+        commission_max_count: _num(root, 'ref_commission_max'),
+        free_config_enabled: _swOn(root, 'ref_fc_enabled'),
+        free_config_threshold: _num(root, 'ref_fc_threshold'),
+        free_config_product_id: _val(root, 'ref_fc_product') ? Number(_val(root, 'ref_fc_product')) : null,
+        invite_bonus_enabled: _swOn(root, 'ref_ib_enabled'),
+        invite_bonus_amount: _num(root, 'ref_ib_amount'),
+        invite_bonus_max_count: _num(root, 'ref_ib_max'),
+      });
       toast('تنظیمات رفرال ذخیره شد.');
     } catch (e) { handleErr(e); }
   });
