@@ -95,6 +95,14 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         return None, None
     router = Router()
 
+    async def _send_inline_main_menu(target, user_tg_id: int):
+        """اگر منوی شیشه‌ای بالا از تنظیمات فعال باشد، آن را به‌عنوان یک پیام
+        جدا (کنار/بعد از منوی پایین) ارسال می‌کند. target هر شیء‌ای است که
+        متد answer async دارد (Message یا call.message)."""
+        inline_kb = (await asyncio.to_thread(kb.inline_menu_for_user, db, user_tg_id, is_main_bot))
+        if inline_kb is not None:
+            await target.answer("📋 منو:", reply_markup=inline_kb)
+
     # -----------------------------------------------------------------------
     # عضویت اجباری در کانال
     # -----------------------------------------------------------------------
@@ -118,6 +126,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 pass
             welcome = (await asyncio.to_thread(db.get_setting, "welcome_text"))
             await call.message.answer(welcome, reply_markup=kb.menu_for_user(db, call.from_user.id, is_main_bot))
+            await _send_inline_main_menu(call.message, call.from_user.id)
         else:
             await call.answer("❌ هنوز عضو کانال نشده‌اید.", show_alert=True)
 
@@ -152,6 +161,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         welcome = (await asyncio.to_thread(db.get_setting, "welcome_text"))
         await message.answer(welcome, reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot))
+        await _send_inline_main_menu(message, message.from_user.id)
 
     async def _handle_referral_invite_rewards(bot: Bot, referrer_id: int, reward_info: dict):
         """پیام و تحویل جوایز حالت‌های ۲ و ۳ زیرمجموعه‌گیری (که با صرفِ دعوت، بدون
@@ -1830,5 +1840,41 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             reply_markup=kb.menu_for_user(db, user.id, is_main_bot),
         )
         await state.clear()
+
+    # -----------------------------------------------------------------------
+    # پل بین منوی شیشه‌ای بالا (Inline) و همان هندلرهای منوی پایین (Reply)
+    # چون هر دکمه‌ی پایین از قبل یک هندلر مستقل دارد، به‌جای تکرار منطق هرکدام،
+    # کلیک روی دکمه‌ی شیشه‌ای معادل، مستقیماً همان تابع را با کاربرِ واقعیِ
+    # کلیک‌کننده (call.from_user) صدا می‌زند تا رفتار دقیقاً یکسان بماند.
+    # -----------------------------------------------------------------------
+
+    @router.callback_query(F.data.startswith("mm:"))
+    async def cb_main_menu_inline(call: CallbackQuery, state: FSMContext, bot: Bot):
+        await call.answer()
+        key = call.data.split(":", 1)[1]
+        # پیام جعلی: همان پیام بات ولی از_user واقعیِ کلیک‌کننده، تا هندلرهای
+        # زیر که message.from_user.id می‌خوانند درست کار کنند
+        fake_message = call.message.model_copy(update={"from_user": call.from_user})
+
+        if key == "btn_buy":
+            await show_categories(fake_message, state)
+        elif key == "btn_test":
+            await get_test_config(fake_message)
+        elif key == "btn_my_orders":
+            await my_orders(fake_message)
+        elif key == "btn_wallet":
+            await wallet_menu(fake_message)
+        elif key == "btn_referral":
+            await referral_menu(fake_message, bot)
+        elif key == "btn_wheel":
+            await wheel_of_fortune(fake_message, bot)
+        elif key == "btn_contact":
+            await contact_start(fake_message, state)
+        elif key == "btn_reseller_panel":
+            await reseller_panel_open(fake_message, state)
+        elif key == "btn_reseller_request":
+            await reseller_request_start(fake_message, state)
+        # کلید "btn_admin_panel" در handlers_admin.py مدیریت می‌شود چون هندلر
+        # اصلی آن (open_admin_panel) در همان روتر تعریف شده است.
 
     return router

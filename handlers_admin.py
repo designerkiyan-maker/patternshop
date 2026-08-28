@@ -3432,6 +3432,60 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await state.clear()
         await message.answer("✅ متن دکمه به‌روزرسانی شد.", reply_markup=kb.admin_edit_buttons_kb(db))
 
+    # -------------------------------------------------------------------
+    # چیدمان/نمایش منوی اصلی: منوی پایین (Reply) و منوی شیشه‌ای بالا (Inline)
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_main_menu_settings")
+    async def cb_admin_main_menu_settings(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        await replace_admin_view(call, "🧩 تنظیمات منوی اصلی:", reply_markup=kb.main_menu_settings_kb(db))
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_mm_toggle_reply")
+    async def cb_admin_mm_toggle_reply(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = (await asyncio.to_thread(db.get_setting, "main_menu_reply_enabled", "1")) == "1"
+        if current and (await asyncio.to_thread(db.get_setting, "main_menu_inline_enabled", "0")) != "1":
+            await call.answer("⚠️ چون منوی شیشه‌ای بالا غیرفعال است، منوی پایین را نمی‌توان خاموش کرد.", show_alert=True)
+            return
+        (await asyncio.to_thread(db.set_setting, "main_menu_reply_enabled", "0" if current else "1"))
+        await safe_edit(call, "🧩 تنظیمات منوی اصلی:", reply_markup=kb.main_menu_settings_kb(db))
+        await call.answer("✅ اعمال شد.")
+
+    @router.callback_query(F.data == "adm_mm_toggle_inline")
+    async def cb_admin_mm_toggle_inline(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = (await asyncio.to_thread(db.get_setting, "main_menu_inline_enabled", "0")) == "1"
+        if current and (await asyncio.to_thread(db.get_setting, "main_menu_reply_enabled", "1")) != "1":
+            await call.answer("⚠️ چون منوی پایین غیرفعال است، منوی شیشه‌ای بالا را نمی‌توان خاموش کرد.", show_alert=True)
+            return
+        (await asyncio.to_thread(db.set_setting, "main_menu_inline_enabled", "0" if current else "1"))
+        await safe_edit(call, "🧩 تنظیمات منوی اصلی:", reply_markup=kb.main_menu_settings_kb(db))
+        await call.answer("✅ اعمال شد.")
+
+    @router.callback_query(F.data == "adm_mm_toggle_columns")
+    async def cb_admin_mm_toggle_columns(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = (await asyncio.to_thread(db.get_setting, "main_menu_columns", "1"))
+        new_val = "2" if current != "2" else "1"
+        (await asyncio.to_thread(db.set_setting, "main_menu_columns", new_val))
+        await safe_edit(call, "🧩 تنظیمات منوی اصلی:", reply_markup=kb.main_menu_settings_kb(db))
+        await call.answer("✅ اعمال شد.")
+
+    # کلیک روی دکمه‌ی «پنل مدیریت» وقتی از منوی شیشه‌ای بالا (نه منوی پایین) زده شود
+    @router.callback_query(F.data == "mm:btn_admin_panel")
+    async def cb_mm_admin_panel(call: CallbackQuery, state: FSMContext):
+        await call.answer()
+        if not admin_only(call.from_user.id):
+            return
+        await state.clear()
+        await call.message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
     def _lookup_button_label(key: str) -> str:
         if key in kb.BUTTON_LABELS:
             return kb.BUTTON_LABELS[key]

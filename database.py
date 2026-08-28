@@ -104,6 +104,11 @@ DEFAULT_SETTINGS = {
     "btn_referral_style": "",
     "btn_wallet_style": "success",
     "btn_admin_panel_style": "danger",
+    # نمایش منوی اصلی: منوی پایین (Reply) و منوی شیشه‌ای بالا (Inline) هرکدام
+    # جداگانه قابل فعال/غیرفعال هستند، و چیدمان (۱ یا ۲ دکمه در هر ردیف) مشترک است
+    "main_menu_reply_enabled": "1",
+    "main_menu_inline_enabled": "0",
+    "main_menu_columns": "1",
     "store_name": "⚡ SHOP VPN",
     "miniapp_banner_text": "اتصال امن و پایدار برقرار است",
     # سیستم زیرمجموعه‌گیری
