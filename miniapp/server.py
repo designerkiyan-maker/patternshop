@@ -717,7 +717,10 @@ async def api_test_config_claim(auth=Depends(require_joined)):
 @app.get("/api/referral")
 async def api_referral(auth=Depends(get_verified_user)):
     tg_id, db, tenant = auth
-    if db.get_setting("referral_enabled", "1") != "1":
+    commission_on = db.get_setting("referral_enabled", "1") == "1"
+    fc_on = db.get_setting("referral_free_config_enabled", "0") == "1"
+    ib_on = db.get_setting("referral_invite_bonus_enabled", "0") == "1"
+    if not (commission_on or fc_on or ib_on):
         return {"enabled": False}
     username = await get_bot_username(tenant)
     ref_start = f"ref{tg_id}"
@@ -728,7 +731,14 @@ async def api_referral(auth=Depends(get_verified_user)):
         "link": link,
         "count": stats["count"],
         "credit": stats["credit"],
+        "commission_enabled": commission_on,
         "percent": db.get_setting("referral_percent", "10"),
+        "commission_max_count": int(db.get_setting("referral_commission_max_count", "0") or 0),
+        "free_config_enabled": fc_on,
+        "free_config_threshold": int(db.get_setting("referral_free_config_threshold", "10") or 0),
+        "invite_bonus_enabled": ib_on,
+        "invite_bonus_amount": int(db.get_setting("referral_invite_bonus_amount", "0") or 0),
+        "invite_bonus_max_count": int(db.get_setting("referral_invite_bonus_max_count", "0") or 0),
     }
 
 
@@ -2083,6 +2093,23 @@ def api_admin_list_products(cat_id: int, auth=Depends(require_senior_admin)):
     ]
 
 
+@app.get("/api/admin/products/all")
+def api_admin_list_all_products(auth=Depends(require_senior_admin)):
+    """لیست همه‌ی محصولات (از همه‌ی دسته‌بندی‌ها، فعال و غیرفعال) - برای مصارفی مثل
+    انتخاب «محصول جایزه» در تنظیمات زیرمجموعه‌گیری."""
+    _, db, _ = auth
+    products = db.get_all_products()
+    return [
+        {
+            "id": p["id"], "name": p["name"], "category_name": p["category_name"],
+            "is_active": bool(p["is_active"]),
+            "is_auto_provision": bool(p["is_auto_provision"]),
+            "provision_server_id": p["provision_server_id"],
+        }
+        for p in products
+    ]
+
+
 @app.post("/api/admin/products")
 def api_admin_create_product(body: ProductCreate, auth=Depends(require_senior_admin)):
     _, db, tenant = auth
@@ -2611,6 +2638,13 @@ def api_admin_delete_reseller(reseller_id: int, purge_db: bool = Query(False), a
 class ReferralSettingsUpdate(BaseModel):
     enabled: bool
     percent: int
+    commission_max_count: int = 0
+    free_config_enabled: bool = False
+    free_config_threshold: int = 10
+    free_config_product_id: Optional[int] = None
+    invite_bonus_enabled: bool = False
+    invite_bonus_amount: int = 0
+    invite_bonus_max_count: int = 0
 
 
 class WheelSettingsUpdate(BaseModel):
@@ -2645,9 +2679,17 @@ class CryptoSettingsUpdate(BaseModel):
 @app.get("/api/admin/settings/referral")
 def api_admin_get_referral_settings(auth=Depends(require_senior_admin)):
     _, db, _ = auth
+    fc_product_id = db.get_setting("referral_free_config_product_id", "") or ""
     return {
         "enabled": db.get_setting("referral_enabled", "1") == "1",
         "percent": int(db.get_setting("referral_percent", "10") or 0),
+        "commission_max_count": int(db.get_setting("referral_commission_max_count", "0") or 0),
+        "free_config_enabled": db.get_setting("referral_free_config_enabled", "0") == "1",
+        "free_config_threshold": int(db.get_setting("referral_free_config_threshold", "10") or 0),
+        "free_config_product_id": int(fc_product_id) if fc_product_id else None,
+        "invite_bonus_enabled": db.get_setting("referral_invite_bonus_enabled", "0") == "1",
+        "invite_bonus_amount": int(db.get_setting("referral_invite_bonus_amount", "0") or 0),
+        "invite_bonus_max_count": int(db.get_setting("referral_invite_bonus_max_count", "0") or 0),
     }
 
 
@@ -2656,8 +2698,31 @@ def api_admin_set_referral_settings(body: ReferralSettingsUpdate, auth=Depends(r
     _, db, _ = auth
     if body.percent < 0 or body.percent > 100:
         raise HTTPException(status_code=400, detail="درصد باید بین ۰ تا ۱۰۰ باشد.")
+    if body.commission_max_count < 0:
+        raise HTTPException(status_code=400, detail="سقف تعداد نفرات نمی‌تواند منفی باشد.")
+    if body.free_config_threshold < 0 or body.invite_bonus_amount < 0 or body.invite_bonus_max_count < 0:
+        raise HTTPException(status_code=400, detail="مقادیر عددی نمی‌توانند منفی باشند.")
+
+    if body.free_config_product_id:
+        product = db.get_product(body.free_config_product_id)
+        if not product:
+            raise HTTPException(status_code=400, detail="محصول جایزه یافت نشد.")
+        if not product["is_auto_provision"] or not product["provision_server_id"]:
+            raise HTTPException(status_code=400, detail="محصول جایزه باید «تحویل خودکار» داشته باشد و به یک پنل وصل باشد.")
+    if body.free_config_enabled and (not body.free_config_product_id or body.free_config_threshold < 1):
+        raise HTTPException(status_code=400, detail="برای فعال‌سازی کانفیگ رایگان، محصول جایزه و آستانه‌ی معتبر (حداقل ۱) لازم است.")
+    if body.invite_bonus_enabled and body.invite_bonus_amount <= 0:
+        raise HTTPException(status_code=400, detail="برای فعال‌سازی شارژ به‌ازای دعوت، مبلغ باید بزرگ‌تر از صفر باشد.")
+
     db.set_setting("referral_enabled", "1" if body.enabled else "0")
     db.set_setting("referral_percent", str(body.percent))
+    db.set_setting("referral_commission_max_count", str(body.commission_max_count))
+    db.set_setting("referral_free_config_enabled", "1" if body.free_config_enabled else "0")
+    db.set_setting("referral_free_config_threshold", str(body.free_config_threshold))
+    db.set_setting("referral_free_config_product_id", str(body.free_config_product_id) if body.free_config_product_id else "")
+    db.set_setting("referral_invite_bonus_enabled", "1" if body.invite_bonus_enabled else "0")
+    db.set_setting("referral_invite_bonus_amount", str(body.invite_bonus_amount))
+    db.set_setting("referral_invite_bonus_max_count", str(body.invite_bonus_max_count))
     return {"status": "ok"}
 
 
