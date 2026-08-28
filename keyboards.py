@@ -81,7 +81,12 @@ def main_menu_kb(db, is_admin: bool, is_reseller: bool = False, is_main_bot: boo
         return [_styled_button(settings.get("btn_wallet", "👛 کیف پول من"), settings.get("btn_wallet_style", ""))]
 
     def row_referral():
-        if settings.get("referral_enabled", "1") != "1":
+        any_mode_enabled = (
+            settings.get("referral_enabled", "1") == "1"
+            or settings.get("referral_free_config_enabled", "0") == "1"
+            or settings.get("referral_invite_bonus_enabled", "0") == "1"
+        )
+        if not any_mode_enabled:
             return None
         return [
             _styled_button(settings.get("btn_referral", "🤝 زیرمجموعه‌گیری من"), settings.get("btn_referral_style", ""))
@@ -836,15 +841,62 @@ def discount_codes_kb(codes) -> InlineKeyboardMarkup:
 # ---------------------------------------------------------------------------
 
 def referral_settings_kb(db) -> InlineKeyboardMarkup:
+    # --- حالت ۱: پورسانت درصدی از اولین خرید هر زیرمجموعه ---
     enabled = db.get_setting("referral_enabled", "1") == "1"
-    toggle_text = "🔴 غیرفعال کردن زیرمجموعه‌گیری" if enabled else "🟢 فعال کردن زیرمجموعه‌گیری"
+    toggle_text = "🔴 غیرفعال کردن پورسانت خرید" if enabled else "🟢 فعال کردن پورسانت خرید"
     percent = db.get_setting("referral_percent", "10")
+    commission_max = int(db.get_setting("referral_commission_max_count", "0") or 0)
+    commission_max_text = f"{commission_max} نفر" if commission_max > 0 else "نامحدود"
+
+    # --- حالت ۲: محصول رایگان با رسیدن به تعداد دعوت مشخص ---
+    fc_enabled = db.get_setting("referral_free_config_enabled", "0") == "1"
+    fc_toggle_text = "🔴 غیرفعال کردن کانفیگ رایگان" if fc_enabled else "🟢 فعال کردن کانفیگ رایگان"
+    fc_threshold = db.get_setting("referral_free_config_threshold", "10")
+    fc_product_id = db.get_setting("referral_free_config_product_id", "") or ""
+    fc_product_name = "تنظیم نشده"
+    if fc_product_id:
+        p = db.get_product(int(fc_product_id))
+        fc_product_name = p["name"] if p else "محصول حذف‌شده - دوباره انتخاب کنید"
+
+    # --- حالت ۳: شارژ ثابت کیف پول به‌ازای هر دعوت ---
+    ib_enabled = db.get_setting("referral_invite_bonus_enabled", "0") == "1"
+    ib_toggle_text = "🔴 غیرفعال کردن شارژ به‌ازای دعوت" if ib_enabled else "🟢 فعال کردن شارژ به‌ازای دعوت"
+    ib_amount = db.get_setting("referral_invite_bonus_amount", "0")
+    ib_max = int(db.get_setting("referral_invite_bonus_max_count", "0") or 0)
+    ib_max_text = f"{ib_max} نفر" if ib_max > 0 else "نامحدود"
+
     rows = [
-        [InlineKeyboardButton(text=f"درصد پورسانت فعلی: {percent}%", callback_data="noop")],
+        [InlineKeyboardButton(text="① پورسانت درصدی از خرید زیرمجموعه", callback_data="noop")],
+        [InlineKeyboardButton(text=f"درصد پورسانت: {percent}% | سقف: {commission_max_text}", callback_data="noop")],
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_referral_toggle")],
         [InlineKeyboardButton(text="✏️ تغییر درصد پورسانت", callback_data="adm_referral_percent_edit")],
+        [InlineKeyboardButton(text="✏️ تغییر سقف تعداد نفرات (۰=نامحدود)", callback_data="adm_referral_commission_max_edit")],
+
+        [InlineKeyboardButton(text="② کانفیگ رایگان با تعداد دعوت مشخص", callback_data="noop")],
+        [InlineKeyboardButton(text=f"آستانه: {fc_threshold} نفر | محصول: {fc_product_name}", callback_data="noop")],
+        [InlineKeyboardButton(text=fc_toggle_text, callback_data="adm_referral_freeconfig_toggle")],
+        [InlineKeyboardButton(text="✏️ تغییر تعداد دعوت لازم", callback_data="adm_referral_freeconfig_threshold_edit")],
+        [InlineKeyboardButton(text="📦 انتخاب محصول جایزه", callback_data="adm_referral_freeconfig_product")],
+
+        [InlineKeyboardButton(text="③ شارژ ثابت کیف پول به‌ازای هر دعوت", callback_data="noop")],
+        [InlineKeyboardButton(text=f"مبلغ: {ib_amount} تومان | سقف: {ib_max_text}", callback_data="noop")],
+        [InlineKeyboardButton(text=ib_toggle_text, callback_data="adm_referral_invitebonus_toggle")],
+        [InlineKeyboardButton(text="✏️ تغییر مبلغ شارژ", callback_data="adm_referral_invitebonus_amount_edit")],
+        [InlineKeyboardButton(text="✏️ تغییر سقف تعداد نفرات (۰=نامحدود)", callback_data="adm_referral_invitebonus_max_edit")],
+
         [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:resellers")],
     ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def referral_freeconfig_product_kb(db) -> InlineKeyboardMarkup:
+    products = db.get_all_products()
+    rows = []
+    for p in products:
+        rows.append([InlineKeyboardButton(
+            text=f"{p['name']} ({p['category_name']})", callback_data=f"adm_referral_freeconfig_setprod:{p['id']}"
+        )])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_referral_settings")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

@@ -103,8 +103,18 @@ DEFAULT_SETTINGS = {
     "store_name": "⚡ SHOP VPN",
     "miniapp_banner_text": "اتصال امن و پایدار برقرار است",
     # سیستم زیرمجموعه‌گیری
+    # حالت ۱: پورسانت درصدی از اولین خرید هر زیرمجموعه
     "referral_enabled": "1",
     "referral_percent": "10",  # درصدی که به دعوت‌کننده به‌عنوان اعتبار کیف پول تعلق می‌گیرد
+    "referral_commission_max_count": "0",  # حداکثر تعداد نفراتی که پورسانت خریدشان تعلق می‌گیرد (0 = نامحدود)
+    # حالت ۲: دریافت یک محصول/کانفیگ رایگان با رسیدن تعداد دعوت‌شده‌ها به یک آستانه (نیازی به خرید نیست)
+    "referral_free_config_enabled": "0",
+    "referral_free_config_threshold": "10",  # تعداد دعوت لازم
+    "referral_free_config_product_id": "",  # آیدی محصولی که رایگان تحویل داده می‌شود
+    # حالت ۳: شارژ ثابت کیف پول به‌ازای هر دعوت (بدون نیاز به خرید)، تا سقف مشخص
+    "referral_invite_bonus_enabled": "0",
+    "referral_invite_bonus_amount": "0",  # مبلغ ثابت شارژ کیف پول به‌ازای هر دعوت (تومان)
+    "referral_invite_bonus_max_count": "10",  # حداکثر تعداد دعوت‌هایی که این پاداش برایشان تعلق می‌گیرد (0 = نامحدود)
     # رنگ دکمه‌های شیشه‌ای داخل پنل مدیریت
     "adm_categories_style": "",
     "adm_products_style": "",
@@ -302,6 +312,8 @@ class Database:
                     referred_by INTEGER,
                     referral_credit INTEGER DEFAULT 0,
                     referral_first_purchase_rewarded INTEGER DEFAULT 0,
+                    referral_invite_bonus_given INTEGER DEFAULT 0,
+                    referral_free_config_given INTEGER DEFAULT 0,
                     joined_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -617,6 +629,8 @@ class Database:
             ("users", "referred_by", "INTEGER"),
             ("users", "referral_credit", "INTEGER DEFAULT 0"),
             ("users", "referral_first_purchase_rewarded", "INTEGER DEFAULT 0"),
+            ("users", "referral_invite_bonus_given", "INTEGER DEFAULT 0"),
+            ("users", "referral_free_config_given", "INTEGER DEFAULT 0"),
             ("orders", "status", "TEXT DEFAULT 'pending'"),
             ("orders", "base_price", "INTEGER"),
             ("orders", "wallet_used", "INTEGER DEFAULT 0"),
@@ -2128,6 +2142,9 @@ class Database:
             )
 
     def reward_referrer_if_first_purchase(self, referred_user_tg_id: int, paid_amount: int):
+        """حالت ۱ از سه مدل زیرمجموعه‌گیری: پورسانت درصدی، فقط برای اولین خرید هر
+        زیرمجموعه، و در صورت تنظیم بودن سقف (referral_commission_max_count)، فقط برای
+        همان تعداد اول از زیرمجموعه‌هایی که خرید کرده‌اند."""
         with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT referred_by, referral_first_purchase_rewarded FROM users WHERE telegram_id=?",
@@ -2135,15 +2152,29 @@ class Database:
             ).fetchone()
             if not row or not row["referred_by"] or row["referral_first_purchase_rewarded"]:
                 return None
+            referrer_id = row["referred_by"]
+
+            if self.get_setting("referral_enabled", "1") != "1":
+                return None
+
+            max_count = int(self.get_setting("referral_commission_max_count", "0") or 0)
+            if max_count > 0:
+                already = conn.execute(
+                    "SELECT COUNT(*) c FROM users WHERE referred_by=? AND referral_first_purchase_rewarded=1",
+                    (referrer_id,),
+                ).fetchone()["c"]
+                if already >= max_count:
+                    # سقف پر شده؛ همچنان به‌عنوان «رویدادِ اولین خرید» علامت می‌زنیم تا دوباره بررسی نشود
+                    conn.execute(
+                        "UPDATE users SET referral_first_purchase_rewarded=1 WHERE telegram_id=?",
+                        (referred_user_tg_id,),
+                    )
+                    return None
 
             conn.execute(
                 "UPDATE users SET referral_first_purchase_rewarded=1 WHERE telegram_id=?",
                 (referred_user_tg_id,),
             )
-            referrer_id = row["referred_by"]
-
-        if self.get_setting("referral_enabled", "1") != "1":
-            return None
 
         percent = int(self.get_setting("referral_percent", "10") or 0)
         reward = (paid_amount * percent) // 100
@@ -2151,6 +2182,60 @@ class Database:
             self.add_wallet_credit(referrer_id, reward)
             return reward, referrer_id
         return None
+
+    def apply_referral_invite_rewards(self, referred_user_tg_id: int, referrer_tg_id: int) -> dict:
+        """بلافاصله بعد از ثبت یک دعوت جدید (بدون نیاز به خرید) صدا زده می‌شود و
+        حالت‌های ۲ و ۳ مدل زیرمجموعه‌گیری را بررسی/اعمال می‌کند:
+        - حالت ۳: شارژ ثابت کیف پول به‌ازای هر دعوت، تا سقف مشخص.
+        - حالت ۲: دریافت یک محصول مشخص و رایگان با رسیدن تعداد دعوت‌ها به یک آستانه.
+        خروجی: {"invite_bonus": مبلغ یا None, "free_config_product_id": آیدی محصول یا None}
+        """
+        result = {"invite_bonus": None, "free_config_product_id": None}
+        with self._get_conn() as conn:
+            referrer = conn.execute(
+                "SELECT referral_free_config_given FROM users WHERE telegram_id=?", (referrer_tg_id,)
+            ).fetchone()
+            if not referrer:
+                return result
+
+            # --- حالت ۳: شارژ ثابت کیف پول برای هر دعوت، تا سقف مشخص ---
+            if self.get_setting("referral_invite_bonus_enabled", "0") == "1":
+                amount = int(self.get_setting("referral_invite_bonus_amount", "0") or 0)
+                max_count = int(self.get_setting("referral_invite_bonus_max_count", "0") or 0)
+                already = conn.execute(
+                    "SELECT COUNT(*) c FROM users WHERE referred_by=? AND referral_invite_bonus_given=1",
+                    (referrer_tg_id,),
+                ).fetchone()["c"]
+                if amount > 0 and (max_count == 0 or already < max_count):
+                    conn.execute(
+                        "UPDATE users SET referral_invite_bonus_given=1 WHERE telegram_id=?",
+                        (referred_user_tg_id,),
+                    )
+                    conn.execute(
+                        "UPDATE users SET referral_credit = MAX(referral_credit + ?, 0) WHERE telegram_id=?",
+                        (amount, referrer_tg_id),
+                    )
+                    result["invite_bonus"] = amount
+
+            # --- حالت ۲: محصول رایگان با رسیدن تعداد دعوت‌ها به یک آستانه (یک‌بار) ---
+            if (
+                self.get_setting("referral_free_config_enabled", "0") == "1"
+                and not referrer["referral_free_config_given"]
+            ):
+                threshold = int(self.get_setting("referral_free_config_threshold", "0") or 0)
+                product_id = self.get_setting("referral_free_config_product_id", "") or ""
+                if threshold > 0 and product_id:
+                    invited_count = conn.execute(
+                        "SELECT COUNT(*) c FROM users WHERE referred_by=?", (referrer_tg_id,)
+                    ).fetchone()["c"]
+                    if invited_count >= threshold:
+                        conn.execute(
+                            "UPDATE users SET referral_free_config_given=1 WHERE telegram_id=?",
+                            (referrer_tg_id,),
+                        )
+                        result["free_config_product_id"] = int(product_id)
+
+        return result
 
     # -----------------------------------------------------------------------
     # کدهای تخفیف

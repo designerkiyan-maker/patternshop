@@ -99,6 +99,22 @@ class AdminReferralPercent(StatesGroup):
     waiting_value = State()
 
 
+class AdminReferralCommissionMax(StatesGroup):
+    waiting_value = State()
+
+
+class AdminReferralFreeConfigThreshold(StatesGroup):
+    waiting_value = State()
+
+
+class AdminReferralInviteBonusAmount(StatesGroup):
+    waiting_value = State()
+
+
+class AdminReferralInviteBonusMax(StatesGroup):
+    waiting_value = State()
+
+
 class AdminResellerCredit(StatesGroup):
     waiting_user_id = State()
     waiting_delta = State()

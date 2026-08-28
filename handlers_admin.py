@@ -53,6 +53,10 @@ from states import (
     AdminReplyFlow,
     AdminCreateDiscount,
     AdminReferralPercent,
+    AdminReferralCommissionMax,
+    AdminReferralFreeConfigThreshold,
+    AdminReferralInviteBonusAmount,
+    AdminReferralInviteBonusMax,
     AdminAddResellerBot,
     AdminSetPanelDomain,
     AdminResellerCredit,
@@ -1418,6 +1422,150 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         (await asyncio.to_thread(db.set_setting, "referral_percent", text))
         await state.clear()
         await message.answer(f"✅ درصد پورسانت زیرمجموعه‌گیری روی {text}٪ تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    @router.callback_query(F.data == "adm_referral_commission_max_edit")
+    async def cb_admin_referral_commission_max_edit(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminReferralCommissionMax.waiting_value)
+        await safe_edit(call,
+            "حداکثر تعداد زیرمجموعه‌هایی که پورسانت خریدشان تعلق می‌گیرد را وارد کنید "
+            "(برای نامحدود، عدد 0 را ارسال کنید):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminReferralCommissionMax.waiting_value)
+    async def process_referral_commission_max(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit():
+            await message.answer("لطفاً یک عدد صحیح (0 یا بیشتر) ارسال کنید.")
+            return
+        (await asyncio.to_thread(db.set_setting, "referral_commission_max_count", text))
+        await state.clear()
+        label = "نامحدود" if text == "0" else f"{text} نفر"
+        await message.answer(f"✅ سقف تعداد نفرات پورسانت‌دار روی «{label}» تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    # --- حالت ۲: کانفیگ رایگان با تعداد دعوت مشخص ---
+
+    @router.callback_query(F.data == "adm_referral_freeconfig_toggle")
+    async def cb_admin_referral_freeconfig_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        current = (await asyncio.to_thread(db.get_setting, "referral_free_config_enabled", "0"))
+        new_value = "0" if current == "1" else "1"
+        if new_value == "1" and not (await asyncio.to_thread(db.get_setting, "referral_free_config_product_id", "")):
+            await call.answer("ابتدا از «انتخاب محصول جایزه» یک محصول انتخاب کنید.", show_alert=True)
+            return
+        (await asyncio.to_thread(db.set_setting, "referral_free_config_enabled", new_value))
+        await safe_edit(call, "🤝 تنظیمات زیرمجموعه‌گیری:", reply_markup=kb.referral_settings_kb(db))
+        await call.answer("وضعیت تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_referral_freeconfig_threshold_edit")
+    async def cb_admin_referral_freeconfig_threshold_edit(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminReferralFreeConfigThreshold.waiting_value)
+        await safe_edit(call,
+            "با دعوت چند نفر، یک کانفیگ رایگان تعلق بگیرد؟ عدد را وارد کنید:",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminReferralFreeConfigThreshold.waiting_value)
+    async def process_referral_freeconfig_threshold(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) < 1:
+            await message.answer("لطفاً یک عدد صحیح بزرگ‌تر از صفر ارسال کنید.")
+            return
+        (await asyncio.to_thread(db.set_setting, "referral_free_config_threshold", text))
+        await state.clear()
+        await message.answer(f"✅ با دعوت {text} نفر، کانفیگ رایگان تعلق می‌گیرد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    @router.callback_query(F.data == "adm_referral_freeconfig_product")
+    async def cb_admin_referral_freeconfig_product(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await replace_admin_view(call, "📦 محصولی که به‌عنوان جایزه رایگان تحویل داده شود را انتخاب کنید:", reply_markup=kb.referral_freeconfig_product_kb(db))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_referral_freeconfig_setprod:"))
+    async def cb_admin_referral_freeconfig_setprod(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        product_id = call.data.split(":")[1]
+        product = (await asyncio.to_thread(db.get_product, int(product_id)))
+        if not product:
+            await call.answer("این محصول یافت نشد.", show_alert=True)
+            return
+        if not product["is_auto_provision"] or not product["provision_server_id"]:
+            await call.answer(
+                "این محصول تحویل خودکار ندارد؛ فقط محصولاتی که به یک پنل وصل و «تحویل خودکار» هستند قابل انتخاب‌اند.",
+                show_alert=True,
+            )
+            return
+        (await asyncio.to_thread(db.set_setting, "referral_free_config_product_id", product_id))
+        await safe_edit(call, "🤝 تنظیمات زیرمجموعه‌گیری:", reply_markup=kb.referral_settings_kb(db))
+        await call.answer(f"✅ محصول «{product['name']}» به‌عنوان جایزه انتخاب شد.")
+
+    # --- حالت ۳: شارژ ثابت کیف پول به‌ازای هر دعوت ---
+
+    @router.callback_query(F.data == "adm_referral_invitebonus_toggle")
+    async def cb_admin_referral_invitebonus_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        current = (await asyncio.to_thread(db.get_setting, "referral_invite_bonus_enabled", "0"))
+        new_value = "0" if current == "1" else "1"
+        if new_value == "1" and int((await asyncio.to_thread(db.get_setting, "referral_invite_bonus_amount", "0")) or 0) <= 0:
+            await call.answer("ابتدا مبلغ شارژ را از «تغییر مبلغ شارژ» تنظیم کنید.", show_alert=True)
+            return
+        (await asyncio.to_thread(db.set_setting, "referral_invite_bonus_enabled", new_value))
+        await safe_edit(call, "🤝 تنظیمات زیرمجموعه‌گیری:", reply_markup=kb.referral_settings_kb(db))
+        await call.answer("وضعیت تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_referral_invitebonus_amount_edit")
+    async def cb_admin_referral_invitebonus_amount_edit(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminReferralInviteBonusAmount.waiting_value)
+        await safe_edit(call,
+            "مبلغ ثابتی که برای هر دعوت به کیف پول دعوت‌کننده اضافه شود را به تومان وارد کنید:",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminReferralInviteBonusAmount.waiting_value)
+    async def process_referral_invitebonus_amount(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) < 0:
+            await message.answer("لطفاً یک عدد صحیح ارسال کنید.")
+            return
+        (await asyncio.to_thread(db.set_setting, "referral_invite_bonus_amount", text))
+        await state.clear()
+        await message.answer(f"✅ مبلغ شارژ به‌ازای هر دعوت روی {int(text):,} تومان تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    @router.callback_query(F.data == "adm_referral_invitebonus_max_edit")
+    async def cb_admin_referral_invitebonus_max_edit(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminReferralInviteBonusMax.waiting_value)
+        await safe_edit(call,
+            "این شارژ فقط برای چند نفر اول دعوت‌شده اعمال شود؟ عدد را وارد کنید "
+            "(برای نامحدود، عدد 0 را ارسال کنید):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminReferralInviteBonusMax.waiting_value)
+    async def process_referral_invitebonus_max(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit():
+            await message.answer("لطفاً یک عدد صحیح (0 یا بیشتر) ارسال کنید.")
+            return
+        (await asyncio.to_thread(db.set_setting, "referral_invite_bonus_max_count", text))
+        await state.clear()
+        label = "نامحدود" if text == "0" else f"{text} نفر"
+        await message.answer(f"✅ سقف تعداد نفرات شارژ به‌ازای دعوت روی «{label}» تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
     # -------------------------------------------------------------------
     # مدیریت گردونه شانس

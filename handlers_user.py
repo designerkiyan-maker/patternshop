@@ -126,21 +126,79 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     # -----------------------------------------------------------------------
 
     @router.message(CommandStart())
-    async def cmd_start(message: Message, state: FSMContext):
+    async def cmd_start(message: Message, state: FSMContext, bot: Bot):
         await state.clear()
+        is_new_user = not (await asyncio.to_thread(db.get_user, message.from_user.id))
         (await asyncio.to_thread(db.add_or_update_user, 
             message.from_user.id, message.from_user.username or "", message.from_user.first_name or ""
         ))
 
         # پردازش لینک دعوت زیرمجموعه‌گیری: /start ref123456789
         parts = (message.text or "").split(maxsplit=1)
-        if len(parts) > 1 and parts[1].startswith("ref"):
+        if is_new_user and len(parts) > 1 and parts[1].startswith("ref"):
             ref_part = parts[1][3:]
-            if ref_part.isdigit():
-                (await asyncio.to_thread(db.set_referred_by, message.from_user.id, int(ref_part)))
+            if ref_part.isdigit() and int(ref_part) != message.from_user.id:
+                referrer_id = int(ref_part)
+                (await asyncio.to_thread(db.set_referred_by, message.from_user.id, referrer_id))
+                reward_info = (await asyncio.to_thread(
+                    db.apply_referral_invite_rewards, message.from_user.id, referrer_id
+                ))
+                await _handle_referral_invite_rewards(bot, referrer_id, reward_info)
 
         welcome = (await asyncio.to_thread(db.get_setting, "welcome_text"))
         await message.answer(welcome, reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot))
+
+    async def _handle_referral_invite_rewards(bot: Bot, referrer_id: int, reward_info: dict):
+        """پیام و تحویل جوایز حالت‌های ۲ و ۳ زیرمجموعه‌گیری (که با صرفِ دعوت، بدون
+        نیاز به خرید زیرمجموعه، فعال می‌شوند) را برای دعوت‌کننده انجام می‌دهد."""
+        if not reward_info:
+            return
+
+        invite_bonus = reward_info.get("invite_bonus")
+        if invite_bonus:
+            try:
+                await bot.send_message(
+                    referrer_id,
+                    f"🤝 یک نفر با لینک دعوت شما به بات آمد!\n"
+                    f"💰 {invite_bonus:,} تومان به کیف پول شما اضافه شد.",
+                )
+            except Exception:
+                pass
+
+        free_product_id = reward_info.get("free_config_product_id")
+        if free_product_id:
+            product = (await asyncio.to_thread(db.get_product, free_product_id))
+            if not product or not product["is_auto_provision"] or not product["provision_server_id"]:
+                try:
+                    await bot.send_message(
+                        referrer_id,
+                        "🎁 شما با تعداد دعوت‌های خود، یک کانفیگ رایگان برنده شدید! "
+                        "برای دریافت آن با پشتیبانی تماس بگیرید.",
+                    )
+                except Exception:
+                    pass
+                return
+            try:
+                prov_results = await provision_direct(db, product, 1, user_id=referrer_id)
+            except (ProvisionError, DirectProvisionError):
+                try:
+                    await bot.send_message(
+                        referrer_id,
+                        "🎁 شما با تعداد دعوت‌های خود، یک کانفیگ رایگان برنده شدید؛ اما در ساخت "
+                        "خودکار آن مشکلی پیش آمد. لطفاً با پشتیبانی تماس بگیرید.",
+                    )
+                except Exception:
+                    pass
+                return
+            try:
+                links_text = "\n".join(f"🔗 {r['subscription_url']}" for r in prov_results)
+                await bot.send_message(
+                    referrer_id,
+                    f"🎉 تبریک! با دعوت موفق دوستانتان، محصول «{product['name']}» به‌صورت رایگان برای شما "
+                    f"ساخته شد:\n\n{links_text}",
+                )
+            except Exception:
+                pass
 
     # -----------------------------------------------------------------------
     # مینی‌اپ (دکمه‌ی متنی -> پیام با دکمه‌ی inline واقعی وب‌اپ)
@@ -1203,24 +1261,42 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
     @router.message(F.text.func(lambda t: t == db.get_setting("btn_referral")))
     async def referral_menu(message: Message, bot: Bot):
-        if (await asyncio.to_thread(db.get_setting, "referral_enabled", "1")) != "1":
+        settings = (await asyncio.to_thread(db.get_all_settings))
+        commission_on = settings.get("referral_enabled", "1") == "1"
+        freeconfig_on = settings.get("referral_free_config_enabled", "0") == "1"
+        invitebonus_on = settings.get("referral_invite_bonus_enabled", "0") == "1"
+
+        if not (commission_on or freeconfig_on or invitebonus_on):
             await message.answer("در حال حاضر سیستم زیرمجموعه‌گیری غیرفعال است.")
             return
 
         me = await bot.get_me()
         link = f"https://t.me/{me.username}?start=ref{message.from_user.id}"
         stats = (await asyncio.to_thread(db.get_referral_stats, message.from_user.id))
-        percent = (await asyncio.to_thread(db.get_setting, "referral_percent", "10"))
 
-        text = (
-            "🤝 سیستم زیرمجموعه‌گیری\n\n"
-            f"لینک اختصاصی دعوت شما:\n{link}\n\n"
-            f"هر کاربری که با این لینک وارد بات شود و اولین خریدش تایید شود، {percent}٪ از مبلغ پرداختی او "
-            f"به‌صورت اعتبار کیف پول به شما تعلق می‌گیرد و به‌طور خودکار در خرید بعدی‌تان کسر می‌شود.\n\n"
-            f"👥 تعداد زیرمجموعه‌های شما: {stats['count']}\n"
-            f"👛 موجودی کیف پول شما: {stats['credit']:,} تومان"
-        )
-        await message.answer(text)
+        lines = ["🤝 سیستم زیرمجموعه‌گیری", "", f"لینک اختصاصی دعوت شما:\n{link}", ""]
+        if commission_on:
+            percent = settings.get("referral_percent", "10")
+            max_count = int(settings.get("referral_commission_max_count", "0") or 0)
+            cap_text = f" (فقط برای {max_count} نفر اول از زیرمجموعه‌هایی که خرید می‌کنند)" if max_count > 0 else ""
+            lines.append(
+                f"💳 هر کاربری که با این لینک وارد بات شود و اولین خریدش تایید شود، {percent}٪ از مبلغ "
+                f"پرداختی او به‌صورت اعتبار کیف پول به شما تعلق می‌گیرد{cap_text}."
+            )
+        if freeconfig_on:
+            threshold = settings.get("referral_free_config_threshold", "10")
+            lines.append(f"🎁 با دعوت {threshold} نفر (حتی بدون خرید آن‌ها)، یک کانفیگ رایگان دریافت می‌کنید.")
+        if invitebonus_on:
+            amount = settings.get("referral_invite_bonus_amount", "0")
+            ib_max = int(settings.get("referral_invite_bonus_max_count", "0") or 0)
+            cap_text = f" (فقط برای {ib_max} دعوت اول)" if ib_max > 0 else ""
+            lines.append(f"💰 با دعوت هر نفر (حتی بدون خرید)، {int(amount):,} تومان به کیف پول شما اضافه می‌شود{cap_text}.")
+
+        lines.append("")
+        lines.append(f"👥 تعداد زیرمجموعه‌های شما: {stats['count']}")
+        lines.append(f"👛 موجودی کیف پول شما: {stats['credit']:,} تومان")
+
+        await message.answer("\n".join(lines))
 
     # -----------------------------------------------------------------------
     # کیف پول (جدا از زیرمجموعه‌گیری)
