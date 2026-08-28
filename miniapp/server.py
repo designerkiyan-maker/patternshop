@@ -1689,6 +1689,9 @@ class ProductCreate(BaseModel):
     price: int
     description: str = ""
     duration_days: int = 30
+    is_auto_provision: bool = False
+    auto_provision_volume_gb: Optional[int] = None
+    provision_server_id: Optional[int] = None
 
 
 class ProductUpdate(BaseModel):
@@ -2052,6 +2055,16 @@ def api_admin_delete_pricing_tier(tier_id: int, auth=Depends(require_full_access
     return {"status": "ok"}
 
 
+@app.get("/api/admin/panel-servers-lite")
+def api_admin_panel_servers_lite(auth=Depends(require_senior_admin)):
+    """لیست سبک پنل‌ها (فقط id/name) برای انتخاب پنل موقع ساخت محصول اتصال مستقیم.
+    مثل بات و پنل وب مستقل، این گزینه فقط برای بات اصلی یا نمایندگی سطح کامل است."""
+    _, db, tenant = auth
+    if not db.is_full_access_bot(not tenant.tenant_id):
+        raise HTTPException(status_code=403, detail="این بخش فقط برای بات اصلی یا نمایندگی کامل در دسترس است.")
+    return [{"id": s["id"], "name": s["name"]} for s in db.get_panel_servers(active_only=True)]
+
+
 @app.get("/api/admin/categories/{cat_id}/products")
 def api_admin_list_products(cat_id: int, auth=Depends(require_senior_admin)):
     _, db, _ = auth
@@ -2060,7 +2073,11 @@ def api_admin_list_products(cat_id: int, auth=Depends(require_senior_admin)):
         {
             "id": p["id"], "name": p["name"], "price": p["price"],
             "description": p["description"], "duration_days": p["duration_days"],
-            "is_active": bool(p["is_active"]), "stock": db.count_available_configs(p["id"]),
+            "is_active": bool(p["is_active"]),
+            "is_auto_provision": bool(p["is_auto_provision"]),
+            "provision_server_id": p["provision_server_id"],
+            "auto_provision_volume_gb": p["auto_provision_volume_gb"],
+            "stock": None if p["is_auto_provision"] else db.count_available_configs(p["id"]),
         }
         for p in products
     ]
@@ -2068,14 +2085,25 @@ def api_admin_list_products(cat_id: int, auth=Depends(require_senior_admin)):
 
 @app.post("/api/admin/products")
 def api_admin_create_product(body: ProductCreate, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
+    _, db, tenant = auth
     if not db.get_category(body.category_id):
         raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
     if not body.name.strip():
         raise HTTPException(status_code=400, detail="نام محصول نمی‌تواند خالی باشد.")
     if body.price < 0:
         raise HTTPException(status_code=400, detail="قیمت نامعتبر است.")
-    product_id = db.add_product(body.category_id, body.name.strip(), body.price, body.description, body.duration_days)
+
+    is_full_access = db.is_full_access_bot(not tenant.tenant_id)
+    provision_server_id = body.provision_server_id if is_full_access else None
+    is_auto_provision = bool(body.is_auto_provision or provision_server_id)
+    if is_auto_provision and not body.auto_provision_volume_gb:
+        raise HTTPException(status_code=400, detail="برای اتصال مستقیم به پنل باید حجم (گیگابایت) را مشخص کنید.")
+
+    product_id = db.add_product(
+        body.category_id, body.name.strip(), body.price, body.description, body.duration_days,
+        is_auto_provision=is_auto_provision, auto_provision_volume_gb=body.auto_provision_volume_gb,
+        provision_server_id=provision_server_id,
+    )
     return {"id": product_id}
 
 
