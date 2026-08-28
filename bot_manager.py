@@ -166,10 +166,13 @@ class BotManager:
         task = asyncio.create_task(dp.start_polling(bot))
         reminder_task = asyncio.create_task(renewal_reminder_loop(bot, db))
         backup_task = asyncio.create_task(backup_loop(bot, db, db_path))
+        # جلوگیری از فریز کل بات هنگام انقضای کش تنظیمات/ادمین‌ها (رجوع کنید
+        # به توضیح داخل Database.cache_autorefresh_loop)
+        cache_refresh_task = asyncio.create_task(db.cache_autorefresh_loop())
 
         self.instances[token] = {
             "bot": bot, "dp": dp, "task": task, "reminder_task": reminder_task,
-            "backup_task": backup_task, "db_path": db_path,
+            "backup_task": backup_task, "cache_refresh_task": cache_refresh_task, "db_path": db_path,
         }
         logger.info("بات با db_path=%s راه‌اندازی شد.", db_path)
         return True
@@ -195,6 +198,13 @@ class BotManager:
             backup_task.cancel()
             try:
                 await backup_task
+            except Exception:
+                pass
+        cache_refresh_task = inst.get("cache_refresh_task")
+        if cache_refresh_task:
+            cache_refresh_task.cancel()
+            try:
+                await cache_refresh_task
             except Exception:
                 pass
         try:

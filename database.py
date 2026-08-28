@@ -10,6 +10,8 @@
 روی بات‌های دیگر اثر بگذارد.
 """
 
+import asyncio
+import logging
 import sqlite3
 import secrets
 import threading
@@ -17,6 +19,8 @@ import time
 import json
 from datetime import datetime, timedelta
 from contextlib import contextmanager
+
+logger = logging.getLogger(__name__)
 
 # مجوزهای granular پنل وب مدیریت. هر ادمین (به‌جز owner که همیشه دسترسی کامل
 # دارد) یک زیرمجموعه دلخواه از این کلیدها را می‌تواند داشته باشد.
@@ -232,6 +236,33 @@ class Database:
         # event loop تک‌رشته‌ای هستند، پس این لاک برای آن‌ها overhead
         # واقعی ندارد ولی برای مینی‌اپ لازم است.
         self._lock = threading.Lock()
+
+    async def cache_autorefresh_loop(self, interval: float = 2.0):
+        """فقط برای پردازش بات (aiogram) استفاده می‌شود، نه مینی‌اپ/پنل وب.
+
+        is_admin()/get_setting() وقتی TTL کش تمام شده باشد، یک بار خودشان
+        مستقیم (synchronous) کش را دوباره می‌خوانند - این خواندن چون روی
+        همان event loop مشترک تمام بات‌ها اجرا می‌شود، اگر درست همان لحظه
+        فایل دیتابیس توسط پردازش دیگری (مینی‌اپ/پنل وب) قفل باشد، کل بات را
+        تا چند ثانیه (busy_timeout) برای همه‌ی کاربران فریز می‌کند - از دید
+        ادمین دقیقاً شبیه «کرش‌کردن دکمه‌ها»ست، بدون این‌که هیچ Exception ای
+        لاگ شود چون در نهایت با موفقیت (بعد از انتظار) تمام می‌شود.
+
+        این تابع در پس‌زمینه، با فاصله‌ی کوتاه‌تر از TTL کش، خودش را با
+        asyncio.to_thread (یعنی روی یک ترد جدا، نه event loop اصلی) تازه
+        نگه می‌دارد؛ در نتیجه وقتی is_admin()/get_setting() صدا زده می‌شوند،
+        کش تقریباً همیشه هنوز تازه است و آن‌ها هرگز مجبور به خواندن مستقیم و
+        بلوکه‌کننده از sqlite روی event loop اصلی نمی‌شوند."""
+        while True:
+            try:
+                await asyncio.to_thread(self._load_settings_cache)
+            except Exception:
+                logger.exception("تازه‌سازی پس‌زمینه‌ی کش تنظیمات ناموفق بود (db_path=%s).", self.db_path)
+            try:
+                await asyncio.to_thread(self._load_admin_cache)
+            except Exception:
+                logger.exception("تازه‌سازی پس‌زمینه‌ی کش ادمین‌ها ناموفق بود (db_path=%s).", self.db_path)
+            await asyncio.sleep(interval)
 
     # -----------------------------------------------------------------------
     # اتصال
