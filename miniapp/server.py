@@ -673,7 +673,7 @@ async def api_test_config_claim(auth=Depends(require_joined)):
 
     if not db.is_full_access_bot(not tenant.tenant_id):
         try:
-            result = await provision_test_config(db)
+            result = await provision_test_config(db, user_id=tg_id)
         except ProvisionError as e:
             raise HTTPException(status_code=409, detail=str(e))
         db.mark_test_used(tg_id)
@@ -1074,9 +1074,9 @@ async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
         if product["is_auto_provision"]:
             try:
                 if product["provision_server_id"]:
-                    prov_results = await provision_direct(db, product, quantity)
+                    prov_results = await provision_direct(db, product, quantity, user_id=tg_id, order_id=order_id)
                 else:
-                    prov_results = await provision_auto_config(db, product, quantity)
+                    prov_results = await provision_auto_config(db, product, quantity, user_id=tg_id, order_id=order_id)
             except (ProvisionError, DirectProvisionError) as e:
                 db.reject_order(order_id)
                 raise HTTPException(status_code=409, detail=str(e))
@@ -1257,9 +1257,9 @@ async def api_plisio_webhook(request: Request, tenant: Tenant = Depends(get_tena
                 quantity = order["quantity"] or 1
                 try:
                     if product["provision_server_id"]:
-                        prov_results = await provision_direct(db, product, quantity)
+                        prov_results = await provision_direct(db, product, quantity, user_id=order["user_id"], order_id=order_id)
                     else:
-                        prov_results = await provision_auto_config(db, product, quantity)
+                        prov_results = await provision_auto_config(db, product, quantity, user_id=order["user_id"], order_id=order_id)
                 except (ProvisionError, DirectProvisionError) as e:
                     admin_ids = db.list_admins()
                     async with aiohttp.ClientSession() as session:
