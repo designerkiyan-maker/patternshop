@@ -2494,6 +2494,8 @@ def api_delete_pricing_tier(tier_id: int, admin=Depends(require_permission("pane
 def api_menu_order_get(admin=Depends(require_permission("settings"))):
     settings = db.get_all_settings()
     order = db.get_menu_order()
+    row_breaks = db.get_menu_row_breaks()
+    break_set = set(row_breaks) if row_breaks is not None else None
     result = []
     for key in order:
         meta = MENU_BUTTON_META.get(key)
@@ -2502,6 +2504,11 @@ def api_menu_order_get(admin=Depends(require_permission("settings"))):
         item = {"key": key, "label": meta["label"], "admin_only": meta["admin_only"]}
         if meta["toggle_key"]:
             item["enabled"] = settings.get(meta["toggle_key"], "1") == "1"
+        # break_before یعنی این دکمه یک ردیف تازه در منو شروع می‌کند (کنار دکمه‌ی
+        # قبلی‌اش قرار نمی‌گیرد). اگر کاربر هنوز چیدمان سفارشی نساخته باشد
+        # (break_set is None)، null برمی‌گردد تا فرانت‌اند بداند هنوز از حالت
+        # قدیمی «تعداد ستون ثابت» استفاده می‌شود.
+        item["break_before"] = (key in break_set) if break_set is not None else None
         result.append(item)
     return result
 
@@ -2514,6 +2521,22 @@ class MenuOrderBody(BaseModel):
 def api_menu_order_set(body: MenuOrderBody, admin=Depends(require_permission("settings"))):
     db.set_menu_order(body.order)
     db.log_admin_action(admin["id"], "menu_order_change", f"ترتیب منوی ربات تغییر کرد (پنل وب - {admin['username']})", "setting", "menu_order")
+    return {"ok": True}
+
+
+class MenuLayoutBody(BaseModel):
+    order: list[str]
+    breaks: list[str]
+
+
+@app.post("/api/settings/menu-layout")
+def api_menu_layout_set(body: MenuLayoutBody, admin=Depends(require_permission("settings"))):
+    """مثل /settings/menu-order ولی علاوه بر ترتیب، چیدمان ردیف‌ها (کدام دکمه‌ها
+    کنار هم و کدام‌ها در ردیف جدا قرار بگیرند) را هم ذخیره می‌کند - یعنی چیدمان
+    آزاد (نه فقط بالا/پایین با تعداد ستون ثابت)."""
+    db.set_menu_order(body.order)
+    db.set_menu_row_breaks(body.breaks)
+    db.log_admin_action(admin["id"], "menu_order_change", f"چیدمان منوی ربات تغییر کرد (پنل وب - {admin['username']})", "setting", "menu_order")
     return {"ok": True}
 
 
