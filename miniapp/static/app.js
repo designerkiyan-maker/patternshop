@@ -153,9 +153,43 @@ async function api(path, options = {}) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "خطا" }));
-    throw new Error(err.detail || "خطای ناشناخته");
+    if (res.status === 403 && err.detail && err.detail.code === "force_join") {
+      showForceJoinGate(err.detail);
+      throw new Error(err.detail.message || "برای ادامه باید در کانال عضو شوید.");
+    }
+    const msg = typeof err.detail === "string" ? err.detail : (err.detail && err.detail.message) || "خطای ناشناخته";
+    throw new Error(msg);
   }
   return res.json();
+}
+
+// بنر/صفحه‌ی عضویت اجباری در کانال - هم‌تراز با force_join.py در ربات اصلی
+// که قبل از هر اکشنی (خرید/تاپ‌آپ/تست/گردونه) عضویت را چک می‌کند.
+function showForceJoinGate(info) {
+  const overlay = document.createElement("div");
+  overlay.className = "force-join-overlay";
+  overlay.innerHTML = `
+    <div class="card" style="max-width:320px;text-align:center">
+      <h3><span class="ic">📢</span>عضویت در کانال الزامی است</h3>
+      <p style="margin:10px 0">برای استفاده از این بخش، ابتدا باید در کانال زیر عضو شوید:</p>
+      <a class="btn" href="${info.join_link}" target="_blank" style="text-decoration:none;display:block;margin-bottom:8px">📢 عضویت در کانال</a>
+      <button class="btn outline" id="force-join-recheck-btn">✅ بررسی مجدد عضویت</button>
+      <button class="btn outline small" id="force-join-close-btn" style="margin-top:8px">بستن</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById("force-join-close-btn").onclick = () => overlay.remove();
+  document.getElementById("force-join-recheck-btn").onclick = async () => {
+    try {
+      const status = await api("/api/force-join-status");
+      if (!status.required || status.member) {
+        notify("✅ عضویت شما تایید شد.");
+        overlay.remove();
+      } else {
+        notify("هنوز عضو کانال نشده‌اید.");
+      }
+    } catch (e) { /* از خود force-join-status هیچ‌وقت force_join throw نمی‌کند */ }
+  };
 }
 
 // آپلود فایل (مولتی‌پارت) - بدون Content-Type دستی تا مرورگر boundary را ست کند
@@ -1374,8 +1408,26 @@ async function renderStore() {
     window._storeCategories = categories;
 
     if (storeCategoryView == null) {
+      let customConfigRow = "";
+      try {
+        const cfgInfo = await api("/api/custom-config/info");
+        if (cfgInfo.enabled || cfgInfo.reseller_available) {
+          customConfigRow = `
+            <div class="list-row" id="custom-config-entry-row">
+              <div class="list-row-main">
+                <div class="list-row-ic">🛠</div>
+                <div class="list-row-text">
+                  <span class="list-row-title">ساخت کانفیگ شخصی</span>
+                  <span class="list-row-sub">${cfgInfo.reseller_available ? "با اعتبار نمایندگی یا خرید مستقیم" : "حجم و مدت دلخواه خودت را انتخاب کن"}</span>
+                </div>
+              </div>
+              <span class="list-row-chev">‹</span>
+            </div>`;
+        }
+      } catch (e) { /* اگه این بخش غیرفعال/خطا بود، بی‌صدا رد شو */ }
       content.innerHTML = `
         <div class="eyebrow">یک دسته را انتخاب کنید</div>
+        ${customConfigRow}
         ${categories.map((c) => `
           <div class="list-row" data-cat="${c.id}">
             <div class="list-row-main">
@@ -1389,6 +1441,8 @@ async function renderStore() {
           </div>
         `).join("")}
       `;
+      const ccRow = document.getElementById("custom-config-entry-row");
+      if (ccRow) ccRow.onclick = renderCustomConfigBuilder;
       content.querySelectorAll(".list-row[data-cat]").forEach((el) => {
         el.onclick = () => { storeCategoryView = parseInt(el.dataset.cat, 10); renderStore(); };
       });
@@ -1494,6 +1548,137 @@ async function buyProduct(productId, quantity, code) {
       `;
       document.getElementById("back-to-store-btn").onclick = renderStore;
       renderReceiptCard(document.getElementById("order-payment-card"), {
+        amount: result.final_price,
+        cardNumber: result.card_number,
+        cardHolder: result.card_holder,
+        successText: "رسید ارسال شد. پس از تایید ادمین، کانفیگ از تب خانه در دسترس شما خواهد بود.",
+        sendReceipt: async (file) => {
+          const fd = new FormData();
+          fd.append("photo", file);
+          await apiUpload(`/api/orders/${result.order_id}/receipt`, fd);
+        },
+        cryptoEnabled: result.crypto_enabled,
+        createCryptoInvoice: async () => api(`/api/orders/${result.order_id}/crypto-invoice`, { method: "POST" }),
+      });
+    }
+  } catch (e) {
+    notify("خطا: " + e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ساخت کانفیگ شخصی (اتصال مستقیم به پنل VPN) - معادل CustomConfigFlow ربات؛
+// از داخل تب فروشگاه در دسترس است.
+// ---------------------------------------------------------------------------
+
+function _randomCustomUsername() {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let s = "u";
+  for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+function _priceForVolume(tiers, gb) {
+  for (const t of tiers) {
+    if (gb >= t.from_gb && (t.to_gb == null || gb <= t.to_gb)) return gb * t.price_per_gb;
+  }
+  return 0;
+}
+
+async function renderCustomConfigBuilder() {
+  content.innerHTML = skeleton(3);
+  try {
+    const info = await api("/api/custom-config/info");
+    if (!info.enabled && !info.reseller_available) {
+      content.innerHTML = `<div class="state-msg"><span class="ic">◌</span>این بخش در حال حاضر غیرفعال است.</div>`;
+      return;
+    }
+    let useCredit = info.reseller_available; // اگه اعتبار نمایندگی داره، پیش‌فرض روی رایگان باشه
+    let username = _randomCustomUsername();
+    let volume = info.reseller_available ? Math.min(info.reseller_credit_gb, 10) || 1 : info.min_gb;
+
+    const draw = () => {
+      const price = useCredit ? 0 : _priceForVolume(info.tiers, volume);
+      content.innerHTML = `
+        <button class="btn outline small" id="back-to-store-btn" style="width:auto;margin-bottom:12px">→ بازگشت به فروشگاه</button>
+        <div class="eyebrow">🛠 ساخت کانفیگ شخصی</div>
+        <div class="card">
+          ${info.reseller_available ? `
+            <div class="stat-row">
+              <span>روش ساخت</span>
+              <div>
+                <button class="btn small ${useCredit ? "" : "outline"}" id="cc-mode-credit">اعتبار نمایندگی (${fmt(info.reseller_credit_gb)} گیگ)</button>
+                <button class="btn small ${useCredit ? "outline" : ""}" id="cc-mode-pay">خرید</button>
+              </div>
+            </div>` : ""}
+          <label class="field-label">نام کاربری</label>
+          <div style="display:flex;gap:8px">
+            <input class="input" id="cc-username" type="text" value="${escHtml(username)}" style="direction:ltr;text-align:left" />
+            <button class="btn outline small" id="cc-random-btn">🎲 تصادفی</button>
+          </div>
+          <label class="field-label" style="margin-top:10px">حجم (گیگابایت)</label>
+          <input class="input" id="cc-volume" type="number" value="${volume}"
+            min="${useCredit ? 1 : info.min_gb}" max="${useCredit ? info.reseller_credit_gb : info.max_gb}" style="direction:ltr;text-align:left" />
+          <div class="stat-row" style="margin-top:8px"><span>مدت اعتبار</span><b>${info.duration_days} روز</b></div>
+          ${!useCredit ? `
+            <div class="pricing-table" style="margin-top:10px;font-size:13px">
+              ${info.tiers.map((t) => `<div class="stat-row"><span>${t.from_gb} تا ${t.to_gb == null ? "به‌بالا" : t.to_gb} گیگ</span><b>${fmt(t.price_per_gb)} تومان/گیگ</b></div>`).join("")}
+            </div>
+            <div class="stat-row" style="margin-top:10px"><span>موجودی کیف پول</span><b>${fmt(info.wallet_credit)} تومان</b></div>
+          ` : ""}
+          <div class="stat-row" style="margin-top:10px"><span>${useCredit ? "هزینه" : "جمع کل"}</span><b>${useCredit ? "رایگان (از اعتبار)" : fmt(price) + " تومان"}</b></div>
+          <button class="btn" id="cc-submit-btn" style="margin-top:10px">✅ ساخت کانفیگ</button>
+        </div>
+      `;
+      document.getElementById("back-to-store-btn").onclick = renderStore;
+      if (info.reseller_available) {
+        document.getElementById("cc-mode-credit").onclick = () => { useCredit = true; volume = Math.min(volume, info.reseller_credit_gb) || 1; draw(); };
+        document.getElementById("cc-mode-pay").onclick = () => { useCredit = false; volume = Math.max(volume, info.min_gb); draw(); };
+      }
+      document.getElementById("cc-random-btn").onclick = () => { username = _randomCustomUsername(); draw(); };
+      document.getElementById("cc-username").oninput = (e) => { username = e.target.value; };
+      document.getElementById("cc-volume").oninput = (e) => { volume = parseInt(e.target.value, 10) || 0; };
+      document.getElementById("cc-submit-btn").onclick = () => submitCustomConfig(username, volume, useCredit, info);
+    };
+    draw();
+  } catch (e) {
+    content.innerHTML = errorState(e.message);
+  }
+}
+
+async function submitCustomConfig(username, volumeGb, useCredit, info) {
+  username = (username || "").trim();
+  if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) {
+    notify("نام کاربری نامعتبر است. فقط حروف انگلیسی، عدد و آندرلاین، بین ۳ تا ۲۰ کاراکتر.");
+    return;
+  }
+  if (!volumeGb || volumeGb <= 0) { notify("حجم را درست وارد کنید."); return; }
+  try {
+    const result = await api("/api/custom-configs", {
+      method: "POST",
+      body: JSON.stringify({ username, volume_gb: volumeGb, use_credit: !!useCredit }),
+    });
+    if (result.status === "approved") {
+      tg.HapticFeedback.notificationOccurred("success");
+      content.innerHTML = `
+        <div class="eyebrow">🛠 کانفیگ شخصی شما آماده شد</div>
+        <div class="card">
+          <div class="stat-row"><span>لینک اشتراک</span></div>
+          <div class="code" style="word-break:break-all;direction:ltr;text-align:left;margin-top:6px">${escHtml(result.link)}</div>
+          <button class="btn outline small" id="cc-copy-btn" style="margin-top:10px">📋 کپی لینک</button>
+        </div>
+      `;
+      document.getElementById("cc-copy-btn").onclick = () => {
+        navigator.clipboard.writeText(result.link).then(() => notify("لینک کپی شد."));
+      };
+    } else {
+      content.innerHTML = `
+        <button class="btn outline small" id="back-to-store-btn" style="width:auto;margin-bottom:12px">→ بازگشت به فروشگاه</button>
+        <div class="eyebrow">پرداخت کانفیگ شخصی</div>
+        <div class="card" id="cc-payment-card"></div>
+      `;
+      document.getElementById("back-to-store-btn").onclick = renderStore;
+      renderReceiptCard(document.getElementById("cc-payment-card"), {
         amount: result.final_price,
         cardNumber: result.card_number,
         cardHolder: result.card_holder,

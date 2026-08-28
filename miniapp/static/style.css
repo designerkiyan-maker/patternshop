@@ -1108,3 +1108,11 @@ html[data-theme="clean-light"] .chat-messages::-webkit-scrollbar-thumb,
 html[data-theme="clean-light"] main::-webkit-scrollbar-thumb { background: var(--border-soft); }
 
 html[data-theme="clean-light"] #tabbar { background: #ffffff; }
+
+/* بنر تمام‌صفحه‌ی عضویت اجباری در کانال */
+.force-join-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
