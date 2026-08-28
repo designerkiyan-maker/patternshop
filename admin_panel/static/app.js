@@ -349,6 +349,8 @@ const NAV = [
 
   // تنظیمات و سیستم — همه‌ی موارد مرتبط با تنظیمات و نگهداری یک‌جا
   { key: 'settings', label: 'تنظیمات و برندینگ', icon: 'settings', role: 'settings', section: 'تنظیمات و سیستم' },
+  { key: 'salessettings', label: 'تنظیمات فروش', icon: 'settings', role: 'settings', section: 'تنظیمات و سیستم' },
+  { key: 'banners', label: 'بنرها', icon: 'catalog', role: 'settings', section: 'تنظیمات و سیستم' },
   { key: 'system', label: 'سیستم و نگهداری', icon: 'system', role: 'system', section: 'تنظیمات و سیستم' },
   { key: 'logs', label: 'لاگ فعالیت ادمین‌ها', icon: 'logs', role: 'system', section: 'تنظیمات و سیستم' },
   { key: 'webadmins', label: 'کاربران پنل', icon: 'webadmins', role: 'owner', section: 'تنظیمات و سیستم' },
@@ -787,6 +789,8 @@ async function renderPage(tab) {
       case 'panels': return renderPanels();
       case 'system': return renderSystem();
       case 'settings': return renderSettings();
+      case 'salessettings': return renderSalesSettings();
+      case 'banners': return renderBanners();
       case 'logs': return renderLogs();
       case 'webadmins': return renderWebAdmins();
       case 'account': return renderAccount();
@@ -3411,6 +3415,267 @@ function bindResellersSubtabs(root) {
   }));
 }
 
+/* ================================================= sales settings === */
+// تنظیمات فروش که قبلاً فقط از داخل ربات/مینی‌اپ قابل تغییر بود: رفرال،
+// گردونه‌شانس، کریپتو، یادآوری تمدید/حجمی، کانفیگ تست، عضویت اجباری، هشدار موجودی.
+
+function _swSpan(key, on) {
+  return `<span class="switch" data-swkey="${key}" data-on="${on ? '1' : '0'}"><i></i></span>`;
+}
+function _bindSwitches(root) {
+  $$('.switch[data-swkey]', root).forEach(sw => {
+    sw.addEventListener('click', () => { sw.dataset.on = sw.dataset.on === '1' ? '0' : '1'; sw.classList.toggle('on'); });
+    if (sw.dataset.on === '1') sw.classList.add('on');
+  });
+}
+function _swOn(root, key) { return $(`.switch[data-swkey="${key}"]`, root)?.dataset.on === '1'; }
+function _val(root, key) { return $(`[data-fkey="${key}"]`, root)?.value; }
+function _num(root, key) { return Number(_val(root, key)) || 0; }
+
+async function renderSalesSettings() {
+  const [referral, wheel, crypto, renewal, volumeReminder, testConfig, forceJoin, stockAlert] = await Promise.all([
+    apiGet('/settings/referral'), apiGet('/settings/wheel'), apiGet('/settings/crypto'),
+    apiGet('/settings/renewal'), apiGet('/settings/volume-reminder'), apiGet('/settings/test-config'),
+    apiGet('/settings/force-join'), apiGet('/settings/stock-alert'),
+  ]);
+
+  setContent(`
+    <div class="card">
+      <h3>🔗 رفرال</h3>
+      <label class="field field-row"><span>فعال</span>${_swSpan('ref_enabled', referral.enabled)}</label>
+      <label class="field"><span>درصد پورسانت</span><input class="input" data-fkey="ref_percent" type="number" value="${referral.percent}"></label>
+      <button class="btn btn-primary btn-sm" id="save-referral">ذخیره</button>
+    </div>
+
+    <div class="card">
+      <h3>🎰 گردونه‌ی شانس</h3>
+      <label class="field field-row"><span>فعال</span>${_swSpan('wheel_enabled', wheel.enabled)}</label>
+      <label class="field"><span>درصد برد</span><input class="input" data-fkey="wheel_win_percent" type="number" value="${wheel.win_percent}"></label>
+      <label class="field"><span>جوایز (٪ تخفیف، با کاما جدا کن)</span><input class="input" data-fkey="wheel_prizes" type="text" value="${(wheel.prizes || []).join(', ')}"></label>
+      <label class="field"><span>اعتبار کد (ساعت)</span><input class="input" data-fkey="wheel_expiry_hours" type="number" value="${wheel.code_expiry_hours}"></label>
+      <label class="field"><span>فاصله‌ی بین دو چرخش (ساعت)</span><input class="input" data-fkey="wheel_cooldown_hours" type="number" value="${wheel.cooldown_hours}"></label>
+      <button class="btn btn-primary btn-sm" id="save-wheel">ذخیره</button>
+    </div>
+
+    <div class="card">
+      <h3>🪙 پرداخت کریپتو (Plisio)</h3>
+      <div class="card-sub" style="margin-bottom:8px">${crypto.gateway_configured ? '✅ کلید API درگاه تنظیم شده است.' : '⚠️ هنوز کلید API درگاه (Plisio) تنظیم نشده — کلید را از داخل ربات یا فایل env تنظیم کن.'}</div>
+      <label class="field field-row"><span>فعال</span>${_swSpan('crypto_enabled', crypto.enabled)}</label>
+      <label class="field"><span>نرخ دلار به تومان (دستی/fallback)</span><input class="input" data-fkey="crypto_rate" type="number" value="${crypto.usd_to_toman_rate}"></label>
+      <button class="btn btn-primary btn-sm" id="save-crypto">ذخیره</button>
+    </div>
+
+    <div class="card">
+      <h3>⏳ یادآوری تمدید</h3>
+      <label class="field field-row"><span>فعال</span>${_swSpan('renewal_enabled', renewal.enabled)}</label>
+      <label class="field"><span>چند روز قبل از انقضا</span><input class="input" data-fkey="renewal_days_before" type="number" value="${renewal.days_before}"></label>
+      <label class="field"><span>درصد تخفیف کد پیشنهادی</span><input class="input" data-fkey="renewal_discount_percent" type="number" value="${renewal.discount_percent}"></label>
+      <label class="field"><span>اعتبار کد (ساعت)</span><input class="input" data-fkey="renewal_discount_expiry_hours" type="number" value="${renewal.discount_expiry_hours}"></label>
+      <button class="btn btn-primary btn-sm" id="save-renewal">ذخیره</button>
+    </div>
+
+    <div class="card">
+      <h3>📶 یادآوری بر اساس حجم مصرفی</h3>
+      <label class="field field-row"><span>فعال</span>${_swSpan('volume_enabled', volumeReminder.enabled)}</label>
+      <label class="field"><span>مبنای آستانه</span>
+        <select class="input" data-fkey="volume_mode">
+          <option value="percent" ${volumeReminder.mode === 'percent' ? 'selected' : ''}>درصد باقی‌مانده</option>
+          <option value="gb" ${volumeReminder.mode === 'gb' ? 'selected' : ''}>گیگابایت باقی‌مانده</option>
+        </select>
+      </label>
+      <label class="field"><span>درصد آستانه (وقتی مبنا درصد است)</span><input class="input" data-fkey="volume_percent" type="number" value="${volumeReminder.percent}"></label>
+      <label class="field"><span>گیگ باقی‌مانده (وقتی مبنا گیگ است)</span><input class="input" data-fkey="volume_gb_left" type="number" value="${volumeReminder.gb_left}"></label>
+      <label class="field"><span>درصد تخفیف کد پیشنهادی</span><input class="input" data-fkey="volume_discount_percent" type="number" value="${volumeReminder.discount_percent}"></label>
+      <label class="field"><span>اعتبار کد (ساعت)</span><input class="input" data-fkey="volume_discount_expiry_hours" type="number" value="${volumeReminder.discount_expiry_hours}"></label>
+      <button class="btn btn-primary btn-sm" id="save-volume">ذخیره</button>
+    </div>
+
+    <div class="card">
+      <h3>🧪 کانفیگ تست</h3>
+      <div class="card-sub" style="margin-bottom:8px">
+        موجودی بانک کانفیگ تست دستی: <b>${fmt(testConfig.bank_stock)}</b>
+        ${testConfig.panel_server ? ` | سرور خودکار: <b>${esc(testConfig.panel_server.name)}</b>` : ' | سرور خودکار تنظیم نشده (از بانک دستی استفاده می‌شود)'}
+      </div>
+      <label class="field field-row"><span>فعال</span>${_swSpan('test_enabled', testConfig.enabled)}</label>
+      <label class="field"><span>حجم کانفیگ تست خودکار (گیگ)</span><input class="input" data-fkey="test_volume_gb" type="number" value="${testConfig.panel_volume_gb}"></label>
+      <label class="field"><span>مدت کانفیگ تست خودکار (روز)</span><input class="input" data-fkey="test_duration_days" type="number" value="${testConfig.panel_duration_days}"></label>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-primary btn-sm" id="save-test">ذخیره</button>
+        <button class="btn btn-sm btn-danger" id="reset-test-all">بازنشانی کانفیگ تست برای همه‌ی کاربران</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>📢 عضویت اجباری در کانال</h3>
+      <label class="field field-row"><span>فعال</span>${_swSpan('fj_enabled', forceJoin.enabled)}</label>
+      <label class="field"><span>آیدی کانال (مثل ‎@my_channel)</span><input class="input" data-fkey="fj_channel" type="text" value="${esc(forceJoin.channel || '')}" style="direction:ltr;text-align:left"></label>
+      <div class="card-sub">این تنظیم روی ربات اصلی، مینی‌اپ، و تمام بات‌های نمایندگی به‌طور یکسان اعمال می‌شود.</div>
+      <button class="btn btn-primary btn-sm" id="save-forcejoin">ذخیره</button>
+    </div>
+
+    <div class="card">
+      <h3>📉 هشدار موجودی کم محصول</h3>
+      <label class="field"><span>آستانه (وقتی موجودی یک محصول به این عدد برسد، به ادمین‌ها اطلاع داده می‌شود)</span>
+        <input class="input" data-fkey="stock_threshold" type="number" value="${stockAlert.threshold}"></label>
+      <button class="btn btn-primary btn-sm" id="save-stock">ذخیره</button>
+    </div>
+  `);
+
+  const root = content();
+  _bindSwitches(root);
+
+  $('#save-referral').addEventListener('click', async () => {
+    try {
+      await apiPost('/settings/referral', { enabled: _swOn(root, 'ref_enabled'), percent: _num(root, 'ref_percent') });
+      toast('تنظیمات رفرال ذخیره شد.');
+    } catch (e) { handleErr(e); }
+  });
+
+  $('#save-wheel').addEventListener('click', async () => {
+    const prizes = (_val(root, 'wheel_prizes') || '').split(',').map(s => Number(s.trim())).filter(n => n > 0);
+    try {
+      await apiPost('/settings/wheel', {
+        enabled: _swOn(root, 'wheel_enabled'), win_percent: _num(root, 'wheel_win_percent'),
+        prizes, expiry_hours: _num(root, 'wheel_expiry_hours'), cooldown_hours: _num(root, 'wheel_cooldown_hours'),
+      });
+      toast('تنظیمات گردونه ذخیره شد.');
+    } catch (e) { handleErr(e); }
+  });
+
+  $('#save-crypto').addEventListener('click', async () => {
+    try {
+      await apiPost('/settings/crypto', { enabled: _swOn(root, 'crypto_enabled'), usd_to_toman_rate: _num(root, 'crypto_rate') });
+      toast('تنظیمات کریپتو ذخیره شد.');
+    } catch (e) { handleErr(e); }
+  });
+
+  $('#save-renewal').addEventListener('click', async () => {
+    try {
+      await apiPost('/settings/renewal', {
+        enabled: _swOn(root, 'renewal_enabled'), days_before: _num(root, 'renewal_days_before'),
+        discount_percent: _num(root, 'renewal_discount_percent'), discount_expiry_hours: _num(root, 'renewal_discount_expiry_hours'),
+      });
+      toast('تنظیمات یادآوری تمدید ذخیره شد.');
+    } catch (e) { handleErr(e); }
+  });
+
+  $('#save-volume').addEventListener('click', async () => {
+    try {
+      await apiPost('/settings/volume-reminder', {
+        enabled: _swOn(root, 'volume_enabled'), mode: _val(root, 'volume_mode'),
+        percent: _num(root, 'volume_percent'), gb_left: _num(root, 'volume_gb_left'),
+        discount_percent: _num(root, 'volume_discount_percent'), discount_expiry_hours: _num(root, 'volume_discount_expiry_hours'),
+      });
+      toast('تنظیمات یادآوری حجمی ذخیره شد.');
+    } catch (e) { handleErr(e); }
+  });
+
+  $('#save-test').addEventListener('click', async () => {
+    try {
+      await apiPost('/settings/test-config', {
+        enabled: _swOn(root, 'test_enabled'), panel_volume_gb: _num(root, 'test_volume_gb'), panel_duration_days: _num(root, 'test_duration_days'),
+      });
+      toast('تنظیمات کانفیگ تست ذخیره شد.');
+    } catch (e) { handleErr(e); }
+  });
+  $('#reset-test-all').addEventListener('click', async () => {
+    if (!confirm('همه‌ی کاربران دوباره امکان دریافت کانفیگ تست پیدا می‌کنند. ادامه بدم؟')) return;
+    try {
+      const res = await apiPost('/settings/test-config/reset-all');
+      toast(`برای ${res.count} کاربر بازنشانی شد.`);
+    } catch (e) { handleErr(e); }
+  });
+
+  $('#save-forcejoin').addEventListener('click', async () => {
+    try {
+      await apiPost('/settings/force-join', { enabled: _swOn(root, 'fj_enabled'), channel: _val(root, 'fj_channel') });
+      toast('تنظیمات عضویت اجباری ذخیره شد.');
+    } catch (e) { handleErr(e); }
+  });
+
+  $('#save-stock').addEventListener('click', async () => {
+    try {
+      await apiPost('/settings/stock-alert', { threshold: _num(root, 'stock_threshold') });
+      toast('آستانه‌ی هشدار موجودی ذخیره شد.');
+    } catch (e) { handleErr(e); }
+  });
+}
+
+/* ======================================================== banners === */
+
+async function renderBanners() {
+  const banners = await apiGet('/banners');
+  const rowHtml = (b, i) => `
+    <div class="card" data-banner-row="${i}" style="margin-bottom:10px">
+      <label class="field"><span>متن بنر</span><input class="input" data-b-text value="${esc(b.text || '')}"></label>
+      <label class="field"><span>آدرس تصویر (اختیاری)</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="input" data-b-image value="${esc(b.image_url || '')}" style="direction:ltr;text-align:left" placeholder="/static/uploads/banners/...">
+          <input type="file" accept="image/*" data-b-upload hidden>
+          <button type="button" class="btn btn-sm" data-b-pick>آپلود تصویر</button>
+        </div>
+      </label>
+      ${b.image_url ? `<img src="${b.image_url}" style="max-height:80px;border-radius:8px;margin-top:6px">` : ''}
+      <label class="field field-row"><span>فعال</span>${_swSpan('b_enabled_' + i, b.enabled !== false)}</label>
+      <button class="btn btn-sm btn-danger" data-b-remove style="margin-top:8px">حذف این بنر</button>
+    </div>`;
+
+  const draw = (list) => {
+    setContent(`
+      <div class="card">
+        <h3>🖼 بنرهای فروشگاه (مینی‌اپ)</h3>
+        <div class="card-sub">این بنرها در صفحه‌ی اصلی مینی‌اپ به‌صورت چرخشی نمایش داده می‌شوند.</div>
+      </div>
+      <div id="banners-list">${list.map(rowHtml).join('')}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm" id="banner-add">➕ افزودن بنر</button>
+        <button class="btn btn-primary btn-sm" id="banner-save">ذخیره‌ی همه</button>
+      </div>
+    `);
+    const root = content();
+    _bindSwitches(root);
+    $$('#banners-list [data-banner-row]', root).forEach((row) => {
+      const pick = $('[data-b-pick]', row), fileInput = $('[data-b-upload]', row);
+      pick.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', async () => {
+        const file = fileInput.files[0];
+        if (!file) return;
+        const fd = new FormData();
+        fd.append('photo', file);
+        try {
+          const res = await fetch('/api/banners/upload-image', { method: 'POST', credentials: 'include', body: fd });
+          const data = await res.json();
+          if (!res.ok) throw new Error(formatApiError(data.detail));
+          $('[data-b-image]', row).value = data.url;
+          toast('تصویر آپلود شد؛ برای ذخیره‌ی نهایی روی «ذخیره‌ی همه» بزن.');
+        } catch (e) { toast(e.message, true); }
+      });
+      $('[data-b-remove]', row).addEventListener('click', () => {
+        const idx = Number(row.dataset.bannerRow);
+        list = list.filter((_, i) => i !== idx);
+        draw(list);
+      });
+    });
+    $('#banner-add').addEventListener('click', () => { list = [...list, { text: '', image_url: null, enabled: true }]; draw(list); });
+    $('#banner-save').addEventListener('click', async () => {
+      const rows = $$('#banners-list [data-banner-row]', root);
+      const payload = rows.map((row, i) => ({
+        text: $('[data-b-text]', row).value.trim(),
+        image_url: $('[data-b-image]', row).value.trim() || null,
+        enabled: _swOn(root, 'b_enabled_' + i),
+      })).filter(b => b.text);
+      try {
+        const res = await apiPost('/banners', { banners: payload });
+        toast('بنرها ذخیره شدند.');
+        list = res.banners;
+        draw(list);
+      } catch (e) { handleErr(e); }
+    });
+  };
+  let list = banners;
+  draw(list);
+}
+
 async function renderResellers() {
   try {
     if (resellersSubTab === 'bots') await renderResellersBotsTab();
@@ -4008,6 +4273,7 @@ const PANEL_TYPE_OPTIONS_HTML = [
 ].map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
 const PANEL_INBOUND_SELECT_TYPES = ['3xui'];
 const PANEL_SUB_BASE_URL_TYPES = ['3xui', 'hiddify'];
+const PANEL_TEMPLATE_BASED_TYPES = ['pasarguard', 'marzban', 'marzneshin'];
 
 function panelAddFormHtml() {
   return `
@@ -4016,15 +4282,17 @@ function panelAddFormHtml() {
       <select class="input" id="p-type">${PANEL_TYPE_OPTIONS_HTML}</select>
       <input class="input" id="p-url" placeholder="آدرس پنل (https://...)">
       <div class="form-row"><input class="input" id="p-user" placeholder="یوزرنیم"><input class="input" id="p-pass" type="password" placeholder="پسورد"></div>
+      <input class="input" id="p-template" placeholder="نام کاربری نمونه (برای دریافت قالب)" style="display:none">
       <p id="p-hint" style="display:none;font-size:12px;color:var(--muted,#8892a6);margin:0"></p>
       <button class="btn btn-primary" id="p-save">ثبت</button>
     </div>`;
 }
 
 function wirePanelAddForm(body, close) {
-  const typeSel = $('#p-type', body), userInp = $('#p-user', body), passInp = $('#p-pass', body), hint = $('#p-hint', body);
+  const typeSel = $('#p-type', body), userInp = $('#p-user', body), passInp = $('#p-pass', body), hint = $('#p-hint', body), templateInp = $('#p-template', body);
   function syncTypeUI() {
     const t = typeSel.value;
+    templateInp.style.display = 'none';
     if (t === '3xui') {
       userInp.style.display = 'none'; userInp.value = '';
       passInp.placeholder = 'API Token (Settings ← Security در پنل)';
@@ -4038,7 +4306,9 @@ function wirePanelAddForm(body, close) {
     } else {
       userInp.style.display = ''; userInp.placeholder = 'یوزرنیم';
       passInp.placeholder = 'پسورد';
-      hint.style.display = 'none';
+      hint.style.display = 'block';
+      templateInp.style.display = '';
+      hint.textContent = 'یک نام کاربری که از قبل روی این پنل ساخته شده را وارد کن؛ تنظیمات (گروه/پروکسی) او به‌عنوان قالب برای کاربرهای جدید استفاده می‌شود.';
     }
   }
   typeSel.addEventListener('change', syncTypeUI);
@@ -4049,11 +4319,15 @@ function wirePanelAddForm(body, close) {
     const panel_type = typeSel.value;
     if (!name || !api_url) return toast('نام و آدرس الزامی است.', true);
     if (!passInp.value.trim()) return toast(panel_type === '3xui' ? 'API Token الزامی است.' : 'رمز/کلید الزامی است.', true);
+    if (PANEL_TEMPLATE_BASED_TYPES.includes(panel_type) && !templateInp.value.trim()) {
+      return toast('نام کاربری نمونه الزامی است.', true);
+    }
     let serverId;
     try {
       const r = await apiPost('/panel-servers', {
         name, panel_type, api_url,
         api_username: userInp.value, api_password: passInp.value,
+        template_username: PANEL_TEMPLATE_BASED_TYPES.includes(panel_type) ? templateInp.value.trim() : undefined,
       });
       serverId = r.id;
     } catch (e) { return handleErr(e); }
@@ -4139,13 +4413,24 @@ async function renderPanels() {
   setContent(`
     <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-panel">+ پنل جدید</button></div>
     <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>نام</th><th>نوع</th><th>آدرس</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+      <thead><tr><th>نام</th><th>نوع</th><th>آدرس</th><th>وضعیت</th><th>مصرف</th><th>عملیات</th></tr></thead>
       <tbody>${servers.map(s => `<tr>
         <td>${esc(s.name)}</td><td>${esc(s.type_label)}</td><td class="mono" style="direction:ltr;text-align:right">${esc(s.api_url)}</td>
-        <td>${s.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
-        <td><button class="btn btn-sm" data-test="${s.id}">تست اتصال</button>
-        <button class="btn btn-danger btn-sm" data-del="${s.id}">حذف</button></td>
-      </tr>`).join('') || '<tr><td colspan="5" class="empty-state">پنلی ثبت نشده</td></tr>'}</tbody>
+        <td>
+          <button class="btn btn-sm ${s.is_active ? '' : 'btn-danger'}" data-toggle-active="${s.id}">${s.is_active ? '✅ فعال' : '⛔️ غیرفعال'}</button>
+          ${s.is_configured ? '' : '<div style="font-size:11px;color:#FB7185;margin-top:4px">⚠️ تکمیل‌نشده</div>'}
+        </td>
+        <td>
+          <label style="display:flex;gap:4px;align-items:center;font-size:12px"><input type="checkbox" data-usage="custom" data-usage-id="${s.id}" ${s.used_for_custom_config ? 'checked' : ''}> کانفیگ شخصی</label>
+          <label style="display:flex;gap:4px;align-items:center;font-size:12px"><input type="checkbox" data-usage="test" data-usage-id="${s.id}" ${s.used_for_test_config ? 'checked' : ''}> کانفیگ تست</label>
+        </td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-sm" data-test="${s.id}">تست اتصال</button>
+          <button class="btn btn-sm" data-edit="${s.id}">ویرایش</button>
+          ${PANEL_TEMPLATE_BASED_TYPES.includes(s.panel_type) ? `<button class="btn btn-sm" data-retemplate="${s.id}">قالب جدید</button>` : ''}
+          <button class="btn btn-danger btn-sm" data-del="${s.id}">حذف</button>
+        </td>
+      </tr>`).join('') || '<tr><td colspan="6" class="empty-state">پنلی ثبت نشده</td></tr>'}</tbody>
     </table></div></div>
   `);
   $('#add-panel').addEventListener('click', () => openModal('پنل جدید', panelAddFormHtml(), wirePanelAddForm));
@@ -4157,7 +4442,63 @@ async function renderPanels() {
     } catch (e) { handleErr(e); }
     finally { b.textContent = 'تست اتصال'; b.disabled = false; }
   }));
+  $$('[data-toggle-active]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/panel-servers/${b.dataset.toggleActive}/toggle`); renderPanels(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-usage]', content()).forEach(cb => cb.addEventListener('change', async () => {
+    try { await apiPost(`/panel-servers/${cb.dataset.usageId}/usage/${cb.dataset.usage}`); toast('ذخیره شد.'); }
+    catch (e) { handleErr(e); cb.checked = !cb.checked; }
+  }));
+  $$('[data-edit]', content()).forEach(b => b.addEventListener('click', () => openPanelEditModal(servers.find(s => s.id === Number(b.dataset.edit)))));
+  $$('[data-retemplate]', content()).forEach(b => b.addEventListener('click', () => openPanelRetemplateModal(Number(b.dataset.retemplate))));
   wirePanelDeleteButtons();
+}
+
+function openPanelEditModal(server) {
+  openModal('ویرایش پنل', `
+    <div class="form-grid">
+      <input class="input" id="pe-name" placeholder="نام" value="${esc(server.name)}">
+      <input class="input" id="pe-url" placeholder="آدرس پنل" value="${esc(server.api_url)}" style="direction:ltr;text-align:left">
+      <div class="form-row">
+        <input class="input" id="pe-user" placeholder="یوزرنیم (خالی = بدون تغییر)">
+        <input class="input" id="pe-pass" type="password" placeholder="پسورد/توکن (خالی = بدون تغییر)">
+      </div>
+      ${PANEL_SUB_BASE_URL_TYPES.includes(server.panel_type) ? `
+        <input class="input" id="pe-suburl" placeholder="لینک Subscription" value="${esc(server.xui_sub_base_url || '')}" style="direction:ltr;text-align:left">
+      ` : ''}
+      <button class="btn btn-primary" id="pe-save">ذخیره</button>
+    </div>`, (body, close) => {
+    $('#pe-save', body).addEventListener('click', async () => {
+      const payload = { name: $('#pe-name', body).value.trim(), api_url: $('#pe-url', body).value.trim() };
+      const user = $('#pe-user', body).value.trim(), pass = $('#pe-pass', body).value.trim();
+      if (user) payload.api_username = user;
+      if (pass) payload.api_password = pass;
+      const suburlInp = $('#pe-suburl', body);
+      if (suburlInp && suburlInp.value.trim()) payload.xui_sub_base_url = suburlInp.value.trim();
+      try {
+        await apiPut(`/panel-servers/${server.id}`, payload);
+        toast('پنل ویرایش شد.'); close(); renderPanels();
+      } catch (e) { handleErr(e); }
+    });
+  });
+}
+
+function openPanelRetemplateModal(serverId) {
+  openModal('دریافت قالب جدید', `
+    <div class="form-grid">
+      <p style="margin:0">نام کاربری نمونه‌ی جدید روی این پنل را وارد کن:</p>
+      <input class="input" id="pt-username" placeholder="نام کاربری نمونه">
+      <button class="btn btn-primary" id="pt-save">دریافت قالب</button>
+    </div>`, (body, close) => {
+    $('#pt-save', body).addEventListener('click', async () => {
+      const username = $('#pt-username', body).value.trim();
+      if (!username) return toast('نام کاربری الزامی است.', true);
+      try {
+        await apiPost(`/panel-servers/${serverId}/template`, { template_username: username });
+        toast('قالب به‌روزرسانی شد.'); close(); renderPanels();
+      } catch (e) { handleErr(e); }
+    });
+  });
 }
 
 /* ------------------------------------------------------------ panels: bento */
