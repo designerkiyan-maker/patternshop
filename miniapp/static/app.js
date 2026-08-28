@@ -3324,6 +3324,8 @@ async function renderAdminCatalogSection() {
       await renderAdminCategories(body);
     } else if (adminCatalogView.level === "products") {
       await renderAdminProducts(body);
+    } else if (adminCatalogView.level === "edit-product") {
+      await renderAdminEditProduct(body);
     } else if (adminCatalogView.level === "configs") {
       await renderAdminConfigs(body);
     }
@@ -3400,18 +3402,34 @@ async function renderAdminCategories(body) {
   };
 }
 
+function productProvisionFieldsHtml(panelServers) {
+  if (!panelServers || !panelServers.length) return "";
+  return `
+    <label class="field-label">منبع کانفیگ</label>
+    <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px">
+      <label style="display:flex;align-items:center;gap:4px"><input type="radio" name="new-prod-source" value="bank" checked /> 📦 بانک کانفیگ</label>
+      <label style="display:flex;align-items:center;gap:4px"><input type="radio" name="new-prod-source" value="direct" /> 🔌 اتصال مستقیم به پنل</label>
+    </div>
+    <div id="new-prod-direct-fields" style="display:none;margin-bottom:8px">
+      <select class="input" id="new-prod-server" style="margin-bottom:8px">${panelServers.map((s) => `<option value="${s.id}">${s.name}</option>`).join("")}</select>
+      <input class="input" id="new-prod-volume" type="number" placeholder="حجم (گیگابایت)" />
+    </div>
+  `;
+}
+
 async function renderAdminProducts(body) {
   const { categoryId, categoryName } = adminCatalogView;
   const products = await api(`/api/admin/categories/${categoryId}/products`);
+  const panelServers = await api("/api/admin/panel-servers-lite").catch(() => []);
   body.innerHTML = `
     <button class="btn outline small" id="back-to-cats" style="width:auto;margin-bottom:12px">→ بازگشت به دسته‌بندی‌ها</button>
     <div class="eyebrow" style="margin-top:0">محصولات «${categoryName}»</div>
     <div class="card">
       ${products.length === 0 ? `<div class="hint-text" style="margin:0">هنوز محصولی در این دسته ثبت نشده.</div>` : products.map((p) => `
         <div class="admin-list-row">
-          <div class="admin-list-row-main" data-open-prod="${p.id}" data-prod-name="${(p.name || "").replace(/"/g, "&quot;")}">
+          <div class="admin-list-row-main" ${p.is_auto_provision ? "" : `data-open-prod="${p.id}" data-prod-name="${(p.name || "").replace(/"/g, "&quot;")}"`}>
             <span>${p.name}</span>
-            <span class="hint-text" style="margin:0">${fmt(p.price)} تومان · موجودی: ${p.stock} ${p.is_active ? "" : "· غیرفعال"}</span>
+            <span class="hint-text" style="margin:0">${fmt(p.price)} تومان · موجودی: ${p.is_auto_provision ? "🔌 خودکار" : p.stock} ${p.is_active ? "" : "· غیرفعال"}</span>
           </div>
           <div class="admin-list-row-actions">
             <button class="btn small outline" data-edit-prod="${p.id}">✏️</button>
@@ -3427,6 +3445,8 @@ async function renderAdminProducts(body) {
       <input class="input" id="new-prod-price" type="number" placeholder="قیمت (تومان)" style="margin-bottom:8px" />
       <input class="input" id="new-prod-duration" type="number" placeholder="مدت اعتبار (روز)" value="30" style="margin-bottom:8px" />
       <input class="input" id="new-prod-desc" type="text" placeholder="توضیحات (اختیاری)" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:8px" />
+      ${productProvisionFieldsHtml(panelServers)}
+      <div class="field-error" id="new-prod-error"></div>
       <button class="btn" id="new-prod-save">➕ افزودن محصول</button>
     </div>
   `;
@@ -3444,21 +3464,10 @@ async function renderAdminProducts(body) {
     };
   });
   body.querySelectorAll("[data-edit-prod]").forEach((el) => {
-    el.onclick = async () => {
+    el.onclick = () => {
       const p = products.find((x) => x.id === Number(el.dataset.editProd));
-      const name = prompt("نام محصول:", p.name);
-      if (name === null) return;
-      const price = prompt("قیمت (تومان):", p.price);
-      if (price === null) return;
-      const duration = prompt("مدت اعتبار (روز):", p.duration_days);
-      if (duration === null) return;
-      try {
-        await api(`/api/admin/products/${p.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ name: name.trim() || undefined, price: Number(price), duration_days: Number(duration) }),
-        });
-        renderAdmin();
-      } catch (e) { notify(e.message); }
+      adminCatalogView = { level: "edit-product", product: p, categoryId, categoryName };
+      renderAdmin();
     };
   });
   body.querySelectorAll("[data-toggle-prod]").forEach((el) => {
@@ -3478,19 +3487,82 @@ async function renderAdminProducts(body) {
       } catch (e) { notify(e.message); }
     };
   });
+  const sourceRadios = body.querySelectorAll('input[name="new-prod-source"]');
+  sourceRadios.forEach((r) => r.addEventListener("change", () => {
+    document.getElementById("new-prod-direct-fields").style.display =
+      body.querySelector('input[name="new-prod-source"]:checked').value === "direct" ? "block" : "none";
+  }));
   document.getElementById("new-prod-save").onclick = async () => {
+    const errBox = document.getElementById("new-prod-error");
+    errBox.textContent = "";
     const name = document.getElementById("new-prod-name").value.trim();
     const price = Number(document.getElementById("new-prod-price").value);
     const duration = Number(document.getElementById("new-prod-duration").value) || 30;
     const desc = document.getElementById("new-prod-desc").value.trim();
-    if (!name || !price) { notify("نام و قیمت الزامی است."); return; }
+    if (!name || !price) { errBox.textContent = "نام و قیمت الزامی است."; return; }
+    const payload = { category_id: categoryId, name, price, duration_days: duration, description: desc };
+    const sourceEl = body.querySelector('input[name="new-prod-source"]:checked');
+    if (sourceEl && sourceEl.value === "direct") {
+      const provision_server_id = Number(document.getElementById("new-prod-server").value);
+      const auto_provision_volume_gb = Number(document.getElementById("new-prod-volume").value);
+      if (!provision_server_id || !auto_provision_volume_gb) {
+        errBox.textContent = "برای اتصال مستقیم به پنل، پنل و حجم (گیگابایت) را مشخص کنید.";
+        return;
+      }
+      payload.provision_server_id = provision_server_id;
+      payload.auto_provision_volume_gb = auto_provision_volume_gb;
+    }
     try {
-      await api("/api/admin/products", {
-        method: "POST",
-        body: JSON.stringify({ category_id: categoryId, name, price, duration_days: duration, description: desc }),
-      });
+      await api("/api/admin/products", { method: "POST", body: JSON.stringify(payload) });
       renderAdmin();
-    } catch (e) { notify(e.message); }
+    } catch (e) { errBox.textContent = e.message; }
+  };
+}
+
+async function renderAdminEditProduct(body) {
+  const { product: p, categoryId, categoryName } = adminCatalogView;
+  body.innerHTML = `
+    <button class="btn outline small" id="edit-prod-back" style="width:auto;margin-bottom:12px">→ بازگشت به محصولات «${categoryName}»</button>
+    <div class="card">
+      <div class="eyebrow" style="margin-top:0">✏️ ویرایش محصول</div>
+      <label class="field-label">نام محصول</label>
+      <input class="input" id="edit-prod-name" type="text" value="${(p.name || "").replace(/"/g, "&quot;")}" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:10px" />
+      <label class="field-label">قیمت (تومان)</label>
+      <input class="input" id="edit-prod-price" type="number" value="${p.price}" style="margin-bottom:10px" />
+      <label class="field-label">مدت اعتبار (روز)</label>
+      <input class="input" id="edit-prod-duration" type="number" value="${p.duration_days}" style="margin-bottom:10px" />
+      <label class="field-label">توضیحات (اختیاری)</label>
+      <input class="input" id="edit-prod-desc" type="text" value="${(p.description || "").replace(/"/g, "&quot;")}" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:10px" />
+      ${p.is_auto_provision ? `<p class="hint-text">🔌 این محصول به‌صورت خودکار (${p.auto_provision_volume_gb || "?"} گیگ) ساخته می‌شود؛ منبع کانفیگ بعد از ساخت محصول قابل تغییر نیست.</p>` : ""}
+      <div class="field-error" id="edit-prod-error"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn" id="edit-prod-save">💾 ذخیره تغییرات</button>
+        <button class="btn outline" id="edit-prod-cancel">انصراف</button>
+      </div>
+    </div>
+  `;
+  const back = () => {
+    adminCatalogView = { level: "products", categoryId, categoryName };
+    renderAdmin();
+  };
+  document.getElementById("edit-prod-back").onclick = back;
+  document.getElementById("edit-prod-cancel").onclick = back;
+  document.getElementById("edit-prod-save").onclick = async () => {
+    const errBox = document.getElementById("edit-prod-error");
+    errBox.textContent = "";
+    const name = document.getElementById("edit-prod-name").value.trim();
+    const price = Number(document.getElementById("edit-prod-price").value);
+    const duration = Number(document.getElementById("edit-prod-duration").value);
+    const description = document.getElementById("edit-prod-desc").value.trim();
+    if (!name || !price || !duration) { errBox.textContent = "نام، قیمت و مدت اعتبار الزامی هستند."; return; }
+    try {
+      await api(`/api/admin/products/${p.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name, price, duration_days: duration, description }),
+      });
+      tg.HapticFeedback.notificationOccurred("success");
+      back();
+    } catch (e) { errBox.textContent = e.message; }
   };
 }
 
