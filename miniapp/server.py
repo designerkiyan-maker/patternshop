@@ -1536,6 +1536,10 @@ class MenuButtonUpdate(BaseModel):
 class MenuLayoutUpdate(BaseModel):
     order: list[str]
     buttons: list[MenuButtonUpdate]
+    # کلیدهایی که باید قبل‌شان یک ردیف جدید در منو شروع شود؛ اگر ارسال نشود
+    # (None) یعنی فرانت‌اند هنوز چیدمان آزاد را ویرایش نکرده و تنظیم قبلی
+    # (تعداد ستون ثابت یا چیدمان سفارشی قبلی) دست‌نخورده باقی می‌ماند.
+    row_breaks: Optional[list[str]] = None
 
 
 @app.get("/api/admin/check")
@@ -1554,6 +1558,8 @@ def api_admin_get_menu(auth=Depends(require_senior_admin)):
     _, db, _ = auth
     settings = db.get_all_settings()
     order = db.get_menu_order()
+    row_breaks = db.get_menu_row_breaks()
+    break_set = set(row_breaks) if row_breaks is not None else None
     result = []
     for key in order:
         meta = MENU_BUTTON_META.get(key)
@@ -1573,6 +1579,9 @@ def api_admin_get_menu(auth=Depends(require_senior_admin)):
             item["style"] = settings.get(f"{key}_style", "")
         if meta["toggle_key"]:
             item["enabled"] = settings.get(meta["toggle_key"], "1") == "1"
+        # break_before یعنی این دکمه یک ردیف جدید شروع می‌کند (نه کنار دکمه‌ی
+        # قبلی). None یعنی هنوز چیدمان آزاد سفارشی نشده (حالت قدیمی ستون ثابت).
+        item["break_before"] = (key in break_set) if break_set is not None else None
         result.append(item)
     return result
 
@@ -1592,6 +1601,8 @@ def api_admin_save_menu(body: MenuLayoutUpdate, auth=Depends(require_senior_admi
         if meta["toggle_key"] and btn.enabled is not None:
             db.set_setting(meta["toggle_key"], "1" if btn.enabled else "0")
     db.set_menu_order(body.order)
+    if body.row_breaks is not None:
+        db.set_menu_row_breaks(body.row_breaks)
     return {"status": "ok"}
 
 
