@@ -176,6 +176,17 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         دسته‌بندی‌ها/کانفیگ‌بانک) را ندارند."""
         return db.is_senior_admin(user_id)
 
+    async def _notify_user_inline_menu(bot: Bot, user_tg_id: int):
+        """بعد از این‌که مدیر یک اقدام را روی سفارش/شارژ/درخواست کاربر انجام می‌دهد
+        (تایید، رد و ...) و پیامی برای کاربر ارسال می‌شود، اگر منوی شیشه‌ای بالا از
+        تنظیمات فعال باشد، دوباره برایش ارسال می‌شود؛ وگرنه بعد از این پیام‌های جدید
+        از دسترس کاربر خارج می‌ماند (چون به پیام قبلی‌اش چسبیده بود، نه به چت)."""
+        try:
+            inline_kb = (await asyncio.to_thread(kb.inline_menu_for_user, db, user_tg_id, is_main_bot))
+            if inline_kb is not None:
+                await bot.send_message(user_tg_id, "📋 منو:", reply_markup=inline_kb)
+        except Exception:
+            pass
 
     async def _send_receipt(bot: Bot, chat_id: int, file_id: str, receipt_type: str, caption: str, reply_markup=None):
         """ارسال رسید ذخیره‌شده؛ رسیدهای قدیمی photo فرض می‌شوند."""
@@ -940,6 +951,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                     bot, order["user_id"], "کانفیگ شخصی",
                     [result.subscription_url], final_price=order["final_price"], order_id=order_id,
                 )
+                await _notify_user_inline_menu(bot, order["user_id"])
             except Exception:
                 pass
             try:
@@ -976,6 +988,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                     bot, order["user_id"], product["name"],
                     [r["subscription_url"] for r in prov_results], final_price=order["final_price"], order_id=order_id,
                 )
+                await _notify_user_inline_menu(bot, order["user_id"])
             except Exception:
                 pass
             try:
@@ -1023,6 +1036,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 final_price=order["final_price"],
                 order_id=order_id,
             )
+            await _notify_user_inline_menu(bot, order["user_id"])
         except Exception:
             pass
 
@@ -1062,6 +1076,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 order["user_id"],
                 "❌ متاسفانه رسید ارسالی شما تایید نشد. در صورت اشتباه لطفاً با پشتیبانی در ارتباط باشید.",
             )
+            await _notify_user_inline_menu(bot, order["user_id"])
         except Exception:
             pass
 
@@ -1237,6 +1252,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 f"✅ شارژ کیف پول شما تایید شد!\n💰 مبلغ {topup['amount']:,} تومان اضافه شد.\n"
                 f"👛 موجودی فعلی کیف پول شما: {new_balance:,} تومان",
             )
+            await _notify_user_inline_menu(bot, topup["user_id"])
         except Exception:
             pass
 
@@ -1276,6 +1292,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 topup["user_id"],
                 "❌ متاسفانه درخواست شارژ کیف پول شما تایید نشد. در صورت اشتباه با پشتیبانی تماس بگیرید.",
             )
+            await _notify_user_inline_menu(bot, topup["user_id"])
         except Exception:
             pass
 
@@ -3123,6 +3140,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                     req["user_id"],
                     f"❌ متاسفانه {label} شما (#{request_id}) رد شد.\n\nدلیل: {reason}",
                 )
+                await _notify_user_inline_menu(bot, req["user_id"])
             except Exception:
                 pass
 
@@ -3221,6 +3239,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                     req["user_id"],
                     f"⚪️ درخواست نمایندگی شما (#{request_id}) توسط مدیریت کنسل شد.",
                 )
+                await _notify_user_inline_menu(bot, req["user_id"])
             except Exception:
                 pass
 
@@ -3891,6 +3910,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 if not owner_only(message.from_user.id):
                     (await asyncio.to_thread(db.set_support_conversation_admin, user_id, message.from_user.id))
                 (await asyncio.to_thread(db.add_support_message, user_id, "admin", message.text))
+            await _notify_user_inline_menu(bot, user_id)
             await message.answer("✅ پاسخ ارسال شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
         except Exception:
             await message.answer("⛔️ ارسال پیام به کاربر با خطا مواجه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
