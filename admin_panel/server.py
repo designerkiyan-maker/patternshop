@@ -2229,39 +2229,7 @@ def api_set_wheel_settings(body: WheelSettingsBody, admin=Depends(require_permis
     return {"ok": True}
 
 
-class CryptoSettingsBody(BaseModel):
-    enabled: bool
-    usd_to_toman_rate: int
 
-
-def _resolve_plisio_key_web() -> str:
-    import crypto_payment
-    return crypto_payment.resolve_plisio_key(db)
-
-
-@app.get("/api/settings/crypto")
-def api_get_crypto_settings(admin=Depends(require_permission("settings"))):
-    import crypto_payment
-    api_key = _resolve_plisio_key_web()
-    return {
-        "enabled": db.get_setting("crypto_payment_enabled", "0") == "1",
-        "usd_to_toman_rate": int(float(db.get_setting("usd_to_toman_rate", "0") or 0)),
-        "has_own_key": bool(db.get_setting("plisio_api_key", "")),
-        "key_source": crypto_payment.resolve_plisio_key_source(db),
-        "gateway_configured": bool(api_key),
-    }
-
-
-@app.post("/api/settings/crypto")
-def api_set_crypto_settings(body: CryptoSettingsBody, admin=Depends(require_permission("settings"))):
-    if body.enabled and not _resolve_plisio_key_web():
-        raise HTTPException(400, "ابتدا کلید API درگاه Plisio باید تنظیم شود.")
-    if body.usd_to_toman_rate < 0:
-        raise HTTPException(400, "نرخ تبدیل نمی‌تواند منفی باشد.")
-    db.set_setting("crypto_payment_enabled", "1" if body.enabled else "0")
-    db.set_setting("usd_to_toman_rate", str(body.usd_to_toman_rate))
-    db.log_admin_action(admin["id"], "setting_change", "crypto settings updated (پنل وب)", "setting", "crypto")
-    return {"ok": True}
 
 
 class RenewalSettingsBody(BaseModel):
