@@ -150,11 +150,22 @@ def get_tenant(b: str = Query("", description="شناسه یا اسلاگ لین
 
 
 def get_verified_user(x_init_data: str = Header(...), tenant: Tenant = Depends(get_tenant)):
-    """initData را با توکن همان مستأجر تایید می‌کند. خروجی: (tg_id, db, tenant)"""
+    """initData را با توکن همان مستأجر تایید می‌کند. خروجی: (tg_id, db, tenant)
+
+    نکته: کاربر را همین‌جا هم در جدول users ثبت/به‌روز می‌کنیم (نه فقط داخل
+    هندلر /start بات)، چون کاربر می‌تواند مستقیماً وارد مینی‌اپ شود بدون آن‌که
+    قبلاً /start را در بات زده باشد. بدون این کار، پیام‌های چت زنده/تیکت چنین
+    کاربری در دیتابیس ثبت می‌شد ولی چون ردیفی در users نداشت، سمت ادمین
+    (هم مینی‌اپ و هم پنل وب) با خطای «کاربر یافت نشد» مواجه می‌شد."""
     result = validate_init_data(x_init_data, tenant.bot_token)
     if not result or "user" not in result:
         raise HTTPException(status_code=401, detail="initData نامعتبر است.")
-    return result["user"]["id"], tenant.db, tenant
+    tg_user = result["user"]
+    try:
+        tenant.db.add_or_update_user(tg_user["id"], tg_user.get("username"), tg_user.get("first_name"))
+    except Exception:
+        logging.getLogger("miniapp.auth").exception("ثبت/به‌روزرسانی کاربر %s ناموفق بود.", tg_user.get("id"))
+    return tg_user["id"], tenant.db, tenant
 
 
 def require_admin(auth=Depends(get_verified_user)):
