@@ -348,10 +348,14 @@ ADMIN_PANEL_CATEGORIES = [
     ("resellers", "🤝 نمایندگی‌ها", [
         "adm_resellers_menu",
         "adm_credit_resellers_menu",
+    ]),
+    ("marketing", "🎯 بازاریابی و تشویقی", [
+        "adm_discounts_menu",
+        "adm_wheel_settings",
         "adm_referral_settings",
+        "adm_broadcast",
     ]),
     ("finance", "💰 مالی و پرداخت", [
-        "adm_discounts_menu",
         "adm_set_card",
         "adm_set_plisio",
     ]),
@@ -359,8 +363,10 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_renewal_settings",
         "adm_volume_reminder_settings",
         "adm_stock_alert_settings",
-        "adm_wheel_settings",
+    ]),
+    ("access", "🔐 دسترسی و امنیت", [
         "adm_forcejoin_menu",
+        "adm_admins_menu",
     ]),
     ("appearance", "🎨 ظاهر و رنگ‌بندی", [
         "adm_edit_buttons",
@@ -369,8 +375,6 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_buyflow_colors_menu",
     ]),
     ("management", "👥 مدیریت و آمار", [
-        "adm_admins_menu",
-        "adm_broadcast",
         "adm_stats",
         "adm_backup_menu",
     ]),
