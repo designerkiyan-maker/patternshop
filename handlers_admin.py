@@ -103,7 +103,7 @@ async def _deliver_webpanel_link(db, answerable, admin_id: int, bot_id: int) -> 
     صداش زده)؛ این تابع فقط لینک نهایی رو می‌سازه، به ادمین نشون می‌ده و از
     طریق بات خودِ نماینده براش می‌فرسته. answerable هر چیزی با متد async
     answer(text, reply_markup=None) است (call.message یا یک Message)."""
-    reseller_bot = db.get_reseller_bot(bot_id)
+    reseller_bot = (await asyncio.to_thread(db.get_reseller_bot, bot_id))
     if not reseller_bot or not reseller_bot["web_panel_setup_token"]:
         await answerable.answer("این نماینده یا توکن راه‌اندازی‌اش دیگر پیدا نشد؛ دوباره از منوی نمایندگی امتحان کن.")
         return
@@ -124,9 +124,9 @@ async def _deliver_webpanel_link(db, answerable, admin_id: int, bot_id: int) -> 
         "این لینک همین الان از طریق بات خودِ نماینده براش ارسال شد.",
         reply_markup=kb.resbot_webpanel_kb(bot_id),
     )
-    db.log_admin_action(
+    (await asyncio.to_thread(db.log_admin_action, 
         admin_id, "reseller_webpanel_enable", f"نماینده #{bot_id} (@{reseller_bot['bot_username'] or ''})",
-    )
+    ))
 
     sent = await _send_via_reseller_bot(
         reseller_bot["bot_token"],
@@ -308,7 +308,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         try:
-            categories = db.get_categories(active_only=False)
+            categories = (await asyncio.to_thread(db.get_categories, active_only=False))
             await replace_admin_view(call, "📂 مدیریت دسته‌بندی‌ها:", kb.admin_categories_kb(categories))
             await call.answer()
         except Exception:
@@ -322,11 +322,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if cat_id is None:
             return await call.answer("⚠️ درخواست نامعتبر است.", show_alert=True)
         try:
-            if db.get_category(cat_id) is None:
+            if (await asyncio.to_thread(db.get_category, cat_id)) is None:
                 return await call.answer("⚠️ این دسته‌بندی دیگر وجود ندارد.", show_alert=True)
-            db.toggle_category(cat_id)
-            db.log_admin_action(call.from_user.id, "category_toggle", f"دسته‌بندی #{cat_id}")
-            categories = db.get_categories(active_only=False)
+            (await asyncio.to_thread(db.toggle_category, cat_id))
+            (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "category_toggle", f"دسته‌بندی #{cat_id}"))
+            categories = (await asyncio.to_thread(db.get_categories, active_only=False))
             await safe_edit(call, "📂 مدیریت دسته‌بندی‌ها:", kb.admin_categories_kb(categories))
             await call.answer("وضعیت تغییر کرد.")
         except Exception:
@@ -340,11 +340,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if cat_id is None:
             return await call.answer("⚠️ درخواست نامعتبر است.", show_alert=True)
         try:
-            if db.get_category(cat_id) is None:
+            if (await asyncio.to_thread(db.get_category, cat_id)) is None:
                 return await call.answer("⚠️ این دسته‌بندی قبلاً حذف شده است.", show_alert=True)
-            db.delete_category(cat_id)
-            db.log_admin_action(call.from_user.id, "category_delete", f"دسته‌بندی #{cat_id}")
-            categories = db.get_categories(active_only=False)
+            (await asyncio.to_thread(db.delete_category, cat_id))
+            (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "category_delete", f"دسته‌بندی #{cat_id}"))
+            categories = (await asyncio.to_thread(db.get_categories, active_only=False))
             await safe_edit(call, "📂 مدیریت دسته‌بندی‌ها:", kb.admin_categories_kb(categories))
             await call.answer("دسته‌بندی حذف شد.")
         except Exception:
@@ -370,8 +370,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("نام دسته‌بندی نباید بیشتر از ۱۰۰ کاراکتر باشد.")
             return
         try:
-            db.add_category(name)
-            db.log_admin_action(message.from_user.id, "category_add", f"دسته‌بندی «{name}»")
+            (await asyncio.to_thread(db.add_category, name))
+            (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "category_add", f"دسته‌بندی «{name}»"))
             await state.clear()
             await message.answer("✅ دسته‌بندی اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
         except Exception:
@@ -385,7 +385,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_products(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        categories = db.get_categories(active_only=False)
+        categories = (await asyncio.to_thread(db.get_categories, active_only=False))
         await replace_admin_view(call, 
             "📦 مدیریت محصولات - ابتدا دسته‌بندی را انتخاب کنید:",
             reply_markup=kb.admin_products_categories_kb(categories),
@@ -400,7 +400,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if cat_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        products = db.get_products(cat_id, active_only=False)
+        products = (await asyncio.to_thread(db.get_products, cat_id, active_only=False))
         if not products:
             await call.answer("محصولی در این دسته وجود ندارد.", show_alert=True)
             return
@@ -415,10 +415,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if product_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        db.toggle_product(product_id)
-        product = db.get_product(product_id)
-        db.log_admin_action(call.from_user.id, "product_toggle", f"محصول «{product['name'] if product else product_id}»")
-        products = db.get_products(product["category_id"], active_only=False)
+        (await asyncio.to_thread(db.toggle_product, product_id))
+        product = (await asyncio.to_thread(db.get_product, product_id))
+        (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "product_toggle", f"محصول «{product['name'] if product else product_id}»"))
+        products = (await asyncio.to_thread(db.get_products, product["category_id"], active_only=False))
         await safe_edit(call, "لیست محصولات این دسته‌بندی:", reply_markup=kb.admin_products_list_kb(db, products))
         await call.answer("وضعیت تغییر کرد.")
 
@@ -430,12 +430,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if product_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        product = db.get_product(product_id)
+        product = (await asyncio.to_thread(db.get_product, product_id))
         cat_id = product["category_id"] if product else None
-        db.delete_product(product_id)
-        db.log_admin_action(call.from_user.id, "product_delete", f"محصول «{product['name'] if product else product_id}»")
+        (await asyncio.to_thread(db.delete_product, product_id))
+        (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "product_delete", f"محصول «{product['name'] if product else product_id}»"))
         if cat_id:
-            products = db.get_products(cat_id, active_only=False)
+            products = (await asyncio.to_thread(db.get_products, cat_id, active_only=False))
             await safe_edit(call, "لیست محصولات این دسته‌بندی:", reply_markup=kb.admin_products_list_kb(db, products))
         await call.answer("محصول حذف شد.")
 
@@ -443,7 +443,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_prod_add(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        categories = db.get_categories(active_only=True)
+        categories = (await asyncio.to_thread(db.get_categories, active_only=True))
         if not categories:
             await call.answer("ابتدا باید حداقل یک دسته‌بندی فعال بسازید.", show_alert=True)
             return
@@ -499,7 +499,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         await state.update_data(duration_days=int(text))
 
-        if db.is_full_access_bot(is_main_bot):
+        if (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             await state.set_state(AdminAddProduct.waiting_provision_choice)
             await message.answer(
                 "منبع کانفیگ این محصول چیست؟\n\n"
@@ -519,15 +519,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         source = call.data.split(":", 1)[1]
         if source == "bank":
             data = await state.get_data()
-            db.add_product(data["category_id"], data["name"], data["price"], data["description"], data["duration_days"])
-            db.log_admin_action(call.from_user.id, "product_add", f"محصول «{data['name']}» | قیمت: {data['price']:,}")
+            (await asyncio.to_thread(db.add_product, data["category_id"], data["name"], data["price"], data["description"], data["duration_days"]))
+            (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "product_add", f"محصول «{data['name']}» | قیمت: {data['price']:,}"))
             await state.clear()
             await safe_edit(call, "✅ محصول با موفقیت اضافه شد.\nحالا از «بانک کانفیگ» می‌تونی لینک‌ها رو براش اضافه کنی.")
             await call.answer()
             return
 
         # اتصال مستقیم به پنل
-        servers = db.get_panel_servers(active_only=True)
+        servers = (await asyncio.to_thread(db.get_panel_servers, active_only=True))
         if not servers:
             await call.answer("ابتدا باید حداقل یک پنل فعال در بخش «مدیریت پنل‌ها» تعریف کنید.", show_alert=True)
             return
@@ -554,17 +554,17 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         data = await state.get_data()
         provision_server_id = data.get("provision_server_id")
-        db.add_product(
+        (await asyncio.to_thread(db.add_product, 
             data["category_id"], data["name"], data["price"], data["description"], data["duration_days"],
             is_auto_provision=True, auto_provision_volume_gb=int(text),
             provision_server_id=provision_server_id,
-        )
-        db.log_admin_action(
+        ))
+        (await asyncio.to_thread(db.log_admin_action, 
             message.from_user.id, "product_add",
             f"محصول «{data['name']}» (خودکار"
             + (" - اتصال مستقیم به پنل" if provision_server_id else "")
             + f"، {text} گیگ) | قیمت: {data['price']:,}",
-        )
+        ))
         await state.clear()
         if provision_server_id:
             await message.answer(
@@ -589,10 +589,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_add_configs(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        if not db.is_full_access_bot(is_main_bot):
+        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             await call.answer("این بخش برای نمایندگی سطح ۲ فعال نیست.", show_alert=True)
             return
-        products = db.get_all_products()
+        products = (await asyncio.to_thread(db.get_all_products))
         if not products:
             await call.answer("ابتدا باید یک محصول بسازید.", show_alert=True)
             return
@@ -621,9 +621,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         data = await state.get_data()
         product_id = data["product_id"]
         links = [line for line in (message.text or "").splitlines() if line.strip()]
-        added_count, duplicate_count = db.add_configs(product_id, links)
+        added_count, duplicate_count = (await asyncio.to_thread(db.add_configs, product_id, links))
         await state.clear()
-        stock = db.count_available_configs(product_id)
+        stock = (await asyncio.to_thread(db.count_available_configs, product_id))
         text = f"✅ {added_count} لینک با موفقیت اضافه شد."
         if duplicate_count:
             text += f"\n⚠️ تعداد {duplicate_count} کانفیگ تکراری بود و اضافه نشد."
@@ -640,7 +640,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_random_cfg(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        products = db.get_all_products()
+        products = (await asyncio.to_thread(db.get_all_products))
         if not products:
             await call.answer("ابتدا باید یک محصول بسازید.", show_alert=True)
             return
@@ -658,8 +658,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if product_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        product = db.get_product(product_id)
-        result = db.admin_take_random_config(product_id, call.from_user.id)
+        product = (await asyncio.to_thread(db.get_product, product_id))
+        result = (await asyncio.to_thread(db.admin_take_random_config, product_id, call.from_user.id))
         if not result:
             await call.answer("کانفیگ آزادی برای این محصول موجود نیست.", show_alert=True)
             return
@@ -687,8 +687,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_test_toggle(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        current = db.get_setting("test_enabled", "1")
-        db.set_setting("test_enabled", "0" if current == "1" else "1")
+        current = (await asyncio.to_thread(db.get_setting, "test_enabled", "1"))
+        (await asyncio.to_thread(db.set_setting, "test_enabled", "0" if current == "1" else "1"))
         await safe_edit(call, "🧪 مدیریت کانفیگ تست:", reply_markup=kb.admin_test_menu_kb(db, is_main_bot))
         await call.answer("وضعیت کانفیگ تست تغییر کرد.")
 
@@ -696,7 +696,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_test_add(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        if not db.is_full_access_bot(is_main_bot):
+        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             await call.answer("این بخش برای نمایندگی سطح ۲ فعال نیست.", show_alert=True)
             return
         await state.set_state(AdminAddTestConfigs.waiting_links)
@@ -708,7 +708,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     @router.message(AdminAddTestConfigs.waiting_links)
     async def process_add_test_configs(message: Message, state: FSMContext):
         links = [line for line in message.text.splitlines() if line.strip()]
-        db.add_test_configs(links)
+        (await asyncio.to_thread(db.add_test_configs, links))
         await state.clear()
         await message.answer(f"✅ {len(links)} لینک تست اضافه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -716,7 +716,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_test_set_volume(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        if db.is_full_access_bot(is_main_bot):
+        if (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             await call.answer("این بخش فقط برای نمایندگی سطح ۲ است.", show_alert=True)
             return
         await state.set_state(AdminTestConfigSettings.waiting_volume)
@@ -740,8 +740,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("لطفاً فقط عدد صحیح و بزرگ‌تر از صفر وارد کنید. مثال: 1")
             return
         data = await state.get_data()
-        db.set_setting("test_config_panel_volume_gb", str(data["volume_gb"]))
-        db.set_setting("test_config_panel_duration_days", text)
+        (await asyncio.to_thread(db.set_setting, "test_config_panel_volume_gb", str(data["volume_gb"])))
+        (await asyncio.to_thread(db.set_setting, "test_config_panel_duration_days", text))
         await state.clear()
         await message.answer(
             f"✅ کانفیگ تست تنظیم شد: {data['volume_gb']} گیگ / {text} روز.",
@@ -768,12 +768,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_forcejoin_toggle(call: CallbackQuery):
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
-        settings = db.get_force_join_settings()
+        settings = (await asyncio.to_thread(db.get_force_join_settings))
         if not settings["enabled"] and not settings["channel"]:
             await call.answer("اول باید آیدی کانال را تنظیم کنی.", show_alert=True)
             return
-        current = db.get_setting("force_join_enabled", "0")
-        db.set_setting("force_join_enabled", "0" if current == "1" else "1")
+        current = (await asyncio.to_thread(db.get_setting, "force_join_enabled", "0"))
+        (await asyncio.to_thread(db.set_setting, "force_join_enabled", "0" if current == "1" else "1"))
         await safe_edit(call, "📢 عضویت اجباری در کانال:", reply_markup=kb.admin_forcejoin_menu_kb(db))
         await call.answer("وضعیت عضویت اجباری تغییر کرد.")
 
@@ -812,7 +812,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             )
             return
 
-        db.set_setting("force_join_channel", channel)
+        (await asyncio.to_thread(db.set_setting, "force_join_channel", channel))
         await state.clear()
         await message.answer(
             f"✅ کانال «{chat.title}» ثبت شد. حالا می‌تونی از منوی قبلی عضویت اجباری رو فعال کنی.",
@@ -827,7 +827,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_pending_orders(call: CallbackQuery):
         if not admin_only(call.from_user.id):
             return await call.answer()
-        orders = db.get_pending_orders()
+        orders = (await asyncio.to_thread(db.get_pending_orders))
         if not orders:
             await call.answer("سفارش در انتظاری وجود ندارد.", show_alert=True)
             return
@@ -842,11 +842,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if order_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        order = db.get_order(order_id)
+        order = (await asyncio.to_thread(db.get_order, order_id))
         if not order:
             await call.answer("سفارش یافت نشد.", show_alert=True)
             return
-        product = db.get_product(order["product_id"])
+        product = (await asyncio.to_thread(db.get_product, order["product_id"]))
         qty = order["quantity"] or 1
         caption = f"سفارش #{order_id}\nکاربر: {order['user_id']}\nمحصول: {product['name'] if product else '---'}"
         if qty > 1:
@@ -869,7 +869,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if order_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        order = db.get_order(order_id)
+        order = (await asyncio.to_thread(db.get_order, order_id))
         if not order:
             await call.answer("سفارش یافت نشد.", show_alert=True)
             return
@@ -879,7 +879,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
         # ===== سفارش کانفیگ شخصی: به‌جای برداشتن از انبار، کاربر روی پنل ساخته می‌شود =====
         if order["is_custom_config"]:
-            server = db.get_panel_server(order["custom_panel_server_id"])
+            server = (await asyncio.to_thread(db.get_panel_server, order["custom_panel_server_id"]))
             if not server or not server["is_active"]:
                 await call.answer("⛔️ سرور پنل مربوطه یافت نشد یا غیرفعال است.", show_alert=True)
                 return
@@ -888,7 +888,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 result = await provider.create_user(
                     username=order["custom_username"],
                     volume_gb=order["custom_volume_gb"],
-                    duration_days=db.get_custom_config_settings()["duration_days"],
+                    duration_days=(await asyncio.to_thread(db.get_custom_config_settings))["duration_days"],
                 )
             except PanelUsernameTakenError:
                 await call.answer("⛔️ این نام کاربری روی پنل تکراری است؛ از کاربر بخواه نام دیگری انتخاب کند.", show_alert=True)
@@ -897,8 +897,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 await call.answer(f"⛔️ خطا در ارتباط با پنل: {e}", show_alert=True)
                 return
 
-            db.approve_custom_config_order(order_id)
-            db.add_custom_config(
+            (await asyncio.to_thread(db.approve_custom_config_order, order_id))
+            (await asyncio.to_thread(db.add_custom_config, 
                 user_id=order["user_id"],
                 panel_server_id=server["id"],
                 username=result.username,
@@ -906,12 +906,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 duration_days=db.get_custom_config_settings()["duration_days"],
                 subscription_url=result.subscription_url,
                 order_id=order_id,
-            )
-            db.log_admin_action(
+            ))
+            (await asyncio.to_thread(db.log_admin_action, 
                 call.from_user.id, "custom_config_approve",
                 f"سفارش کانفیگ شخصی #{order_id} | کاربر {order['user_id']} | یوزرنیم «{result.username}» | "
                 f"{order['custom_volume_gb']} گیگ | مبلغ: {order['final_price']:,}",
-            )
+            ))
             try:
                 await bot.send_message(order["user_id"], "✅ کانفیگ شخصی شما ساخته شد!")
                 await deliver_config_to_user(
@@ -930,7 +930,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer("سفارش تایید و کانفیگ شخصی روی پنل ساخته شد.")
             return
 
-        product = db.get_product(order["product_id"])
+        product = (await asyncio.to_thread(db.get_product, order["product_id"]))
 
         if product and product["is_auto_provision"]:
             quantity = order["quantity"] or 1
@@ -942,12 +942,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             except (ProvisionError, DirectProvisionError) as e:
                 await call.answer(f"⛔️ {e}", show_alert=True)
                 return
-            db.approve_order_auto(order_id)
-            db.log_admin_action(
+            (await asyncio.to_thread(db.approve_order_auto, order_id))
+            (await asyncio.to_thread(db.log_admin_action, 
                 call.from_user.id, "order_approve",
                 f"سفارش #{order_id} (خودکار) | کاربر {order['user_id']} | محصول «{product['name']}» | "
                 f"مبلغ: {(order['final_price'] or product['price']):,}",
-            )
+            ))
             try:
                 await bot.send_message(order["user_id"], f"✅ خرید شما تایید شد!\n📦 محصول: {product['name']}")
                 await deliver_config_to_user(
@@ -967,19 +967,19 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
 
         quantity = order["quantity"] or 1
-        results = db.take_unused_configs(order["product_id"], order["user_id"], quantity)
+        results = (await asyncio.to_thread(db.take_unused_configs, order["product_id"], order["user_id"], quantity))
         if not results:
             await call.answer("⛔️ موجودی این محصول تمام شده! ابتدا لینک جدید اضافه کنید.", show_alert=True)
             return
 
-        db.approve_order(order_id, [r["id"] for r in results])
-        db.log_admin_action(
+        (await asyncio.to_thread(db.approve_order, order_id, [r["id"] for r in results]))
+        (await asyncio.to_thread(db.log_admin_action, 
             call.from_user.id, "order_approve",
             f"سفارش #{order_id} | کاربر {order['user_id']} | محصول «{product['name'] if product else '---'}» | مبلغ: {(order['final_price'] or (product['price'] if product else 0)):,}",
-        )
+        ))
         await check_and_notify_low_stock(bot.send_message, db, order["product_id"])
 
-        reward_info = db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or product["price"])
+        reward_info = (await asyncio.to_thread(db.reward_referrer_if_first_purchase, order["user_id"], order["final_price"] or product["price"]))
         if reward_info:
             reward_amount, referrer_id = reward_info
             try:
@@ -1022,7 +1022,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if order_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        order = db.get_order(order_id)
+        order = (await asyncio.to_thread(db.get_order, order_id))
         if not order:
             await call.answer("سفارش یافت نشد.", show_alert=True)
             return
@@ -1030,11 +1030,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer("این سفارش قبلاً بررسی شده است.", show_alert=True)
             return
 
-        db.reject_order(order_id)
-        db.log_admin_action(
+        (await asyncio.to_thread(db.reject_order, order_id))
+        (await asyncio.to_thread(db.log_admin_action, 
             call.from_user.id, "order_reject",
             f"سفارش #{order_id} | کاربر {order['user_id']}",
-        )
+        ))
         try:
             await bot.send_message(
                 order["user_id"],
@@ -1060,7 +1060,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_pending_topups(call: CallbackQuery):
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
-        topups = db.get_pending_topups()
+        topups = (await asyncio.to_thread(db.get_pending_topups))
         if not topups:
             await call.answer("درخواست شارژ در انتظاری وجود ندارد.", show_alert=True)
             return
@@ -1075,9 +1075,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_crypto_payments(call: CallbackQuery):
         if not admin_only(call.from_user.id):
             return await call.answer()
-        db.expire_stale_crypto_invoices()
-        db.purge_old_crypto_invoices(days=7)
-        invoices = db.get_crypto_invoices(50)
+        (await asyncio.to_thread(db.expire_stale_crypto_invoices))
+        (await asyncio.to_thread(db.purge_old_crypto_invoices, days=7))
+        invoices = (await asyncio.to_thread(db.get_crypto_invoices, 50))
         if not invoices:
             await call.answer("هیچ پرداخت کریپتویی ثبت نشده است.", show_alert=True)
             return
@@ -1096,7 +1096,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if invoice_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        invoice = db.get_crypto_invoice(invoice_id)
+        invoice = (await asyncio.to_thread(db.get_crypto_invoice, invoice_id))
         if not invoice:
             await call.answer("فاکتور یافت نشد.", show_alert=True)
             return
@@ -1141,16 +1141,16 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if invoice_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        invoice = db.get_crypto_invoice(invoice_id)
+        invoice = (await asyncio.to_thread(db.get_crypto_invoice, invoice_id))
         if not invoice:
             await call.answer("فاکتور یافت نشد یا قبلاً حذف شده.", show_alert=True)
         else:
-            db.cancel_and_delete_crypto_invoice(invoice_id)
+            (await asyncio.to_thread(db.cancel_and_delete_crypto_invoice, invoice_id))
             await call.answer("✅ فاکتور لغو و حذف شد.")
 
-        db.expire_stale_crypto_invoices()
-        db.purge_old_crypto_invoices(days=7)
-        invoices = db.get_crypto_invoices(50)
+        (await asyncio.to_thread(db.expire_stale_crypto_invoices))
+        (await asyncio.to_thread(db.purge_old_crypto_invoices, days=7))
+        invoices = (await asyncio.to_thread(db.get_crypto_invoices, 50))
         if not invoices:
             await replace_admin_view(call, "🪙 پرداخت‌های کریپتو\n\nهیچ پرداخت کریپتویی ثبت نشده است.",
                                       reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -1171,7 +1171,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if topup_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        topup = db.get_topup(topup_id)
+        topup = (await asyncio.to_thread(db.get_topup, topup_id))
         if not topup:
             await call.answer("درخواست یافت نشد.", show_alert=True)
             return
@@ -1194,7 +1194,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if topup_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        topup = db.get_topup(topup_id)
+        topup = (await asyncio.to_thread(db.get_topup, topup_id))
         if not topup:
             await call.answer("درخواست یافت نشد.", show_alert=True)
             return
@@ -1202,12 +1202,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer("این درخواست قبلاً بررسی شده است.", show_alert=True)
             return
 
-        db.approve_topup(topup_id)
-        new_balance = db.get_wallet_credit(topup["user_id"])
-        db.log_admin_action(
+        (await asyncio.to_thread(db.approve_topup, topup_id))
+        new_balance = (await asyncio.to_thread(db.get_wallet_credit, topup["user_id"]))
+        (await asyncio.to_thread(db.log_admin_action, 
             call.from_user.id, "topup_approve",
             f"شارژ #{topup_id} | کاربر {topup['user_id']} | مبلغ: {topup['amount']:,} | موجودی جدید: {new_balance:,}",
-        )
+        ))
 
         try:
             await bot.send_message(
@@ -1236,7 +1236,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if topup_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        topup = db.get_topup(topup_id)
+        topup = (await asyncio.to_thread(db.get_topup, topup_id))
         if not topup:
             await call.answer("درخواست یافت نشد.", show_alert=True)
             return
@@ -1244,11 +1244,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer("این درخواست قبلاً بررسی شده است.", show_alert=True)
             return
 
-        db.reject_topup(topup_id)
-        db.log_admin_action(
+        (await asyncio.to_thread(db.reject_topup, topup_id))
+        (await asyncio.to_thread(db.log_admin_action, 
             call.from_user.id, "topup_reject",
             f"شارژ #{topup_id} | کاربر {topup['user_id']} | مبلغ: {topup['amount']:,}",
-        )
+        ))
         try:
             await bot.send_message(
                 topup["user_id"],
@@ -1274,7 +1274,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_discounts_menu(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        codes = db.list_discount_codes()
+        codes = (await asyncio.to_thread(db.list_discount_codes))
         await replace_admin_view(call, "🎟 مدیریت کدهای تخفیف:", reply_markup=kb.discount_codes_kb(codes))
         await call.answer()
 
@@ -1286,9 +1286,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if code_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        db.toggle_discount_code(code_id)
-        db.log_admin_action(call.from_user.id, "discount_toggle", f"کد تخفیف #{code_id}")
-        codes = db.list_discount_codes()
+        (await asyncio.to_thread(db.toggle_discount_code, code_id))
+        (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "discount_toggle", f"کد تخفیف #{code_id}"))
+        codes = (await asyncio.to_thread(db.list_discount_codes))
         await safe_edit(call, "🎟 مدیریت کدهای تخفیف:", reply_markup=kb.discount_codes_kb(codes))
         await call.answer("وضعیت تغییر کرد.")
 
@@ -1300,9 +1300,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if code_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        db.delete_discount_code(code_id)
-        db.log_admin_action(call.from_user.id, "discount_delete", f"کد تخفیف #{code_id}")
-        codes = db.list_discount_codes()
+        (await asyncio.to_thread(db.delete_discount_code, code_id))
+        (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "discount_delete", f"کد تخفیف #{code_id}"))
+        codes = (await asyncio.to_thread(db.list_discount_codes))
         await safe_edit(call, "🎟 مدیریت کدهای تخفیف:", reply_markup=kb.discount_codes_kb(codes))
         await call.answer("کد حذف شد.")
 
@@ -1319,7 +1319,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     @router.message(AdminCreateDiscount.waiting_code)
     async def process_disc_code(message: Message, state: FSMContext):
         code = message.text.strip()
-        if db.get_discount_code(code):
+        if (await asyncio.to_thread(db.get_discount_code, code)):
             await message.answer("⛔️ این کد از قبل وجود دارد. یک نام دیگر ارسال کنید:")
             return
         await state.update_data(disc_code=code)
@@ -1354,10 +1354,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         max_uses = int(message.text.strip())
         data = await state.get_data()
-        db.create_discount_code(
+        (await asyncio.to_thread(db.create_discount_code, 
             data["disc_code"], percent=data.get("disc_percent"), fixed_amount=data.get("disc_fixed"), max_uses=max_uses
-        )
-        db.log_admin_action(message.from_user.id, "discount_add", f"کد «{data['disc_code']}»")
+        ))
+        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "discount_add", f"کد «{data['disc_code']}»"))
         await state.clear()
         await message.answer(f"✅ کد تخفیف «{data['disc_code']}» ساخته شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -1376,8 +1376,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_referral_toggle(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        current = db.get_setting("referral_enabled", "1")
-        db.set_setting("referral_enabled", "0" if current == "1" else "1")
+        current = (await asyncio.to_thread(db.get_setting, "referral_enabled", "1"))
+        (await asyncio.to_thread(db.set_setting, "referral_enabled", "0" if current == "1" else "1"))
         await safe_edit(call, "🤝 تنظیمات زیرمجموعه‌گیری:", reply_markup=kb.referral_settings_kb(db))
         await call.answer("وضعیت تغییر کرد.")
 
@@ -1397,7 +1397,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not text.isdigit() or not (0 <= int(text) <= 100):
             await message.answer("لطفاً یک عدد بین 0 تا 100 ارسال کنید.")
             return
-        db.set_setting("referral_percent", text)
+        (await asyncio.to_thread(db.set_setting, "referral_percent", text))
         await state.clear()
         await message.answer(f"✅ درصد پورسانت زیرمجموعه‌گیری روی {text}٪ تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -1416,8 +1416,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_wheel_toggle(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        current = db.get_setting("wheel_enabled", "1")
-        db.set_setting("wheel_enabled", "0" if current == "1" else "1")
+        current = (await asyncio.to_thread(db.get_setting, "wheel_enabled", "1"))
+        (await asyncio.to_thread(db.set_setting, "wheel_enabled", "0" if current == "1" else "1"))
         await safe_edit(call, "🎡 مدیریت گردونه شانس:", reply_markup=kb.wheel_settings_kb(db))
         await call.answer("وضعیت تغییر کرد.")
 
@@ -1437,7 +1437,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not text.isdigit() or not (0 <= int(text) <= 100):
             await message.answer("لطفاً یک عدد بین 0 تا 100 ارسال کنید.")
             return
-        db.set_setting("wheel_win_percent", text)
+        (await asyncio.to_thread(db.set_setting, "wheel_win_percent", text))
         await state.clear()
         await message.answer(f"✅ احتمال برد گردونه روی {text}٪ تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -1458,7 +1458,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not all(p.isdigit() and 0 < int(p) <= 100 for p in parts) or not parts:
             await message.answer("فرمت اشتباه است. مثال درست: 10,20,30,50")
             return
-        db.set_wheel_prizes([int(p) for p in parts])
+        (await asyncio.to_thread(db.set_wheel_prizes, [int(p) for p in parts]))
         await state.clear()
         await message.answer("✅ لیست جوایز گردونه به‌روزرسانی شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -1478,7 +1478,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not text.isdigit() or int(text) <= 0:
             await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
             return
-        db.set_setting("wheel_code_expiry_hours", text)
+        (await asyncio.to_thread(db.set_setting, "wheel_code_expiry_hours", text))
         await state.clear()
         await message.answer(f"✅ اعتبار کد جایزه روی {text} ساعت تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -1498,7 +1498,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not text.isdigit() or int(text) <= 0:
             await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
             return
-        db.set_setting("wheel_cooldown_hours", text)
+        (await asyncio.to_thread(db.set_setting, "wheel_cooldown_hours", text))
         await state.clear()
         await message.answer(f"✅ فاصله بین دو چرخش روی {text} ساعت تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -1540,7 +1540,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not text.isdigit() or int(text) < 0:
             await message.answer("لطفاً یک عدد صحیح غیرمنفی ارسال کنید.")
             return
-        db.set_setting("low_stock_threshold", text)
+        (await asyncio.to_thread(db.set_setting, "low_stock_threshold", text))
         await state.clear()
         await message.answer(
             f"✅ آستانه‌ی هشدار موجودی روی {text} کانفیگ تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot)
@@ -1552,7 +1552,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_custom_config_settings")
     async def cb_admin_custom_config_settings(call: CallbackQuery):
-        if not db.is_full_access_bot(is_main_bot):
+        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -1566,13 +1566,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_custom_config_toggle")
     async def cb_admin_custom_config_toggle(call: CallbackQuery):
-        if not db.is_full_access_bot(is_main_bot):
+        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        current = db.get_setting("custom_config_enabled", "0")
-        db.set_setting("custom_config_enabled", "0" if current == "1" else "1")
-        db.log_admin_action(call.from_user.id, "custom_config_toggle", f"وضعیت جدید: {'0' if current == '1' else '1'}")
+        current = (await asyncio.to_thread(db.get_setting, "custom_config_enabled", "0"))
+        (await asyncio.to_thread(db.set_setting, "custom_config_enabled", "0" if current == "1" else "1"))
+        (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "custom_config_toggle", f"وضعیت جدید: {'0' if current == '1' else '1'}"))
         await safe_edit(call, "🛠 ساخت کانفیگ شخصی:", reply_markup=kb.custom_config_menu_kb(db, is_main_bot))
         await call.answer("وضعیت تغییر کرد.")
 
@@ -1602,8 +1602,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not text.isdigit() or int(text) <= min_gb:
             await message.answer(f"لطفاً عددی بزرگ‌تر از حداقل ({min_gb}) ارسال کنید.")
             return
-        db.set_setting("custom_config_min_gb", data["min_gb"])
-        db.set_setting("custom_config_max_gb", text)
+        (await asyncio.to_thread(db.set_setting, "custom_config_min_gb", data["min_gb"]))
+        (await asyncio.to_thread(db.set_setting, "custom_config_max_gb", text))
         await state.clear()
         await message.answer(
             f"✅ بازه‌ی حجم مجاز روی {data['min_gb']} تا {text} گیگابایت تنظیم شد.",
@@ -1615,7 +1615,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_panel_servers")
     async def cb_admin_panel_servers(call: CallbackQuery):
-        if not db.is_full_access_bot(is_main_bot):
+        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -1624,7 +1624,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_panel_server_add")
     async def cb_admin_panel_server_add(call: CallbackQuery, state: FSMContext):
-        if not db.is_full_access_bot(is_main_bot):
+        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -1695,21 +1695,21 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
         if data["panel_type"] in INBOUND_SELECT_PANEL_TYPES:
             await message.answer("⏳ در حال دریافت لیست inbound از پنل...")
-            server_id = db.add_panel_server(
+            server_id = (await asyncio.to_thread(db.add_panel_server, 
                 name=data["name"], panel_type=data["panel_type"], api_url=data["url"],
                 api_username=data["username"], api_password=data["password"],
-            )
-            server = db.get_panel_server(server_id)
+            ))
+            server = (await asyncio.to_thread(db.get_panel_server, server_id))
             try:
                 provider = get_provider(server)
                 inbounds = await provider.list_inbounds()
             except PanelError as e:
-                db.delete_panel_server(server_id)
+                (await asyncio.to_thread(db.delete_panel_server, server_id))
                 await state.clear()
                 await message.answer(f"⛔️ {e}\nسرور ذخیره نشد؛ دوباره از ابتدا تلاش کن.")
                 return
             if not inbounds:
-                db.delete_panel_server(server_id)
+                (await asyncio.to_thread(db.delete_panel_server, server_id))
                 await state.clear()
                 await message.answer("⛔️ این پنل هیچ inbound ای ندارد. اول از داخل پنل یک inbound بساز.")
                 return
@@ -1720,10 +1720,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
         if data["panel_type"] in SUB_BASE_URL_PANEL_TYPES:
             # مثل Hiddify: inbound لازم نیست، فقط یک آدرس Subscription جدا از آدرس ادمین
-            server_id = db.add_panel_server(
+            server_id = (await asyncio.to_thread(db.add_panel_server, 
                 name=data["name"], panel_type=data["panel_type"], api_url=data["url"],
                 api_username=data["username"], api_password=data["password"],
-            )
+            ))
             await state.update_data(server_id=server_id)
             await state.set_state(AdminAddPanelServer.waiting_sub_base_url)
             await message.answer(
@@ -1759,12 +1759,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         data = await state.get_data()
         if "inbound_id" in data:
-            db.update_panel_server(data["server_id"], xui_inbound_id=data["inbound_id"], xui_sub_base_url=url)
+            (await asyncio.to_thread(db.update_panel_server, data["server_id"], xui_inbound_id=data["inbound_id"], xui_sub_base_url=url))
         else:
-            db.update_panel_server(data["server_id"], xui_sub_base_url=url)
+            (await asyncio.to_thread(db.update_panel_server, data["server_id"], xui_sub_base_url=url))
         await state.clear()
         label = PANEL_TYPE_LABELS.get(data["panel_type"], data["panel_type"])
-        db.log_admin_action(message.from_user.id, "panel_server_add", f"سرور «{data['name']}» ({label}, #{data['server_id']})")
+        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "panel_server_add", f"سرور «{data['name']}» ({label}, #{data['server_id']})"))
         await message.answer(
             f"✅ سرور «{data['name']}» ({label}) با موفقیت اضافه شد.",
             reply_markup=kb.admin_panel_kb(db, is_main_bot),
@@ -1773,31 +1773,31 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     @router.message(AdminAddPanelServer.waiting_template_user)
     async def process_panel_server_template_user(message: Message, state: FSMContext):
         data = await state.get_data()
-        server_id = db.add_panel_server(
+        server_id = (await asyncio.to_thread(db.add_panel_server, 
             name=data["name"], panel_type=data["panel_type"], api_url=data["url"],
             api_username=data["username"], api_password=data["password"],
-        )
-        server = db.get_panel_server(server_id)
+        ))
+        server = (await asyncio.to_thread(db.get_panel_server, server_id))
         await message.answer("⏳ در حال دریافت قالب از پنل...")
         try:
             provider = get_provider(server)
             template = await provider.fetch_template_from_user(message.text.strip())
         except PanelError as e:
-            db.delete_panel_server(server_id)
+            (await asyncio.to_thread(db.delete_panel_server, server_id))
             await state.clear()
             await message.answer(f"⛔️ {e}\nسرور ذخیره نشد؛ دوباره از ابتدا تلاش کن.")
             return
 
         import json as _json
-        db.update_panel_server(
+        (await asyncio.to_thread(db.update_panel_server, 
             server_id,
             group_ids=_json.dumps(template["group_ids"]),
             proxy_settings=_json.dumps(template["proxy_settings"]),
             template_username=message.text.strip(),
-        )
+        ))
         await state.clear()
         label = PANEL_TYPE_LABELS.get(data["panel_type"], data["panel_type"])
-        db.log_admin_action(message.from_user.id, "panel_server_add", f"سرور «{data['name']}» ({label}, #{server_id})")
+        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "panel_server_add", f"سرور «{data['name']}» ({label}, #{server_id})"))
         await message.answer(
             f"✅ سرور «{data['name']}» ({label}) با قالب گرفته‌شده از «{message.text.strip()}» اضافه شد.",
             reply_markup=kb.admin_panel_kb(db, is_main_bot),
@@ -1805,12 +1805,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_view:"))
     async def cb_admin_panel_server_view(call: CallbackQuery):
-        if not db.is_full_access_bot(is_main_bot):
+        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_view")
-        server = db.get_panel_server(server_id)
+        server = (await asyncio.to_thread(db.get_panel_server, server_id))
         if not server:
             await call.answer("سرور یافت نشد.", show_alert=True)
             return
@@ -1833,12 +1833,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_template:"))
     async def cb_admin_panel_server_template(call: CallbackQuery, state: FSMContext):
-        if not db.is_full_access_bot(is_main_bot):
+        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_template")
-        if not db.get_panel_server(server_id):
+        if not (await asyncio.to_thread(db.get_panel_server, server_id)):
             await call.answer("سرور یافت نشد.", show_alert=True)
             return
         await state.update_data(panel_server_id=server_id)
@@ -1849,7 +1849,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     @router.message(AdminSetPanelTemplate.waiting_username)
     async def process_panel_server_template_update(message: Message, state: FSMContext):
         data = await state.get_data()
-        server = db.get_panel_server(data["panel_server_id"])
+        server = (await asyncio.to_thread(db.get_panel_server, data["panel_server_id"]))
         if not server:
             await state.clear()
             await message.answer("سرور یافت نشد.")
@@ -1862,24 +1862,24 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer(f"⛔️ {e}")
             return
         import json as _json
-        db.update_panel_server(
+        (await asyncio.to_thread(db.update_panel_server, 
             server["id"],
             group_ids=_json.dumps(template["group_ids"]),
             proxy_settings=_json.dumps(template["proxy_settings"]),
             template_username=message.text.strip(),
-        )
+        ))
         await state.clear()
-        db.log_admin_action(message.from_user.id, "panel_server_template_update", f"سرور #{server['id']} ← «{message.text.strip()}»")
+        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "panel_server_template_update", f"سرور #{server['id']} ← «{message.text.strip()}»"))
         await message.answer("✅ قالب جدید ذخیره شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
     @router.callback_query(F.data.startswith("adm_panel_server_suburl:"))
     async def cb_admin_panel_server_suburl(call: CallbackQuery, state: FSMContext):
-        if not db.is_full_access_bot(is_main_bot):
+        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_suburl")
-        server = db.get_panel_server(server_id)
+        server = (await asyncio.to_thread(db.get_panel_server, server_id))
         if not server:
             await call.answer("سرور یافت نشد.", show_alert=True)
             return
@@ -1902,24 +1902,24 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("آدرس باید با http:// یا https:// شروع شود.")
             return
         data = await state.get_data()
-        server = db.get_panel_server(data["panel_server_id"])
+        server = (await asyncio.to_thread(db.get_panel_server, data["panel_server_id"]))
         if not server:
             await state.clear()
             await message.answer("سرور یافت نشد.")
             return
-        db.update_panel_server(server["id"], xui_sub_base_url=url)
+        (await asyncio.to_thread(db.update_panel_server, server["id"], xui_sub_base_url=url))
         await state.clear()
-        db.log_admin_action(message.from_user.id, "panel_server_suburl_update", f"سرور #{server['id']} ← {url}")
+        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "panel_server_suburl_update", f"سرور #{server['id']} ← {url}"))
         await message.answer("✅ آدرس Subscription جدید ذخیره شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
     @router.callback_query(F.data.startswith("adm_panel_server_test:"))
     async def cb_admin_panel_server_test(call: CallbackQuery):
-        if not db.is_full_access_bot(is_main_bot):
+        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_test")
-        server = db.get_panel_server(server_id)
+        server = (await asyncio.to_thread(db.get_panel_server, server_id))
         if not server:
             await call.answer("سرور یافت نشد.", show_alert=True)
             return
@@ -1933,13 +1933,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_usage:"))
     async def cb_admin_panel_server_usage_toggle(call: CallbackQuery):
-        if not db.is_full_access_bot(is_main_bot):
+        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         _, kind, server_id_str = call.data.split(":")
         server_id = int(server_id_str)
-        server = db.get_panel_server(server_id)
+        server = (await asyncio.to_thread(db.get_panel_server, server_id))
         if not server:
             await call.answer("سرور یافت نشد.", show_alert=True)
             return
@@ -1947,12 +1947,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not field:
             await call.answer("نوع نامعتبر.", show_alert=True)
             return
-        db.update_panel_server(server_id, **{field: 0 if server[field] else 1})
-        server = db.get_panel_server(server_id)
-        db.log_admin_action(
+        (await asyncio.to_thread(db.update_panel_server, server_id, **{field: 0 if server[field] else 1}))
+        server = (await asyncio.to_thread(db.get_panel_server, server_id))
+        (await asyncio.to_thread(db.log_admin_action, 
             call.from_user.id, "panel_server_usage_toggle",
             f"سرور #{server_id} | {field} ← {server[field]}",
-        )
+        ))
         status = "🟢 فعال" if server["is_active"] else "🔴 غیرفعال"
         template_status = panel_server_readiness_text(server)
         usage_status = (
@@ -1969,17 +1969,17 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_toggle:"))
     async def cb_admin_panel_server_toggle(call: CallbackQuery):
-        if not db.is_full_access_bot(is_main_bot):
+        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_toggle")
-        server = db.get_panel_server(server_id)
+        server = (await asyncio.to_thread(db.get_panel_server, server_id))
         if not server:
             await call.answer("سرور یافت نشد.", show_alert=True)
             return
-        db.update_panel_server(server_id, is_active=0 if server["is_active"] else 1)
-        server = db.get_panel_server(server_id)
+        (await asyncio.to_thread(db.update_panel_server, server_id, is_active=0 if server["is_active"] else 1))
+        server = (await asyncio.to_thread(db.get_panel_server, server_id))
         await safe_edit(call,
             f"🖥 {server['name']}\nنوع: {PANEL_TYPE_LABELS.get(server['panel_type'], server['panel_type'])}\nآدرس: {server['api_url']}\n"
             f"وضعیت: {'🟢 فعال' if server['is_active'] else '🔴 غیرفعال'}",
@@ -1989,16 +1989,16 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_delete:"))
     async def cb_admin_panel_server_delete(call: CallbackQuery):
-        if not db.is_full_access_bot(is_main_bot):
+        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_delete")
-        server = db.get_panel_server(server_id)
+        server = (await asyncio.to_thread(db.get_panel_server, server_id))
         if not server:
             await call.answer("سرور یافت نشد.", show_alert=True)
             return
-        dependent = db.count_custom_configs_by_panel(server_id)
+        dependent = (await asyncio.to_thread(db.count_custom_configs_by_panel, server_id))
         if dependent:
             await safe_edit(
                 call,
@@ -2011,27 +2011,27 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             )
             await call.answer()
             return
-        db.delete_panel_server(server_id)
-        db.log_admin_action(call.from_user.id, "panel_server_delete", f"سرور #{server_id}")
+        (await asyncio.to_thread(db.delete_panel_server, server_id))
+        (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "panel_server_delete", f"سرور #{server_id}"))
         await replace_admin_view(call, "🖥 سرورهای پنل VPN متصل:", reply_markup=kb.panel_servers_list_kb(db))
         await call.answer("سرور حذف شد.")
 
     @router.callback_query(F.data.startswith("adm_panel_server_delete_force:"))
     async def cb_admin_panel_server_delete_force(call: CallbackQuery):
-        if not db.is_full_access_bot(is_main_bot):
+        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_delete_force")
-        server = db.get_panel_server(server_id)
+        server = (await asyncio.to_thread(db.get_panel_server, server_id))
         if not server:
             await call.answer("سرور یافت نشد.", show_alert=True)
             return
-        removed = db.delete_panel_server(server_id, force=True)
-        db.log_admin_action(
+        removed = (await asyncio.to_thread(db.delete_panel_server, server_id, force=True))
+        (await asyncio.to_thread(db.log_admin_action, 
             call.from_user.id, "panel_server_delete",
             f"سرور #{server_id} ({server['name']}) + {removed} کانفیگ شخصی مرتبط",
-        )
+        ))
         await replace_admin_view(call, "🖥 سرورهای پنل VPN متصل:", reply_markup=kb.panel_servers_list_kb(db))
         await call.answer("سرور و کانفیگ‌های مرتبط حذف شدند.")
 
@@ -2090,13 +2090,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
             return
         data = await state.get_data()
-        db.add_pricing_tier(data["from_gb"], data.get("to_gb"), int(text))
+        (await asyncio.to_thread(db.add_pricing_tier, data["from_gb"], data.get("to_gb"), int(text)))
         await state.clear()
         to_label = data.get("to_gb") or "∞"
-        db.log_admin_action(
+        (await asyncio.to_thread(db.log_admin_action, 
             message.from_user.id, "pricing_tier_add",
             f"بازه {data['from_gb']} تا {to_label} گیگ ← {int(text):,} تومان/گیگ",
-        )
+        ))
         await message.answer(
             f"✅ بازه‌ی قیمت اضافه شد: {data['from_gb']} تا {to_label} گیگ ← {int(text):,} تومان/گیگ",
             reply_markup=kb.admin_panel_kb(db, is_main_bot),
@@ -2107,8 +2107,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         tier_id = callback_id(call.data, "adm_pricing_tier_delete")
-        db.delete_pricing_tier(tier_id)
-        db.log_admin_action(call.from_user.id, "pricing_tier_delete", f"بازه #{tier_id}")
+        (await asyncio.to_thread(db.delete_pricing_tier, tier_id))
+        (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "pricing_tier_delete", f"بازه #{tier_id}"))
         await replace_admin_view(call, "💰 قیمت‌گذاری بر اساس بازه‌ی حجم:", reply_markup=kb.pricing_tiers_kb(db))
         await call.answer("بازه حذف شد.")
 
@@ -2132,11 +2132,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("لطفاً یک متن معتبر ارسال کنید.")
             return
         await state.clear()
-        user_ids = db.reset_all_test_usage()
-        db.log_admin_action(
+        user_ids = (await asyncio.to_thread(db.reset_all_test_usage))
+        (await asyncio.to_thread(db.log_admin_action, 
             message.from_user.id, "reset_test_configs",
             f"بازنشانی کانفیگ تست برای {len(user_ids)} کاربر",
-        )
+        ))
         status_msg = await message.answer(f"⏳ در حال ارسال پیام به {len(user_ids)} کاربر...")
         sent = 0
         for uid in user_ids:
@@ -2159,8 +2159,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_renewal_toggle(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        current = db.get_setting("renewal_reminder_enabled", "1")
-        db.set_setting("renewal_reminder_enabled", "0" if current == "1" else "1")
+        current = (await asyncio.to_thread(db.get_setting, "renewal_reminder_enabled", "1"))
+        (await asyncio.to_thread(db.set_setting, "renewal_reminder_enabled", "0" if current == "1" else "1"))
         await safe_edit(call, "🔔 یادآوری تمدید سرویس:", reply_markup=kb.renewal_settings_kb(db))
         await call.answer("وضعیت تغییر کرد.")
 
@@ -2181,7 +2181,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not text.isdigit() or int(text) <= 0:
             await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
             return
-        db.set_setting("renewal_reminder_days_before", text)
+        (await asyncio.to_thread(db.set_setting, "renewal_reminder_days_before", text))
         await state.clear()
         await message.answer(
             f"✅ یادآوری روی {text} روز قبل از اتمام سرویس تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot)
@@ -2204,7 +2204,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not text.isdigit() or not (0 < int(text) <= 100):
             await message.answer("لطفاً یک عدد بین 1 تا 100 ارسال کنید.")
             return
-        db.set_setting("renewal_discount_percent", text)
+        (await asyncio.to_thread(db.set_setting, "renewal_discount_percent", text))
         await state.clear()
         await message.answer(f"✅ درصد تخفیف کد تشویقی روی {text}٪ تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -2225,7 +2225,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not text.isdigit() or int(text) <= 0:
             await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
             return
-        db.set_setting("renewal_discount_expiry_hours", text)
+        (await asyncio.to_thread(db.set_setting, "renewal_discount_expiry_hours", text))
         await state.clear()
         await message.answer(
             f"✅ اعتبار کد تخفیف تشویقی روی {text} ساعت تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot)
@@ -2246,8 +2246,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_volume_toggle(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        current = db.get_setting("volume_reminder_enabled", "1")
-        db.set_setting("volume_reminder_enabled", "0" if current == "1" else "1")
+        current = (await asyncio.to_thread(db.get_setting, "volume_reminder_enabled", "1"))
+        (await asyncio.to_thread(db.set_setting, "volume_reminder_enabled", "0" if current == "1" else "1"))
         await safe_edit(call, "📉 یادآوری اتمام حجم:", reply_markup=kb.volume_reminder_settings_kb(db))
         await call.answer("وضعیت تغییر کرد.")
 
@@ -2255,8 +2255,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_volume_toggle_mode(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        current = db.get_setting("volume_reminder_mode", "percent")
-        db.set_setting("volume_reminder_mode", "gb" if current == "percent" else "percent")
+        current = (await asyncio.to_thread(db.get_setting, "volume_reminder_mode", "percent"))
+        (await asyncio.to_thread(db.set_setting, "volume_reminder_mode", "gb" if current == "percent" else "percent"))
         await safe_edit(call, "📉 یادآوری اتمام حجم:", reply_markup=kb.volume_reminder_settings_kb(db))
         await call.answer("مبنای آستانه تغییر کرد.")
 
@@ -2277,7 +2277,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not text.isdigit() or not (0 < int(text) < 100):
             await message.answer("لطفاً یک عدد بین 1 تا 99 ارسال کنید.")
             return
-        db.set_setting("volume_reminder_percent", text)
+        (await asyncio.to_thread(db.set_setting, "volume_reminder_percent", text))
         await state.clear()
         await message.answer(
             f"✅ آستانه‌ی یادآوری حجم روی {text}٪ مصرف تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot)
@@ -2304,7 +2304,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         except ValueError:
             await message.answer("لطفاً یک عدد مثبت ارسال کنید (مثلاً 2 یا 1.5).")
             return
-        db.set_setting("volume_reminder_gb_left", str(value))
+        (await asyncio.to_thread(db.set_setting, "volume_reminder_gb_left", str(value)))
         await state.clear()
         await message.answer(
             f"✅ آستانه‌ی یادآوری حجم روی {value} گیگ باقی‌مانده تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot)
@@ -2327,7 +2327,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not text.isdigit() or not (0 < int(text) <= 100):
             await message.answer("لطفاً یک عدد بین 1 تا 100 ارسال کنید.")
             return
-        db.set_setting("volume_discount_percent", text)
+        (await asyncio.to_thread(db.set_setting, "volume_discount_percent", text))
         await state.clear()
         await message.answer(f"✅ درصد تخفیف کد تشویقی روی {text}٪ تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -2348,7 +2348,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not text.isdigit() or int(text) <= 0:
             await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
             return
-        db.set_setting("volume_discount_expiry_hours", text)
+        (await asyncio.to_thread(db.set_setting, "volume_discount_expiry_hours", text))
         await state.clear()
         await message.answer(
             f"✅ اعتبار کد تخفیف تشویقی روی {text} ساعت تنظیم شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot)
@@ -2367,7 +2367,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         async def cb_admin_resellers_menu(call: CallbackQuery):
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
-            bots = db.list_reseller_bots()
+            bots = (await asyncio.to_thread(db.list_reseller_bots))
             await replace_admin_view(call, "🏪 مدیریت بات‌های نمایندگی:", reply_markup=kb.resellers_kb(bots))
             await call.answer()
 
@@ -2379,12 +2379,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if bot_id is None:
                 await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
                 return
-            reseller_bot = db.get_reseller_bot(bot_id)
+            reseller_bot = (await asyncio.to_thread(db.get_reseller_bot, bot_id))
             if not reseller_bot:
                 return await call.answer("یافت نشد.", show_alert=True)
 
-            db.toggle_reseller_bot(bot_id)
-            updated = db.get_reseller_bot(bot_id)
+            (await asyncio.to_thread(db.toggle_reseller_bot, bot_id))
+            updated = (await asyncio.to_thread(db.get_reseller_bot, bot_id))
 
             if bot_manager:
                 if updated["is_active"]:
@@ -2395,7 +2395,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 else:
                     await bot_manager.stop_bot(updated["bot_token"])
 
-            bots = db.list_reseller_bots()
+            bots = (await asyncio.to_thread(db.list_reseller_bots))
             await safe_edit(call, "🏪 مدیریت بات‌های نمایندگی:", reply_markup=kb.resellers_kb(bots))
             await call.answer("وضعیت تغییر کرد و اعمال شد.")
 
@@ -2407,23 +2407,23 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if bot_id is None:
                 await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
                 return
-            reseller_bot = db.get_reseller_bot(bot_id)
+            reseller_bot = (await asyncio.to_thread(db.get_reseller_bot, bot_id))
             if not reseller_bot:
                 return await call.answer("یافت نشد.", show_alert=True)
 
             current_level = reseller_bot["reseller_level"] if "reseller_level" in reseller_bot.keys() else 2
             new_level = 2 if current_level == 1 else 1
-            db.set_reseller_level(bot_id, new_level)
+            (await asyncio.to_thread(db.set_reseller_level, bot_id, new_level))
 
             try:
                 reseller_db = Database(resolve_db_path(reseller_bot["db_path"]))
-                reseller_db.set_setting("reseller_level", str(new_level))
+                (await asyncio.to_thread(reseller_db.set_setting, "reseller_level", str(new_level)))
                 if new_level == 2:
-                    reseller_db.set_setting("custom_config_enabled", "0")
+                    (await asyncio.to_thread(reseller_db.set_setting, "custom_config_enabled", "0"))
             except Exception:
                 pass
 
-            bots = db.list_reseller_bots()
+            bots = (await asyncio.to_thread(db.list_reseller_bots))
             level_label = "کامل" if new_level == 1 else "سطح ۲ (محدود)"
             await safe_edit(call, f"🏪 مدیریت بات‌های نمایندگی:", reply_markup=kb.resellers_kb(bots))
             await call.answer(f"سطح این نمایندگی به «{level_label}» تغییر کرد.")
@@ -2436,7 +2436,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if bot_id is None:
                 await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
                 return
-            reseller_bot = db.get_reseller_bot(bot_id)
+            reseller_bot = (await asyncio.to_thread(db.get_reseller_bot, bot_id))
             if not reseller_bot:
                 return await call.answer("یافت نشد.", show_alert=True)
 
@@ -2454,10 +2454,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 )
                 return await call.answer()
 
-            db.enable_reseller_web_panel(bot_id)
-            db.log_admin_action(
+            (await asyncio.to_thread(db.enable_reseller_web_panel, bot_id))
+            (await asyncio.to_thread(db.log_admin_action, 
                 call.from_user.id, "reseller_webpanel_enable", f"نماینده #{bot_id} (@{reseller_bot['bot_username'] or ''})",
-            )
+            ))
             await call.answer("پنل وب فعال شد.")
 
             if not _get_admin_panel_url(db):
@@ -2479,7 +2479,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             bot_id = callback_id(call.data, "adm_resbot_webpanel_loginlink")
-            reseller_bot = db.get_reseller_bot(bot_id) if bot_id is not None else None
+            reseller_bot = (await asyncio.to_thread(db.get_reseller_bot, bot_id)) if bot_id is not None else None
             if not reseller_bot:
                 return await call.answer("یافت نشد.", show_alert=True)
 
@@ -2505,12 +2505,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             bot_id = callback_id(call.data, "adm_resbot_webpanel_regen")
-            reseller_bot = db.get_reseller_bot(bot_id) if bot_id is not None else None
+            reseller_bot = (await asyncio.to_thread(db.get_reseller_bot, bot_id)) if bot_id is not None else None
             if not reseller_bot:
                 return await call.answer("یافت نشد.", show_alert=True)
 
-            db.regenerate_reseller_web_panel_token(bot_id)
-            db.log_admin_action(call.from_user.id, "reseller_webpanel_regen", f"نماینده #{bot_id}")
+            (await asyncio.to_thread(db.regenerate_reseller_web_panel_token, bot_id))
+            (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "reseller_webpanel_regen", f"نماینده #{bot_id}"))
             await call.answer("توکن جدید ساخته شد.")
 
             if not _get_admin_panel_url(db):
@@ -2529,13 +2529,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             bot_id = callback_id(call.data, "adm_resbot_webpanel_off")
-            reseller_bot = db.get_reseller_bot(bot_id) if bot_id is not None else None
+            reseller_bot = (await asyncio.to_thread(db.get_reseller_bot, bot_id)) if bot_id is not None else None
             if not reseller_bot:
                 return await call.answer("یافت نشد.", show_alert=True)
 
-            db.disable_reseller_web_panel(bot_id)
-            db.log_admin_action(call.from_user.id, "reseller_webpanel_disable", f"نماینده #{bot_id}")
-            bots = db.list_reseller_bots()
+            (await asyncio.to_thread(db.disable_reseller_web_panel, bot_id))
+            (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "reseller_webpanel_disable", f"نماینده #{bot_id}"))
+            bots = (await asyncio.to_thread(db.list_reseller_bots))
             await safe_edit(call, "⛔️ پنل وب این نماینده غیرفعال شد (نشست‌های فعلی هم دیگر کار نمی‌کنند).\n\n🏪 مدیریت بات‌های نمایندگی:", reply_markup=kb.resellers_kb(bots))
             await call.answer("غیرفعال شد.")
 
@@ -2561,7 +2561,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 await message.answer("آدرس باید با http:// یا https:// شروع بشه. دوباره بفرست:")
                 return
 
-            db.set_setting("admin_panel_url", url)
+            (await asyncio.to_thread(db.set_setting, "admin_panel_url", url))
             data = await state.get_data()
             pending_bot_id = data.get("pending_webpanel_bot_id")
             await state.clear()
@@ -2593,15 +2593,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
                 return
             bot_id, purge = int(parts[1]), parts[2] == "1"
-            reseller_bot = db.get_reseller_bot(bot_id)
+            reseller_bot = (await asyncio.to_thread(db.get_reseller_bot, bot_id))
             if reseller_bot and bot_manager:
                 await bot_manager.stop_bot(reseller_bot["bot_token"])
-            db.delete_reseller_bot(bot_id)
+            (await asyncio.to_thread(db.delete_reseller_bot, bot_id))
             if reseller_bot:
                 # پرچم نماینده/اعتبار/پنل کاربر مالک در دیتابیس اصلی هم پاک شود؛
                 # وگرنه او همچنان «نماینده» شناخته می‌شود و نمی‌تواند دوباره
                 # درخواست نمایندگی بدهد.
-                db.purge_reseller_leftovers(reseller_bot["owner_telegram_id"])
+                (await asyncio.to_thread(db.purge_reseller_leftovers, reseller_bot["owner_telegram_id"]))
 
             db_purged = False
             if purge and reseller_bot:
@@ -2613,7 +2613,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 except OSError:
                     logger.exception("پاک‌کردن فایل دیتابیس نماینده ناموفق بود: %s", resolved_path)
 
-            bots = db.list_reseller_bots()
+            bots = (await asyncio.to_thread(db.list_reseller_bots))
             note = "⚠️ بات متوقف و حذف شد. وضعیت نمایندگی مالک هم در بات اصلی پاک شد."
             note += " دیتابیسش هم پاک شد." if db_purged else " فایل دیتابیسش برای احتیاط پاک نشد."
             await safe_edit(call,
@@ -2626,7 +2626,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         async def cb_admin_reseller_orphans(call: CallbackQuery):
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
-            orphans = db.list_orphaned_reseller_users()
+            orphans = (await asyncio.to_thread(db.list_orphaned_reseller_users))
             if not orphans:
                 await call.answer("موردی پیدا نشد؛ هیچ داده‌ی باقی‌مانده‌ای وجود ندارد.", show_alert=True)
                 return
@@ -2649,9 +2649,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if target_id is None:
                 await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
                 return
-            db.purge_reseller_leftovers(target_id)
-            db.log_admin_action(call.from_user.id, "reseller_orphan_purge", f"کاربر {target_id}")
-            orphans = db.list_orphaned_reseller_users()
+            (await asyncio.to_thread(db.purge_reseller_leftovers, target_id))
+            (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "reseller_orphan_purge", f"کاربر {target_id}"))
+            orphans = (await asyncio.to_thread(db.list_orphaned_reseller_users))
             if orphans:
                 await safe_edit(
                     call,
@@ -2705,7 +2705,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             else:
                 try:
                     os.remove(target_path)
-                    db.log_admin_action(call.from_user.id, "orphan_db_file_delete", fname)
+                    (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "orphan_db_file_delete", fname))
                 except OSError:
                     logger.exception("پاک‌کردن فایل دیتابیس یتیم ناموفق بود: %s", target_path)
                     await call.answer("❌ حذف فایل با خطا مواجه شد.", show_alert=True)
@@ -2743,7 +2743,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
             existing = None
             with_conn_check = None
-            for b in db.list_reseller_bots():
+            for b in (await asyncio.to_thread(db.list_reseller_bots)):
                 if b["bot_token"] == token:
                     existing = b
                     break
@@ -2804,7 +2804,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             os.makedirs(RESELLER_DBS_DIR, exist_ok=True)
             db_path = os.path.join(RESELLER_DBS_DIR, f"{username}.db")
 
-            reseller_id = db.register_reseller_bot(token, username, owner_id, owner_name, db_path, reseller_level=level)
+            reseller_id = (await asyncio.to_thread(db.register_reseller_bot, token, username, owner_id, owner_name, db_path, reseller_level=level))
 
             started = False
             if bot_manager:
@@ -2813,12 +2813,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             # دیتابیس همین نماینده باید بداند شناسه‌ی خودش در جدول reseller_bots (بات اصلی) چیست
             # تا بتواند لینک مینی‌اپ اختصاصی خودش را بسازد (?b=<reseller_id>)، و سطح دسترسی‌اش چیست
             reseller_db = Database(db_path)
-            reseller_db.init_db(owner_id=owner_id)
-            reseller_db.set_setting("miniapp_tenant_id", str(reseller_id))
-            reseller_db.set_setting("reseller_level", str(level))
+            (await asyncio.to_thread(reseller_db.init_db, owner_id=owner_id))
+            (await asyncio.to_thread(reseller_db.set_setting, "miniapp_tenant_id", str(reseller_id)))
+            (await asyncio.to_thread(reseller_db.set_setting, "reseller_level", str(level)))
             if level == 2:
                 # نمایندگی سطح ۲ نباید هرگز حالت کانفیگ دستی/شخصی روشن داشته باشد
-                reseller_db.set_setting("custom_config_enabled", "0")
+                (await asyncio.to_thread(reseller_db.set_setting, "custom_config_enabled", "0"))
 
             await state.clear()
             status_text = "✅ بات نمایندگی راه‌اندازی و همین الان روشن شد." if started else \
@@ -2843,11 +2843,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             request_id = int(call.data.split(":")[1])
-            req = db.get_reseller_request(request_id)
+            req = (await asyncio.to_thread(db.get_reseller_request, request_id))
             if not req or req["status"] != "pending_review":
                 await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
                 return
-            panels = db.get_panel_servers(active_only=True)
+            panels = (await asyncio.to_thread(db.get_panel_servers, active_only=True))
             await call.message.answer(
                 "🔗 این نماینده روی کدام پنل کانفیگ بسازد؟\n(نماینده هیچ‌وقت آدرس/مشخصات این پنل را نمی‌بیند.)",
                 reply_markup=kb.reseller_request_panel_pick_kb(request_id, panels),
@@ -2860,7 +2860,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 return await deny_mid(call)
             _, request_id_str, panel_id_str = call.data.split(":")
             request_id, panel_id = int(request_id_str), int(panel_id_str)
-            req = db.get_reseller_request(request_id)
+            req = (await asyncio.to_thread(db.get_reseller_request, request_id))
             if not req or req["status"] != "pending_review":
                 await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
                 return
@@ -2878,17 +2878,17 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             price = int(text)
             data = await state.get_data()
             request_id, panel_id = data.get("resreq_request_id"), data.get("resreq_panel_id")
-            req = db.get_reseller_request(request_id) if request_id else None
+            req = (await asyncio.to_thread(db.get_reseller_request, request_id)) if request_id else None
             await state.clear()
             if not req or req["status"] != "pending_review":
                 await message.answer("این درخواست دیگر معتبر نیست.")
                 return
 
-            db.quote_reseller_request(request_id, price, panel_id, message.from_user.id)
-            db.log_admin_action(
+            (await asyncio.to_thread(db.quote_reseller_request, request_id, price, panel_id, message.from_user.id))
+            (await asyncio.to_thread(db.log_admin_action, 
                 message.from_user.id, "reseller_request_quote",
                 f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {price:,}",
-            )
+            ))
             await message.answer(f"✅ هزینه برای کاربر ارسال شد ({price:,} تومان).")
             try:
                 await bot.send_message(
@@ -2907,7 +2907,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             request_id = int(call.data.split(":")[1])
-            req = db.get_reseller_request(request_id)
+            req = (await asyncio.to_thread(db.get_reseller_request, request_id))
             if not req or req["status"] != "pending_review":
                 await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
                 return
@@ -2921,7 +2921,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             request_id = int(call.data.split(":")[1])
-            req = db.get_reseller_request(request_id)
+            req = (await asyncio.to_thread(db.get_reseller_request, request_id))
             if not req or req["status"] != "awaiting_payment_review":
                 await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
                 return
@@ -2936,17 +2936,17 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             data = await state.get_data()
             request_id = data.get("resreq_reject_id")
             status = data.get("resreq_reject_status", "rejected")
-            req = db.get_reseller_request(request_id) if request_id else None
+            req = (await asyncio.to_thread(db.get_reseller_request, request_id)) if request_id else None
             await state.clear()
             if not req:
                 await message.answer("این درخواست دیگر معتبر نیست.")
                 return
 
-            db.reject_reseller_request(request_id, status, message.from_user.id, reason)
-            db.log_admin_action(
+            (await asyncio.to_thread(db.reject_reseller_request, request_id, status, message.from_user.id, reason))
+            (await asyncio.to_thread(db.log_admin_action, 
                 message.from_user.id, "reseller_request_reject",
                 f"درخواست #{request_id} | کاربر {req['user_id']} | وضعیت: {status} | دلیل: {reason}",
-            )
+            ))
             await message.answer("✅ ثبت شد و به کاربر اطلاع داده شد.")
             label = "درخواست نمایندگی" if status == "rejected" else "پرداخت درخواست نمایندگی"
             try:
@@ -2962,16 +2962,16 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             request_id = int(call.data.split(":")[1])
-            req = db.get_reseller_request(request_id)
+            req = (await asyncio.to_thread(db.get_reseller_request, request_id))
             if not req or req["status"] != "awaiting_payment_review":
                 await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
                 return
 
-            db.approve_reseller_request_payment(request_id, call.from_user.id)
-            db.log_admin_action(
+            (await asyncio.to_thread(db.approve_reseller_request_payment, request_id, call.from_user.id))
+            (await asyncio.to_thread(db.log_admin_action, 
                 call.from_user.id, "reseller_request_payment_approve",
                 f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {req['price_toman']:,}",
-            )
+            ))
 
             user_state = FSMContext(
                 storage=dispatcher.storage,
@@ -3006,7 +3006,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         async def cb_admin_reseller_requests_menu(call: CallbackQuery):
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
-            requests = db.list_open_reseller_requests()
+            requests = (await asyncio.to_thread(db.list_open_reseller_requests))
             if not requests:
                 await call.answer("درخواست باز برای نمایندگی وجود ندارد.", show_alert=True)
                 return
@@ -3027,12 +3027,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if request_id is None:
                 await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
                 return
-            req = db.get_reseller_request(request_id)
-            if not req or not db.is_reseller_request_open(req["status"]):
+            req = (await asyncio.to_thread(db.get_reseller_request, request_id))
+            if not req or not (await asyncio.to_thread(db.is_reseller_request_open, req["status"])):
                 await call.answer("این درخواست دیگر باز نیست.", show_alert=True)
                 return
 
-            db.admin_cancel_reseller_request(request_id, call.from_user.id)
+            (await asyncio.to_thread(db.admin_cancel_reseller_request, request_id, call.from_user.id))
             if req["status"] == "awaiting_bot_info":
                 # کاربر منتظر ارسال توکن بات بوده؛ چون کنسل شد، نباید در این state گیر بماند
                 try:
@@ -3043,10 +3043,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                     await user_state.clear()
                 except Exception:
                     pass
-            db.log_admin_action(
+            (await asyncio.to_thread(db.log_admin_action, 
                 call.from_user.id, "reseller_request_admin_cancel",
                 f"درخواست #{request_id} | کاربر {req['user_id']}",
-            )
+            ))
             try:
                 await bot.send_message(
                     req["user_id"],
@@ -3055,7 +3055,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             except Exception:
                 pass
 
-            requests = db.list_open_reseller_requests()
+            requests = (await asyncio.to_thread(db.list_open_reseller_requests))
             if requests:
                 await safe_edit(
                     call,
@@ -3078,7 +3078,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         async def cb_admin_credit_resellers_menu(call: CallbackQuery):
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
-            resellers = db.get_resellers()
+            resellers = (await asyncio.to_thread(db.get_resellers))
             await replace_admin_view(
                 call,
                 "💳 نمایندگی حجمی:\n\n"
@@ -3107,7 +3107,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 await message.answer("لطفاً فقط آیدی عددی ارسال کنید.")
                 return
             target_id = int(raw)
-            if not db.get_user(target_id):
+            if not (await asyncio.to_thread(db.get_user, target_id)):
                 await state.clear()
                 await message.answer(
                     "این کاربر هنوز با بات /start نزده. اول باید کاربر یک‌بار بات را استارت کند.",
@@ -3115,8 +3115,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 )
                 return
             await state.clear()
-            credit = db.get_reseller_credit(target_id)
-            is_res = db.is_reseller(target_id)
+            credit = (await asyncio.to_thread(db.get_reseller_credit, target_id))
+            is_res = (await asyncio.to_thread(db.is_reseller, target_id))
             await message.answer(
                 f"👤 کاربر {target_id}\n"
                 f"وضعیت نمایندگی: {'✅ فعال' if is_res else '◻️ غیرفعال'}\n"
@@ -3129,8 +3129,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             target_id = int(call.data.split(":")[1])
-            credit = db.get_reseller_credit(target_id)
-            is_res = db.is_reseller(target_id)
+            credit = (await asyncio.to_thread(db.get_reseller_credit, target_id))
+            is_res = (await asyncio.to_thread(db.is_reseller, target_id))
             await replace_admin_view(
                 call,
                 f"👤 کاربر {target_id}\n"
@@ -3145,10 +3145,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             target_id = int(call.data.split(":")[1])
-            db.set_reseller_status(target_id, not db.is_reseller(target_id))
-            db.log_admin_action(call.from_user.id, "reseller_credit_toggle", f"کاربر {target_id}")
-            is_res = db.is_reseller(target_id)
-            credit = db.get_reseller_credit(target_id)
+            (await asyncio.to_thread(db.set_reseller_status, target_id, not db.is_reseller(target_id)))
+            (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "reseller_credit_toggle", f"کاربر {target_id}"))
+            is_res = (await asyncio.to_thread(db.is_reseller, target_id))
+            credit = (await asyncio.to_thread(db.get_reseller_credit, target_id))
             await safe_edit(
                 call,
                 f"👤 کاربر {target_id}\n"
@@ -3183,11 +3183,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 await message.answer("لطفاً یک عدد صحیح غیرصفر ارسال کنید (مثلاً 1000 یا 1000-).")
                 return
             delta = sign * int(digits)
-            db.adjust_reseller_credit(target_id, delta, admin_id=message.from_user.id, reason="تنظیم دستی توسط ادمین")
-            db.log_admin_action(message.from_user.id, "reseller_credit_adjust", f"کاربر {target_id} | {delta:+} گیگ")
+            (await asyncio.to_thread(db.adjust_reseller_credit, target_id, delta, admin_id=message.from_user.id, reason="تنظیم دستی توسط ادمین"))
+            (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "reseller_credit_adjust", f"کاربر {target_id} | {delta:+} گیگ"))
             await state.clear()
-            credit = db.get_reseller_credit(target_id)
-            is_res = db.is_reseller(target_id)
+            credit = (await asyncio.to_thread(db.get_reseller_credit, target_id))
+            is_res = (await asyncio.to_thread(db.is_reseller, target_id))
             await message.answer(
                 f"✅ اعتبار به‌روزرسانی شد.\n\n"
                 f"👤 کاربر {target_id}\n"
@@ -3200,7 +3200,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if not senior_admin_only(call.from_user.id):
                 return await deny_mid(call)
             target_id = int(call.data.split(":")[1])
-            panels = db.get_panel_servers(active_only=True)
+            panels = (await asyncio.to_thread(db.get_panel_servers, active_only=True))
             await replace_admin_view(
                 call,
                 "🔗 این نماینده روی کدام پنل کانفیگ بسازد؟\n"
@@ -3215,13 +3215,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 return await deny_mid(call)
             _, target_id_str, panel_id_str = call.data.split(":")
             target_id, panel_id = int(target_id_str), int(panel_id_str)
-            db.set_reseller_panel(target_id, panel_id or None)
-            db.log_admin_action(
+            (await asyncio.to_thread(db.set_reseller_panel, target_id, panel_id or None))
+            (await asyncio.to_thread(db.log_admin_action, 
                 call.from_user.id, "reseller_panel_set",
                 f"کاربر {target_id} ← پنل {panel_id or 'خودکار'}",
-            )
-            is_res = db.is_reseller(target_id)
-            credit = db.get_reseller_credit(target_id)
+            ))
+            is_res = (await asyncio.to_thread(db.is_reseller, target_id))
+            credit = (await asyncio.to_thread(db.get_reseller_credit, target_id))
             await safe_edit(
                 call,
                 f"✅ پنل این نماینده تنظیم شد.\n\n"
@@ -3248,7 +3248,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         key = call.data.split(":")[1]
         await state.update_data(setting_key=key)
         await state.set_state(AdminEditButton.waiting_text)
-        current = db.get_setting(key)
+        current = (await asyncio.to_thread(db.get_setting, key))
         await safe_edit(call, 
             f"متن فعلی: {current}\n\nمتن جدید را ارسال کنید (می‌توانید ایموجی هم اضافه کنید):",
             reply_markup=kb.admin_back_kb(),
@@ -3259,7 +3259,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def process_edit_button(message: Message, state: FSMContext):
         data = await state.get_data()
         key = data["setting_key"]
-        db.set_setting(key, message.text.strip())
+        (await asyncio.to_thread(db.set_setting, key, message.text.strip()))
         await state.clear()
         await message.answer("✅ متن دکمه به‌روزرسانی شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -3307,7 +3307,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not key or style not in {"primary", "success", "danger", "none"}:
             await call.answer("❌ رنگ انتخاب‌شده نامعتبر است.", show_alert=True)
             return
-        db.set_setting(f"{key}_style", "" if style == "none" else style)
+        (await asyncio.to_thread(db.set_setting, f"{key}_style", "" if style == "none" else style))
         if _is_panel_item_key(key):
             await safe_edit(call, "🎨 رنگ‌آمیزی دکمه‌های پنل مدیریت:", reply_markup=kb.admin_panel_colors_kb(db, is_main_bot))
         elif _is_buyflow_key(key):
@@ -3347,13 +3347,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     @router.message(AdminSetCard.waiting_holder)
     async def process_set_card_holder(message: Message, state: FSMContext):
         data = await state.get_data()
-        db.set_setting("card_number", data["card_number"])
-        db.set_setting("card_holder", message.text.strip())
+        (await asyncio.to_thread(db.set_setting, "card_number", data["card_number"]))
+        (await asyncio.to_thread(db.set_setting, "card_holder", message.text.strip()))
         await state.clear()
-        db.log_admin_action(
+        (await asyncio.to_thread(db.log_admin_action, 
             message.from_user.id, "card_change",
             f"شماره کارت جدید: {data['card_number']} | به نام: {message.text.strip()}",
-        )
+        ))
         await message.answer("✅ اطلاعات کارت به‌روزرسانی شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
     # -------------------------------------------------------------------
@@ -3364,7 +3364,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_set_plisio(call: CallbackQuery, state: FSMContext):
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
-        current = db.get_setting("plisio_api_key", "")
+        current = (await asyncio.to_thread(db.get_setting, "plisio_api_key", ""))
         masked = f"...{current[-4:]}" if current else "❌ تنظیم نشده"
         source = crypto_payment.resolve_plisio_key_source(db)
         source_note = {
@@ -3388,12 +3388,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         text = message.text.strip()
         await state.clear()
         if text in ("حذف", "/حذف", "-"):
-            db.set_setting("plisio_api_key", "")
-            db.log_admin_action(message.from_user.id, "plisio_key_change", "API Key کریپتو حذف شد.")
+            (await asyncio.to_thread(db.set_setting, "plisio_api_key", ""))
+            (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "plisio_key_change", "API Key کریپتو حذف شد."))
             await message.answer("✅ API Key کریپتو حذف شد و درگاه غیرفعال شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
             return
-        db.set_setting("plisio_api_key", text)
-        db.log_admin_action(message.from_user.id, "plisio_key_change", "API Key کریپتو تغییر کرد.")
+        (await asyncio.to_thread(db.set_setting, "plisio_api_key", text))
+        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "plisio_key_change", "API Key کریپتو تغییر کرد."))
         await message.answer(
             "✅ API Key کریپتو ذخیره شد.\n"
             "الان از مینی‌اپ → مدیریت → فروش → «پرداخت کریپتو» فعالش کن.",
@@ -3409,13 +3409,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
         await state.set_state(AdminEditWelcome.waiting_text)
-        current = db.get_setting("welcome_text")
+        current = (await asyncio.to_thread(db.get_setting, "welcome_text"))
         await safe_edit(call, f"متن فعلی:\n{current}\n\nمتن جدید را ارسال کنید:", reply_markup=kb.admin_back_kb())
         await call.answer()
 
     @router.message(AdminEditWelcome.waiting_text)
     async def process_edit_welcome(message: Message, state: FSMContext):
-        db.set_setting("welcome_text", message.text)
+        (await asyncio.to_thread(db.set_setting, "welcome_text", message.text))
         await state.clear()
         await message.answer("✅ پیام خوش‌آمد به‌روزرسانی شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
 
@@ -3438,7 +3438,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not owner_only(call.from_user.id):
             return await call.answer("⛔️ فقط مالک اصلی می‌تواند لیست ادمین‌ها را ببیند.", show_alert=True)
         try:
-            admins = db.list_admins_with_roles()
+            admins = (await asyncio.to_thread(db.list_admins_with_roles))
             if not admins:
                 text = "📃 هیچ ادمینی ثبت نشده است."
             else:
@@ -3467,7 +3467,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("لطفاً فقط آیدی عددی ارسال کنید.")
             return
         target_id = int(raw)
-        if db.is_admin(target_id):
+        if (await asyncio.to_thread(db.is_admin, target_id)):
             await state.clear()
             await message.answer(
                 "این کاربر از قبل ادمین است. برای تغییر نقشش از «🔄 تغییر نقش ادمین» استفاده کن.",
@@ -3489,11 +3489,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if len(parts) != 3 or not parts[1].isdigit() or parts[2] not in ("admin", "mid", "support"):
                 return await call.answer("⚠️ درخواست نامعتبر است.", show_alert=True)
             target_id, role = int(parts[1]), parts[2]
-            db.add_admin(target_id, role=role)
-            db.log_admin_action(
+            (await asyncio.to_thread(db.add_admin, target_id, role=role))
+            (await asyncio.to_thread(db.log_admin_action, 
                 call.from_user.id, "admin_add",
                 f"کاربر {target_id} | نقش: {kb.ADMIN_ROLE_LABELS.get(role, role)}",
-            )
+            ))
             await safe_edit(
                 call,
                 f"✅ کاربر {target_id} با نقش «{kb.ADMIN_ROLE_LABELS.get(role, role)}» اضافه شد.",
@@ -3522,7 +3522,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         target_id = int(raw)
         await state.clear()
-        role = db.get_admin_role(target_id)
+        role = (await asyncio.to_thread(db.get_admin_role, target_id))
         if role is None:
             await message.answer("این کاربر ادمین نیست.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
             return
@@ -3543,13 +3543,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if len(parts) != 3 or not parts[1].isdigit() or parts[2] not in ("admin", "mid", "support"):
                 return await call.answer("⚠️ درخواست نامعتبر است.", show_alert=True)
             target_id, role = int(parts[1]), parts[2]
-            ok = db.set_admin_role(target_id, role)
+            ok = (await asyncio.to_thread(db.set_admin_role, target_id, role))
             if not ok:
                 return await call.answer("⛔️ تغییر نقش ناموفق بود.", show_alert=True)
-            db.log_admin_action(
+            (await asyncio.to_thread(db.log_admin_action, 
                 call.from_user.id, "admin_role_change",
                 f"کاربر {target_id} | نقش جدید: {kb.ADMIN_ROLE_LABELS.get(role, role)}",
-            )
+            ))
             await safe_edit(
                 call,
                 f"✅ نقش کاربر {target_id} به «{kb.ADMIN_ROLE_LABELS.get(role, role)}» تغییر کرد.",
@@ -3577,18 +3577,18 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         target_id = int(raw)
         try:
-            if not db.is_admin(target_id):
+            if not (await asyncio.to_thread(db.is_admin, target_id)):
                 await state.clear()
                 await message.answer("⛔️ این کاربر ادمین نیست.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
                 return
-            if db.get_admin_role(target_id) == "owner":
+            if (await asyncio.to_thread(db.get_admin_role, target_id)) == "owner":
                 await state.clear()
                 await message.answer("⛔️ مالک اصلی قابل حذف نیست.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
                 return
-            ok = db.remove_admin(target_id)
+            ok = (await asyncio.to_thread(db.remove_admin, target_id))
             await state.clear()
             if ok:
-                db.log_admin_action(message.from_user.id, "admin_remove", f"کاربر {target_id}")
+                (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "admin_remove", f"کاربر {target_id}"))
                 await message.answer("✅ ادمین حذف شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
             else:
                 await message.answer("⛔️ حذف ادمین ناموفق بود.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
@@ -3610,7 +3610,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.message(AdminBroadcast.waiting_message)
     async def process_broadcast(message: Message, state: FSMContext, bot: Bot):
-        user_ids = db.get_all_user_ids()
+        user_ids = (await asyncio.to_thread(db.get_all_user_ids))
         success, failed = 0, 0
         for uid in user_ids:
             try:
@@ -3619,7 +3619,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             except Exception:
                 failed += 1
         await state.clear()
-        db.log_admin_action(message.from_user.id, "broadcast", f"ارسال به {len(user_ids)} کاربر | موفق: {success} | ناموفق: {failed}")
+        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "broadcast", f"ارسال به {len(user_ids)} کاربر | موفق: {success} | ناموفق: {failed}"))
         await message.answer(
             f"📢 پیام همگانی ارسال شد.\n✅ موفق: {success}\n❌ ناموفق: {failed}", reply_markup=kb.admin_panel_kb(db, is_main_bot)
         )
@@ -3634,7 +3634,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if user_id is None:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
-        conv = db.get_support_conversation(user_id)
+        conv = (await asyncio.to_thread(db.get_support_conversation, user_id))
         assigned_admin_id = conv["assigned_admin_id"] if conv else None
         if assigned_admin_id and assigned_admin_id != call.from_user.id and not owner_only(call.from_user.id):
             await call.answer(
@@ -3653,7 +3653,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not user_id:
             await state.clear()
             return
-        conv = db.get_support_conversation(user_id)
+        conv = (await asyncio.to_thread(db.get_support_conversation, user_id))
         assigned_admin_id = conv["assigned_admin_id"] if conv else None
         if assigned_admin_id and assigned_admin_id != message.from_user.id and not owner_only(message.from_user.id):
             await message.answer(
@@ -3666,8 +3666,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await bot.send_message(user_id, f"📩 پاسخ پشتیبانی:\n\n{message.text}")
             if message.text:
                 if not owner_only(message.from_user.id):
-                    db.set_support_conversation_admin(user_id, message.from_user.id)
-                db.add_support_message(user_id, "admin", message.text)
+                    (await asyncio.to_thread(db.set_support_conversation_admin, user_id, message.from_user.id))
+                (await asyncio.to_thread(db.add_support_message, user_id, "admin", message.text))
             await message.answer("✅ پاسخ ارسال شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
         except Exception:
             await message.answer("⛔️ ارسال پیام به کاربر با خطا مواجه شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
@@ -3758,7 +3758,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return await call.message.answer("❌ گرفتن بکاپ ناموفق بود.")
         if not backup_path:
             return await call.message.answer("❌ فایل دیتابیس پیدا نشد.")
-        db.log_admin_action(call.from_user.id, "backup_create", "دریافت بکاپ فوری از طریق بات")
+        (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "backup_create", "دریافت بکاپ فوری از طریق بات"))
         await call.message.answer_document(
             FSInputFile(backup_path), caption="🗄 بکاپ فوری دیتابیس"
         )
@@ -3831,7 +3831,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         except Exception as e:
             return await safe_edit(call, f"❌ بازیابی ناموفق بود: {e}")
         else:
-            db.log_admin_action(call.from_user.id, "backup_restore", "بازیابی دیتابیس از فایل بکاپ آپلودی")
+            (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "backup_restore", "بازیابی دیتابیس از فایل بکاپ آپلودی"))
         finally:
             try:
                 os.remove(tmp_path)
