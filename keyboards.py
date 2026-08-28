@@ -652,9 +652,16 @@ def admin_test_menu_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=f"موجودی فعلی: {remaining} عدد", callback_data="noop")],
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_test_toggle")],
         [InlineKeyboardButton(text="➕ افزودن لینک تست", callback_data="adm_test_add")],
-        [InlineKeyboardButton(text="🔁 بازنشانی کانفیگ تست برای همه", callback_data="adm_reset_test_configs")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")],
     ]
+    if db.get_panel_server_for_usage("test_config"):
+        volume_gb = db.get_setting("test_config_panel_volume_gb", "1")
+        duration_days = db.get_setting("test_config_panel_duration_days", "1")
+        rows.append([InlineKeyboardButton(
+            text=f"⚙️ حجم/مدت کانفیگ تست پنل: {volume_gb} گیگ / {duration_days} روز",
+            callback_data="adm_test_set_volume",
+        )])
+    rows.append([InlineKeyboardButton(text="🔁 بازنشانی کانفیگ تست برای همه", callback_data="adm_reset_test_configs")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

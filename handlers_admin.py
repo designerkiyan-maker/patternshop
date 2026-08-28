@@ -659,6 +659,22 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
         product = (await asyncio.to_thread(db.get_product, product_id))
+        if product and product["provision_server_id"]:
+            try:
+                built = await provision_direct(db, product, quantity=1, user_id=call.from_user.id)
+            except DirectProvisionError as e:
+                await call.answer(f"⛔️ {e}", show_alert=True)
+                return
+            item = built[0]
+            text = (
+                f"🎲 یک کانفیگ از پنل متصل به «{product['name']}» ساخته شد:\n\n"
+                f"`{item['subscription_url']}`\n\n"
+                f"📦 حجم: {item['volume_gb']} گیگ | ⏳ مدت: {item['duration_days']} روز"
+            )
+            await safe_edit(call, text, parse_mode="Markdown", reply_markup=kb.admin_back_kb())
+            await call.answer("کانفیگ دریافت شد ✅")
+            return
+
         result = (await asyncio.to_thread(db.admin_take_random_config, product_id, call.from_user.id))
         if not result:
             await call.answer("کانفیگ آزادی برای این محصول موجود نیست.", show_alert=True)
@@ -716,8 +732,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_test_set_volume(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        if (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
-            await call.answer("این بخش فقط برای نمایندگی سطح ۲ است.", show_alert=True)
+        if (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)) and not (
+            await asyncio.to_thread(db.get_panel_server_for_usage, "test_config")
+        ):
+            await call.answer("این بخش فقط وقتی یک پنل برای کانفیگ تست فعال باشد در دسترس است.", show_alert=True)
             return
         await state.set_state(AdminTestConfigSettings.waiting_volume)
         await safe_edit(call, "کانفیگ تست چند گیگابایت باشد؟ فقط عدد وارد کنید (مثال: 1):", reply_markup=kb.admin_back_kb())
