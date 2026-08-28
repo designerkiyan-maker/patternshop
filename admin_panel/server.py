@@ -136,7 +136,7 @@ def resolve_tenant_by_slug(slug: str) -> Optional[Tenant]:
 
 
 async def _notify_admins(permission: str, payload: dict):
-    subs = db.list_push_subscriptions_for_permission(permission)
+    subs = (await asyncio.to_thread(db.list_push_subscriptions_for_permission, permission))
     if not subs:
         return
     gone = []
@@ -145,19 +145,23 @@ async def _notify_admins(permission: str, payload: dict):
         if result == "gone":
             gone.append(s["endpoint"])
     if gone:
-        db.delete_push_subscriptions_by_endpoints(gone)
+        (await asyncio.to_thread(db.delete_push_subscriptions_by_endpoints, gone))
 
 
 async def _notifier_loop():
-    last_order_id = max((o["id"] for o in db.get_pending_orders()), default=0)
-    last_topup_id = max((t["id"] for t in db.get_pending_topups()), default=0)
-    last_ticket_id = max((t["id"] for t in db.get_all_tickets("open")), default=0)
-    last_support_id = db.get_latest_user_support_message_id()
+    init_orders = (await asyncio.to_thread(db.get_pending_orders))
+    init_topups = (await asyncio.to_thread(db.get_pending_topups))
+    init_tickets = (await asyncio.to_thread(db.get_all_tickets, "open"))
+    last_order_id = max((o["id"] for o in init_orders), default=0)
+    last_topup_id = max((t["id"] for t in init_topups), default=0)
+    last_ticket_id = max((t["id"] for t in init_tickets), default=0)
+    last_support_id = (await asyncio.to_thread(db.get_latest_user_support_message_id))
     while True:
         try:
-            orders = [o for o in db.get_pending_orders() if o["id"] > last_order_id]
+            all_pending_orders = (await asyncio.to_thread(db.get_pending_orders))
+            orders = [o for o in all_pending_orders if o["id"] > last_order_id]
             for o in orders:
-                user = db.get_user(o["user_id"])
+                user = (await asyncio.to_thread(db.get_user, o["user_id"]))
                 uname = (user["username"] if user else None) or o["user_id"]
                 await _notify_admins("orders", {
                     "title": "🛒 سفارش جدید",
@@ -167,9 +171,10 @@ async def _notifier_loop():
             if orders:
                 last_order_id = max(o["id"] for o in orders)
 
-            topups = [t for t in db.get_pending_topups() if t["id"] > last_topup_id]
+            all_pending_topups = (await asyncio.to_thread(db.get_pending_topups))
+            topups = [t for t in all_pending_topups if t["id"] > last_topup_id]
             for t in topups:
-                user = db.get_user(t["user_id"])
+                user = (await asyncio.to_thread(db.get_user, t["user_id"]))
                 uname = (user["username"] if user else None) or t["user_id"]
                 await _notify_admins("orders", {
                     "title": "💳 درخواست شارژ جدید",
@@ -179,7 +184,8 @@ async def _notifier_loop():
             if topups:
                 last_topup_id = max(t["id"] for t in topups)
 
-            tickets = [tk for tk in db.get_all_tickets("open") if tk["id"] > last_ticket_id]
+            all_open_tickets = (await asyncio.to_thread(db.get_all_tickets, "open"))
+            tickets = [tk for tk in all_open_tickets if tk["id"] > last_ticket_id]
             for tk in tickets:
                 await _notify_admins("tickets", {
                     "title": "🎫 تیکت جدید",
@@ -189,11 +195,11 @@ async def _notifier_loop():
             if tickets:
                 last_ticket_id = max(tk["id"] for tk in tickets)
 
-            latest_support_id = db.get_latest_user_support_message_id()
+            latest_support_id = (await asyncio.to_thread(db.get_latest_user_support_message_id))
             if latest_support_id > last_support_id:
-                new_msgs = db.get_new_support_messages_since(last_support_id)
+                new_msgs = (await asyncio.to_thread(db.get_new_support_messages_since, last_support_id))
                 for m in new_msgs:
-                    user = db.get_user(m["user_id"])
+                    user = (await asyncio.to_thread(db.get_user, m["user_id"]))
                     uname = (user["username"] if user else None) or (user["first_name"] if user else None) or m["user_id"]
                     preview = (m["message"] or "")[:120]
                     await _notify_admins("tickets", {
@@ -255,7 +261,7 @@ async def _server_status_loop():
         interval_seconds = _get_server_check_interval_seconds()
         try:
             streak_needed = _get_server_offline_streak_threshold()
-            link = db.get_setting("master_sub_link", "").strip()
+            link = (await asyncio.to_thread(db.get_setting, "master_sub_link", "")).strip()
             if link:
                 result = await geo_scan.scan_subscription(
                     link,
@@ -322,7 +328,7 @@ async def _notifier_supervisor():
     while True:
         try:
             active_slugs = set()
-            for row in main_db.list_reseller_bots(active_only=True):
+            for row in (await asyncio.to_thread(main_db.list_reseller_bots, active_only=True)):
                 level = row["reseller_level"] if "reseller_level" in row.keys() else 2
                 enabled = bool(row["web_panel_enabled"]) if "web_panel_enabled" in row.keys() else False
                 if level != 1 or not enabled:
@@ -373,14 +379,14 @@ async def get_current_admin(request: Request):
         raise HTTPException(401, "پنل وب این نماینده دیگر فعال نیست.")
     _current_tenant.set(tenant)
 
-    admin = tenant.db.get_web_admin(payload["id"])
+    admin = (await asyncio.to_thread(tenant.db.get_web_admin, payload["id"]))
     if not admin or not admin["is_active"]:
         raise HTTPException(401, "حساب کاربری غیرفعال یا حذف شده است.")
     return {
         "id": admin["id"],
         "username": admin["username"],
         "role": admin["role"],
-        "permissions": tenant.db.get_web_admin_permissions(admin),
+        "permissions": (await asyncio.to_thread(tenant.db.get_web_admin_permissions, admin)),
         "tenant": tenant.slug,
     }
 
@@ -562,7 +568,7 @@ def api_push_unsubscribe(body: PushUnsubscribeBody, admin=Depends(get_current_ad
 async def api_push_test(admin=Depends(get_current_admin)):
     if not PUSH_ENABLED:
         raise HTTPException(400, "اعلان Push روی سرور تنظیم نشده است.")
-    subs = db.list_push_subscriptions_for_admin(admin["id"])
+    subs = (await asyncio.to_thread(db.list_push_subscriptions_for_admin, admin["id"]))
     if not subs:
         raise HTTPException(400, "هنوز روی این دستگاه اعلان را فعال نکرده‌ای.")
     sent, gone = 0, []
@@ -577,7 +583,7 @@ async def api_push_test(admin=Depends(get_current_admin)):
         elif result == "gone":
             gone.append(s["endpoint"])
     if gone:
-        db.delete_push_subscriptions_by_endpoints(gone)
+        (await asyncio.to_thread(db.delete_push_subscriptions_by_endpoints, gone))
     if not sent:
         raise HTTPException(502, "ارسال اعلان تست ناموفق بود.")
     return {"ok": True, "sent": sent}
@@ -663,7 +669,7 @@ def api_set_server_check_settings(body: ServerCheckSettingsBody, admin=Depends(r
 
 @app.get("/api/dashboard/servers-map")
 async def api_dashboard_servers_map(refresh: bool = False, admin=Depends(get_current_admin)):
-    link = db.get_setting("master_sub_link", "").strip()
+    link = (await asyncio.to_thread(db.get_setting, "master_sub_link", "")).strip()
     if not link:
         return {"ok": False, "error": "no_link"}
     return await geo_scan.scan_subscription(link, force_refresh=refresh)
@@ -766,17 +772,17 @@ async def api_backup_create(admin=Depends(require_permission("backup"))):
     caption = f"🗄 بکاپ فوری دیتابیس (پنل وب - {admin['username']})"
 
     sent, failed = 0, 0
-    for admin_tg_id in db.list_admins():
+    for admin_tg_id in (await asyncio.to_thread(db.list_admins)):
         ok = await tg_send_document(_bot_token(), admin_tg_id, backup_path, caption)
         sent += 1 if ok else 0
         failed += 0 if ok else 1
 
-    db.set_setting("_job_backup_last_at", datetime.now().isoformat())
-    db.log_admin_action(
+    (await asyncio.to_thread(db.set_setting, "_job_backup_last_at", datetime.now().isoformat()))
+    (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "backup_create",
         f"بکاپ فوری ساخته شد ({os.path.basename(backup_path)}, {size_mb} مگابایت) — ارسال به {sent} ادمین "
         f"(پنل وب - {admin['username']})",
-    )
+    ))
     return {"ok": True, "filename": os.path.basename(backup_path), "size_mb": size_mb, "sent": sent, "failed": failed}
 
 
@@ -816,11 +822,11 @@ async def api_backup_restore(
         except OSError:
             pass
 
-    db.log_admin_action(
+    (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "backup_restore",
         f"دیتابیس از فایل آپلودی بازیابی شد؛ نسخه‌ی قبلی: {os.path.basename(pre_restore_path)} "
         f"(پنل وب - {admin['username']})",
-    )
+    ))
     return {"ok": True, "pre_restore_backup": os.path.basename(pre_restore_path)}
 
 
@@ -843,7 +849,7 @@ def api_orders(status: str = "pending", admin=Depends(get_current_admin)):
 
 @app.get("/api/orders/{order_id}/receipt")
 async def api_order_receipt(order_id: int, admin=Depends(get_current_admin)):
-    order = db.get_order(order_id)
+    order = (await asyncio.to_thread(db.get_order, order_id))
     if not order or not order["receipt_file_id"]:
         raise HTTPException(404, "رسیدی برای این سفارش ثبت نشده است.")
     result = await fetch_telegram_file(_bot_token(), order["receipt_file_id"])
@@ -855,12 +861,12 @@ async def api_order_receipt(order_id: int, admin=Depends(get_current_admin)):
 
 @app.post("/api/orders/{order_id}/approve")
 async def api_approve_order(order_id: int, admin=Depends(require_permission("orders"))):
-    order = db.get_order(order_id)
+    order = (await asyncio.to_thread(db.get_order, order_id))
     if not order or order["status"] != "pending":
         raise HTTPException(400, "سفارش یافت نشد یا قبلاً بررسی شده.")
 
     if order["is_custom_config"]:
-        server = db.get_panel_server(order["custom_panel_server_id"])
+        server = (await asyncio.to_thread(db.get_panel_server, order["custom_panel_server_id"]))
         if not server or not server["is_active"]:
             raise HTTPException(400, "سرور پنل مربوطه یافت نشد یا غیرفعال است.")
 
@@ -869,15 +875,15 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
             result = await provider.create_user(
                 username=order["custom_username"],
                 volume_gb=order["custom_volume_gb"],
-                duration_days=db.get_custom_config_settings()["duration_days"],
+                duration_days=(await asyncio.to_thread(db.get_custom_config_settings))["duration_days"],
             )
         except PanelUsernameTakenError:
             raise HTTPException(400, "این نام کاربری روی پنل تکراری است؛ از کاربر بخواه نام دیگری انتخاب کند.")
         except PanelError as e:
             raise HTTPException(400, f"خطا در ارتباط با پنل: {e}")
 
-        db.approve_custom_config_order(order_id)
-        db.add_custom_config(
+        (await asyncio.to_thread(db.approve_custom_config_order, order_id))
+        (await asyncio.to_thread(db.add_custom_config, 
             user_id=order["user_id"],
             panel_server_id=server["id"],
             username=result.username,
@@ -885,13 +891,13 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
             duration_days=db.get_custom_config_settings()["duration_days"],
             subscription_url=result.subscription_url,
             order_id=order_id,
-        )
-        db.log_admin_action(
+        ))
+        (await asyncio.to_thread(db.log_admin_action, 
             admin["id"], "order_approve",
             f"سفارش شخصی #{order_id} | کاربر {order['user_id']} | یوزرنیم «{result.username}» | "
             f"{order['custom_volume_gb']} گیگ | مبلغ: {order['final_price']:,} (پنل وب - {admin['username']})",
             "order", order_id,
-        )
+        ))
         await notify_user(order["user_id"], "✅ کانفیگ شخصی شما ساخته شد!")
         asyncio.create_task(deliver_config_to_user_web(
             order["user_id"], "کانفیگ شخصی", result.subscription_url,
@@ -899,7 +905,7 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
         ))
         return {"ok": True}
 
-    product = db.get_product(order["product_id"])
+    product = (await asyncio.to_thread(db.get_product, order["product_id"]))
     quantity = order["quantity"] or 1
 
     if product and product["is_auto_provision"]:
@@ -910,12 +916,12 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
                 results = await provision_auto_config(db, product, quantity)
         except (ProvisionError, DirectProvisionError) as e:
             raise HTTPException(400, str(e))
-        db.approve_order_auto(order_id)
-        db.log_admin_action(
+        (await asyncio.to_thread(db.approve_order_auto, order_id))
+        (await asyncio.to_thread(db.log_admin_action, 
             admin["id"], "order_approve",
             f"سفارش #{order_id} (خودکار) | کاربر {order['user_id']} | محصول «{product['name']}» (پنل وب - {admin['username']})",
             "order", order_id,
-        )
+        ))
         links = [r["subscription_url"] for r in results]
         await notify_user(order["user_id"], "✅ خرید شما تایید شد!")
         asyncio.create_task(deliver_config_to_user_web(
@@ -924,17 +930,17 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
         ))
         return {"ok": True}
 
-    results = db.take_unused_configs(order["product_id"], order["user_id"], quantity)
+    results = (await asyncio.to_thread(db.take_unused_configs, order["product_id"], order["user_id"], quantity))
     if not results:
         raise HTTPException(400, "موجودی این محصول تمام شده است.")
-    db.approve_order(order_id, [r["id"] for r in results])
-    db.log_admin_action(
+    (await asyncio.to_thread(db.approve_order, order_id, [r["id"] for r in results]))
+    (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "order_approve",
         f"سفارش #{order_id} | کاربر {order['user_id']} | محصول «{product['name'] if product else '---'}» (پنل وب - {admin['username']})",
         "order", order_id,
-    )
+    ))
     await check_and_notify_low_stock(lambda aid, text: tg_send(_bot_token(), aid, text), db, order["product_id"])
-    db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or (product["price"] if product else 0))
+    (await asyncio.to_thread(db.reward_referrer_if_first_purchase, order["user_id"], order["final_price"] or (product["price"] if product else 0)))
     links = [r["link"] for r in results]
     await notify_user(order["user_id"], "✅ خرید شما تایید شد!")
     asyncio.create_task(deliver_config_to_user_web(
@@ -946,11 +952,11 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
 
 @app.post("/api/orders/{order_id}/reject")
 async def api_reject_order(order_id: int, admin=Depends(require_permission("orders"))):
-    order = db.get_order(order_id)
+    order = (await asyncio.to_thread(db.get_order, order_id))
     if not order or order["status"] != "pending":
         raise HTTPException(400, "سفارش یافت نشد یا قبلاً بررسی شده.")
-    db.reject_order(order_id)
-    db.log_admin_action(admin["id"], "order_reject", f"سفارش #{order_id} رد شد (پنل وب - {admin['username']})", "order", order_id)
+    (await asyncio.to_thread(db.reject_order, order_id))
+    (await asyncio.to_thread(db.log_admin_action, admin["id"], "order_reject", f"سفارش #{order_id} رد شد (پنل وب - {admin['username']})", "order", order_id))
     await notify_user(order["user_id"], "⛔️ سفارش شما رد شد. در صورت کسر از کیف پول، مبلغ برگشت داده شد.")
     return {"ok": True}
 
@@ -972,7 +978,7 @@ def api_topups(status: str = "pending", admin=Depends(get_current_admin)):
 
 @app.get("/api/topups/{topup_id}/receipt")
 async def api_topup_receipt(topup_id: int, admin=Depends(get_current_admin)):
-    topup = db.get_topup(topup_id)
+    topup = (await asyncio.to_thread(db.get_topup, topup_id))
     if not topup or not topup["receipt_file_id"]:
         raise HTTPException(404, "رسیدی برای این شارژ ثبت نشده است.")
     result = await fetch_telegram_file(_bot_token(), topup["receipt_file_id"])
@@ -984,23 +990,23 @@ async def api_topup_receipt(topup_id: int, admin=Depends(get_current_admin)):
 
 @app.post("/api/topups/{topup_id}/approve")
 async def api_approve_topup(topup_id: int, admin=Depends(require_permission("orders"))):
-    topup = db.get_topup(topup_id)
+    topup = (await asyncio.to_thread(db.get_topup, topup_id))
     if not topup:
         raise HTTPException(404, "یافت نشد.")
-    if not db.approve_topup(topup_id):
+    if not (await asyncio.to_thread(db.approve_topup, topup_id)):
         raise HTTPException(400, "قبلاً بررسی شده است.")
-    db.log_admin_action(admin["id"], "topup_approve", f"شارژ #{topup_id} تایید شد (پنل وب - {admin['username']})", "topup", topup_id)
+    (await asyncio.to_thread(db.log_admin_action, admin["id"], "topup_approve", f"شارژ #{topup_id} تایید شد (پنل وب - {admin['username']})", "topup", topup_id))
     await notify_user(topup["user_id"], f"✅ شارژ کیف پول شما به مبلغ {topup['amount']:,} تومان تایید شد.")
     return {"ok": True}
 
 
 @app.post("/api/topups/{topup_id}/reject")
 async def api_reject_topup(topup_id: int, admin=Depends(require_permission("orders"))):
-    topup = db.get_topup(topup_id)
+    topup = (await asyncio.to_thread(db.get_topup, topup_id))
     if not topup or topup["status"] != "pending":
         raise HTTPException(400, "یافت نشد یا قبلاً بررسی شده.")
-    db.reject_topup(topup_id)
-    db.log_admin_action(admin["id"], "topup_reject", f"شارژ #{topup_id} رد شد (پنل وب - {admin['username']})", "topup", topup_id)
+    (await asyncio.to_thread(db.reject_topup, topup_id))
+    (await asyncio.to_thread(db.log_admin_action, admin["id"], "topup_reject", f"شارژ #{topup_id} رد شد (پنل وب - {admin['username']})", "topup", topup_id))
     await notify_user(topup["user_id"], "⛔️ درخواست شارژ کیف پول شما رد شد.")
     return {"ok": True}
 
@@ -1051,11 +1057,11 @@ class WalletAdjustBody(BaseModel):
 
 @app.post("/api/users/{tg_id}/wallet")
 async def api_adjust_wallet(tg_id: int, body: WalletAdjustBody, admin=Depends(require_permission("users"))):
-    db.add_wallet_credit(tg_id, body.delta)
-    db.log_admin_action(
+    (await asyncio.to_thread(db.add_wallet_credit, tg_id, body.delta))
+    (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "wallet_adjust", f"کیف پول کاربر {tg_id} به میزان {body.delta:,} تغییر کرد (پنل وب - {admin['username']})",
         "user", tg_id,
-    )
+    ))
     if body.delta:
         sign = "افزایش" if body.delta > 0 else "کاهش"
         await notify_user(tg_id, f"💰 موجودی کیف پول شما {sign} یافت: {abs(body.delta):,} تومان")
@@ -1259,13 +1265,13 @@ class TicketReplyBody(BaseModel):
 
 @app.post("/api/tickets/{ticket_id}/reply")
 async def api_ticket_reply(ticket_id: int, body: TicketReplyBody, admin=Depends(require_permission("tickets"))):
-    ticket = db.get_ticket(ticket_id)
+    ticket = (await asyncio.to_thread(db.get_ticket, ticket_id))
     if not ticket:
         raise HTTPException(404, "یافت نشد.")
-    db.claim_ticket_if_open(ticket_id, admin["id"])
-    db.add_ticket_message(ticket_id, "admin", body.message)
+    (await asyncio.to_thread(db.claim_ticket_if_open, ticket_id, admin["id"]))
+    (await asyncio.to_thread(db.add_ticket_message, ticket_id, "admin", body.message))
     await notify_user(ticket["user_id"], f"📩 پاسخ پشتیبانی برای تیکت «{ticket['subject']}»:\n\n{body.message}")
-    db.log_admin_action(admin["id"], "ticket_reply", f"تیکت #{ticket_id} (پنل وب - {admin['username']})", "ticket", ticket_id)
+    (await asyncio.to_thread(db.log_admin_action, admin["id"], "ticket_reply", f"تیکت #{ticket_id} (پنل وب - {admin['username']})", "ticket", ticket_id))
     return {"ok": True}
 
 
@@ -1291,7 +1297,7 @@ async def api_broadcast(body: BroadcastBody, admin=Depends(require_permission("b
     if len(text) > 4000:
         raise HTTPException(400, "متن پیام بیش از حد طولانی است.")
 
-    user_ids = db.get_all_user_ids()
+    user_ids = (await asyncio.to_thread(db.get_all_user_ids))
     sem = asyncio.Semaphore(20)
     counters = {"success": 0, "failed": 0}
 
@@ -1301,11 +1307,11 @@ async def api_broadcast(body: BroadcastBody, admin=Depends(require_permission("b
             counters["success" if ok else "failed"] += 1
 
     await asyncio.gather(*[_send(uid) for uid in user_ids])
-    db.log_admin_action(
+    (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "broadcast",
         f"ارسال به {len(user_ids)} کاربر | موفق: {counters['success']} | ناموفق: {counters['failed']} "
         f"(پنل وب - {admin['username']})",
-    )
+    ))
     return {"total": len(user_ids), "success": counters["success"], "failed": counters["failed"]}
 
 
@@ -1370,7 +1376,7 @@ class SupportReplyBody(BaseModel):
 
 @app.post("/api/support/{user_id}/messages")
 async def api_support_send(user_id: int, body: SupportReplyBody, admin=Depends(get_current_admin)):
-    user = db.get_user(user_id)
+    user = (await asyncio.to_thread(db.get_user, user_id))
     if not user:
         raise HTTPException(404, "کاربر یافت نشد.")
     text = (body.message or "").strip()
@@ -1383,7 +1389,7 @@ async def api_support_send(user_id: int, body: SupportReplyBody, admin=Depends(g
     # ستون assigned_admin_id ذخیره می‌شود (که با آیدی‌های واقعی تلگرام تداخل ندارد).
     my_lock_id = -admin["id"]
     is_owner = admin["role"] == "owner"
-    conv = db.get_support_conversation(user_id)
+    conv = (await asyncio.to_thread(db.get_support_conversation, user_id))
     assigned = conv["assigned_admin_id"] if conv else None
     if assigned and assigned != my_lock_id and not is_owner:
         raise HTTPException(
@@ -1391,11 +1397,11 @@ async def api_support_send(user_id: int, body: SupportReplyBody, admin=Depends(g
             f"این گفتگو در حال حاضر توسط {_support_lock_label(assigned)} در حال پاسخ‌دهی است.",
         )
     if not is_owner:
-        db.set_support_conversation_admin(user_id, my_lock_id)
+        (await asyncio.to_thread(db.set_support_conversation_admin, user_id, my_lock_id))
 
-    msg_id = db.add_support_message(user_id, "admin", text)
+    msg_id = (await asyncio.to_thread(db.add_support_message, user_id, "admin", text))
     await notify_user(user_id, f"💬 پشتیبانی:\n\n{text}")
-    db.log_admin_action(admin["id"], "support_reply", f"پاسخ چت زنده به کاربر {user_id} (پنل وب - {admin['username']})", "user", user_id)
+    (await asyncio.to_thread(db.log_admin_action, admin["id"], "support_reply", f"پاسخ چت زنده به کاربر {user_id} (پنل وب - {admin['username']})", "user", user_id))
     return {"ok": True, "id": msg_id}
 
 
@@ -1410,7 +1416,7 @@ def _resolved_admin_panel_url(request: Request) -> str:
 
 
 async def _deliver_reseller_webpanel_link(bot_id: int, request: Request) -> bool:
-    reseller_bot = db.get_reseller_bot(bot_id)
+    reseller_bot = (await asyncio.to_thread(db.get_reseller_bot, bot_id))
     if not reseller_bot or not reseller_bot["web_panel_setup_token"]:
         return False
     panel_url = _resolved_admin_panel_url(request)
@@ -1565,7 +1571,7 @@ def api_delete_reseller_bot(bot_id: int, purge_db: bool = False, admin=Depends(r
 
 @app.post("/api/reseller-bots/{bot_id}/web-panel/enable")
 async def api_enable_reseller_webpanel(bot_id: int, request: Request, admin=Depends(require_permission("resellers"))):
-    reseller_bot = db.get_reseller_bot(bot_id)
+    reseller_bot = (await asyncio.to_thread(db.get_reseller_bot, bot_id))
     if not reseller_bot:
         raise HTTPException(404, "یافت نشد.")
     level = reseller_bot["reseller_level"] if "reseller_level" in reseller_bot.keys() else 2
@@ -1573,25 +1579,25 @@ async def api_enable_reseller_webpanel(bot_id: int, request: Request, admin=Depe
         raise HTTPException(400, "پنل وب فقط برای نمایندگی «کامل» قابل فعال‌سازی است.")
     if reseller_bot["web_panel_enabled"]:
         raise HTTPException(400, "قبلاً فعال است؛ برای لینک جدید از «ساخت لینک جدید» استفاده کنید.")
-    db.enable_reseller_web_panel(bot_id)
-    db.log_admin_action(
+    (await asyncio.to_thread(db.enable_reseller_web_panel, bot_id))
+    (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "reseller_webpanel_enable", f"نماینده #{bot_id} (پنل وب - {admin['username']})",
         "reseller_bot", bot_id,
-    )
+    ))
     sent = await _deliver_reseller_webpanel_link(bot_id, request)
     return {"ok": True, "sent_to_owner": sent}
 
 
 @app.post("/api/reseller-bots/{bot_id}/web-panel/regenerate")
 async def api_regen_reseller_webpanel(bot_id: int, request: Request, admin=Depends(require_permission("resellers"))):
-    reseller_bot = db.get_reseller_bot(bot_id)
+    reseller_bot = (await asyncio.to_thread(db.get_reseller_bot, bot_id))
     if not reseller_bot:
         raise HTTPException(404, "یافت نشد.")
-    db.regenerate_reseller_web_panel_token(bot_id)
-    db.log_admin_action(
+    (await asyncio.to_thread(db.regenerate_reseller_web_panel_token, bot_id))
+    (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "reseller_webpanel_regen", f"نماینده #{bot_id} (پنل وب - {admin['username']})",
         "reseller_bot", bot_id,
-    )
+    ))
     sent = await _deliver_reseller_webpanel_link(bot_id, request)
     return {"ok": True, "sent_to_owner": sent}
 
@@ -1640,12 +1646,12 @@ class ResellerCreditBody(BaseModel):
 
 @app.post("/api/resellers/{tg_id}/credit")
 async def api_adjust_reseller_credit(tg_id: int, body: ResellerCreditBody, admin=Depends(require_permission("resellers"))):
-    db.adjust_reseller_credit(tg_id, body.delta_gb, admin_id=admin["id"], reason=body.reason or "تنظیم از پنل وب")
-    db.log_admin_action(
+    (await asyncio.to_thread(db.adjust_reseller_credit, tg_id, body.delta_gb, admin_id=admin["id"], reason=body.reason or "تنظیم از پنل وب"))
+    (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "reseller_credit_adjust",
         f"نماینده {tg_id} به میزان {body.delta_gb:,} گیگ (پنل وب - {admin['username']})",
         "reseller", tg_id,
-    )
+    ))
     await notify_user(tg_id, f"📦 اعتبار حجمی نمایندگی شما تغییر کرد: {body.delta_gb:+,} گیگابایت")
     return {"ok": True}
 
@@ -1720,7 +1726,7 @@ def api_reseller_requests(status: Optional[str] = None, admin=Depends(require_pe
 
 @app.get("/api/reseller-requests/{request_id}/receipt")
 async def api_reseller_request_receipt(request_id: int, admin=Depends(require_permission("resellers"))):
-    req = db.get_reseller_request(request_id)
+    req = (await asyncio.to_thread(db.get_reseller_request, request_id))
     if not req or not req["receipt_file_id"]:
         raise HTTPException(404, "رسیدی برای این درخواست ثبت نشده است.")
     result = await fetch_telegram_file(_bot_token(), req["receipt_file_id"])
@@ -1737,16 +1743,16 @@ class ResellerRequestQuoteBody(BaseModel):
 
 @app.post("/api/reseller-requests/{request_id}/quote")
 async def api_quote_reseller_request(request_id: int, body: ResellerRequestQuoteBody, admin=Depends(require_permission("resellers"))):
-    req = db.get_reseller_request(request_id)
+    req = (await asyncio.to_thread(db.get_reseller_request, request_id))
     if not req or req["status"] != "pending_review":
         raise HTTPException(400, "این درخواست دیگر معتبر نیست.")
     if body.price_toman <= 0:
         raise HTTPException(400, "هزینه باید عددی مثبت باشد.")
-    db.quote_reseller_request(request_id, body.price_toman, body.panel_server_id, admin["id"])
-    db.log_admin_action(
+    (await asyncio.to_thread(db.quote_reseller_request, request_id, body.price_toman, body.panel_server_id, admin["id"]))
+    (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "reseller_request_quote",
         f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {body.price_toman:,} (پنل وب - {admin['username']})",
-    )
+    ))
     await tg_send(
         _bot_token(), req["user_id"],
         f"🏪 درخواست نمایندگی #{request_id} شما تایید شد!\n\n"
@@ -1760,14 +1766,14 @@ async def api_quote_reseller_request(request_id: int, body: ResellerRequestQuote
 
 @app.post("/api/reseller-requests/{request_id}/approve-payment")
 async def api_approve_reseller_request_payment(request_id: int, admin=Depends(require_permission("resellers"))):
-    req = db.get_reseller_request(request_id)
+    req = (await asyncio.to_thread(db.get_reseller_request, request_id))
     if not req or req["status"] != "awaiting_payment_review":
         raise HTTPException(400, "این درخواست دیگر معتبر نیست.")
-    db.approve_reseller_request_payment(request_id, admin["id"])
-    db.log_admin_action(
+    (await asyncio.to_thread(db.approve_reseller_request_payment, request_id, admin["id"]))
+    (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "reseller_request_payment_approve",
         f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {(req['price_toman'] or 0):,} (پنل وب - {admin['username']})",
-    )
+    ))
     _set_main_bot_fsm_state(req["user_id"], "ResellerRequestFlow:waiting_bot_token", {"resreq_request_id": request_id})
     await notify_user(
         req["user_id"],
@@ -1785,17 +1791,17 @@ class ResellerRequestRejectBody(BaseModel):
 async def api_reject_reseller_request(request_id: int, body: ResellerRequestRejectBody, admin=Depends(require_permission("resellers"))):
     if body.kind not in ("rejected", "payment_rejected"):
         raise HTTPException(400, "نوع رد نامعتبر است.")
-    req = db.get_reseller_request(request_id)
-    if not req or not db.is_reseller_request_open(req["status"]):
+    req = (await asyncio.to_thread(db.get_reseller_request, request_id))
+    if not req or not (await asyncio.to_thread(db.is_reseller_request_open, req["status"])):
         raise HTTPException(400, "این درخواست دیگر باز نیست.")
     reason = (body.reason or "").strip()
     if not reason:
         raise HTTPException(400, "دلیل رد الزامی است.")
-    db.reject_reseller_request(request_id, body.kind, admin["id"], reason)
-    db.log_admin_action(
+    (await asyncio.to_thread(db.reject_reseller_request, request_id, body.kind, admin["id"], reason))
+    (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "reseller_request_reject",
         f"درخواست #{request_id} | کاربر {req['user_id']} | وضعیت: {body.kind} | دلیل: {reason} (پنل وب - {admin['username']})",
-    )
+    ))
     label = "درخواست نمایندگی" if body.kind == "rejected" else "پرداخت درخواست نمایندگی"
     await notify_user(req["user_id"], f"❌ متاسفانه {label} شما (#{request_id}) رد شد.\n\nدلیل: {reason}")
     return {"ok": True}
@@ -1803,15 +1809,15 @@ async def api_reject_reseller_request(request_id: int, body: ResellerRequestReje
 
 @app.post("/api/reseller-requests/{request_id}/cancel")
 async def api_cancel_reseller_request(request_id: int, admin=Depends(require_permission("resellers"))):
-    req = db.get_reseller_request(request_id)
-    if not req or not db.is_reseller_request_open(req["status"]):
+    req = (await asyncio.to_thread(db.get_reseller_request, request_id))
+    if not req or not (await asyncio.to_thread(db.is_reseller_request_open, req["status"])):
         raise HTTPException(400, "این درخواست دیگر باز نیست.")
-    db.admin_cancel_reseller_request(request_id, admin["id"])
+    (await asyncio.to_thread(db.admin_cancel_reseller_request, request_id, admin["id"]))
     if req["status"] == "awaiting_bot_info":
         _set_main_bot_fsm_state(req["user_id"], None, {})
-    db.log_admin_action(
+    (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "reseller_request_admin_cancel", f"درخواست #{request_id} | کاربر {req['user_id']} (پنل وب - {admin['username']})",
-    )
+    ))
     await notify_user(req["user_id"], f"⚪️ درخواست نمایندگی شما (#{request_id}) توسط مدیریت کنسل شد.")
     return {"ok": True}
 
@@ -1854,7 +1860,7 @@ def api_add_panel_server(body: PanelServerBody, admin=Depends(require_permission
 
 @app.get("/api/panel-servers/{server_id}/inbounds")
 async def api_panel_server_inbounds(server_id: int, admin=Depends(require_permission("panels"))):
-    server = db.get_panel_server(server_id)
+    server = (await asyncio.to_thread(db.get_panel_server, server_id))
     if not server:
         raise HTTPException(404, "یافت نشد.")
     try:
@@ -1893,7 +1899,7 @@ def api_delete_panel_server(server_id: int, force: bool = False, admin=Depends(r
 
 @app.post("/api/panel-servers/{server_id}/test")
 async def api_test_panel_server(server_id: int, admin=Depends(require_permission("panels"))):
-    server = db.get_panel_server(server_id)
+    server = (await asyncio.to_thread(db.get_panel_server, server_id))
     if not server:
         raise HTTPException(404, "یافت نشد.")
     try:
@@ -1945,10 +1951,10 @@ async def api_exchange_rate_refresh(admin=Depends(require_permission("panels")))
         status = await exchange_rate.refresh_rate(manual_fallback=_manual_fallback_rate())
     except Exception as e:
         raise HTTPException(502, str(e))
-    db.log_admin_action(
+    (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "exchange_rate_refresh",
         f"نرخ دلار به {status['rate']:,} تومان (منبع: {status['source']}) رفرش شد (پنل وب - {admin['username']})",
-    )
+    ))
     return _rate_response(True, status)
 
 
