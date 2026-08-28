@@ -3439,8 +3439,8 @@ function _val(root, key) { return $(`[data-fkey="${key}"]`, root)?.value; }
 function _num(root, key) { return Number(_val(root, key)) || 0; }
 
 async function renderSalesSettings() {
-  const [referral, wheel, crypto, renewal, volumeReminder, testConfig, forceJoin, stockAlert, products] = await Promise.all([
-    apiGet('/settings/referral'), apiGet('/settings/wheel'), apiGet('/settings/crypto'),
+  const [referral, wheel, renewal, volumeReminder, testConfig, forceJoin, stockAlert, products] = await Promise.all([
+    apiGet('/settings/referral'), apiGet('/settings/wheel'),
     apiGet('/settings/renewal'), apiGet('/settings/volume-reminder'), apiGet('/settings/test-config'),
     apiGet('/settings/force-join'), apiGet('/settings/stock-alert'), apiGet('/products'),
   ]);
@@ -3486,14 +3486,6 @@ async function renderSalesSettings() {
       <label class="field"><span>اعتبار کد (ساعت)</span><input class="input" data-fkey="wheel_expiry_hours" type="number" value="${wheel.code_expiry_hours}"></label>
       <label class="field"><span>فاصله‌ی بین دو چرخش (ساعت)</span><input class="input" data-fkey="wheel_cooldown_hours" type="number" value="${wheel.cooldown_hours}"></label>
       <button class="btn btn-primary btn-sm" id="save-wheel">ذخیره</button>
-    </div>
-
-    <div class="card">
-      <h3>🪙 پرداخت کریپتو (Plisio)</h3>
-      <div class="card-sub" style="margin-bottom:8px">${crypto.gateway_configured ? '✅ کلید API درگاه تنظیم شده است.' : '⚠️ هنوز کلید API درگاه (Plisio) تنظیم نشده — کلید را از داخل ربات یا فایل env تنظیم کن.'}</div>
-      <label class="field field-row"><span>فعال</span>${_swSpan('crypto_enabled', crypto.enabled)}</label>
-      <label class="field"><span>نرخ دلار به تومان (دستی/fallback)</span><input class="input" data-fkey="crypto_rate" type="number" value="${crypto.usd_to_toman_rate}"></label>
-      <button class="btn btn-primary btn-sm" id="save-crypto">ذخیره</button>
     </div>
 
     <div class="card">
@@ -3580,13 +3572,6 @@ async function renderSalesSettings() {
         prizes, expiry_hours: _num(root, 'wheel_expiry_hours'), cooldown_hours: _num(root, 'wheel_cooldown_hours'),
       });
       toast('تنظیمات گردونه ذخیره شد.');
-    } catch (e) { handleErr(e); }
-  });
-
-  $('#save-crypto').addEventListener('click', async () => {
-    try {
-      await apiPost('/settings/crypto', { enabled: _swOn(root, 'crypto_enabled'), usd_to_toman_rate: _num(root, 'crypto_rate') });
-      toast('تنظیمات کریپتو ذخیره شد.');
     } catch (e) { handleErr(e); }
   });
 
@@ -4709,8 +4694,13 @@ const SETTINGS_GROUPS = [
     { key: 'card_number', label: 'شماره کارت', type: 'text' },
     { key: 'card_holder', label: 'نام صاحب کارت', type: 'text' },
   ]},
-  { tab: 'payment', title: 'نرخ ارز پشتیبان', fields: [
-    { key: 'manual_usd_rate_toman', label: 'نرخ دلار دستی (پشتیبان — فقط وقتی همه‌ی منابع زنده شکست بخورند استفاده می‌شود)', type: 'number' },
+  { tab: 'payment', title: 'نرخ ارز پشتیبان (عمومی فروشگاه)', fields: [
+    { key: 'manual_usd_rate_toman', label: 'نرخ دلار دستی — فقط وقتی همه‌ی منابع زنده شکست بخورند استفاده می‌شود', type: 'number' },
+  ]},
+  { tab: 'payment', title: '🪙 پرداخت کریپتو (Plisio)', fields: [
+    { key: 'crypto_payment_enabled', label: 'فعال بودن پرداخت کریپتو', type: 'bool' },
+    { key: 'plisio_api_key', label: 'کلید API درگاه Plisio', type: 'password' },
+    { key: 'usd_to_toman_rate', label: 'نرخ دلار دستی مخصوص کریپتو (fallback — جدا از نرخ عمومی بالا)', type: 'number' },
   ]},
 
   // ------------------------------------------------------ سرویس‌های ویژه
