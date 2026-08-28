@@ -128,22 +128,27 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     @router.message(CommandStart())
     async def cmd_start(message: Message, state: FSMContext, bot: Bot):
         await state.clear()
-        is_new_user = not (await asyncio.to_thread(db.get_user, message.from_user.id))
         (await asyncio.to_thread(db.add_or_update_user, 
             message.from_user.id, message.from_user.username or "", message.from_user.first_name or ""
         ))
 
         # پردازش لینک دعوت زیرمجموعه‌گیری: /start ref123456789
+        # (نیازی به «کاربر جدید بودن» نیست؛ خود set_referred_by فقط وقتی کاربر
+        # هنوز referred_by ندارد آن را ثبت می‌کند - همین‌جا هم برای جلوگیری از
+        # اعمال چندباره‌ی پاداش‌های حالت ۲/۳، دقیقاً همان شرط را چک می‌کنیم)
         parts = (message.text or "").split(maxsplit=1)
-        if is_new_user and len(parts) > 1 and parts[1].startswith("ref"):
+        if len(parts) > 1 and parts[1].startswith("ref"):
             ref_part = parts[1][3:]
             if ref_part.isdigit() and int(ref_part) != message.from_user.id:
                 referrer_id = int(ref_part)
-                (await asyncio.to_thread(db.set_referred_by, message.from_user.id, referrer_id))
-                reward_info = (await asyncio.to_thread(
-                    db.apply_referral_invite_rewards, message.from_user.id, referrer_id
-                ))
-                await _handle_referral_invite_rewards(bot, referrer_id, reward_info)
+                already_referred = (await asyncio.to_thread(db.get_user, message.from_user.id))
+                already_referred = bool(already_referred and already_referred["referred_by"])
+                if not already_referred:
+                    (await asyncio.to_thread(db.set_referred_by, message.from_user.id, referrer_id))
+                    reward_info = (await asyncio.to_thread(
+                        db.apply_referral_invite_rewards, message.from_user.id, referrer_id
+                    ))
+                    await _handle_referral_invite_rewards(bot, referrer_id, reward_info)
 
         welcome = (await asyncio.to_thread(db.get_setting, "welcome_text"))
         await message.answer(welcome, reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot))
