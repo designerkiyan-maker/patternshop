@@ -35,7 +35,10 @@ from admin_panel.webpush import PUSH_ENABLED, send_push
 from reseller_auto_provision import provision_auto_config, ProvisionError
 from direct_panel_provision import provision_direct, ProvisionError as DirectProvisionError
 from stock_alerts import check_and_notify_low_stock
-from panel_providers import get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS
+from panel_providers import (
+    get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS,
+    PROVIDERS, SUB_BASE_URL_PANEL_TYPES, INBOUND_SELECT_PANEL_TYPES, TEMPLATE_BASED_PANEL_TYPES,
+)
 from renewal_reminders import STATUS_KEY_LAST_RUN, STATUS_KEY_LAST_DATE_SENT, STATUS_KEY_LAST_VOLUME_SENT
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 import exchange_rate
@@ -1832,30 +1835,116 @@ class PanelServerBody(BaseModel):
     api_username: str = ""
     api_password: str
     default_group: Optional[str] = None
+    template_username: Optional[str] = None  # لازم برای PasarGuard/Marzban/Marzneshin
 
 
 class PanelServerUpdateBody(BaseModel):
+    name: Optional[str] = None
+    api_url: Optional[str] = None
+    api_username: Optional[str] = None
+    api_password: Optional[str] = None
     xui_inbound_id: Optional[int] = None
     xui_sub_base_url: Optional[str] = None
 
 
+class PanelServerTemplateBody(BaseModel):
+    template_username: str
+
+
+class PanelServerXuiConfigBody(BaseModel):
+    inbound_id: Optional[int] = None
+    sub_base_url: str
+
+
+def _panel_server_public(s) -> dict:
+    is_sub_base_type = s["panel_type"] in SUB_BASE_URL_PANEL_TYPES
+    if is_sub_base_type:
+        needs_inbound = s["panel_type"] in INBOUND_SELECT_PANEL_TYPES
+        configured = bool(s["xui_sub_base_url"]) and (bool(s["xui_inbound_id"]) if needs_inbound else True)
+    else:
+        configured = bool(s["group_ids"] and s["proxy_settings"])
+    return {
+        "id": s["id"], "name": s["name"], "panel_type": s["panel_type"],
+        "type_label": PANEL_TYPE_LABELS.get(s["panel_type"], s["panel_type"]),
+        "api_url": s["api_url"], "template_username": s["template_username"],
+        "has_template": bool(s["group_ids"] and s["proxy_settings"]),
+        "xui_inbound_id": s["xui_inbound_id"], "xui_sub_base_url": s["xui_sub_base_url"],
+        "is_configured": configured,
+        "used_for_custom_config": bool(s["used_for_custom_config"]),
+        "used_for_test_config": bool(s["used_for_test_config"]),
+        "default_group": s["default_group"], "is_active": bool(s["is_active"]),
+    }
+
+
 @app.get("/api/panel-servers")
 def api_panel_servers(admin=Depends(require_permission("panels"))):
-    servers = rows_to_list(db.get_panel_servers())
-    for s in servers:
-        s["type_label"] = PANEL_TYPE_LABELS.get(s["panel_type"], s["panel_type"])
-    return servers
+    return [_panel_server_public(s) for s in db.get_panel_servers()]
+
+
+@app.get("/api/panel-servers/panel-types")
+def api_panel_server_types(admin=Depends(require_permission("panels"))):
+    """لیست انواع پنل پشتیبانی‌شده - برای ساخت فرم افزودن سرور در فرانت."""
+    return [
+        {
+            "type": k, "label": v,
+            "needs_template": k in TEMPLATE_BASED_PANEL_TYPES,
+            "needs_sub_base_url": k in SUB_BASE_URL_PANEL_TYPES,
+            "needs_inbound_select": k in INBOUND_SELECT_PANEL_TYPES,
+        }
+        for k, v in PANEL_TYPE_LABELS.items()
+    ]
 
 
 @app.post("/api/panel-servers")
-def api_add_panel_server(body: PanelServerBody, admin=Depends(require_permission("panels"))):
-    username = body.api_username
+async def api_add_panel_server(body: PanelServerBody, admin=Depends(require_permission("panels"))):
+    if not body.name.strip() or not body.api_url.strip() or not body.api_password.strip():
+        raise HTTPException(400, "نام، آدرس و پسورد/توکن الزامی هستند.")
+    if body.panel_type not in PROVIDERS:
+        raise HTTPException(400, "نوع پنل پشتیبانی نمی‌شود.")
+
+    username = body.api_username.strip()
     if body.panel_type == "3xui":
         # 3X-UI جدید فقط با API Token (فیلد پسورد) کار می‌کند؛ یوزرنیم استفاده نمی‌شود.
-        username = "3xui"
-    sid = db.add_panel_server(body.name, body.panel_type, body.api_url, username, body.api_password, body.default_group)
-    db.log_admin_action(admin["id"], "panel_add", body.name, "panel", sid)
-    return {"id": sid}
+        username = username or "3xui"
+
+    if body.panel_type in INBOUND_SELECT_PANEL_TYPES:
+        server_id = db.add_panel_server(body.name.strip(), body.panel_type, body.api_url.strip(), username, body.api_password, body.default_group)
+        server = db.get_panel_server(server_id)
+        try:
+            provider = get_provider(server)
+            inbounds = await provider.list_inbounds()
+        except PanelError as e:
+            db.delete_panel_server(server_id)
+            raise HTTPException(400, str(e))
+        if not inbounds:
+            db.delete_panel_server(server_id)
+            raise HTTPException(400, "این پنل هیچ inbound ای ندارد. اول از داخل پنل یک inbound بساز.")
+        db.log_admin_action(admin["id"], "panel_add", f"سرور «{body.name}» (3X-UI، #{server_id}) از پنل وب")
+        return {"id": server_id, "inbounds": inbounds, "needs_inbound_select": True}
+
+    if body.panel_type in SUB_BASE_URL_PANEL_TYPES:
+        # مثل Hiddify: inbound لازم نیست؛ باید بعداً با /xui-config تکمیل شود.
+        server_id = db.add_panel_server(body.name.strip(), body.panel_type, body.api_url.strip(), username, body.api_password, body.default_group)
+        db.log_admin_action(admin["id"], "panel_add", f"سرور «{body.name}» (#{server_id}) از پنل وب")
+        return {"id": server_id, "needs_sub_base_url": True}
+
+    # خانواده‌ی PasarGuard/Marzban/Marzneshin: با «کاربر نمونه» قالب گرفته می‌شود
+    if not body.template_username or not body.template_username.strip():
+        raise HTTPException(400, "نام کاربری نمونه (برای دریافت قالب) الزامی است.")
+    server_id = db.add_panel_server(body.name.strip(), body.panel_type, body.api_url.strip(), username, body.api_password, body.default_group)
+    server = db.get_panel_server(server_id)
+    try:
+        provider = get_provider(server)
+        template = await provider.fetch_template_from_user(body.template_username.strip())
+    except PanelError as e:
+        db.delete_panel_server(server_id)
+        raise HTTPException(400, str(e))
+    db.update_panel_server(
+        server_id, group_ids=json.dumps(template["group_ids"]),
+        proxy_settings=json.dumps(template["proxy_settings"]), template_username=body.template_username.strip(),
+    )
+    db.log_admin_action(admin["id"], "panel_add", f"سرور «{body.name}» (#{server_id}) از پنل وب")
+    return {"id": server_id}
 
 
 @app.get("/api/panel-servers/{server_id}/inbounds")
@@ -1869,6 +1958,69 @@ async def api_panel_server_inbounds(server_id: int, admin=Depends(require_permis
     except PanelError as e:
         raise HTTPException(400, str(e))
     return inbounds
+
+
+@app.post("/api/panel-servers/{server_id}/xui-config")
+async def api_set_panel_server_xui_config(server_id: int, body: PanelServerXuiConfigBody, admin=Depends(require_permission("panels"))):
+    """تکمیل ساخت سرور برای پنل‌های نیازمند «آدرس پایه‌ی Subscription» (3X-UI/Hiddify)."""
+    server = db.get_panel_server(server_id)
+    if not server:
+        raise HTTPException(404, "یافت نشد.")
+    if server["panel_type"] not in SUB_BASE_URL_PANEL_TYPES:
+        raise HTTPException(400, "این سرور به این تنظیمات نیاز ندارد.")
+    if server["panel_type"] in INBOUND_SELECT_PANEL_TYPES and not body.inbound_id:
+        raise HTTPException(400, "انتخاب inbound برای این نوع پنل الزامی است.")
+    url = body.sub_base_url.strip()
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(400, "آدرس Subscription باید با http:// یا https:// شروع شود.")
+    db.update_panel_server(server_id, xui_inbound_id=body.inbound_id, xui_sub_base_url=url)
+    db.log_admin_action(admin["id"], "panel_update", f"xui-config سرور #{server_id} (پنل وب)", "panel", server_id)
+    return {"ok": True}
+
+
+@app.post("/api/panel-servers/{server_id}/template")
+async def api_set_panel_server_template(server_id: int, body: PanelServerTemplateBody, admin=Depends(require_permission("panels"))):
+    """گرفتن/به‌روزرسانی قالب (group_ids/proxy_settings) از روی یک کاربر نمونه‌ی
+    دیگر روی پنل - برای پنل‌های خانواده‌ی PasarGuard/Marzban/Marzneshin."""
+    server = db.get_panel_server(server_id)
+    if not server:
+        raise HTTPException(404, "یافت نشد.")
+    try:
+        provider = get_provider(server)
+        template = await provider.fetch_template_from_user(body.template_username.strip())
+    except PanelError as e:
+        raise HTTPException(400, str(e))
+    db.update_panel_server(
+        server_id, group_ids=json.dumps(template["group_ids"]),
+        proxy_settings=json.dumps(template["proxy_settings"]), template_username=body.template_username.strip(),
+    )
+    db.log_admin_action(admin["id"], "panel_update", f"template سرور #{server_id} (پنل وب)", "panel", server_id)
+    return {"ok": True}
+
+
+@app.post("/api/panel-servers/{server_id}/toggle")
+def api_toggle_panel_server(server_id: int, admin=Depends(require_permission("panels"))):
+    server = db.get_panel_server(server_id)
+    if not server:
+        raise HTTPException(404, "یافت نشد.")
+    db.update_panel_server(server_id, is_active=0 if server["is_active"] else 1)
+    db.log_admin_action(admin["id"], "panel_toggle", f"سرور #{server_id} (پنل وب)", "panel", server_id)
+    return {"ok": True}
+
+
+@app.post("/api/panel-servers/{server_id}/usage/{kind}")
+def api_toggle_panel_server_usage(server_id: int, kind: str, admin=Depends(require_permission("panels"))):
+    """مشخص‌کردن این‌که این سرور برای «کانفیگ شخصی» و/یا «کانفیگ تست» استفاده شود؛
+    قبلاً این کلیدها فقط از داخل ربات/مینی‌اپ قابل تنظیم بودند."""
+    if kind not in ("custom", "test"):
+        raise HTTPException(400, "نوع مصرف نامعتبر است.")
+    server = db.get_panel_server(server_id)
+    if not server:
+        raise HTTPException(404, "یافت نشد.")
+    field = "used_for_custom_config" if kind == "custom" else "used_for_test_config"
+    db.update_panel_server(server_id, **{field: 0 if server[field] else 1})
+    db.log_admin_action(admin["id"], "panel_usage_toggle", f"سرور #{server_id} | {field} (پنل وب)", "panel", server_id)
+    return {"ok": True}
 
 
 @app.put("/api/panel-servers/{server_id}")
@@ -1975,6 +2127,356 @@ class SettingBody(BaseModel):
 def api_set_setting(body: SettingBody, admin=Depends(require_permission("settings"))):
     db.set_setting(body.key, body.value)
     db.log_admin_action(admin["id"], "setting_change", f"{body.key}={body.value} (پنل وب - {admin['username']})", "setting", body.key)
+    return {"ok": True}
+
+
+# --------------------------------------------------- تنظیمات کامل فروش -----
+# این بخش‌ها قبلاً فقط از داخل ربات یا مینی‌اپ قابل تنظیم بودند و در پنل وب
+# مستقل اصلاً وجود نداشتند (رفرال، گردونه‌شانس، کریپتو، یادآوری تمدید/حجم،
+# کانفیگ تست، عضویت اجباری کانال، هشدار موجودی، بنرها). این‌جا برای هماهنگی
+# کامل با ربات و مینی‌اپ اضافه شده‌اند.
+
+
+class ReferralSettingsBody(BaseModel):
+    enabled: bool
+    percent: int
+
+
+@app.get("/api/settings/referral")
+def api_get_referral_settings(admin=Depends(require_permission("settings"))):
+    return {
+        "enabled": db.get_setting("referral_enabled", "1") == "1",
+        "percent": int(db.get_setting("referral_percent", "10") or 0),
+    }
+
+
+@app.post("/api/settings/referral")
+def api_set_referral_settings(body: ReferralSettingsBody, admin=Depends(require_permission("settings"))):
+    if body.percent < 0 or body.percent > 100:
+        raise HTTPException(400, "درصد باید بین ۰ تا ۱۰۰ باشد.")
+    db.set_setting("referral_enabled", "1" if body.enabled else "0")
+    db.set_setting("referral_percent", str(body.percent))
+    db.log_admin_action(admin["id"], "setting_change", f"referral_percent={body.percent} (پنل وب - {admin['username']})", "setting", "referral")
+    return {"ok": True}
+
+
+class WheelSettingsBody(BaseModel):
+    enabled: bool
+    win_percent: int
+    prizes: list[int]
+    expiry_hours: int
+    cooldown_hours: int
+
+
+@app.get("/api/settings/wheel")
+def api_get_wheel_settings(admin=Depends(require_permission("settings"))):
+    return db.get_wheel_settings()
+
+
+@app.post("/api/settings/wheel")
+def api_set_wheel_settings(body: WheelSettingsBody, admin=Depends(require_permission("settings"))):
+    if body.win_percent < 0 or body.win_percent > 100:
+        raise HTTPException(400, "درصد برد باید بین ۰ تا ۱۰۰ باشد.")
+    if not body.prizes or any(p <= 0 for p in body.prizes):
+        raise HTTPException(400, "حداقل یک جایزه‌ی معتبر (بزرگ‌تر از صفر) لازم است.")
+    if body.expiry_hours <= 0 or body.cooldown_hours <= 0:
+        raise HTTPException(400, "مقادیر ساعت باید بزرگ‌تر از صفر باشند.")
+    db.set_setting("wheel_enabled", "1" if body.enabled else "0")
+    db.set_setting("wheel_win_percent", str(body.win_percent))
+    db.set_wheel_prizes(body.prizes)
+    db.set_setting("wheel_code_expiry_hours", str(body.expiry_hours))
+    db.set_setting("wheel_cooldown_hours", str(body.cooldown_hours))
+    db.log_admin_action(admin["id"], "setting_change", f"wheel updated (پنل وب - {admin['username']})", "setting", "wheel")
+    return {"ok": True}
+
+
+class CryptoSettingsBody(BaseModel):
+    enabled: bool
+    usd_to_toman_rate: int
+
+
+def _resolve_plisio_key_web() -> str:
+    import crypto_payment
+    return crypto_payment.resolve_plisio_key(db)
+
+
+@app.get("/api/settings/crypto")
+def api_get_crypto_settings(admin=Depends(require_permission("settings"))):
+    import crypto_payment
+    api_key = _resolve_plisio_key_web()
+    return {
+        "enabled": db.get_setting("crypto_payment_enabled", "0") == "1",
+        "usd_to_toman_rate": int(float(db.get_setting("usd_to_toman_rate", "0") or 0)),
+        "has_own_key": bool(db.get_setting("plisio_api_key", "")),
+        "key_source": crypto_payment.resolve_plisio_key_source(db),
+        "gateway_configured": bool(api_key),
+    }
+
+
+@app.post("/api/settings/crypto")
+def api_set_crypto_settings(body: CryptoSettingsBody, admin=Depends(require_permission("settings"))):
+    if body.enabled and not _resolve_plisio_key_web():
+        raise HTTPException(400, "ابتدا کلید API درگاه Plisio باید تنظیم شود.")
+    if body.usd_to_toman_rate < 0:
+        raise HTTPException(400, "نرخ تبدیل نمی‌تواند منفی باشد.")
+    db.set_setting("crypto_payment_enabled", "1" if body.enabled else "0")
+    db.set_setting("usd_to_toman_rate", str(body.usd_to_toman_rate))
+    db.log_admin_action(admin["id"], "setting_change", "crypto settings updated (پنل وب)", "setting", "crypto")
+    return {"ok": True}
+
+
+class RenewalSettingsBody(BaseModel):
+    enabled: bool
+    days_before: int
+    discount_percent: int
+    discount_expiry_hours: int
+
+
+@app.get("/api/settings/renewal")
+def api_get_renewal_settings(admin=Depends(require_permission("settings"))):
+    return db.get_renewal_settings()
+
+
+@app.post("/api/settings/renewal")
+def api_set_renewal_settings(body: RenewalSettingsBody, admin=Depends(require_permission("settings"))):
+    if body.discount_percent < 0 or body.discount_percent > 100:
+        raise HTTPException(400, "درصد تخفیف باید بین ۰ تا ۱۰۰ باشد.")
+    if body.days_before <= 0 or body.discount_expiry_hours <= 0:
+        raise HTTPException(400, "مقادیر روز/ساعت باید بزرگ‌تر از صفر باشند.")
+    db.set_setting("renewal_reminder_enabled", "1" if body.enabled else "0")
+    db.set_setting("renewal_reminder_days_before", str(body.days_before))
+    db.set_setting("renewal_discount_percent", str(body.discount_percent))
+    db.set_setting("renewal_discount_expiry_hours", str(body.discount_expiry_hours))
+    db.log_admin_action(admin["id"], "setting_change", "renewal settings updated (پنل وب)", "setting", "renewal")
+    return {"ok": True}
+
+
+class VolumeReminderSettingsBody(BaseModel):
+    enabled: bool
+    mode: str
+    percent: int
+    gb_left: int
+    discount_percent: int
+    discount_expiry_hours: int
+
+
+@app.get("/api/settings/volume-reminder")
+def api_get_volume_reminder_settings(admin=Depends(require_permission("settings"))):
+    return db.get_volume_reminder_settings()
+
+
+@app.post("/api/settings/volume-reminder")
+def api_set_volume_reminder_settings(body: VolumeReminderSettingsBody, admin=Depends(require_permission("settings"))):
+    if body.mode not in ("percent", "gb"):
+        raise HTTPException(400, "مبنای آستانه باید percent یا gb باشد.")
+    if body.discount_percent < 0 or body.discount_percent > 100:
+        raise HTTPException(400, "درصد تخفیف باید بین ۰ تا ۱۰۰ باشد.")
+    if not (0 < body.percent < 100):
+        raise HTTPException(400, "درصد آستانه باید بین ۱ تا ۹۹ باشد.")
+    if body.gb_left <= 0:
+        raise HTTPException(400, "آستانه‌ی گیگابایت باید بزرگ‌تر از صفر باشد.")
+    if body.discount_expiry_hours <= 0:
+        raise HTTPException(400, "اعتبار کد تخفیف باید بزرگ‌تر از صفر باشد.")
+    db.set_setting("volume_reminder_enabled", "1" if body.enabled else "0")
+    db.set_setting("volume_reminder_mode", body.mode)
+    db.set_setting("volume_reminder_percent", str(body.percent))
+    db.set_setting("volume_reminder_gb_left", str(body.gb_left))
+    db.set_setting("volume_discount_percent", str(body.discount_percent))
+    db.set_setting("volume_discount_expiry_hours", str(body.discount_expiry_hours))
+    db.log_admin_action(admin["id"], "setting_change", "volume reminder settings updated (پنل وب)", "setting", "volume_reminder")
+    return {"ok": True}
+
+
+class TestConfigSettingsBody(BaseModel):
+    enabled: bool
+    panel_volume_gb: int
+    panel_duration_days: int
+
+
+@app.get("/api/settings/test-config")
+def api_get_test_config_settings(admin=Depends(require_permission("settings"))):
+    return {
+        "enabled": db.get_setting("test_enabled", "1") == "1",
+        "panel_volume_gb": int(db.get_setting("test_config_panel_volume_gb", "1") or 1),
+        "panel_duration_days": int(db.get_setting("test_config_panel_duration_days", "1") or 1),
+        "bank_stock": db.count_available_test_configs(),
+        "panel_server": (lambda s: {"id": s["id"], "name": s["name"]} if s else None)(db.get_panel_server_for_usage("test_config")),
+    }
+
+
+@app.post("/api/settings/test-config")
+def api_set_test_config_settings(body: TestConfigSettingsBody, admin=Depends(require_permission("settings"))):
+    if body.panel_volume_gb <= 0 or body.panel_duration_days <= 0:
+        raise HTTPException(400, "حجم و مدت باید بزرگ‌تر از صفر باشند.")
+    db.set_setting("test_enabled", "1" if body.enabled else "0")
+    db.set_setting("test_config_panel_volume_gb", str(body.panel_volume_gb))
+    db.set_setting("test_config_panel_duration_days", str(body.panel_duration_days))
+    db.log_admin_action(admin["id"], "setting_change", "test config settings updated (پنل وب)", "setting", "test_config")
+    return {"ok": True}
+
+
+@app.post("/api/settings/test-config/reset-all")
+def api_reset_all_test_configs(admin=Depends(require_permission("settings"))):
+    """معادل «بازنشانی کانفیگ تست برای همه» در ربات: امکان دریافت مجدد کانفیگ تست برای همه‌ی کاربران."""
+    count = db.reset_all_test_usage()
+    db.log_admin_action(admin["id"], "test_config_reset_all", f"{count} کاربر (پنل وب - {admin['username']})", "setting", "test_config")
+    return {"ok": True, "count": count}
+
+
+class ForceJoinSettingsBody(BaseModel):
+    enabled: bool
+    channel: str = ""
+
+
+@app.get("/api/settings/force-join")
+def api_get_force_join_settings(admin=Depends(require_permission("settings"))):
+    return db.get_force_join_settings()
+
+
+@app.post("/api/settings/force-join")
+def api_set_force_join_settings(body: ForceJoinSettingsBody, admin=Depends(require_permission("settings"))):
+    channel = (body.channel or "").strip()
+    if body.enabled and not channel:
+        raise HTTPException(400, "برای فعال‌سازی، آیدی کانال الزامی است.")
+    db.set_setting("force_join_enabled", "1" if body.enabled else "0")
+    db.set_setting("force_join_channel", channel)
+    db.log_admin_action(admin["id"], "setting_change", f"force_join_channel={channel} (پنل وب - {admin['username']})", "setting", "force_join")
+    return {"ok": True}
+
+
+class StockAlertSettingsBody(BaseModel):
+    threshold: int
+
+
+@app.get("/api/settings/stock-alert")
+def api_get_stock_alert_settings(admin=Depends(require_permission("settings"))):
+    return {"threshold": int(db.get_setting("stock_alert_threshold", "5") or 5)}
+
+
+@app.post("/api/settings/stock-alert")
+def api_set_stock_alert_settings(body: StockAlertSettingsBody, admin=Depends(require_permission("settings"))):
+    if body.threshold < 0:
+        raise HTTPException(400, "آستانه نمی‌تواند منفی باشد.")
+    db.set_setting("stock_alert_threshold", str(body.threshold))
+    db.log_admin_action(admin["id"], "setting_change", f"stock_alert_threshold={body.threshold} (پنل وب - {admin['username']})", "setting", "stock_alert")
+    return {"ok": True}
+
+
+# ------------------------------------------------------------------ بنرها --
+
+
+class BannerItemBody(BaseModel):
+    text: str
+    image_url: Optional[str] = None
+    enabled: bool = True
+
+
+class BannersUpdateBody(BaseModel):
+    banners: list[BannerItemBody]
+
+
+@app.get("/api/banners")
+def api_get_banners(admin=Depends(require_permission("settings"))):
+    return db.get_banners()
+
+
+@app.post("/api/banners/upload-image")
+async def api_upload_banner_image(photo: UploadFile = File(...), admin=Depends(require_permission("settings"))):
+    if not photo.content_type or not photo.content_type.startswith("image/"):
+        raise HTTPException(400, "فقط فایل تصویری مجاز است.")
+    content = await photo.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(400, "حجم تصویر نباید بیشتر از ۲ مگابایت باشد.")
+    ext = os.path.splitext(photo.filename or "")[1].lower() or ".jpg"
+    if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+        ext = ".jpg"
+    fname = f"banner_{int(time.time()*1000)}{ext}"
+    dest_dir = os.path.join(BASE_DIR, "static", "uploads", "banners")
+    os.makedirs(dest_dir, exist_ok=True)
+    with open(os.path.join(dest_dir, fname), "wb") as f:
+        f.write(content)
+    return {"url": f"/static/uploads/banners/{fname}"}
+
+
+@app.post("/api/banners")
+def api_save_banners(body: BannersUpdateBody, admin=Depends(require_permission("settings"))):
+    if len(body.banners) > 20:
+        raise HTTPException(400, "حداکثر ۲۰ بنر مجاز است.")
+    clean = []
+    for b in body.banners:
+        text = (b.text or "").strip()
+        if not text:
+            continue
+        clean.append({"text": text, "image_url": b.image_url, "enabled": bool(b.enabled)})
+    db.set_banners(clean)
+    db.log_admin_action(admin["id"], "setting_change", f"{len(clean)} بنر ذخیره شد (پنل وب - {admin['username']})", "setting", "banners")
+    return {"ok": True, "banners": clean}
+
+
+# --------------------------------------------- نمایندگان اعتباری (Credit) --
+# توجه: این قابلیت از قبل در همین پنل زیر مسیر /api/resellers پیاده‌سازی شده
+# بود (adjust credit/status/panel/log/cohort/orphans) - همان‌جا کامل‌تر هم
+# هست (شامل آمار فروش و purge). چیزی این‌جا اضافه نشد تا دو سیستم موازی
+# ساخته نشود؛ گپ واقعی فقط در مینی‌اپ بود که در miniapp/server.py اضافه شد.
+
+
+# ------------------------------------------------------------- منوی قیمت‌گذاری بازه‌ای و تنظیمات کانفیگ شخصی --
+# معادل adm_pricing_tiers / تنظیمات custom_config در ربات و مینی‌اپ؛ در پنل
+# وب مستقل اصلاً وجود نداشت.
+
+
+class CustomConfigSettingsBody(BaseModel):
+    enabled: bool
+    min_gb: int
+    max_gb: int
+    duration_days: int
+
+
+@app.get("/api/custom-config/settings")
+def api_get_custom_config_settings(admin=Depends(require_permission("panels"))):
+    return db.get_custom_config_settings()
+
+
+@app.post("/api/custom-config/settings")
+def api_set_custom_config_settings(body: CustomConfigSettingsBody, admin=Depends(require_permission("panels"))):
+    if body.min_gb <= 0 or body.max_gb <= 0 or body.min_gb > body.max_gb:
+        raise HTTPException(400, "بازه‌ی حجم نامعتبر است.")
+    if body.duration_days <= 0:
+        raise HTTPException(400, "مدت باید بزرگ‌تر از صفر باشد.")
+    db.set_setting("custom_config_enabled", "1" if body.enabled else "0")
+    db.set_setting("custom_config_min_gb", str(body.min_gb))
+    db.set_setting("custom_config_max_gb", str(body.max_gb))
+    db.set_setting("custom_config_duration_days", str(body.duration_days))
+    db.log_admin_action(admin["id"], "setting_change", "custom config settings updated (پنل وب)", "setting", "custom_config")
+    return {"ok": True}
+
+
+@app.get("/api/custom-config/pricing-tiers")
+def api_get_pricing_tiers(admin=Depends(require_permission("panels"))):
+    return rows_to_list(db.get_pricing_tiers())
+
+
+class PricingTierBody(BaseModel):
+    from_gb: int
+    to_gb: Optional[int] = None
+    price_per_gb: int
+
+
+@app.post("/api/custom-config/pricing-tiers")
+def api_add_pricing_tier(body: PricingTierBody, admin=Depends(require_permission("panels"))):
+    if body.from_gb < 0 or body.price_per_gb <= 0:
+        raise HTTPException(400, "مقادیر نامعتبر است.")
+    if body.to_gb is not None and body.to_gb <= body.from_gb:
+        raise HTTPException(400, "سقف بازه باید بزرگ‌تر از کف بازه باشد.")
+    tier_id = db.add_pricing_tier(body.from_gb, body.to_gb, body.price_per_gb)
+    db.log_admin_action(admin["id"], "pricing_tier_add", f"{body.from_gb}-{body.to_gb} = {body.price_per_gb} (پنل وب)")
+    return {"id": tier_id}
+
+
+@app.delete("/api/custom-config/pricing-tiers/{tier_id}")
+def api_delete_pricing_tier(tier_id: int, admin=Depends(require_permission("panels"))):
+    db.delete_pricing_tier(tier_id)
+    db.log_admin_action(admin["id"], "pricing_tier_delete", str(tier_id), "setting", "pricing_tier")
     return {"ok": True}
 
 
