@@ -57,6 +57,7 @@ from panel_providers import (
 )
 from reseller_auto_provision import provision_auto_config, provision_test_config, ProvisionError
 from direct_panel_provision import provision_direct, ProvisionError as DirectProvisionError
+from admin_panel.telegram_notify import send_message as _tg_notify, fetch_telegram_file as _tg_fetch_file
 
 app = FastAPI(title="V2Ray Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -213,6 +214,79 @@ def require_owner(auth=Depends(get_verified_user)):
     if not db.is_owner(tg_id):
         raise HTTPException(status_code=403, detail="این بخش فقط برای مالک بات در دسترس است.")
     return auth
+
+
+# ---------------------------------------------------------------------------
+# عضویت اجباری در کانال - هماهنگ با force_join.py که در ربات اصلی اجرا می‌شود.
+# در ربات این چک قبل از هر هندلر (میدل‌ور) اجرا می‌شود؛ این‌جا هم باید همان
+# منطق قبل از هر اکشن نوشتنی (خرید/تاپ‌آپ/کانفیگ تست/گردونه) اجرا شود تا
+# کاربر نتواند صرفاً با استفاده از مینی‌اپ این محدودیت را دور بزند.
+async def _is_channel_member_http(bot_token: str, channel: str, tg_id: int) -> bool:
+    """مثل force_join.is_channel_member ولی بدون وابستگی به شیء Bot آیوگرم
+    (چون این پروسه‌ی fastapi جدا از پروسه‌ی بات است)؛ fail-open در صورت خطا."""
+    if not bot_token:
+        return True
+    url = f"https://api.telegram.org/bot{bot_token}/getChatMember"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, params={"chat_id": channel, "user_id": tg_id},
+                timeout=aiohttp.ClientTimeout(total=8),
+            ) as resp:
+                data = await resp.json()
+    except Exception:
+        logging.getLogger("miniapp.forcejoin").exception("بررسی عضویت کانال ناموفق بود.")
+        return True
+    if not data.get("ok"):
+        return True
+    status = (data.get("result") or {}).get("status")
+    return status not in ("left", "kicked")
+
+
+async def _force_join_check(tg_id: int, db: Database, tenant: "Tenant"):
+    """اگر عضویت لازم باشد و کاربر عضو نباشد، خطای ۴۰۳ با جزئیات کانال می‌دهد."""
+    settings = db.get_force_join_settings()
+    if not settings.get("enabled") or not settings.get("channel"):
+        return
+    if db.is_admin(tg_id):
+        return
+    member = await _is_channel_member_http(tenant.bot_token, settings["channel"], tg_id)
+    if member:
+        return
+    channel_display = str(settings["channel"]).lstrip("@")
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": "force_join",
+            "message": "برای ادامه، ابتدا باید در کانال زیر عضو شوید.",
+            "channel": settings["channel"],
+            "join_link": f"https://t.me/{channel_display}",
+        },
+    )
+
+
+async def require_joined(auth=Depends(get_verified_user)):
+    """مثل get_verified_user، به‌علاوه‌ی چک عضویت اجباری کانال - برای همه‌ی
+    اکشن‌های نوشتنی/خرید (سفارش، تاپ‌آپ، کانفیگ تست، گردونه، کانفیگ شخصی)."""
+    tg_id, db, tenant = auth
+    await _force_join_check(tg_id, db, tenant)
+    return auth
+
+
+@app.get("/api/force-join-status")
+async def api_force_join_status(auth=Depends(get_verified_user)):
+    """فرانت قبل از نمایش دکمه‌های خرید، این را چک می‌کند تا در صورت لزوم
+    بنر عضویت در کانال را نشان دهد (هم‌تراز با رفتار ربات اصلی)."""
+    tg_id, db, tenant = auth
+    settings = db.get_force_join_settings()
+    if not settings.get("enabled") or not settings.get("channel") or db.is_admin(tg_id):
+        return {"required": False, "member": True}
+    member = await _is_channel_member_http(tenant.bot_token, settings["channel"], tg_id)
+    channel_display = str(settings["channel"]).lstrip("@")
+    return {
+        "required": True, "member": member,
+        "channel": settings["channel"], "join_link": f"https://t.me/{channel_display}",
+    }
 
 
 async def get_bot_username(tenant: Tenant) -> str:
@@ -398,6 +472,145 @@ async def api_delete_custom_config(custom_config_id: int, auth=Depends(get_verif
     return {"status": "ok"}
 
 
+# ---------------------------------------------------------------------------
+# ساخت کانفیگ شخصی (اتصال مستقیم به پنل VPN) - معادل CustomConfigFlow ربات؛
+# قبلاً این‌جا فقط GET/DELETE بود (کاربر فقط می‌توانست کانفیگ‌های ساخته‌شده در
+# ربات را ببیند/حذف کند). این endpoint ساخت واقعی کانفیگ جدید را هم اضافه
+# می‌کند تا کاربر برای این کار مجبور به رفتن سراغ ربات نباشد.
+# همچنین «پنل نمایندگی اعتباری» (ساخت رایگان از استخر گیگ نماینده) را هم
+# اگر کاربر reseller باشد پشتیبانی می‌کند (use_credit=True).
+# ---------------------------------------------------------------------------
+
+@app.get("/api/custom-config/info")
+def api_custom_config_info(auth=Depends(get_verified_user)):
+    tg_id, db, tenant = auth
+    settings = db.get_custom_config_settings()
+    tiers = db.get_pricing_tiers()
+    server = db.get_panel_server_for_usage("custom_config")
+    is_reseller = db.is_reseller(tg_id)
+    reseller_credit = db.get_reseller_credit(tg_id) if is_reseller else 0
+    reseller_server = db.get_reseller_panel(tg_id) if is_reseller else None
+    return {
+        "enabled": settings["enabled"] and bool(server) and bool(tiers)
+        and bool(db.is_full_access_bot(not tenant.tenant_id)),
+        "min_gb": settings["min_gb"], "max_gb": settings["max_gb"],
+        "duration_days": settings["duration_days"],
+        "tiers": [
+            {"from_gb": t["from_gb"], "to_gb": t["to_gb"], "price_per_gb": t["price_per_gb"]}
+            for t in tiers
+        ],
+        "wallet_credit": db.get_wallet_credit(tg_id),
+        "is_reseller": is_reseller,
+        "reseller_credit_gb": reseller_credit,
+        "reseller_available": is_reseller and reseller_credit > 0 and bool(reseller_server),
+        "crypto_enabled": db.get_setting("crypto_payment_enabled", "0") == "1"
+        and bool(_resolve_plisio_key(db)) and bool(API_BASE_URL),
+        "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
+    }
+
+
+class CustomConfigPurchase(BaseModel):
+    username: str
+    volume_gb: int
+    use_credit: bool = False  # True یعنی از اعتبار گیگ نمایندگی (رایگان) ساخته شود
+
+
+def _valid_custom_username(username: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z0-9_]{3,20}", username or ""))
+
+
+@app.post("/api/custom-configs")
+async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(require_joined)):
+    tg_id, db, tenant = auth
+    username = (body.username or "").strip()
+    if not _valid_custom_username(username):
+        raise HTTPException(status_code=400, detail="نام کاربری نامعتبر است. فقط حروف انگلیسی، عدد و آندرلاین، بین ۳ تا ۲۰ کاراکتر.")
+    if db.is_custom_username_taken(username):
+        raise HTTPException(status_code=400, detail="این نام کاربری قبلاً استفاده شده است.")
+
+    # --- مسیر نمایندگی اعتباری: رایگان از استخر حجم خودِ نماینده ---
+    if body.use_credit:
+        if not db.is_reseller(tg_id):
+            raise HTTPException(status_code=403, detail="شما نماینده نیستید.")
+        credit = db.get_reseller_credit(tg_id)
+        if body.volume_gb <= 0 or body.volume_gb > credit:
+            raise HTTPException(status_code=400, detail=f"اعتبار شما کافی نیست. اعتبار باقی‌مانده: {credit:,} گیگ.")
+        server = db.get_reseller_panel(tg_id)
+        if not server or not server["is_active"]:
+            raise HTTPException(status_code=400, detail="سرور نمایندگی در دسترس نیست.")
+        duration_days = db.get_custom_config_settings()["duration_days"]
+        try:
+            provider = get_provider(server)
+            result = await provider.create_user(username, body.volume_gb, duration_days)
+        except PanelUsernameTakenError:
+            raise HTTPException(status_code=409, detail="این نام کاربری روی پنل تکراری است.")
+        except PanelError as e:
+            raise HTTPException(status_code=502, detail=f"خطا در ساخت کانفیگ: {e}")
+        db.adjust_reseller_credit(tg_id, -body.volume_gb, reason=f"ساخت کانفیگ «{result.username}» (مینی‌اپ)")
+        db.add_custom_config(
+            tg_id, server["id"], result.username, body.volume_gb, duration_days,
+            result.subscription_url, source="reseller",
+        )
+        return {
+            "status": "approved", "link": result.subscription_url,
+            "reseller_credit_left": db.get_reseller_credit(tg_id),
+        }
+
+    # --- مسیر خرید عادی (پرداخت از کیف‌پول/کارت/کریپتو) ---
+    settings = db.get_custom_config_settings()
+    if not settings["enabled"] or not db.is_full_access_bot(not tenant.tenant_id):
+        raise HTTPException(status_code=400, detail="این بخش در حال حاضر غیرفعال است.")
+    if body.volume_gb < settings["min_gb"] or body.volume_gb > settings["max_gb"]:
+        raise HTTPException(status_code=400, detail=f"حجم باید بین {settings['min_gb']} تا {settings['max_gb']} گیگابایت باشد.")
+    price = db.calc_custom_config_price(body.volume_gb)
+    if price <= 0:
+        raise HTTPException(status_code=400, detail="قیمت‌گذاری این بخش هنوز تنظیم نشده است.")
+    server = db.get_panel_server_for_usage("custom_config")
+    if not server or not server["is_active"]:
+        raise HTTPException(status_code=400, detail="در حال حاضر سروری برای ساخت کانفیگ شخصی فعال نیست.")
+
+    user_row = db.get_user(tg_id)
+    if user_row and user_row["is_blocked"]:
+        raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
+
+    wallet_credit = db.get_wallet_credit(tg_id)
+    wallet_used = min(wallet_credit, price)
+    if wallet_used > 0:
+        db.add_wallet_credit(tg_id, -wallet_used)
+
+    order_id = db.create_custom_config_order(
+        tg_id, body.volume_gb, username, server["id"], base_price=price, wallet_used=wallet_used,
+    )
+    order = db.get_order(order_id)
+
+    if order["final_price"] <= 0:
+        try:
+            provider = get_provider(server)
+            result = await provider.create_user(username, body.volume_gb, settings["duration_days"])
+        except Exception as e:
+            db.reject_order(order_id)
+            if wallet_used:
+                db.add_wallet_credit(tg_id, wallet_used)
+            raise HTTPException(status_code=502, detail=f"خطا در ساخت کانفیگ روی پنل: {e}")
+        db.approve_custom_config_order(order_id)
+        db.add_custom_config(
+            tg_id, server["id"], result.username, body.volume_gb, settings["duration_days"],
+            result.subscription_url, order_id=order_id, source="custom_config",
+        )
+        try:
+            db.reward_referrer_if_first_purchase(tg_id, price)
+        except Exception:
+            pass
+        return {"status": "approved", "order_id": order_id, "link": result.subscription_url}
+
+    return {
+        "status": "pending_payment", "order_id": order_id, "final_price": order["final_price"],
+        "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
+        "crypto_enabled": db.get_setting("crypto_payment_enabled", "0") == "1"
+        and bool(_resolve_plisio_key(db)) and bool(API_BASE_URL),
+    }
+
+
 @app.get("/api/catalog")
 def api_catalog(auth=Depends(get_verified_user)):
     tg_id, db, _ = auth
@@ -450,7 +663,7 @@ def api_test_config_status(auth=Depends(get_verified_user)):
 
 
 @app.post("/api/test-config/claim")
-async def api_test_config_claim(auth=Depends(get_verified_user)):
+async def api_test_config_claim(auth=Depends(require_joined)):
     tg_id, db, tenant = auth
     if db.get_setting("test_enabled", "1") != "1":
         raise HTTPException(status_code=400, detail="در حال حاضر امکان دریافت کانفیگ تست غیرفعال است.")
@@ -813,7 +1026,7 @@ class TopupCreate(BaseModel):
 
 
 @app.post("/api/orders")
-async def api_create_order(body: OrderCreate, auth=Depends(get_verified_user)):
+async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
     tg_id, db, tenant = auth
     user_row = db.get_user(tg_id)
     if user_row and user_row["is_blocked"]:
@@ -945,17 +1158,21 @@ async def _create_crypto_invoice_for(
 
 
 @app.post("/api/orders/{order_id}/crypto-invoice")
-async def api_order_crypto_invoice(order_id: int, auth=Depends(get_verified_user)):
+async def api_order_crypto_invoice(order_id: int, auth=Depends(require_joined)):
     tg_id, db, tenant = auth
     order = db.get_order(order_id)
     if not order or order["user_id"] != tg_id:
         raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
-    product = db.get_product(order["product_id"])
+    if order["is_custom_config"]:
+        order_label = f"کانفیگ شخصی #{order_id} - {order['custom_username']}"
+    else:
+        product = db.get_product(order["product_id"])
+        order_label = f"سفارش #{order_id} - {product['name'] if product else ''}"
     result = await _create_crypto_invoice_for(
         db, tenant, tg_id, "order", order_id, order["final_price"],
-        order_name=f"سفارش #{order_id} - {product['name'] if product else ''}",
+        order_name=order_label,
     )
     return result
 
@@ -965,7 +1182,7 @@ class CryptoWalletInvoiceRequest(BaseModel):
 
 
 @app.post("/api/wallet/crypto-invoice")
-async def api_wallet_crypto_invoice(body: CryptoWalletInvoiceRequest, auth=Depends(get_verified_user)):
+async def api_wallet_crypto_invoice(body: CryptoWalletInvoiceRequest, auth=Depends(require_joined)):
     tg_id, db, tenant = auth
     topup = db.get_topup(body.topup_id)
     if not topup or topup["user_id"] != tg_id:
@@ -1128,7 +1345,7 @@ def api_wheel_status(auth=Depends(get_verified_user)):
 
 
 @app.post("/api/wheel/spin")
-def api_wheel_spin(auth=Depends(get_verified_user)):
+def api_wheel_spin(auth=Depends(require_joined)):
     tg_id, db, _ = auth
     settings = db.get_wheel_settings()
     if not settings["enabled"]:
@@ -1151,7 +1368,7 @@ def api_wheel_spin(auth=Depends(get_verified_user)):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/wallet/topup-request")
-def api_topup_request(body: TopupCreate, auth=Depends(get_verified_user)):
+def api_topup_request(body: TopupCreate, auth=Depends(require_joined)):
     tg_id, db, _ = auth
     user_row = db.get_user(tg_id)
     if user_row and user_row["is_blocked"]:
@@ -1239,14 +1456,18 @@ async def api_order_receipt(
     if len(photo_bytes) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="حجم عکس بیش از حد مجاز است.")
 
-    product = db.get_product(order["product_id"])
     user = db.get_user(tg_id)
     qty = order["quantity"] or 1
+    if order["is_custom_config"]:
+        product_line = f"🛠 کانفیگ شخصی «{order['custom_username']}» ({order['custom_volume_gb']} گیگ)\n"
+    else:
+        product = db.get_product(order["product_id"])
+        product_line = f"📦 محصول: {product['name'] if product else '---'}" + (f" × {qty}\n" if qty > 1 else "\n")
     caption = (
         f"🧾 سفارش #{order_id}\n"
         f"👤 کاربر: {(user['first_name'] if user else '') or ''} (@{(user['username'] if user else '') or '---'})\n"
         f"🆔 آیدی عددی: {tg_id}\n"
-        f"📦 محصول: {product['name'] if product else '---'}" + (f" × {qty}\n" if qty > 1 else "\n") +
+        f"{product_line}"
         f"💰 قیمت پایه: {order['base_price']:,} تومان\n"
     )
     if order["discount_amount"]:
@@ -1958,6 +2179,243 @@ def _reseller_miniapp_link(reseller_row) -> Optional[str]:
     b_value = reseller_row["link_slug"] or str(reseller_row["id"])
     sep = "&" if "?" in MINIAPP_URL else "?"
     return f"{MINIAPP_URL}{sep}b={b_value}"
+
+
+# ---------------------------------------------------------------------------
+# نمایندگان اعتباری (Credit Resellers) - معادل adm_credit_resellers_menu/
+# adm_cres_* در ربات؛ قبلاً این بخش فقط داخل ربات در دسترس بود.
+# متمایز از بخش «resellers» زیر که مربوط به بات‌های نمایندگی زیرمجموعه (white-label) است.
+# ---------------------------------------------------------------------------
+
+def _credit_reseller_to_dict(user_id: int, db: Database) -> dict:
+    user = db.get_user(user_id)
+    return {
+        "telegram_id": user_id,
+        "first_name": user["first_name"] if user else None,
+        "username": user["username"] if user else None,
+        "is_reseller": db.is_reseller(user_id),
+        "credit_gb": db.get_reseller_credit(user_id),
+        "panel_server_id": user["reseller_panel_id"] if user else None,
+    }
+
+
+@app.get("/api/admin/credit-resellers")
+def api_admin_list_credit_resellers(auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    rows = db.get_resellers()
+    return [
+        {
+            "telegram_id": r["telegram_id"], "first_name": r["first_name"],
+            "username": r["username"], "credit_gb": r["reseller_credit_gb"],
+            "panel_server_id": r["reseller_panel_id"], "is_reseller": True,
+        }
+        for r in rows
+    ]
+
+
+@app.get("/api/admin/credit-resellers/{telegram_id}")
+def api_admin_get_credit_reseller(telegram_id: int, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    user = db.get_user(telegram_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="این کاربر هنوز با /start بات را استارت نکرده است.")
+    info = _credit_reseller_to_dict(telegram_id, db)
+    info["credit_log"] = [
+        {"delta_gb": l["delta_gb"], "reason": l["reason"], "created_at": l["created_at"]}
+        for l in db.get_reseller_credit_log(telegram_id)
+    ]
+    return info
+
+
+@app.post("/api/admin/credit-resellers/{telegram_id}/toggle")
+def api_admin_toggle_credit_reseller(telegram_id: int, auth=Depends(require_senior_admin)):
+    admin_id, db, _ = auth
+    if not db.get_user(telegram_id):
+        raise HTTPException(status_code=404, detail="این کاربر هنوز با /start بات را استارت نکرده است.")
+    db.set_reseller_status(telegram_id, not db.is_reseller(telegram_id))
+    db.log_admin_action(admin_id, "reseller_credit_toggle", f"کاربر {telegram_id} (مینی‌اپ)")
+    return _credit_reseller_to_dict(telegram_id, db)
+
+
+class CreditAdjust(BaseModel):
+    delta_gb: int
+    reason: Optional[str] = None
+
+
+@app.post("/api/admin/credit-resellers/{telegram_id}/credit")
+def api_admin_adjust_credit_reseller(telegram_id: int, body: CreditAdjust, auth=Depends(require_senior_admin)):
+    admin_id, db, _ = auth
+    if not db.get_user(telegram_id):
+        raise HTTPException(status_code=404, detail="این کاربر هنوز با /start بات را استارت نکرده است.")
+    if body.delta_gb == 0:
+        raise HTTPException(status_code=400, detail="مقدار تغییر نمی‌تواند صفر باشد.")
+    db.adjust_reseller_credit(
+        telegram_id, body.delta_gb, admin_id=admin_id,
+        reason=body.reason or "تنظیم دستی توسط ادمین (مینی‌اپ)",
+    )
+    db.log_admin_action(admin_id, "reseller_credit_adjust", f"کاربر {telegram_id} | {body.delta_gb:+} گیگ (مینی‌اپ)")
+    return _credit_reseller_to_dict(telegram_id, db)
+
+
+class CreditResellerPanelSet(BaseModel):
+    panel_server_id: Optional[int] = None
+
+
+@app.post("/api/admin/credit-resellers/{telegram_id}/panel")
+def api_admin_set_credit_reseller_panel(telegram_id: int, body: CreditResellerPanelSet, auth=Depends(require_senior_admin)):
+    admin_id, db, _ = auth
+    if not db.get_user(telegram_id):
+        raise HTTPException(status_code=404, detail="این کاربر هنوز با /start بات را استارت نکرده است.")
+    if body.panel_server_id and not db.get_panel_server(body.panel_server_id):
+        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
+    db.set_reseller_panel(telegram_id, body.panel_server_id)
+    db.log_admin_action(admin_id, "reseller_credit_panel_set", f"کاربر {telegram_id} (مینی‌اپ)")
+    return _credit_reseller_to_dict(telegram_id, db)
+
+
+# ---------------------------------------------------------------------------
+# درخواست‌های نمایندگی (Reseller Requests) - معادل resreq_* در ربات و
+# /api/reseller-requests در پنل وب مستقل؛ قبلاً در مینی‌اپ اصلاً وجود نداشت.
+# فقط در بات اصلی معنا دارد (کاربر با آن صاحب یک بات نمایندگی زیرمجموعه‌ی
+# جدید می‌شود)، بنابراین require_main_admin.
+# ---------------------------------------------------------------------------
+
+def _set_bot_fsm_state(chat_id: int, state: Optional[str], data: Optional[dict] = None) -> bool:
+    """مستقیم روی فایل SQLite استوریج FSM بات اصلی می‌نویسد؛ همان تکنیکی که
+    admin_panel/server.py برای هدایت کاربر به مرحله‌ی بعدی فلوی نمایندگی
+    استفاده می‌کند (چون این پروسه هم Dispatcher زنده‌ی بات را در اختیار ندارد)."""
+    try:
+        bot_id = int(BOT_TOKEN.split(":")[0])
+        conn = sqlite3.connect(f"{DB_PATH}.fsm.sqlite3", timeout=10)
+        try:
+            conn.execute("PRAGMA busy_timeout=4000")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fsm_storage (
+                    bot_id INTEGER NOT NULL, chat_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+                    thread_id INTEGER, business_connection_id TEXT, destiny TEXT NOT NULL DEFAULT 'default',
+                    state TEXT, data TEXT,
+                    PRIMARY KEY (bot_id, chat_id, user_id, thread_id, business_connection_id, destiny)
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO fsm_storage "
+                "(bot_id, chat_id, user_id, thread_id, business_connection_id, destiny, state, data) "
+                "VALUES (?, ?, ?, 0, '', 'default', ?, ?) "
+                "ON CONFLICT (bot_id, chat_id, user_id, thread_id, business_connection_id, destiny) "
+                "DO UPDATE SET state=excluded.state, data=excluded.data",
+                (bot_id, chat_id, chat_id, state, json.dumps(data or {}, ensure_ascii=False)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return True
+    except Exception:
+        logging.getLogger("miniapp.fsm").exception("تنظیم FSM state بات اصلی برای %s ناموفق بود.", chat_id)
+        return False
+
+
+@app.get("/api/admin/reseller-requests")
+def api_admin_reseller_requests(status: Optional[str] = None, auth=Depends(require_main_admin)):
+    _, db, _ = auth
+    out = []
+    for r in db.list_reseller_requests(status):
+        r = dict(r)
+        user = db.get_user(r["user_id"])
+        r["username"] = user["username"] if user else None
+        out.append(r)
+    return out
+
+
+@app.get("/api/admin/reseller-requests/{request_id}/receipt")
+async def api_admin_reseller_request_receipt(request_id: int, auth=Depends(require_main_admin)):
+    _, db, tenant = auth
+    req = db.get_reseller_request(request_id)
+    if not req or not req["receipt_file_id"]:
+        raise HTTPException(status_code=404, detail="رسیدی برای این درخواست ثبت نشده است.")
+    result = await _tg_fetch_file(tenant.bot_token, req["receipt_file_id"])
+    if not result:
+        raise HTTPException(status_code=502, detail="دریافت رسید از تلگرام ناموفق بود.")
+    content, content_type = result
+    return Response(content=content, media_type=content_type)
+
+
+class ResellerRequestQuote(BaseModel):
+    price_toman: int
+    panel_server_id: Optional[int] = None
+
+
+@app.post("/api/admin/reseller-requests/{request_id}/quote")
+async def api_admin_quote_reseller_request(request_id: int, body: ResellerRequestQuote, auth=Depends(require_main_admin)):
+    admin_id, db, tenant = auth
+    req = db.get_reseller_request(request_id)
+    if not req or req["status"] != "pending_review":
+        raise HTTPException(status_code=400, detail="این درخواست دیگر معتبر نیست.")
+    if body.price_toman <= 0:
+        raise HTTPException(status_code=400, detail="هزینه باید عددی مثبت باشد.")
+    db.quote_reseller_request(request_id, body.price_toman, body.panel_server_id, admin_id)
+    db.log_admin_action(admin_id, "reseller_request_quote", f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {body.price_toman:,} (مینی‌اپ)")
+    await _tg_notify(
+        tenant.bot_token, req["user_id"],
+        f"🏪 درخواست نمایندگی #{request_id} شما تایید شد!\n\n"
+        f"💰 هزینه‌ی نمایندگی: {body.price_toman:,} تومان\n"
+        f"📦 حجم: {req['volume_gb']:,} گیگ\n\nدر صورت موافقت از داخل بات روی «پرداخت می‌کنم» بزنید.",
+    )
+    return {"ok": True}
+
+
+@app.post("/api/admin/reseller-requests/{request_id}/approve-payment")
+async def api_admin_approve_reseller_request_payment(request_id: int, auth=Depends(require_main_admin)):
+    admin_id, db, tenant = auth
+    req = db.get_reseller_request(request_id)
+    if not req or req["status"] != "awaiting_payment_review":
+        raise HTTPException(status_code=400, detail="این درخواست دیگر معتبر نیست.")
+    db.approve_reseller_request_payment(request_id, admin_id)
+    db.log_admin_action(admin_id, "reseller_request_payment_approve", f"درخواست #{request_id} | کاربر {req['user_id']} (مینی‌اپ)")
+    _set_bot_fsm_state(req["user_id"], "ResellerRequestFlow:waiting_bot_token", {"resreq_request_id": request_id})
+    await _tg_notify(
+        tenant.bot_token, req["user_id"],
+        "✅ پرداخت شما تایید شد!\n\nحالا از داخل بات، توکن بات نماینده‌ی خودتان را ارسال کنید (همانی که از @BotFather گرفته‌اید):",
+    )
+    return {"ok": True}
+
+
+class ResellerRequestReject(BaseModel):
+    reason: str
+    kind: str = "rejected"
+
+
+@app.post("/api/admin/reseller-requests/{request_id}/reject")
+async def api_admin_reject_reseller_request(request_id: int, body: ResellerRequestReject, auth=Depends(require_main_admin)):
+    admin_id, db, tenant = auth
+    if body.kind not in ("rejected", "payment_rejected"):
+        raise HTTPException(status_code=400, detail="نوع رد نامعتبر است.")
+    req = db.get_reseller_request(request_id)
+    if not req or not db.is_reseller_request_open(req["status"]):
+        raise HTTPException(status_code=400, detail="این درخواست دیگر باز نیست.")
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="دلیل رد الزامی است.")
+    db.reject_reseller_request(request_id, body.kind, admin_id, reason)
+    db.log_admin_action(admin_id, "reseller_request_reject", f"درخواست #{request_id} | کاربر {req['user_id']} | {body.kind}: {reason} (مینی‌اپ)")
+    label = "درخواست نمایندگی" if body.kind == "rejected" else "پرداخت درخواست نمایندگی"
+    await _tg_notify(tenant.bot_token, req["user_id"], f"❌ متاسفانه {label} شما (#{request_id}) رد شد.\n\nدلیل: {reason}")
+    return {"ok": True}
+
+
+@app.post("/api/admin/reseller-requests/{request_id}/cancel")
+async def api_admin_cancel_reseller_request(request_id: int, auth=Depends(require_main_admin)):
+    admin_id, db, tenant = auth
+    req = db.get_reseller_request(request_id)
+    if not req or not db.is_reseller_request_open(req["status"]):
+        raise HTTPException(status_code=400, detail="این درخواست دیگر باز نیست.")
+    db.admin_cancel_reseller_request(request_id, admin_id)
+    if req["status"] == "awaiting_bot_info":
+        _set_bot_fsm_state(req["user_id"], None, {})
+    db.log_admin_action(admin_id, "reseller_request_admin_cancel", f"درخواست #{request_id} | کاربر {req['user_id']} (مینی‌اپ)")
+    await _tg_notify(tenant.bot_token, req["user_id"], f"⚪️ درخواست نمایندگی شما (#{request_id}) توسط مدیریت کنسل شد.")
+    return {"ok": True}
 
 
 @app.get("/api/admin/resellers")
