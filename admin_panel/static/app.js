@@ -4700,7 +4700,6 @@ const SETTINGS_GROUPS = [
   { tab: 'payment', title: '🪙 پرداخت کریپتو (Plisio)', fields: [
     { key: 'crypto_payment_enabled', label: 'فعال بودن پرداخت کریپتو', type: 'bool' },
     { key: 'plisio_api_key', label: 'کلید API درگاه Plisio', type: 'password' },
-    { key: 'usd_to_toman_rate', label: 'نرخ دلار دستی مخصوص کریپتو (fallback — جدا از نرخ عمومی بالا)', type: 'number' },
   ]},
 
   // ------------------------------------------------------ سرویس‌های ویژه
