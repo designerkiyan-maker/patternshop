@@ -4659,11 +4659,11 @@ function rateCardHtml(r) {
 const SETTINGS_TABS = [
   { key: 'content', label: '📝 محتوا و متن‌ها' },
   { key: 'payment', label: '💳 پرداخت و مالی' },
-  { key: 'marketing', label: '🎯 بازاریابی و تشویقی' },
-  { key: 'alerts', label: '🔔 یادآوری‌ها و هشدارها' },
-  { key: 'access', label: '🔐 دسترسی و امنیت' },
   { key: 'services', label: '⚙️ سرویس‌های ویژه' },
 ];
+// نکته: تنظیمات رفرال، گردونه‌شانس، کریپتو، یادآوری تمدید/حجم، کانفیگ تست خودکار،
+// عضویت اجباری و هشدار موجودی همگی به‌طور کامل‌تر در صفحه‌ی «تنظیمات فروش» هستند؛
+// اینجا تکرار نمی‌شوند تا تنظیمات فروش فقط یک مرجع داشته باشد.
 
 const SETTINGS_GROUPS = [
   // ---------------------------------------------------------- محتوا و متن‌ها
@@ -4678,17 +4678,14 @@ const SETTINGS_GROUPS = [
     { key: 'btn_buy_style', label: 'رنگ دکمه خرید کانفیگ', type: 'color' },
     { key: 'btn_test', label: 'متن دکمه کانفیگ تست', type: 'text' },
     { key: 'btn_test_style', label: 'رنگ دکمه کانفیگ تست', type: 'color' },
-    { key: 'test_enabled', label: 'نمایش دکمه کانفیگ تست', type: 'bool' },
     { key: 'btn_my_orders', label: 'متن دکمه سفارش‌های من', type: 'text' },
     { key: 'btn_my_orders_style', label: 'رنگ دکمه سفارش‌های من', type: 'color' },
     { key: 'btn_wallet', label: 'متن دکمه کیف پول', type: 'text' },
     { key: 'btn_wallet_style', label: 'رنگ دکمه کیف پول', type: 'color' },
     { key: 'btn_referral', label: 'متن دکمه زیرمجموعه‌گیری', type: 'text' },
     { key: 'btn_referral_style', label: 'رنگ دکمه زیرمجموعه‌گیری', type: 'color' },
-    { key: 'referral_enabled', label: 'نمایش دکمه زیرمجموعه‌گیری', type: 'bool' },
     { key: 'btn_wheel', label: 'متن دکمه گردونه شانس', type: 'text' },
     { key: 'btn_wheel_style', label: 'رنگ دکمه گردونه شانس', type: 'color' },
-    { key: 'wheel_enabled', label: 'نمایش دکمه گردونه شانس', type: 'bool' },
     { key: 'btn_contact', label: 'متن دکمه ارتباط با پشتیبانی', type: 'text' },
     { key: 'btn_contact_style', label: 'رنگ دکمه ارتباط با پشتیبانی', type: 'color' },
     { key: 'btn_reseller_panel', label: 'متن دکمه پنل نمایندگی (فقط برای نماینده‌ها)', type: 'text' },
@@ -4712,55 +4709,11 @@ const SETTINGS_GROUPS = [
     { key: 'card_number', label: 'شماره کارت', type: 'text' },
     { key: 'card_holder', label: 'نام صاحب کارت', type: 'text' },
   ]},
-  { tab: 'payment', title: 'پرداخت کریپتو (Plisio)', fields: [
-    { key: 'crypto_payment_enabled', label: 'فعال بودن پرداخت کریپتو', type: 'bool' },
-    { key: 'plisio_api_key', label: 'کلید API درگاه Plisio', type: 'password' },
-  ]},
   { tab: 'payment', title: 'نرخ ارز پشتیبان', fields: [
     { key: 'manual_usd_rate_toman', label: 'نرخ دلار دستی (پشتیبان — فقط وقتی همه‌ی منابع زنده شکست بخورند استفاده می‌شود)', type: 'number' },
   ]},
 
-  // -------------------------------------------------------- بازاریابی و تشویقی
-  { tab: 'marketing', title: 'زیرمجموعه‌گیری (رفرال)', fields: [
-    { key: 'referral_percent', label: 'درصد پورسانت رفرال', type: 'number' },
-  ]},
-  { tab: 'marketing', title: 'گردونه شانس', fields: [
-    { key: 'wheel_win_percent', label: 'درصد احتمال برد در هر چرخش', type: 'number' },
-    { key: 'wheel_prizes', label: 'درصدهای تخفیف ممکن (با کاما جدا کنید، مثلاً 10,20,30,50)', type: 'text' },
-    { key: 'wheel_code_expiry_hours', label: 'اعتبار کد جایزه پس از برد (ساعت)', type: 'number' },
-    { key: 'wheel_cooldown_hours', label: 'فاصله مجاز بین دو چرخش هر کاربر (ساعت)', type: 'number' },
-  ]},
-
-  // ------------------------------------------------------ یادآوری‌ها و هشدارها
-  { tab: 'alerts', title: 'آستانه هشدار موجودی', fields: [
-    { key: 'low_stock_threshold', label: 'آستانه هشدار موجودی کم', type: 'number' },
-  ]},
-  { tab: 'alerts', title: 'یادآوری تمدید سرویس', fields: [
-    { key: 'renewal_reminder_enabled', label: 'فعال بودن یادآوری', type: 'bool' },
-    { key: 'renewal_reminder_days_before', label: 'چند روز قبل از انقضا یادآوری ارسال شود', type: 'number' },
-    { key: 'renewal_discount_percent', label: 'درصد تخفیف کد تشویقی تمدید', type: 'number' },
-    { key: 'renewal_discount_expiry_hours', label: 'اعتبار کد تشویقی تمدید (ساعت)', type: 'number' },
-  ]},
-  { tab: 'alerts', title: 'یادآوری اتمام حجم', fields: [
-    { key: 'volume_reminder_enabled', label: 'فعال بودن یادآوری', type: 'bool' },
-    { key: 'volume_reminder_mode', label: 'مبنای هشدار', type: 'select', options: [['percent', 'بر اساس درصد مصرف'], ['gb', 'بر اساس حجم باقی‌مانده']] },
-    { key: 'volume_reminder_percent', label: 'درصد مصرف برای هشدار (حالت درصد)', type: 'number' },
-    { key: 'volume_reminder_gb_left', label: 'حجم باقی‌مانده برای هشدار — گیگ (حالت حجم)', type: 'number' },
-    { key: 'volume_discount_percent', label: 'درصد تخفیف کد تشویقی اتمام حجم', type: 'number' },
-    { key: 'volume_discount_expiry_hours', label: 'اعتبار کد تشویقی اتمام حجم (ساعت)', type: 'number' },
-  ]},
-
-  // ---------------------------------------------------------- دسترسی و امنیت
-  { tab: 'access', title: 'عضویت اجباری کانال', fields: [
-    { key: 'force_join_enabled', label: 'فعال بودن عضویت اجباری', type: 'bool' },
-    { key: 'force_join_channel', label: 'آیدی کانال (مثلاً ‎@mychannel)', type: 'text' },
-  ]},
-
   // ------------------------------------------------------ سرویس‌های ویژه
-  { tab: 'services', title: 'کانفیگ تست رایگان', fields: [
-    { key: 'test_config_panel_volume_gb', label: 'حجم کانفیگ تست (گیگابایت)', type: 'number' },
-    { key: 'test_config_panel_duration_days', label: 'مدت اعتبار کانفیگ تست (روز)', type: 'number' },
-  ]},
   { tab: 'services', title: 'کانفیگ شخصی/سفارشی', fields: [
     { key: 'custom_config_enabled', label: 'فعال بودن ساخت کانفیگ شخصی', type: 'bool' },
     { key: 'custom_config_min_gb', label: 'حداقل حجم مجاز (گیگ)', type: 'number' },
