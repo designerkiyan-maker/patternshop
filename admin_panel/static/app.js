@@ -342,18 +342,18 @@ const NAV = [
   { key: 'catalog', label: 'محصولات و بانک کانفیگ', icon: 'catalog', role: 'catalog', section: 'محصولات و بازاریابی' },
   { key: 'discounts', label: 'کدهای تخفیف', icon: 'discounts', role: 'discounts', section: 'محصولات و بازاریابی' },
   { key: 'broadcast', label: 'پیام همگانی', icon: 'broadcast', role: 'broadcast', section: 'محصولات و بازاریابی' },
+  { key: 'banners', label: 'بنرها', icon: 'catalog', role: 'settings', section: 'محصولات و بازاریابی' },
 
   // شبکه و همکاران
   { key: 'resellers', label: 'نمایندگی‌ها', icon: 'resellers', role: 'resellers', section: 'شبکه و همکاران' },
   { key: 'panels', label: 'پنل‌های VPN', icon: 'panels', role: 'panels', section: 'شبکه و همکاران' },
 
-  // تنظیمات و سیستم — همه‌ی موارد مرتبط با تنظیمات و نگهداری یک‌جا
+  // تنظیمات و سیستم — نگهداری، دسترسی و پیکربندی
   { key: 'settings', label: 'تنظیمات و برندینگ', icon: 'settings', role: 'settings', section: 'تنظیمات و سیستم' },
   { key: 'salessettings', label: 'تنظیمات فروش', icon: 'settings', role: 'settings', section: 'تنظیمات و سیستم' },
-  { key: 'banners', label: 'بنرها', icon: 'catalog', role: 'settings', section: 'تنظیمات و سیستم' },
+  { key: 'webadmins', label: 'کاربران پنل', icon: 'webadmins', role: 'owner', section: 'تنظیمات و سیستم' },
   { key: 'system', label: 'سیستم و نگهداری', icon: 'system', role: 'system', section: 'تنظیمات و سیستم' },
   { key: 'logs', label: 'لاگ فعالیت ادمین‌ها', icon: 'logs', role: 'system', section: 'تنظیمات و سیستم' },
-  { key: 'webadmins', label: 'کاربران پنل', icon: 'webadmins', role: 'owner', section: 'تنظیمات و سیستم' },
 
   // حساب کاربری
   { key: 'account', label: 'حساب من', icon: 'account', role: 'any', section: 'حساب کاربری' },
@@ -4659,7 +4659,9 @@ function rateCardHtml(r) {
 const SETTINGS_TABS = [
   { key: 'content', label: '📝 محتوا و متن‌ها' },
   { key: 'payment', label: '💳 پرداخت و مالی' },
-  { key: 'campaign', label: '🎯 کمپین و مشارکت' },
+  { key: 'marketing', label: '🎯 بازاریابی و تشویقی' },
+  { key: 'alerts', label: '🔔 یادآوری‌ها و هشدارها' },
+  { key: 'access', label: '🔐 دسترسی و امنیت' },
   { key: 'services', label: '⚙️ سرویس‌های ویژه' },
 ];
 
@@ -4714,38 +4716,44 @@ const SETTINGS_GROUPS = [
     { key: 'crypto_payment_enabled', label: 'فعال بودن پرداخت کریپتو', type: 'bool' },
     { key: 'plisio_api_key', label: 'کلید API درگاه Plisio', type: 'password' },
   ]},
-  { tab: 'payment', title: 'موجودی و نرخ ارز پشتیبان', fields: [
-    { key: 'low_stock_threshold', label: 'آستانه هشدار موجودی کم', type: 'number' },
+  { tab: 'payment', title: 'نرخ ارز پشتیبان', fields: [
     { key: 'manual_usd_rate_toman', label: 'نرخ دلار دستی (پشتیبان — فقط وقتی همه‌ی منابع زنده شکست بخورند استفاده می‌شود)', type: 'number' },
   ]},
 
-  // -------------------------------------------------------- کمپین و مشارکت
-  { tab: 'campaign', title: 'عضویت اجباری کانال', fields: [
-    { key: 'force_join_enabled', label: 'فعال بودن عضویت اجباری', type: 'bool' },
-    { key: 'force_join_channel', label: 'آیدی کانال (مثلاً ‎@mychannel)', type: 'text' },
-  ]},
-  { tab: 'campaign', title: 'زیرمجموعه‌گیری (رفرال)', fields: [
+  // -------------------------------------------------------- بازاریابی و تشویقی
+  { tab: 'marketing', title: 'زیرمجموعه‌گیری (رفرال)', fields: [
     { key: 'referral_percent', label: 'درصد پورسانت رفرال', type: 'number' },
   ]},
-  { tab: 'campaign', title: 'گردونه شانس', fields: [
+  { tab: 'marketing', title: 'گردونه شانس', fields: [
     { key: 'wheel_win_percent', label: 'درصد احتمال برد در هر چرخش', type: 'number' },
     { key: 'wheel_prizes', label: 'درصدهای تخفیف ممکن (با کاما جدا کنید، مثلاً 10,20,30,50)', type: 'text' },
     { key: 'wheel_code_expiry_hours', label: 'اعتبار کد جایزه پس از برد (ساعت)', type: 'number' },
     { key: 'wheel_cooldown_hours', label: 'فاصله مجاز بین دو چرخش هر کاربر (ساعت)', type: 'number' },
   ]},
-  { tab: 'campaign', title: 'یادآوری تمدید سرویس', fields: [
+
+  // ------------------------------------------------------ یادآوری‌ها و هشدارها
+  { tab: 'alerts', title: 'آستانه هشدار موجودی', fields: [
+    { key: 'low_stock_threshold', label: 'آستانه هشدار موجودی کم', type: 'number' },
+  ]},
+  { tab: 'alerts', title: 'یادآوری تمدید سرویس', fields: [
     { key: 'renewal_reminder_enabled', label: 'فعال بودن یادآوری', type: 'bool' },
     { key: 'renewal_reminder_days_before', label: 'چند روز قبل از انقضا یادآوری ارسال شود', type: 'number' },
     { key: 'renewal_discount_percent', label: 'درصد تخفیف کد تشویقی تمدید', type: 'number' },
     { key: 'renewal_discount_expiry_hours', label: 'اعتبار کد تشویقی تمدید (ساعت)', type: 'number' },
   ]},
-  { tab: 'campaign', title: 'یادآوری اتمام حجم', fields: [
+  { tab: 'alerts', title: 'یادآوری اتمام حجم', fields: [
     { key: 'volume_reminder_enabled', label: 'فعال بودن یادآوری', type: 'bool' },
     { key: 'volume_reminder_mode', label: 'مبنای هشدار', type: 'select', options: [['percent', 'بر اساس درصد مصرف'], ['gb', 'بر اساس حجم باقی‌مانده']] },
     { key: 'volume_reminder_percent', label: 'درصد مصرف برای هشدار (حالت درصد)', type: 'number' },
     { key: 'volume_reminder_gb_left', label: 'حجم باقی‌مانده برای هشدار — گیگ (حالت حجم)', type: 'number' },
     { key: 'volume_discount_percent', label: 'درصد تخفیف کد تشویقی اتمام حجم', type: 'number' },
     { key: 'volume_discount_expiry_hours', label: 'اعتبار کد تشویقی اتمام حجم (ساعت)', type: 'number' },
+  ]},
+
+  // ---------------------------------------------------------- دسترسی و امنیت
+  { tab: 'access', title: 'عضویت اجباری کانال', fields: [
+    { key: 'force_join_enabled', label: 'فعال بودن عضویت اجباری', type: 'bool' },
+    { key: 'force_join_channel', label: 'آیدی کانال (مثلاً ‎@mychannel)', type: 'text' },
   ]},
 
   // ------------------------------------------------------ سرویس‌های ویژه
