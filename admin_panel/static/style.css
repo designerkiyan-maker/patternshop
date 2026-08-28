@@ -606,6 +606,7 @@ body{ transition: background .2s ease, color .2s ease; }
 .menu-order-row:last-child{ margin-bottom:0; }
 .menu-order-row.dragging{ opacity:.55; border:1px dashed var(--primary); touch-action:none; }
 .menu-order-row.drag-over{ border-top:2px solid var(--primary); }
+.menu-order-row.menu-order-joined{ margin-top:-6px; border-top:1px dashed var(--border); }
 .menu-order-drag-handle{
   cursor:grab; font-size:16px; color:var(--text-muted); padding:2px 6px;
   user-select:none; -webkit-user-select:none; touch-action:none; -webkit-touch-callout:none;

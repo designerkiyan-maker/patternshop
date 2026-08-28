@@ -4845,14 +4845,26 @@ async function collectAndSaveSettings(root, btn) {
 /* ------------------------------------------------------- menu order card - */
 let menuOrderItems = [];
 let menuOrderDragState = null;
+let menuOrderCustomLayout = false; // یعنی کاربر همین حالا چیدمان آزاد (ردیف‌ها) را ویرایش کرده
 
-function menuOrderRowHtml(item, idx) {
+function computeMenuRowNumbers() {
+  let row = 0;
+  return menuOrderItems.map((it, idx) => {
+    if (idx === 0 || it.break_before !== false) row++;
+    return row;
+  });
+}
+
+function menuOrderRowHtml(item, idx, rowNumbers) {
+  const joined = idx > 0 && item.break_before === false;
   return `
-    <div class="menu-order-row" data-idx="${idx}">
+    <div class="menu-order-row${joined ? ' menu-order-joined' : ''}" data-idx="${idx}">
       <span class="menu-order-drag-handle" data-idx="${idx}">⠿</span>
+      <span class="chip" style="opacity:.7">ردیف ${rowNumbers[idx]}</span>
       <span class="menu-order-label">${esc(item.label)}${item.admin_only ? ' <span class="card-sub">(فقط ادمین)</span>' : ''}</span>
       ${item.enabled === false ? '<span class="chip" style="color:var(--rose)">غیرفعال</span>' : ''}
       <div class="menu-order-arrows">
+        ${idx > 0 ? `<button type="button" class="btn btn-sm ${joined ? 'btn-primary' : 'btn-ghost'}" data-order-break="${idx}" title="کنار دکمه‌ی قبلی یا در ردیف جدید">${joined ? '↔ کنار قبلی' : '⤵ ردیف جدید'}</button>` : ''}
         <button type="button" class="btn btn-sm btn-ghost" data-order-up="${idx}" ${idx === 0 ? 'disabled' : ''}>▲</button>
         <button type="button" class="btn btn-sm btn-ghost" data-order-down="${idx}" ${idx === menuOrderItems.length - 1 ? 'disabled' : ''}>▼</button>
       </div>
@@ -4862,10 +4874,22 @@ function menuOrderRowHtml(item, idx) {
 function renderMenuOrderList() {
   const list = $('#menu-order-list', content());
   if (!list) return;
-  list.innerHTML = menuOrderItems.map((item, idx) => menuOrderRowHtml(item, idx)).join('');
+  const rowNumbers = computeMenuRowNumbers();
+  list.innerHTML = menuOrderItems.map((item, idx) => menuOrderRowHtml(item, idx, rowNumbers)).join('');
   $$('[data-order-up]', list).forEach(b => b.addEventListener('click', () => moveMenuOrderItem(Number(b.dataset.orderUp), -1)));
   $$('[data-order-down]', list).forEach(b => b.addEventListener('click', () => moveMenuOrderItem(Number(b.dataset.orderDown), 1)));
+  $$('[data-order-break]', list).forEach(b => b.addEventListener('click', () => toggleMenuOrderBreak(Number(b.dataset.orderBreak))));
   $$('.menu-order-drag-handle', list).forEach(h => h.addEventListener('pointerdown', onMenuOrderDragStart));
+}
+
+function toggleMenuOrderBreak(idx) {
+  const item = menuOrderItems[idx];
+  if (!item || idx === 0) return;
+  // اگر break_before تا حالا مشخص نشده بود (چیدمان قدیمی ستون‌ثابت)، اولین کلیک
+  // یعنی «بچسبان به قبلی»؛ بعد از این لحظه چیدمان آزاد رسماً شروع شده.
+  item.break_before = item.break_before === false ? true : false;
+  menuOrderCustomLayout = true;
+  renderMenuOrderList();
 }
 
 function moveMenuOrderItem(idx, dir) {
@@ -4920,13 +4944,14 @@ function onMenuOrderDragStart(e) {
 
 function menuOrderCardHtml(items) {
   menuOrderItems = items;
+  menuOrderCustomLayout = false;
   return `
     <div class="card" style="margin-bottom:18px">
       <div class="card-head">
-        <h3>ترتیب دکمه‌های منوی ربات</h3>
-        <button class="btn btn-primary btn-sm" id="menu-order-save">ذخیره ترتیب</button>
+        <h3>چیدمان دکمه‌های منوی ربات</h3>
+        <button class="btn btn-primary btn-sm" id="menu-order-save">ذخیره چیدمان</button>
       </div>
-      <span class="card-sub">با گرفتن دستگیره ⠿ (یا فلش‌ها) ترتیب نمایش دکمه‌های منوی اصلی ربات را جابه‌جا کن.</span>
+      <span class="card-sub">با دستگیره ⠿ (یا فلش‌ها) ترتیب را جابه‌جا کن؛ با دکمه‌ی «کنار قبلی / ردیف جدید» مشخص کن کدام دکمه‌ها کنار هم و کدام‌ها در ردیف جدا نمایش داده شوند - مثلاً یک دکمه تمام‌عرض بالا و دو دکمه کنار هم پایینش.</span>
       <div id="menu-order-list" style="margin-top:12px"></div>
     </div>`;
 }
@@ -4936,8 +4961,17 @@ async function saveMenuOrder() {
   btn.disabled = true;
   const prevTxt = btn.textContent; btn.textContent = 'در حال ذخیره...';
   try {
-    await apiPost('/settings/menu-order', { order: menuOrderItems.map(i => i.key) });
-    toast('ترتیب منو ذخیره شد.');
+    const order = menuOrderItems.map(i => i.key);
+    if (menuOrderCustomLayout) {
+      // یعنی کاربر همین الان حداقل یک بار چیدمان ردیف‌ها را دستی تغییر داده؛
+      // بقیه‌ی آیتم‌هایی که هنوز break_before نامشخص (null) دارند به‌صورت
+      // پیش‌فرض «ردیف جدا» در نظر گرفته می‌شوند تا رفتار قابل‌پیش‌بینی بماند.
+      const breaks = menuOrderItems.filter((it, idx) => idx > 0 && it.break_before !== false).map(i => i.key);
+      await apiPost('/settings/menu-layout', { order, breaks });
+    } else {
+      await apiPost('/settings/menu-order', { order });
+    }
+    toast('چیدمان منو ذخیره شد.');
   } catch (e) {
     handleErr(e);
   } finally {
