@@ -936,9 +936,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             quantity = order["quantity"] or 1
             try:
                 if product["provision_server_id"]:
-                    prov_results = await provision_direct(db, product, quantity)
+                    prov_results = await provision_direct(db, product, quantity, user_id=order["user_id"], order_id=order_id)
                 else:
-                    prov_results = await provision_auto_config(db, product, quantity)
+                    prov_results = await provision_auto_config(db, product, quantity, user_id=order["user_id"], order_id=order_id)
             except (ProvisionError, DirectProvisionError) as e:
                 await call.answer(f"⛔️ {e}", show_alert=True)
                 return

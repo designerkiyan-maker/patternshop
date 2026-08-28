@@ -23,12 +23,15 @@ def _random_username() -> str:
     return "d" + "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
 
 
-async def provision_direct(db, product, quantity: int = 1) -> list:
+async def provision_direct(db, product, quantity: int = 1, user_id: int = None, order_id: int = None) -> list:
     """محصول باید provision_server_id معتبر داشته باشد. برای هر واحد یک کاربر واقعی
     روی همان پنل ساخته می‌شود. برمی‌گرداند: لیستی از
     {"username": ..., "subscription_url": ..., "volume_gb": ..., "duration_days": ...}
     در صورت بروز خطا ProvisionError پرتاب می‌شود؛ واحدهایی که تا آن لحظه با موفقیت
-    روی پنل ساخته شده‌اند، در همان لیست خطا هم اشاره می‌شوند تا چیزی گم نشود."""
+    روی پنل ساخته شده‌اند، در همان لیست خطا هم اشاره می‌شوند تا چیزی گم نشود.
+
+    اگر user_id داده شود، هر واحد ساخته‌شده در custom_configs (source='direct_product')
+    هم ثبت می‌شود تا هشدار اتمام حجم/زمان و «سرویس‌های من» آن را ببینند."""
     server_id = product["provision_server_id"]
     if not server_id:
         raise ProvisionError("این محصول به هیچ پنلی وصل نشده است.")
@@ -68,5 +71,15 @@ async def provision_direct(db, product, quantity: int = 1) -> list:
         raise
     except PanelError as e:
         raise ProvisionError(f"خطا در ساخت کانفیگ روی پنل: {e}")
+
+    if user_id is not None:
+        for item in built:
+            try:
+                db.add_custom_config(
+                    user_id, server["id"], item["username"], item["volume_gb"], item["duration_days"],
+                    item["subscription_url"], order_id=order_id, source="direct_product",
+                )
+            except Exception:
+                pass
 
     return built

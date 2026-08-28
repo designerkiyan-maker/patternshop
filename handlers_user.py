@@ -460,9 +460,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             if product["is_auto_provision"]:
                 try:
                     if product["provision_server_id"]:
-                        prov_results = await provision_direct(db, product, quantity)
+                        prov_results = await provision_direct(db, product, quantity, user_id=call.from_user.id, order_id=order_id)
                     else:
-                        prov_results = await provision_auto_config(db, product, quantity)
+                        prov_results = await provision_auto_config(db, product, quantity, user_id=call.from_user.id, order_id=order_id)
                 except (ProvisionError, DirectProvisionError) as e:
                     (await asyncio.to_thread(db.reject_order, order_id))
                     await _notify_admins_of_order(bot, order_id)
@@ -852,7 +852,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
             # نماینده سطح ۲: کانفیگ تست هم خودکار و از اعتبار حجمی نماینده ساخته می‌شود
             try:
-                result = await provision_test_config(db)
+                result = await provision_test_config(db, user_id=message.from_user.id)
             except ProvisionError as e:
                 await message.answer(f"⛔️ {e}")
                 return

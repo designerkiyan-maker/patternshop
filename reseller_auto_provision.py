@@ -29,12 +29,19 @@ def _random_username() -> str:
     return "r" + "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
 
 
-async def provision_auto_config(local_db: Database, product, quantity: int = 1) -> list:
+async def provision_auto_config(
+    local_db: Database, product, quantity: int = 1,
+    user_id: int = None, order_id: int = None, source: str = "direct_product",
+) -> list:
     """محصول باید is_auto_provision=1 داشته باشد. برای هر واحد یک کاربر واقعی روی پنل
     نمایندگی ساخته می‌شود. برمی‌گرداند: لیستی از
     {"username": ..., "subscription_url": ..., "volume_gb": ..., "duration_days": ...}
     در صورت هر نوع خطا (حتی بعد از ساخت موفق چند واحد) ProvisionError پرتاب می‌شود و
-    هیچ اعتباری کم نمی‌شود - یعنی این تابع همه‌یا-هیچ است تا خرید ناقص تحویل داده نشود."""
+    هیچ اعتباری کم نمی‌شود - یعنی این تابع همه‌یا-هیچ است تا خرید ناقص تحویل داده نشود.
+
+    اگر user_id داده شود، هر واحد در custom_configs بات نمایندگی (local_db) هم
+    ثبت می‌شود (source پیش‌فرض 'direct_product'، برای کانفیگ تست 'test') تا هشدار
+    اتمام حجم/زمان و «سرویس‌های من» آن را ببینند."""
     owner_id = local_db.get_owner_telegram_id()
     if not owner_id:
         raise ProvisionError("مالک این بات مشخص نیست؛ با پشتیبانی تماس بگیرید.")
@@ -90,15 +97,25 @@ async def provision_auto_config(local_db: Database, product, quantity: int = 1) 
         owner_id, -total_volume_gb, reason=f"خرید خودکار مشتری - محصول «{product['name']}» × {quantity}"
     )
 
+    if user_id is not None:
+        for item in built:
+            try:
+                local_db.add_custom_config(
+                    user_id, server["id"], item["username"], item["volume_gb"], item["duration_days"],
+                    item["subscription_url"], order_id=order_id, source=source,
+                )
+            except Exception:
+                pass
+
     return built
 
 
-async def provision_test_config(local_db: Database) -> dict:
+async def provision_test_config(local_db: Database, user_id: int = None) -> dict:
     """کانفیگ تست برای نماینده‌ی سطح ۲: مثل provision_auto_config ولی حجم/مدت را از
     تنظیمات محلی («test_config_panel_volume_gb»/«test_config_panel_duration_days») می‌خواند
     و همان‌طور از اعتبار حجمی نماینده کم می‌کند (کانفیگ تست هم مصرف واقعی روی پنل دارد)."""
     volume_gb = int(local_db.get_setting("test_config_panel_volume_gb", "1") or 1)
     duration_days = int(local_db.get_setting("test_config_panel_duration_days", "1") or 1)
     fake_product = {"name": "کانفیگ تست", "auto_provision_volume_gb": volume_gb, "duration_days": duration_days}
-    built = await provision_auto_config(local_db, fake_product, quantity=1)
+    built = await provision_auto_config(local_db, fake_product, quantity=1, user_id=user_id, source="test")
     return built[0]
