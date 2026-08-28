@@ -683,6 +683,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             "✅ رسید شما برای بررسی ارسال شد. پس از تایید ادمین، کانفیگ برای شما ارسال خواهد شد.",
             reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
         )
+        await _send_inline_main_menu(message, message.from_user.id)
         await state.clear()
 
     @router.message(BuyFlow.waiting_receipt)
@@ -823,6 +824,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 "کانفیگ شما در پیام بعدی ارسال می‌شود 👇",
                 reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
             )
+            await _send_inline_main_menu(message, message.from_user.id)
             await deliver_config_to_user(
                 message.bot, message.from_user.id, "کانفیگ شخصی",
                 [result.subscription_url], final_price=0, order_id=order_id,
@@ -901,6 +903,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             "✅ رسید شما برای بررسی ارسال شد. پس از تایید ادمین، کانفیگ شخصی شما ساخته و ارسال خواهد شد.",
             reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
         )
+        await _send_inline_main_menu(message, message.from_user.id)
         await state.clear()
 
     @router.message(CustomConfigFlow.waiting_receipt)
@@ -1086,6 +1089,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             parse_mode="Markdown",
             reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
         )
+        await _send_inline_main_menu(message, message.from_user.id)
 
     # -----------------------------------------------------------------------
     # سفارش‌های من (منوی کانفیگ‌ها + امکان حذف کامل هر کانفیگ)
@@ -1463,6 +1467,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             "✅ درخواست شارژ کیف پول شما برای بررسی ارسال شد. پس از تایید ادمین، مبلغ به کیف پول شما اضافه می‌شود.",
             reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
         )
+        await _send_inline_main_menu(message, message.from_user.id)
         await state.clear()
 
     @router.message(WalletTopup.waiting_receipt)
@@ -1528,6 +1533,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 "لطفاً دوباره روی «درخواست نمایندگی سطح ۲» بزنید.",
                 reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
             )
+            await _send_inline_main_menu(message, message.from_user.id)
             return
 
         try:
@@ -1552,12 +1558,14 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 "✅ درخواست نمایندگی شما ثبت شد. بعد از بررسی ادمین، هزینه‌ی نمایندگی برایتان اعلام می‌شود.",
                 reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
             )
+            await _send_inline_main_menu(message, message.from_user.id)
         except Exception:
             logging.getLogger(__name__).exception("خطا در ثبت درخواست نمایندگی سطح ۲ کاربر %s", message.from_user.id)
             await message.answer(
                 "⚠️ در ثبت درخواست خطایی رخ داد. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.",
                 reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
             )
+            await _send_inline_main_menu(message, message.from_user.id)
 
     @router.callback_query(F.data.startswith("resreq_pay:"))
     async def reseller_request_pay(call: CallbackQuery):
@@ -1665,6 +1673,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 "✅ رسید شما برای بررسی ارسال شد. پس از تایید ادمین، کانفیگ برای شما ارسال خواهد شد.",
                 reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
             )
+            await _send_inline_main_menu(message, message.from_user.id)
             return
 
         # هیچ سفارش/درخواست pending‌ای برای این کاربر پیدا نشد. برای شارژ کیف‌پول
@@ -1710,6 +1719,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 "✅ درخواست شارژ کیف پول شما برای بررسی ارسال شد. پس از تایید ادمین، مبلغ به کیف پول شما اضافه می‌شود.",
                 reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
             )
+            await _send_inline_main_menu(message, message.from_user.id)
             return
 
         log.warning(
@@ -1723,6 +1733,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             "لطفاً دوباره از منوی اصلی همان مسیر خرید یا شارژ کیف پول را طی کنید و رسید را مجدداً ارسال کنید.",
             reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
         )
+        await _send_inline_main_menu(message, message.from_user.id)
 
     @router.message(ResellerRequestFlow.waiting_bot_token)
     async def reseller_request_bot_token(message: Message, state: FSMContext):
@@ -1795,6 +1806,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             f"برای شروع، با /start به بات خودتان (@{username}) وارد شوید.",
             reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
         )
+        await _send_inline_main_menu(message, message.from_user.id)
         try:
             for admin_id in _senior_admin_ids():
                 await bot.send_message(
@@ -1839,6 +1851,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             "پیام شما برای پشتیبانی ارسال شد. به زودی پاسخ داده می‌شود.",
             reply_markup=kb.menu_for_user(db, user.id, is_main_bot),
         )
+        await _send_inline_main_menu(message, user.id)
         await state.clear()
 
     # -----------------------------------------------------------------------
