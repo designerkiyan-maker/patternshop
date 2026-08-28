@@ -3049,7 +3049,13 @@ function renderSupportRowsBrutalist(convs) {
 
 async function showSupportChat(userId) {
   let lastId = 0;
-  const d = await apiGet(`/support/${userId}/messages`);
+  let d;
+  try {
+    d = await apiGet(`/support/${userId}/messages`);
+  } catch (e) {
+    handleErr(e);
+    return;
+  }
   lastId = d.messages.length ? d.messages[d.messages.length - 1].id : 0;
   const title = d.user.user_name || d.user.user_username || `#${userId}`;
   const locked = d.user.locked_for_me;
