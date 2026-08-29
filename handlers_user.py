@@ -13,7 +13,7 @@ import asyncio
 import logging
 
 from aiogram import Router, F, Bot
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, StateFilter
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest, TelegramNetworkError
@@ -1088,5 +1088,18 @@ def create_user_router(db) -> Router:
             await contact_start(fake_message, state)
         # کلید دکمه‌ی مدیریت (پنل ادمین) اینجا هندل نمی‌شود؛ هندلر اصلی‌اش در
         # handlers_admin.py تعریف شده است.
+
+    # هر متن ناشناخته‌ای منوی اصلی را دوباره نمایش می‌دهد. کاربرد اصلی: بعد از
+    # «Clear History» تلگرام، هم کیبورد پاسخ‌گو حذف می‌شود هم دکمه‌ی Start
+    # دیگر ظاهر نمی‌شود (رفتار خود تلگرام) — با فرستادن هر متنی (یا همان
+    # دکمه‌های قبلی) منو دوباره برمی‌گردد و کاربر گم نمی‌شود.
+    @router.message(StateFilter(None), F.text, ~F.text.startswith("/"))
+    async def unknown_text_shows_menu(message: Message, state: FSMContext, bot: Bot):
+        (await asyncio.to_thread(db.add_or_update_user,
+            message.from_user.id, message.from_user.username or "", message.from_user.first_name or ""
+        ))
+        welcome = (await asyncio.to_thread(db.get_setting, "welcome_text"))
+        await message.answer(welcome, reply_markup=kb.menu_for_user(db, message.from_user.id))
+        await _send_inline_main_menu(message, message.from_user.id)
 
     return router

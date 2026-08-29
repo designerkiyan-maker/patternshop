@@ -119,10 +119,6 @@ DEFAULT_SETTINGS = {
     "wheel_code_expiry_hours": "24",  # اعتبار کد جایزه پس از برد (ساعت)
     "wheel_cooldown_hours": "24",  # فاصله مجاز بین دو چرخش هر کاربر
     "btn_wheel": "🎡 گردونه شانس",
-    # دکمه‌ی فروشگاه وب (Mini App) - فقط وقتی MINIAPP_URL در .env تنظیم شده باشد نمایش داده می‌شود
-    "btn_miniapp": "🛍 فروشگاه",
-    "btn_miniapp_style": "primary",
-    "miniapp_button_enabled": "1",
     "btn_wheel_style": "success",
     # چیدمان دکمه‌های منوی اصلی (ترتیب و نمایش) - آرایه JSON از کلیدها
     "menu_order": '["btn_buy","btn_test","btn_my_orders","btn_wallet","btn_referral","btn_wheel","btn_contact","btn_admin_panel"]',
@@ -139,13 +135,12 @@ MENU_BUTTON_META = {
     "btn_wallet": {"label": "دکمه کیف پول", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
     "btn_referral": {"label": "دکمه زیرمجموعه‌گیری", "toggle_key": "referral_button_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_wheel": {"label": "دکمه گردونه شانس", "toggle_key": "wheel_enabled", "admin_only": False, "has_text": True, "has_style": True},
-    "btn_miniapp": {"label": "دکمه فروشگاه وب (Mini App)", "toggle_key": "miniapp_button_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_contact": {"label": "دکمه ارتباط با پشتیبانی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
     "btn_admin_panel": {"label": "دکمه پنل مدیریت", "toggle_key": None, "admin_only": True, "has_text": True, "has_style": True},
 }
 DEFAULT_MENU_ORDER = [
     "btn_buy", "btn_test", "btn_my_orders", "btn_wallet", "btn_referral",
-    "btn_wheel", "btn_miniapp", "btn_contact", "btn_admin_panel",
+    "btn_wheel", "btn_contact", "btn_admin_panel",
 ]
 
 

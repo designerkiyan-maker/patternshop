@@ -6,23 +6,15 @@
 به‌عنوان پارامتر می‌گیرند - نه اینکه از یک ماژول سراسری import شود.
 """
 
-import os
-
 from aiogram.types import (
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
     KeyboardButton,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    WebAppInfo,
 )
 
 from database import MENU_BUTTON_META
-
-
-def _miniapp_url() -> str:
-    """آدرس Mini App از متغیر محیطی MINIAPP_URL (خالی یعنی دکمه‌ی فروشگاه وب نمایش داده نشود)."""
-    return os.getenv("MINIAPP_URL", "").rstrip("/")
 
 
 # ---------------------------------------------------------------------------
@@ -82,13 +74,6 @@ def _menu_items(db, is_admin: bool):
             return None
         return (settings.get("btn_admin_panel", "⚙️ پنل مدیریت"), settings.get("btn_admin_panel_style", ""))
 
-    def item_miniapp():
-        if not _miniapp_url():
-            return None
-        if settings.get("miniapp_button_enabled", "1") != "1":
-            return None
-        return (settings.get("btn_miniapp", "🛍 فروشگاه"), settings.get("btn_miniapp_style", "primary"))
-
     builders = {
         "btn_buy": item_buy,
         "btn_test": item_test,
@@ -96,7 +81,6 @@ def _menu_items(db, is_admin: bool):
         "btn_wallet": item_wallet,
         "btn_referral": item_referral,
         "btn_wheel": item_wheel,
-        "btn_miniapp": item_miniapp,
         "btn_contact": item_contact,
         "btn_admin_panel": item_admin_panel,
     }
@@ -164,16 +148,7 @@ def main_menu_kb(db, is_admin: bool = False, *_legacy_args):
 
     items = _menu_items(db, is_admin)
     item_rows = _menu_item_rows(db, items)
-    rows = []
-    for row in item_rows:
-        buttons = []
-        for _key, text, style in row:
-            if _key == "btn_miniapp":
-                # دکمه‌ی وب‌اپ: با کلیک، Mini App مستقیم باز می‌شود (بدون ارسال پیام)
-                buttons.append(KeyboardButton(text=text, web_app=WebAppInfo(url=_miniapp_url())))
-            else:
-                buttons.append(_styled_button(text, style))
-        rows.append(buttons)
+    rows = [[_styled_button(text, style) for _key, text, style in row] for row in item_rows]
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
@@ -185,8 +160,6 @@ def main_menu_inline_kb(db, is_admin: bool = False, *_legacy_args) -> InlineKeyb
     item_rows = _menu_item_rows(db, items)
 
     def _build_button(key, text, style):
-        if key == "btn_miniapp":
-            return InlineKeyboardButton(text=text, web_app=WebAppInfo(url=_miniapp_url()))
         s = style if style in ("primary", "success", "danger") else None
         return InlineKeyboardButton(text=text, callback_data=f"mm:{key}", style=s)
 
