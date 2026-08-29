@@ -2501,7 +2501,10 @@ def api_menu_order_get(admin=Depends(require_permission("settings"))):
         meta = MENU_BUTTON_META.get(key)
         if not meta:
             continue
-        item = {"key": key, "label": meta["label"], "admin_only": meta["admin_only"]}
+        item = {
+            "key": key, "label": meta["label"], "admin_only": meta["admin_only"],
+            "togglable": meta["toggle_key"] is not None,
+        }
         if meta["toggle_key"]:
             item["enabled"] = settings.get(meta["toggle_key"], "1") == "1"
         # break_before یعنی این دکمه یک ردیف تازه در منو شروع می‌کند (کنار دکمه‌ی
@@ -2513,13 +2516,27 @@ def api_menu_order_get(admin=Depends(require_permission("settings"))):
     return result
 
 
+class MenuButtonToggle(BaseModel):
+    key: str
+    enabled: bool
+
+
+def _apply_menu_button_toggles(buttons: Optional[list[MenuButtonToggle]]):
+    for btn in buttons or []:
+        meta = MENU_BUTTON_META.get(btn.key)
+        if meta and meta["toggle_key"]:
+            db.set_setting(meta["toggle_key"], "1" if btn.enabled else "0")
+
+
 class MenuOrderBody(BaseModel):
     order: list[str]
+    buttons: Optional[list[MenuButtonToggle]] = None
 
 
 @app.post("/api/settings/menu-order")
 def api_menu_order_set(body: MenuOrderBody, admin=Depends(require_permission("settings"))):
     db.set_menu_order(body.order)
+    _apply_menu_button_toggles(body.buttons)
     db.log_admin_action(admin["id"], "menu_order_change", f"ترتیب منوی ربات تغییر کرد (پنل وب - {admin['username']})", "setting", "menu_order")
     return {"ok": True}
 
@@ -2527,6 +2544,7 @@ def api_menu_order_set(body: MenuOrderBody, admin=Depends(require_permission("se
 class MenuLayoutBody(BaseModel):
     order: list[str]
     breaks: list[str]
+    buttons: Optional[list[MenuButtonToggle]] = None
 
 
 @app.post("/api/settings/menu-layout")
@@ -2536,6 +2554,7 @@ def api_menu_layout_set(body: MenuLayoutBody, admin=Depends(require_permission("
     آزاد (نه فقط بالا/پایین با تعداد ستون ثابت)."""
     db.set_menu_order(body.order)
     db.set_menu_row_breaks(body.breaks)
+    _apply_menu_button_toggles(body.buttons)
     db.log_admin_action(admin["id"], "menu_order_change", f"چیدمان منوی ربات تغییر کرد (پنل وب - {admin['username']})", "setting", "menu_order")
     return {"ok": True}
 
