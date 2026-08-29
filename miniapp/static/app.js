@@ -1863,6 +1863,7 @@ function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder, cryptoE
 // ---------------------------------------------------------------------------
 
 let adminMenuItems = [];
+let adminMenuCustomLayout = false; // یعنی همین الان چیدمان ردیف‌ها (نه فقط ترتیب) دستی تغییر کرده
 
 const STYLE_OPTIONS = [
   { value: "", label: "⚪️ پیش‌فرض" },
@@ -2188,8 +2189,9 @@ async function renderAdminMenuSection() {
   try {
     const menu = await api("/api/admin/menu");
     adminMenuItems = menu;
+    adminMenuCustomLayout = false;
     body.innerHTML = `
-      <p class="hint-text">ترتیب، متن، رنگ و فعال/غیرفعال بودن دکمه‌های منوی اصلی بات را از اینجا مدیریت کن. با فلش‌ها جای دکمه‌ها را جابه‌جا کن.</p>
+      <p class="hint-text">ترتیب، متن، رنگ و فعال/غیرفعال بودن دکمه‌های منوی اصلی بات را از اینجا مدیریت کن. با فلش‌ها جای دکمه‌ها را جابه‌جا کن؛ با دکمه‌ی «کنار قبلی / ردیف جدید» مشخص کن کدام دکمه‌ها کنار هم و کدام‌ها در ردیف جدا نمایش داده شوند.</p>
       <div class="card" id="admin-menu-list"></div>
       <button class="btn" id="admin-menu-save">💾 ذخیره تغییرات</button>
     `;
@@ -2784,18 +2786,38 @@ async function saveAdminBanners() {
   }
 }
 
-function renderAdminMenuList() {
-  const list = document.getElementById("admin-menu-list");
-  list.innerHTML = adminMenuItems.map((item, idx) => adminMenuRow(item, idx)).join("");
-  adminMenuItems.forEach((item, idx) => {
-    const upBtn = document.getElementById(`menu-up-${idx}`);
-    const downBtn = document.getElementById(`menu-down-${idx}`);
-    if (upBtn) upBtn.onclick = () => moveMenuItem(idx, -1);
-    if (downBtn) downBtn.onclick = () => moveMenuItem(idx, 1);
+function computeAdminMenuRowNumbers() {
+  let row = 0;
+  return adminMenuItems.map((it, idx) => {
+    if (idx === 0 || it.break_before !== false) row++;
+    return row;
   });
 }
 
-function adminMenuRow(item, idx) {
+function renderAdminMenuList() {
+  const list = document.getElementById("admin-menu-list");
+  const rowNumbers = computeAdminMenuRowNumbers();
+  list.innerHTML = adminMenuItems.map((item, idx) => adminMenuRow(item, idx, rowNumbers)).join("");
+  adminMenuItems.forEach((item, idx) => {
+    const upBtn = document.getElementById(`menu-up-${idx}`);
+    const downBtn = document.getElementById(`menu-down-${idx}`);
+    const breakBtn = document.getElementById(`menu-break-${idx}`);
+    if (upBtn) upBtn.onclick = () => moveMenuItem(idx, -1);
+    if (downBtn) downBtn.onclick = () => moveMenuItem(idx, 1);
+    if (breakBtn) breakBtn.onclick = () => toggleMenuBreak(idx);
+  });
+}
+
+function toggleMenuBreak(idx) {
+  collectMenuEdits();
+  const item = adminMenuItems[idx];
+  if (!item || idx === 0) return;
+  item.break_before = item.break_before === false ? true : false;
+  adminMenuCustomLayout = true;
+  renderAdminMenuList();
+}
+
+function adminMenuRow(item, idx, rowNumbers) {
   const styleSelect = item.has_style
     ? `<select class="input menu-style-input" data-idx="${idx}">
         ${STYLE_OPTIONS.map((o) => `<option value="${o.value}" ${o.value === (item.style || "") ? "selected" : ""}>${o.label}</option>`).join("")}
@@ -2810,11 +2832,16 @@ function adminMenuRow(item, idx) {
         <span>فعال</span>
       </label>`
     : "";
+  const joined = idx > 0 && item.break_before === false;
+  const breakBtn = idx > 0
+    ? `<button type="button" class="btn small ${joined ? "" : "outline"}" id="menu-break-${idx}" title="کنار دکمه‌ی قبلی یا در ردیف جدید">${joined ? "↔ کنار قبلی" : "⤵ ردیف جدید"}</button>`
+    : "";
   return `
     <div class="menu-row" data-idx="${idx}">
       <div class="menu-row-top">
-        <span class="menu-row-label">${item.label}${item.admin_only ? " (فقط ادمین)" : ""}</span>
+        <span class="menu-row-label">ردیف ${rowNumbers[idx]} · ${item.label}${item.admin_only ? " (فقط ادمین)" : ""}</span>
         <div class="menu-row-arrows">
+          ${breakBtn}
           <button type="button" class="btn small outline" id="menu-up-${idx}" ${idx === 0 ? "disabled" : ""}>▲</button>
           <button type="button" class="btn small outline" id="menu-down-${idx}" ${idx === adminMenuItems.length - 1 ? "disabled" : ""}>▼</button>
         </div>
@@ -2856,12 +2883,19 @@ async function saveAdminMenu() {
   saveBtn.disabled = true;
   saveBtn.textContent = "در حال ذخیره...";
   try {
+    const payload = {
+      order: adminMenuItems.map((i) => i.key),
+      buttons: adminMenuItems.map((i) => ({ key: i.key, text: i.text, style: i.style, enabled: i.enabled })),
+    };
+    if (adminMenuCustomLayout) {
+      // اگه کاربر همین الان حداقل یک‌بار چیدمان ردیف‌ها رو دستی عوض کرده، بقیه‌ی
+      // آیتم‌هایی که هنوز break_before نامشخص (null) دارن، به‌صورت پیش‌فرض
+      // «ردیف جدا» در نظر گرفته می‌شن تا رفتار قابل‌پیش‌بینی بمونه.
+      payload.row_breaks = adminMenuItems.filter((i, idx) => idx > 0 && i.break_before !== false).map((i) => i.key);
+    }
     await api("/api/admin/menu", {
       method: "POST",
-      body: JSON.stringify({
-        order: adminMenuItems.map((i) => i.key),
-        buttons: adminMenuItems.map((i) => ({ key: i.key, text: i.text, style: i.style, enabled: i.enabled })),
-      }),
+      body: JSON.stringify(payload),
     });
     tg.HapticFeedback.notificationOccurred("success");
     notify("چیدمان منو با موفقیت ذخیره شد. برای دیدن تغییرات، بات را دوباره در تلگرام باز کن.");
