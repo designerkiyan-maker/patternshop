@@ -10,6 +10,7 @@
 """
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -696,6 +697,35 @@ async def api_adjust_wallet(tg_id: int, body: WalletAdjustBody, admin=Depends(re
     return {"ok": True}
 
 
+class LoyaltyAdjustBody(BaseModel):
+    amount: int
+    reason: str
+
+
+@app.post("/api/users/{tg_id}/loyalty")
+async def api_adjust_loyalty(tg_id: int, body: LoyaltyAdjustBody, admin=Depends(require_permission("users"))):
+    if body.amount == 0:
+        raise HTTPException(400, "مقدار تعدیل نمی‌تواند صفر باشد.")
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(400, "دلیل تعدیل الزامی است.")
+    if (await asyncio.to_thread(db.get_user, tg_id)) is None:
+        raise HTTPException(404, "کاربری با این آیدی پیدا نشد.")
+    try:
+        new_balance = (await asyncio.to_thread(
+            loyalty.admin_adjust, db, admin["id"], tg_id, body.amount, reason,
+        ))
+    except loyalty.LoyaltyError as e:
+        raise HTTPException(400, str(e))
+    (await asyncio.to_thread(
+        db.log_admin_action,
+        admin["id"], "loyalty_adjust",
+        f"کاربر {tg_id} | {body.amount:+d} | دلیل: {reason} (پنل وب - {admin['username']})",
+        "user", tg_id,
+    ))
+    return {"ok": True, "new_balance": int(new_balance)}
+
+
 # ------------------------------------------------------- categories/products --
 
 
@@ -1250,6 +1280,84 @@ def api_set_wheel_settings(body: WheelSettingsBody, admin=Depends(require_permis
     return {"ok": True}
 
 
+# ---------------------------------------------------- باشگاه مشتریان -------
+# تنظیمات امتیاز وفاداری؛ همان کلیدهایی که سرویس loyalty.py می‌خواند تا ربات،
+# مینی‌اپ و پنل وب همیشه یک منبع حقیقت مشترک داشته باشند.
+
+
+class LoyaltyTierBody(BaseModel):
+    name: str
+    min: int
+    mult: int
+
+
+class LoyaltySettingsBody(BaseModel):
+    enabled: bool
+    points_per_toman: int
+    reg_bonus: int
+    referral_bonus: int
+    redeem_points: int
+    redeem_toman: int
+    min_redeem: int
+    max_per_order: int
+    tiers: list[LoyaltyTierBody]
+
+
+@app.get("/api/settings/loyalty")
+def api_get_loyalty_settings(admin=Depends(require_permission("settings"))):
+    return {
+        "enabled": db.get_setting("loyalty_enabled", "1") == "1",
+        "points_per_toman": int(db.get_setting("loyalty_points_per_toman", "10000") or 0),
+        "reg_bonus": int(db.get_setting("loyalty_reg_bonus", "0") or 0),
+        "referral_bonus": int(db.get_setting("loyalty_referral_bonus", "0") or 0),
+        "redeem_points": int(db.get_setting("loyalty_redeem_points", "100") or 0),
+        "redeem_toman": int(db.get_setting("loyalty_redeem_toman", "0") or 0),
+        "min_redeem": int(db.get_setting("loyalty_min_redeem", "0") or 0),
+        "max_per_order": int(db.get_setting("loyalty_max_per_order", "0") or 0),
+        "tiers": loyalty.load_tiers(db),
+    }
+
+
+@app.post("/api/settings/loyalty")
+def api_set_loyalty_settings(body: LoyaltySettingsBody, admin=Depends(require_permission("settings"))):
+    if body.points_per_toman < 1:
+        raise HTTPException(400, "نرخ امتیاز باید حداقل ۱ باشد.")
+    if body.reg_bonus < 0 or body.referral_bonus < 0 or body.min_redeem < 0 or body.max_per_order < 0:
+        raise HTTPException(400, "مقادیر عددی نمی‌توانند منفی باشند.")
+    if body.redeem_points < 1 or body.redeem_toman < 1:
+        raise HTTPException(400, "نرخ تبدیل امتیاز باید حداقل ۱ امتیاز و ۱ تومان باشد.")
+
+    if not body.tiers:
+        raise HTTPException(400, "حداقل یک سطح لازم است.")
+    for t in body.tiers:
+        if not t.name.strip():
+            raise HTTPException(400, "نام سطح نمی‌تواند خالی باشد.")
+        if t.min < 0 or t.mult < 1:
+            raise HTTPException(400, "آستانه و ضریب سطح‌ها باید معتبر باشند (آستانه ≥ ۰ و ضریب ≥ ۱).")
+    sorted_tiers = sorted(body.tiers, key=lambda t: t.min)
+    if sorted_tiers[0].min != 0:
+        raise HTTPException(400, "کم‌ترین سطح باید آستانه‌ی صفر داشته باشد.")
+    mins = [t.min for t in sorted_tiers]
+    if len(set(mins)) != len(mins):
+        raise HTTPException(400, "آستانه‌ی سطح‌ها نباید تکراری باشد.")
+
+    tiers_out = [
+        {"id": f"t{i}", "name": t.name.strip(), "min": t.min, "mult": t.mult}
+        for i, t in enumerate(sorted_tiers)
+    ]
+    db.set_setting("loyalty_enabled", "1" if body.enabled else "0")
+    db.set_setting("loyalty_points_per_toman", str(body.points_per_toman))
+    db.set_setting("loyalty_reg_bonus", str(body.reg_bonus))
+    db.set_setting("loyalty_referral_bonus", str(body.referral_bonus))
+    db.set_setting("loyalty_redeem_points", str(body.redeem_points))
+    db.set_setting("loyalty_redeem_toman", str(body.redeem_toman))
+    db.set_setting("loyalty_min_redeem", str(body.min_redeem))
+    db.set_setting("loyalty_max_per_order", str(body.max_per_order))
+    db.set_setting("loyalty_tiers", json.dumps(tiers_out, ensure_ascii=False))
+    db.log_admin_action(admin["id"], "loyalty_settings", f"باشگاه مشتریان به‌روزرسانی شد (پنل وب - {admin['username']})", "setting", "loyalty")
+    return {"ok": True}
+
+
 class ForceJoinSettingsBody(BaseModel):
     enabled: bool
     channel: str = ""
@@ -1439,6 +1547,52 @@ def api_delete_web_admin(admin_id: int, admin=Depends(require_owner)):
     if not db.delete_web_admin(admin_id):
         raise HTTPException(400, "امکان حذف این حساب نیست.")
     db.log_admin_action(admin["id"], "web_admin_delete", f"admin#{admin_id}", "webadmin", admin_id)
+    return {"ok": True}
+
+
+# ------------------------------------------------------- telegram admins ---
+# مدیریت ادمین‌های تلگرامی (جدول admins) — فقط مالک؛ دقیقاً مثل خود ربات.
+
+
+class TelegramAdminBody(BaseModel):
+    telegram_id: int
+    role: str = "admin"
+
+
+@app.get("/api/telegram-admins")
+def api_telegram_admins(admin=Depends(require_owner)):
+    return db.list_admins_with_roles()
+
+
+@app.post("/api/telegram-admins")
+def api_add_telegram_admin(body: TelegramAdminBody, admin=Depends(require_owner)):
+    if body.role not in ("admin", "mid", "support"):
+        raise HTTPException(400, "نقش باید یکی از مقادیر admin، mid یا support باشد.")
+    existing = {a["telegram_id"] for a in db.list_admins_with_roles()}
+    if body.telegram_id in existing:
+        raise HTTPException(400, "این آیدی از قبل ادمین است.")
+    db.add_admin(body.telegram_id, body.role)
+    db.log_admin_action(admin["id"], "tg_admin_add", f"ادمین تلگرام {body.telegram_id} با نقش {body.role} اضافه شد (پنل وب - {admin['username']})", "tg_admin", body.telegram_id)
+    return {"ok": True}
+
+
+class TelegramAdminRoleBody(BaseModel):
+    role: str
+
+
+@app.post("/api/telegram-admins/{tg_id}/role")
+def api_set_telegram_admin_role(tg_id: int, body: TelegramAdminRoleBody, admin=Depends(require_owner)):
+    if not db.set_admin_role(tg_id, body.role):
+        raise HTTPException(400, "این ادمین قابل تغییر نیست یا وجود ندارد.")
+    db.log_admin_action(admin["id"], "tg_admin_role", f"نقش ادمین تلگرام {tg_id} به {body.role} تغییر کرد (پنل وب - {admin['username']})", "tg_admin", tg_id)
+    return {"ok": True}
+
+
+@app.delete("/api/telegram-admins/{tg_id}")
+def api_remove_telegram_admin(tg_id: int, admin=Depends(require_owner)):
+    if not db.remove_admin(tg_id, protected_owner_id=OWNER_ID):
+        raise HTTPException(400, "مالک قابل حذف نیست.")
+    db.log_admin_action(admin["id"], "tg_admin_remove", f"ادمین تلگرام {tg_id} حذف شد (پنل وب - {admin['username']})", "tg_admin", tg_id)
     return {"ok": True}
 
 

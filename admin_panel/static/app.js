@@ -345,6 +345,7 @@ const NAV = [
   { key: 'settings', label: 'تنظیمات و برندینگ', icon: 'settings', role: 'settings', section: 'تنظیمات و سیستم' },
   { key: 'salessettings', label: 'تنظیمات فروش', icon: 'settings', role: 'settings', section: 'تنظیمات و سیستم' },
   { key: 'webadmins', label: 'کاربران پنل', icon: 'webadmins', role: 'owner', section: 'تنظیمات و سیستم' },
+  { key: 'tgadmins', label: '👤 ادمین‌های تلگرام', icon: 'webadmins', role: 'owner', section: 'تنظیمات و سیستم' },
   { key: 'system', label: 'سیستم و نگهداری', icon: 'system', role: 'system', section: 'تنظیمات و سیستم' },
   { key: 'logs', label: 'لاگ فعالیت ادمین‌ها', icon: 'logs', role: 'system', section: 'تنظیمات و سیستم' },
 
@@ -719,6 +720,7 @@ async function renderPage(tab) {
       case 'salessettings': return renderSalesSettings();
       case 'logs': return renderLogs();
       case 'webadmins': return renderWebAdmins();
+      case 'tgadmins': return renderTgAdmins();
       case 'account': return renderAccount();
     }
   } catch (e) { handleErr(e); setContent(`<div class="empty-state">${esc(e.message)}</div>`); }
@@ -1842,6 +1844,12 @@ async function showUserDetail(tgId) {
   ];
   if (u.referred_by) statCards.push({ label: 'دعوت‌شده توسط', val: `#${u.referred_by}` });
 
+  // باشگاه مشتریان — اگر سرور اطلاعات امتیاز را برگردانده باشد
+  const ly = d.loyalty || null;
+  const lyTier = ly ? (typeof ly.tier === 'string' ? ly.tier : (ly.tier && ly.tier.name) || ly.tier_name || '—') : '';
+  const lyPoints = ly?.points ?? ly?.balance ?? 0;
+  if (ly) statCards.push({ label: '⭐ امتیاز باشگاه', val: `${fmt(lyPoints)}${lyTier && lyTier !== '—' ? ' · ' + lyTier : ''}` });
+
   openModal(`کاربر ${esc(displayName)}`, `
     <div class="ud-head">
       <div class="ud-avatar">${esc(initial)}</div>
@@ -1862,6 +1870,21 @@ async function showUserDetail(tgId) {
       <button class="btn btn-primary" id="wallet-submit">اعمال</button>
     </div>` : ''}
 
+    ${ly ? `
+    <h4 class="ud-section-title">⭐ باشگاه مشتریان</h4>
+    <div class="ud-stats">
+      <div class="ud-stat"><span>امتیاز فعلی</span><b class="mono">${fmt(lyPoints)}</b></div>
+      <div class="ud-stat"><span>سطح</span><b>${esc(String(lyTier))}</b></div>
+      <div class="ud-stat"><span>کل امتیاز کسب‌شده</span><b class="mono">${fmt(ly.lifetime_earned ?? 0)}</b></div>
+      <div class="ud-stat"><span>کل امتیاز مصرف‌شده</span><b class="mono">${fmt(ly.lifetime_spent ?? 0)}</b></div>
+    </div>
+    ${isSenior ? `<div class="form-row" style="margin:12px 0 16px">
+      <input class="input" id="loyalty-delta" type="number" placeholder="تغییر امتیاز (مثبت=افزایش، منفی=کاهش)">
+      <input class="input" id="loyalty-reason" type="text" placeholder="دلیل تعدیل">
+      <button class="btn btn-primary" id="loyalty-submit">ثبت</button>
+    </div>` : ''}
+    ` : ''}
+
     <h4 class="ud-section-title">سفارش‌های اخیر</h4>
     <div class="table-wrap"><table><thead><tr><th>#</th><th>محصول</th><th>مبلغ</th><th>وضعیت</th><th>تاریخ</th></tr></thead>
     <tbody>${d.orders.slice(0, 10).map(o => `<tr><td class="mono">#${o.id}</td><td>${esc(o.product_name || '-')}</td><td class="mono">${fmt(o.final_price)}</td><td>${esc(o.status)}</td><td class="mono">${fmtDate(o.created_at)}</td></tr>`).join('') || `<tr><td colspan="5" class="empty-state"><div class="icon">${svg('empty')}</div>سفارشی نیست</td></tr>`}</tbody></table></div>
@@ -1876,6 +1899,18 @@ async function showUserDetail(tgId) {
       if (!delta) return;
       try { await apiPost(`/users/${tgId}/wallet`, { delta }); toast('کیف پول به‌روزرسانی شد.'); close(); }
       catch (e) { handleErr(e); }
+    });
+    const lyBtn = $('#loyalty-submit', body);
+    if (lyBtn) lyBtn.addEventListener('click', async () => {
+      const amount = Number($('#loyalty-delta', body).value);
+      if (!amount) return;
+      const reason = $('#loyalty-reason', body).value.trim();
+      try {
+        const r = await apiPost(`/users/${tgId}/loyalty`, { amount, reason });
+        toast(`✅ ثبت شد — موجودی جدید: ${fmt(r.new_balance)}`);
+        close();
+        showUserDetail(tgId);
+      } catch (e) { handleErr(e); }
     });
   }, { wide: true });
 }
@@ -2986,10 +3021,32 @@ function _swOn(root, key) { return $(`.switch[data-swkey="${key}"]`, root)?.data
 function _val(root, key) { return $(`[data-fkey="${key}"]`, root)?.value; }
 function _num(root, key) { return Number(_val(root, key)) || 0; }
 
+/* سطوح باشگاه مشتریان در یک فیلد متنی: هر سطح به شکل «نام:آستانه:ضریب» و
+   سطح‌ها با ویرگول فارسی «،» از هم جدا می‌شوند (همان قالبی که ربات می‌فهمد). */
+function _loyaltyTiersText(tiers) {
+  return (tiers || []).map(t => `${t.name}:${t.min}:${t.mult}`).join('، ');
+}
+function _parseLoyaltyTiers(text) {
+  const rows = (text || '').split(/[،,]/).map(s => s.trim()).filter(Boolean);
+  const tiers = [];
+  for (const row of rows) {
+    const parts = row.split(':').map(s => s.trim());
+    const name = parts[0];
+    const min = Number(parts[1]);
+    const mult = Number(parts[2]);
+    if (!name || parts.length !== 3 || !Number.isFinite(min) || min < 0
+        || !Number.isInteger(mult) || mult < 1) {
+      throw new Error('قالب سطح‌ها درست نیست. هر سطح باید به شکل نام:آستانه:ضریب (درصد) باشد — مثلاً برنز:0:100، نقره‌ای:500:110، طلایی:2000:125');
+    }
+    tiers.push({ name, min: Math.round(min), mult });
+  }
+  return tiers;
+}
+
 async function renderSalesSettings() {
-  const [referral, wheel, forceJoin, products, sampleFiles] = await Promise.all([
+  const [referral, wheel, forceJoin, products, sampleFiles, loyalty] = await Promise.all([
     apiGet('/settings/referral'), apiGet('/settings/wheel'), apiGet('/settings/force-join'),
-    apiGet('/products'), apiGet('/sample-files'),
+    apiGet('/products'), apiGet('/sample-files'), apiGet('/settings/loyalty'),
   ]);
 
   const productOptions = (products || []).map(p =>
@@ -3046,6 +3103,23 @@ async function renderSalesSettings() {
     </div>
 
     <div class="card">
+      <h3>⭐ باشگاه مشتریان</h3>
+      <label class="field field-row"><span>فعال</span>${_swSpan('loyalty_enabled', loyalty.enabled)}</label>
+      <label class="field"><span>هر ۱ امتیاز = چند تومان خرید؟</span><input class="input" data-fkey="loyalty_points_per_toman" type="number" value="${loyalty.points_per_toman}"></label>
+      <label class="field"><span>امتیاز هدیه‌ی ثبت‌نام</span><input class="input" data-fkey="loyalty_reg_bonus" type="number" value="${loyalty.reg_bonus}"></label>
+      <label class="field"><span>امتیاز جایزه‌ی دعوت (زیرمجموعه‌گیری)</span><input class="input" data-fkey="loyalty_referral_bonus" type="number" value="${loyalty.referral_bonus}"></label>
+      <label class="field"><span>تعداد امتیاز لازم برای تبدیل</span><input class="input" data-fkey="loyalty_redeem_points" type="number" value="${loyalty.redeem_points}"></label>
+      <label class="field"><span>معادل تومانی آن (شارژ کیف پول)</span><input class="input" data-fkey="loyalty_redeem_toman" type="number" value="${loyalty.redeem_toman}"></label>
+      <label class="field"><span>حداقل امتیاز قابل استفاده</span><input class="input" data-fkey="loyalty_min_redeem" type="number" value="${loyalty.min_redeem}"></label>
+      <label class="field"><span>حداکثر امتیاز قابل استفاده در هر سفارش</span><input class="input" data-fkey="loyalty_max_per_order" type="number" value="${loyalty.max_per_order}"></label>
+      <label class="field"><span>سطح‌ها (قالب: نام:آستانه:ضریب — سطح‌ها را با «،» جدا کن)</span>
+        <textarea class="input" data-fkey="loyalty_tiers" rows="2">${esc(_loyaltyTiersText(loyalty.tiers))}</textarea>
+      </label>
+      <div class="card-sub">آستانه = حداقل مجموع امتیاز برای رسیدن به آن سطح، ضریب = چند برابر شدن امتیاز کسب‌شده در آن سطح.</div>
+      <button class="btn btn-primary btn-sm" id="save-loyalty" style="margin-top:12px">ذخیره</button>
+    </div>
+
+    <div class="card">
       <h3>🧪 الگوهای نمونه رایگان</h3>
       <div class="card-sub" style="margin-bottom:8px">این فایل‌ها با دکمه‌ی «الگوی نمونه رایگان» ربات برای کاربران ارسال می‌شوند (PDF و سایر اسناد، حداکثر ۵۰ مگابایت).</div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
@@ -3092,6 +3166,27 @@ async function renderSalesSettings() {
         prizes, expiry_hours: _num(root, 'wheel_expiry_hours'), cooldown_hours: _num(root, 'wheel_cooldown_hours'),
       });
       toast('تنظیمات گردونه ذخیره شد.');
+    } catch (e) { handleErr(e); }
+  });
+
+  $('#save-loyalty').addEventListener('click', async () => {
+    let tiers;
+    try {
+      tiers = _parseLoyaltyTiers(_val(root, 'loyalty_tiers'));
+    } catch (e) { return toast(e.message, true); }
+    try {
+      await apiPost('/settings/loyalty', {
+        enabled: _swOn(root, 'loyalty_enabled'),
+        points_per_toman: _num(root, 'loyalty_points_per_toman'),
+        reg_bonus: _num(root, 'loyalty_reg_bonus'),
+        referral_bonus: _num(root, 'loyalty_referral_bonus'),
+        redeem_points: _num(root, 'loyalty_redeem_points'),
+        redeem_toman: _num(root, 'loyalty_redeem_toman'),
+        min_redeem: _num(root, 'loyalty_min_redeem'),
+        max_per_order: _num(root, 'loyalty_max_per_order'),
+        tiers,
+      });
+      toast('تنظیمات باشگاه مشتریان ذخیره شد.');
     } catch (e) { handleErr(e); }
   });
 
@@ -3164,6 +3259,8 @@ const SETTINGS_GROUPS = [
     { key: 'btn_referral_style', label: 'رنگ دکمه زیرمجموعه‌گیری', type: 'color' },
     { key: 'btn_wheel', label: 'متن دکمه گردونه شانس', type: 'text' },
     { key: 'btn_wheel_style', label: 'رنگ دکمه گردونه شانس', type: 'color' },
+    { key: 'btn_loyalty', label: 'متن دکمه باشگاه مشتریان', type: 'text' },
+    { key: 'btn_loyalty_style', label: 'رنگ دکمه باشگاه مشتریان', type: 'color' },
     { key: 'btn_contact', label: 'متن دکمه ارتباط با پشتیبانی', type: 'text' },
     { key: 'btn_contact_style', label: 'رنگ دکمه ارتباط با پشتیبانی', type: 'color' },
     { key: 'btn_admin_panel', label: 'متن دکمه پنل مدیریت (فقط برای ادمین‌ها)', type: 'text' },
@@ -3566,6 +3663,7 @@ const ACTION_LABEL = {
   category_edit: 'ویرایش دسته‌بندی', category_toggle: 'فعال/غیرفعال کردن دسته‌بندی',
   discount_add: 'افزودن کد تخفیف', discount_delete: 'حذف کد تخفیف',
   discount_toggle: 'فعال/غیرفعال کردن کد تخفیف',
+  loyalty_adjust: 'تعدیل امتیاز', loyalty_settings: 'تنظیمات باشگاه مشتریان',
   menu_order_change: 'تغییر چیدمان منو',
   order_approve: 'تایید سفارش', order_reject: 'رد سفارش',
   product_add: 'افزودن محصول', product_delete: 'حذف محصول', product_edit: 'ویرایش محصول',
@@ -3574,6 +3672,7 @@ const ACTION_LABEL = {
   product_price_edit: 'ویرایش قیمت محصول', product_toggle: 'فعال/غیرفعال کردن محصول',
   sample_file_add: 'افزودن الگوی نمونه', sample_file_delete: 'حذف الگوی نمونه',
   setting_change: 'تغییر تنظیمات', support_reply: 'پاسخ چت زنده',
+  tg_admin_add: 'افزودن ادمین تلگرام', tg_admin_remove: 'حذف ادمین تلگرام', tg_admin_role: 'تغییر نقش ادمین تلگرام',
   ticket_close: 'بستن تیکت', ticket_reply: 'پاسخ تیکت', topup_approve: 'تایید شارژ کیف پول',
   topup_reject: 'رد شارژ کیف پول', user_block: 'مسدودسازی کاربر', user_unblock: 'رفع مسدودی کاربر',
   wallet_adjust: 'تغییر موجودی کیف پول', web_admin_active: 'فعال/غیرفعال کردن ادمین پنل',
@@ -4005,6 +4104,69 @@ function renderWebAdminsBrutalist(admins) {
   $$('[data-del]', content()).forEach(b => b.addEventListener('click', async () => {
     if (!confirm('این حساب حذف شود؟')) return;
     try { await apiDelete(`/web-admins/${b.dataset.del}`); toast('حذف شد.'); renderWebAdmins(); } catch (e) { handleErr(e); }
+  }));
+}
+
+/* ========================================================== tgadmins === */
+// ادمین‌های تلگرام ربات (مالکِ پنل = فقط مالک می‌بیند؛ مثل صفحه‌ی «کاربران پنل»
+// ورود این صفحه از طریق NAV با role:'owner' کنترل می‌شود.)
+const TG_ROLE_OPTIONS = [
+  { key: 'admin', label: 'مدیر کامل' },
+  { key: 'mid', label: 'ادمین میانی' },
+  { key: 'support', label: 'پشتیبان' },
+];
+
+async function renderTgAdmins() {
+  if (ME?.role !== 'owner') return;
+  const admins = await apiGet('/telegram-admins');
+  setContent(`
+    <div class="card" style="margin-bottom:14px">
+      <h3>➕ افزودن ادمین تلگرام</h3>
+      <div class="card-sub">آیدی عددی تلگرام کاربر را وارد کنید؛ کاربر باید حداقل یک‌بار ربات را استارت کرده باشد.</div>
+      <div class="form-row" style="margin-top:10px">
+        <input class="input" id="tga-id" type="number" placeholder="آیدی عددی تلگرام" style="direction:ltr;text-align:left">
+        <select class="input" id="tga-role">${TG_ROLE_OPTIONS.map(r => `<option value="${r.key}">${r.label}</option>`).join('')}</select>
+        <button class="btn btn-primary btn-sm" id="tga-add">افزودن</button>
+      </div>
+    </div>
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>آیدی تلگرام</th><th>نقش</th><th>تغییر نقش</th><th>عملیات</th></tr></thead>
+      <tbody>${admins.map(a => `<tr>
+        <td class="mono" style="direction:ltr">${a.telegram_id}</td>
+        <td><span class="badge badge-${a.role}">${ROLE_LABEL[a.role] || esc(a.role)}</span></td>
+        <td>${a.role === 'owner' ? '<span class="card-sub">—</span>' : `
+          <div class="form-row" style="margin:0">
+            <select class="input" data-tga-select="${a.telegram_id}">${TG_ROLE_OPTIONS.map(r => `<option value="${r.key}" ${a.role === r.key ? 'selected' : ''}>${r.label}</option>`).join('')}</select>
+            <button class="btn btn-sm" data-tga-set-role="${a.telegram_id}">اعمال</button>
+          </div>`}</td>
+        <td>${a.role === 'owner' ? '<span class="card-sub">مالک</span>' : `<button class="btn btn-danger btn-sm" data-tga-del="${a.telegram_id}">حذف</button>`}</td>
+      </tr>`).join('') || `<tr><td colspan="4" class="empty-state"><div class="icon">${svg('empty')}</div>ادمینی ثبت نشده</td></tr>`}</tbody>
+    </table></div></div>
+  `);
+  $('#tga-add').addEventListener('click', async () => {
+    const tgId = Number($('#tga-id').value);
+    if (!tgId) return toast('آیدی عددی تلگرام را وارد کنید.', true);
+    try {
+      await apiPost('/telegram-admins', { telegram_id: tgId, role: $('#tga-role').value });
+      toast('ادمین تلگرام اضافه شد.');
+      renderTgAdmins();
+    } catch (e) { handleErr(e); }
+  });
+  $$('[data-tga-set-role]', content()).forEach(b => b.addEventListener('click', async () => {
+    const sel = $(`[data-tga-select="${b.dataset.tgaSetRole}"]`, content());
+    try {
+      await apiPost(`/telegram-admins/${b.dataset.tgaSetRole}/role`, { role: sel.value });
+      toast('نقش ادمین تلگرام به‌روزرسانی شد.');
+      renderTgAdmins();
+    } catch (e) { handleErr(e); }
+  }));
+  $$('[data-tga-del]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm(`ادمین تلگرام با آیدی ${b.dataset.tgaDel} حذف شود؟`)) return;
+    try {
+      await apiDelete(`/telegram-admins/${b.dataset.tgaDel}`);
+      toast('حذف شد.');
+      renderTgAdmins();
+    } catch (e) { handleErr(e); }
   }));
 }
 
