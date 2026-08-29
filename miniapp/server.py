@@ -728,6 +728,8 @@ async def api_test_config_claim(auth=Depends(require_joined)):
 @app.get("/api/referral")
 async def api_referral(auth=Depends(get_verified_user)):
     tg_id, db, tenant = auth
+    if db.get_setting("referral_button_enabled", "1") != "1":
+        return {"enabled": False}
     commission_on = db.get_setting("referral_enabled", "1") == "1"
     fc_on = db.get_setting("referral_free_config_enabled", "0") == "1"
     ib_on = db.get_setting("referral_invite_bonus_enabled", "0") == "1"
