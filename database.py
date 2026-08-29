@@ -188,6 +188,8 @@ DEFAULT_SETTINGS = {
     "adm_custom_config_settings_style": "",
     # چیدمان دکمه‌های منوی اصلی (ترتیب و نمایش) - آرایه JSON از کلیدها
     "menu_order": '["miniapp","btn_buy","btn_test","btn_my_orders","btn_wallet","btn_referral","btn_wheel","btn_contact","btn_admin_panel"]',
+    "miniapp_enabled": "1",
+    "reseller_request_enabled": "1",
 }
 
 
@@ -195,7 +197,7 @@ DEFAULT_SETTINGS = {
 # toggle_key: نام تنظیمی که فعال/غیرفعال بودن دکمه را کنترل می‌کند (None یعنی همیشه نمایش داده می‌شود)
 # admin_only: اگر True فقط برای ادمین‌ها نمایش داده می‌شود
 MENU_BUTTON_META = {
-    "miniapp": {"label": "دکمه مینی‌اپ فروشگاه", "toggle_key": None, "admin_only": False, "has_text": False, "has_style": False},
+    "miniapp": {"label": "دکمه مینی‌اپ فروشگاه", "toggle_key": "miniapp_enabled", "admin_only": False, "has_text": False, "has_style": False},
     "btn_buy": {"label": "دکمه خرید کانفیگ", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
     "btn_test": {"label": "دکمه کانفیگ تست", "toggle_key": "test_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_my_orders": {"label": "دکمه سفارش‌های من", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
@@ -204,11 +206,11 @@ MENU_BUTTON_META = {
     "btn_wheel": {"label": "دکمه گردونه شانس", "toggle_key": "wheel_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_contact": {"label": "دکمه ارتباط با پشتیبانی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
     "btn_admin_panel": {"label": "دکمه پنل مدیریت", "toggle_key": None, "admin_only": True, "has_text": True, "has_style": True},
-    # این دو دکمه بر اساس وضعیت کاربر (نماینده بودن/نبودن) به‌صورت پویا نمایش داده می‌شوند،
-    # نه با یک toggle سراسری؛ به همین دلیل toggle_key ندارند ولی مثل بقیه‌ی دکمه‌ها
-    # متن/رنگ قابل تنظیم و در چیدمان منو قابل جابجایی هستند.
+    # btn_reseller_panel بر اساس وضعیت کاربر (نماینده بودن/نبودن) به‌صورت پویا نمایش
+    # داده می‌شود، نه با یک toggle سراسری؛ به همین دلیل toggle_key ندارد ولی مثل
+    # بقیه‌ی دکمه‌ها متن/رنگ قابل تنظیم و در چیدمان منو قابل جابجایی است.
     "btn_reseller_panel": {"label": "دکمه پنل نمایندگی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
-    "btn_reseller_request": {"label": "دکمه درخواست نمایندگی سطح ۲", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
+    "btn_reseller_request": {"label": "دکمه درخواست نمایندگی سطح ۲", "toggle_key": "reseller_request_enabled", "admin_only": False, "has_text": True, "has_style": True},
 }
 DEFAULT_MENU_ORDER = [
     "miniapp", "btn_reseller_panel", "btn_reseller_request", "btn_buy", "btn_test",

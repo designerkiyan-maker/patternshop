@@ -1485,6 +1485,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     async def reseller_request_start(message: Message, state: FSMContext):
         if not is_main_bot:
             return
+        if (await asyncio.to_thread(db.get_setting, "reseller_request_enabled", "1")) != "1":
+            await message.answer("در حال حاضر امکان درخواست نمایندگی سطح ۲ غیرفعال است.")
+            return
         if (await asyncio.to_thread(db.is_reseller, message.from_user.id)):
             await message.answer("شما همین الان هم نماینده هستید.")
             return

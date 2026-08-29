@@ -18,6 +18,7 @@ from aiogram.types import (
 
 from config import MINIAPP_URL
 from panel_providers import PANEL_TYPE_LABELS
+from database import MENU_BUTTON_META
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +67,8 @@ def _menu_items(db, is_admin: bool, is_reseller: bool, is_main_bot: bool, show_r
     miniapp_url = _miniapp_url(db)
 
     def item_miniapp():
+        if settings.get("miniapp_enabled", "1") != "1":
+            return None
         return (MINIAPP_BTN_TEXT, "") if miniapp_url else None
 
     def item_buy():
@@ -112,6 +115,8 @@ def _menu_items(db, is_admin: bool, is_reseller: bool, is_main_bot: bool, show_r
 
     def item_reseller_request():
         if not show_reseller_request:
+            return None
+        if settings.get("reseller_request_enabled", "1") != "1":
             return None
         return (settings.get("btn_reseller_request", "🏪 درخواست نمایندگی سطح ۲"), settings.get("btn_reseller_request_style", "primary"))
 
@@ -793,12 +798,29 @@ def admin_edit_buttons_kb(db) -> InlineKeyboardMarkup:
     for key, label in BUTTON_LABELS.items():
         current_style = db.get_setting(f"{key}_style", "")
         style_icon = {"primary": "🔵", "success": "🟢", "danger": "🔴", "": "⚪️"}.get(current_style, "⚪️")
-        rows.append(
-            [
-                InlineKeyboardButton(text=f"✏️ {style_icon} {label}", callback_data=f"adm_btn_edit:{key}"),
-                InlineKeyboardButton(text="🎨 تغییر رنگ", callback_data=f"adm_btn_color_menu:{key}"),
-            ]
-        )
+        row = [
+            InlineKeyboardButton(text=f"✏️ {style_icon} {label}", callback_data=f"adm_btn_edit:{key}"),
+            InlineKeyboardButton(text="🎨 تغییر رنگ", callback_data=f"adm_btn_color_menu:{key}"),
+        ]
+        toggle_key = MENU_BUTTON_META.get(key, {}).get("toggle_key")
+        if toggle_key:
+            enabled = db.get_setting(toggle_key, "1") == "1"
+            row.append(
+                InlineKeyboardButton(
+                    text="🟢 فعال" if enabled else "🔴 غیرفعال",
+                    callback_data=f"adm_btn_toggle:{key}",
+                )
+            )
+        rows.append(row)
+    miniapp_enabled = db.get_setting("miniapp_enabled", "1") == "1"
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=f"دکمه مینی‌اپ فروشگاه: {'🟢 فعال' if miniapp_enabled else '🔴 غیرفعال'}",
+                callback_data="adm_btn_toggle:miniapp",
+            )
+        ]
+    )
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:appearance")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

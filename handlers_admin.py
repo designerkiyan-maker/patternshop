@@ -22,7 +22,7 @@ from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
 
 import keyboards as kb
-from database import Database
+from database import Database, MENU_BUTTON_META
 from config import RESELLER_DBS_DIR, resolve_db_path, ADMIN_PANEL_URL
 from config_delivery import deliver_config_to_user
 from jalali import to_jalali_str
@@ -3450,6 +3450,21 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         (await asyncio.to_thread(db.set_setting, key, message.text.strip()))
         await state.clear()
         await message.answer("✅ متن دکمه به‌روزرسانی شد.", reply_markup=kb.admin_edit_buttons_kb(db))
+
+    @router.callback_query(F.data.startswith("adm_btn_toggle:"))
+    async def cb_admin_btn_toggle(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        key = call.data.split(":")[1]
+        meta = MENU_BUTTON_META.get(key)
+        if not meta or not meta["toggle_key"]:
+            await call.answer("❌ این دکمه قابل فعال/غیرفعال کردن نیست.", show_alert=True)
+            return
+        toggle_key = meta["toggle_key"]
+        current = (await asyncio.to_thread(db.get_setting, toggle_key, "1"))
+        (await asyncio.to_thread(db.set_setting, toggle_key, "0" if current == "1" else "1"))
+        await safe_edit(call, "کدام دکمه ویرایش شود؟", reply_markup=kb.admin_edit_buttons_kb(db))
+        await call.answer("✅ وضعیت دکمه به‌روزرسانی شد.")
 
     # -------------------------------------------------------------------
     # چیدمان/نمایش منوی اصلی: منوی پایین (Reply) و منوی شیشه‌ای بالا (Inline)
