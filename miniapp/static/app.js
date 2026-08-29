@@ -706,10 +706,11 @@ async function renderHome() {
 async function renderProfile() {
   content.innerHTML = skeleton(3);
   try {
-    const [me, orders, customConfigs] = await Promise.all([
+    const [me, orders, customConfigs, referral] = await Promise.all([
       api("/api/me"),
       api("/api/orders"),
       api("/api/custom-configs").catch(() => []),
+      api("/api/referral").catch(() => ({ enabled: true })),
     ]);
     setHeaderWallet(me.wallet_credit);
     const active = orders.filter((o) => o.status === "approved" && !o.is_custom_config);
@@ -752,13 +753,14 @@ async function renderProfile() {
           </div>
           <span class="list-row-chev">‹</span>
         </div>
+        ${referral.enabled ? `
         <div class="list-row" data-nav="referral">
           <div class="list-row-main">
             <div class="list-row-ic line">${ICON_REFERRAL}</div>
             <div class="list-row-text"><div class="list-row-title">زیرمجموعه‌گیری</div></div>
           </div>
           <span class="list-row-chev">‹</span>
-        </div>
+        </div>` : ""}
         <div class="list-row" data-nav="test">
           <div class="list-row-main">
             <div class="list-row-ic line">${ICON_TEST}</div>
