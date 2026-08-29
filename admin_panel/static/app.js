@@ -4857,12 +4857,16 @@ function computeMenuRowNumbers() {
 
 function menuOrderRowHtml(item, idx, rowNumbers) {
   const joined = idx > 0 && item.break_before === false;
+  const toggle = item.togglable
+    ? `<span class="switch" data-order-enabled="${idx}" data-on="${item.enabled ? '1' : '0'}" title="فعال/غیرفعال" style="margin:0 4px"><i></i></span>`
+    : '';
   return `
     <div class="menu-order-row${joined ? ' menu-order-joined' : ''}" data-idx="${idx}">
       <span class="menu-order-drag-handle" data-idx="${idx}">⠿</span>
       <span class="chip" style="opacity:.7">ردیف ${rowNumbers[idx]}</span>
       <span class="menu-order-label">${esc(item.label)}${item.admin_only ? ' <span class="card-sub">(فقط ادمین)</span>' : ''}</span>
-      ${item.enabled === false ? '<span class="chip" style="color:var(--rose)">غیرفعال</span>' : ''}
+      ${item.togglable && item.enabled === false ? '<span class="chip" style="color:var(--rose)">غیرفعال</span>' : ''}
+      ${toggle}
       <div class="menu-order-arrows">
         ${idx > 0 ? `<button type="button" class="btn btn-sm ${joined ? 'btn-primary' : 'btn-ghost'}" data-order-break="${idx}" title="کنار دکمه‌ی قبلی یا در ردیف جدید">${joined ? '↔ کنار قبلی' : '⤵ ردیف جدید'}</button>` : ''}
         <button type="button" class="btn btn-sm btn-ghost" data-order-up="${idx}" ${idx === 0 ? 'disabled' : ''}>▲</button>
@@ -4880,6 +4884,11 @@ function renderMenuOrderList() {
   $$('[data-order-down]', list).forEach(b => b.addEventListener('click', () => moveMenuOrderItem(Number(b.dataset.orderDown), 1)));
   $$('[data-order-break]', list).forEach(b => b.addEventListener('click', () => toggleMenuOrderBreak(Number(b.dataset.orderBreak))));
   $$('.menu-order-drag-handle', list).forEach(h => h.addEventListener('pointerdown', onMenuOrderDragStart));
+  $$('[data-order-enabled]', list).forEach(sw => sw.addEventListener('click', () => {
+    const idx = Number(sw.dataset.orderEnabled);
+    menuOrderItems[idx].enabled = !menuOrderItems[idx].enabled;
+    renderMenuOrderList();
+  }));
 }
 
 function toggleMenuOrderBreak(idx) {
@@ -4962,14 +4971,15 @@ async function saveMenuOrder() {
   const prevTxt = btn.textContent; btn.textContent = 'در حال ذخیره...';
   try {
     const order = menuOrderItems.map(i => i.key);
+    const buttons = menuOrderItems.filter(i => i.togglable).map(i => ({ key: i.key, enabled: !!i.enabled }));
     if (menuOrderCustomLayout) {
       // یعنی کاربر همین الان حداقل یک بار چیدمان ردیف‌ها را دستی تغییر داده؛
       // بقیه‌ی آیتم‌هایی که هنوز break_before نامشخص (null) دارند به‌صورت
       // پیش‌فرض «ردیف جدا» در نظر گرفته می‌شوند تا رفتار قابل‌پیش‌بینی بماند.
       const breaks = menuOrderItems.filter((it, idx) => idx > 0 && it.break_before !== false).map(i => i.key);
-      await apiPost('/settings/menu-layout', { order, breaks });
+      await apiPost('/settings/menu-layout', { order, breaks, buttons });
     } else {
-      await apiPost('/settings/menu-order', { order });
+      await apiPost('/settings/menu-order', { order, buttons });
     }
     toast('چیدمان منو ذخیره شد.');
   } catch (e) {
