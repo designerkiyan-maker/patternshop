@@ -325,6 +325,16 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
 .promo-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--glass-brd); transition: background .15s ease, width .15s ease; }
 .promo-dots span.active { background: var(--pink); width: 16px; border-radius: 4px; }
 
+/* تنفس آرام لایه‌ی گرادیان اسلایدها — اکسنت حرکتی ملایم و رترویو consistent */
+@keyframes promo-glow-shift {
+  0%, 100% { filter: hue-rotate(0deg) brightness(1); transform: scale(1); }
+  50% { filter: hue-rotate(16deg) brightness(1.07); transform: scale(1.04); }
+}
+.promo-slide::before { animation: promo-glow-shift 8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .promo-slide::before { animation: none; }
+}
+
 /* ===================================================================
    Profile page
 =================================================================== */
@@ -803,6 +813,14 @@ textarea.input { font-family: var(--font-mono); min-height: 90px; }
 }
 .banner-title { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-weight: 700; font-size: 12.5px; color: var(--amber); margin-bottom: 8px; }
 .banner-hint { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+
+/* نکته‌ی تاکیدی تبدیل امتیاز باشگاه مشتریان (تب کیف پول) — هم‌خانواده‌ی banner-warn */
+.redeem-note {
+  margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, rgba(255, 207, 107, 0.14), rgba(255, 138, 61, 0.05));
+  border: 1px solid rgba(255, 207, 107, 0.3);
+  font-size: 11.5px; line-height: 1.8; color: var(--text);
+}
 
 /* ===================================================================
    Support chat

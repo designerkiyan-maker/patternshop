@@ -564,6 +564,42 @@ function renderPromoCarousel(slides) {
   `;
 }
 
+// ---------------------------------------------------------------------------
+// چرخش خودکار کاروسل تبلیغات صفحه‌ی خانه — هر چند ثانیه اسلاید بعدی، با توقف
+// موقع تعامل کاربر. تایمر با جابه‌جایی تب در switchTab پاک می‌شود (هم‌الگوی
+// پولینگ چت).
+// ---------------------------------------------------------------------------
+const PROMO_ROTATE_MS = 4500;  // فاصله‌ی چرخش خودکار
+const PROMO_RESUME_MS = 6000;  // مکث بعد از آخرین تعامل کاربر قبل از شروع دوباره
+let promoAutoTimer = null;
+let promoResumeTimer = null;
+
+function promoCurrentIndex(track) {
+  // در سند راست‌به‌چپ، scrollLeft هنگام رفتن به اسلایدهای بعدی منفی می‌شود؛
+  // قدرمطلق هر دو رفتار (منفی/مثبت) را پوشش می‌دهد.
+  const w = track.clientWidth || 1;
+  return Math.abs(Math.round(track.scrollLeft / w));
+}
+
+function stopPromoAutoRotate() {
+  if (promoAutoTimer) { clearInterval(promoAutoTimer); promoAutoTimer = null; }
+  if (promoResumeTimer) { clearTimeout(promoResumeTimer); promoResumeTimer = null; }
+}
+
+function startPromoAutoRotate(track, dots) {
+  stopPromoAutoRotate();
+  if (!dots || dots.length < 2) return;
+  try {
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  } catch (e) {}
+  promoAutoTimer = setInterval(() => {
+    if (!track.isConnected) { stopPromoAutoRotate(); return; }
+    const count = dots.length;
+    const next = (promoCurrentIndex(track) + 1) % count; // بعد از آخرین اسلاید، برگشت به اولی
+    track.scrollTo({ left: -next * track.clientWidth, behavior: "smooth" });
+  }, PROMO_ROTATE_MS);
+}
+
 function wirePromoCarousel(root) {
   const track = root.querySelector("#promo-track");
   if (!track) return;
@@ -573,9 +609,21 @@ function wirePromoCarousel(root) {
   const dots = root.querySelectorAll(".promo-dots span");
   if (!dots.length) return;
   track.addEventListener("scroll", () => {
-    const idx = Math.round(track.scrollLeft / track.clientWidth);
+    const idx = Math.min(promoCurrentIndex(track), dots.length - 1);
     dots.forEach((d, i) => d.classList.toggle("active", i === idx));
   }, { passive: true });
+  // هنگام تعامل کاربر (لمس/کشیدن/اسکرول‌ول) چرخش خودکار می‌ایستد و چند ثانیه
+  // بعد از آخرین تعامل دوباره شروع می‌شود؛ اسکرول دستی همیشه فعال می‌ماند.
+  const pauseAutoRotate = () => {
+    if (promoAutoTimer) { clearInterval(promoAutoTimer); promoAutoTimer = null; }
+    clearTimeout(promoResumeTimer);
+    promoResumeTimer = setTimeout(() => startPromoAutoRotate(track, dots), PROMO_RESUME_MS);
+  };
+  const carousel = track.closest(".promo-carousel") || track;
+  ["pointerdown", "touchstart", "wheel"].forEach((evt) => {
+    carousel.addEventListener(evt, pauseAutoRotate, { passive: true });
+  });
+  startPromoAutoRotate(track, dots);
 }
 
 async function renderHome() {
@@ -656,6 +704,7 @@ async function renderProfile() {
         <div class="profile-info-grid">
           <div class="stat-card"><div class="stat-num">${fmt(deliveredCount)}</div><div class="stat-label">الگوی خریداری‌شده</div></div>
           <div class="stat-card"><div class="stat-num">${fmt(me.wallet_credit)}</div><div class="stat-label">موجودی کیف پول</div></div>
+          ${me.loyalty && me.loyalty.points != null ? `<div class="stat-card"><div class="stat-num">${fmt(me.loyalty.points)}</div><div class="stat-label">⭐ امتیاز باشگاه</div></div>` : ""}
           <div class="profile-info-row"><span>تاریخ عضویت</span><b>${me.joined_at ? toJalaliStr(me.joined_at) : "-"}</b></div>
         </div>
       </div>
@@ -1255,12 +1304,21 @@ async function renderWallet() {
   try {
     const me = await api("/api/me");
     setHeaderWallet(me.wallet_credit);
+    const loyalty = me.loyalty && me.loyalty.points != null ? me.loyalty : null;
     content.innerHTML = `
       <div class="eyebrow">کیف پول</div>
       <div class="card">
         <h3><span class="ic">👛</span>موجودی فعلی</h3>
         <div class="stat-row"><span>قابل استفاده برای خرید الگو</span><b>${fmt(me.wallet_credit)} تومان</b></div>
       </div>
+      ${loyalty ? `
+      <div class="card">
+        <h3><span class="ic">⭐</span>باشگاه مشتریان</h3>
+        <div class="stat-row"><span>امتیاز فعلی تو</span><b>${fmt(loyalty.points)} امتیاز</b></div>
+        ${loyalty.tier ? `<div class="stat-row"><span>سطح</span><b>${escHtml(loyalty.tier)}</b></div>` : ""}
+        ${loyalty.redeem_enabled ? `
+        <div class="redeem-note">🎁 هر ${fmt(loyalty.redeem_points)} امتیاز = ${fmt(loyalty.redeem_toman)} تومان — با تبدیل، این مبلغ مستقیم به کیف پولت اضافه می‌شه.</div>` : ""}
+      </div>` : ""}
       <div class="eyebrow">شارژ کیف پول</div>
       <div class="card" id="topup-card">
         <input id="topup-amount" class="input" type="number" placeholder="مبلغ به تومان" />
@@ -1317,6 +1375,7 @@ const tabs = {
 function switchTab(name) {
   document.querySelectorAll("#tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   if (name !== "support") clearInterval(supportPollTimer);
+  stopPromoAutoRotate(); // کاروسل تبلیغات فقط در تب خانه است؛ با خروج، تایمرش پاک می‌شود
   content.classList.remove("fade-in");
   void content.offsetWidth; // ری‌استارت انیمیشن
   (tabs[name] || renderHome)();

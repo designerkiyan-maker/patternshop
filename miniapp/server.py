@@ -301,6 +301,9 @@ def api_me(auth=Depends(get_verified_user)):
             "points": s["current"],
             "tier": s["tier"]["name"] if s["tier"] else None,
             "lifetime_earned": s["lifetime_earned"],
+            "redeem_enabled": s["redeem_enabled"],
+            "redeem_points": s["redeem_points"],
+            "redeem_toman": s["redeem_toman"],
         }
     except Exception:
         logger.exception("خلاصه‌ی باشگاه وفاداری کاربر %s دریافت نشد.", tg_id)
