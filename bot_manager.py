@@ -195,13 +195,15 @@ class BotManager:
         return token in self.instances
 
     async def wait_all(self):
-        """تا وقتی بات در حال اجراست، برنامه را زنده نگه می‌دارد."""
+        """تا وقتی بات در حال اجراست، برنامه را زنده نگه می‌دارد.
+        وقتی تسک polling تمام شد (مثلاً با SIGTERM) برمی‌گردد تا main()
+        بتواند shutdown تمیز را انجام دهد — حلقه روی تسک تمام‌شده
+        اسپین نمی‌کند."""
         while True:
-            tasks = [inst["task"] for inst in self.instances.values()]
-            if not tasks:
-                await asyncio.sleep(1)
-                continue
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+            pending = [inst["task"] for inst in self.instances.values() if not inst["task"].done()]
+            if not pending:
+                return
+            done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_EXCEPTION)
             for d in done:
                 exc = d.exception()
                 if exc and not isinstance(exc, asyncio.CancelledError):
