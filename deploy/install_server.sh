@@ -95,7 +95,7 @@ Wants=network-online.target
 [Service]
 WorkingDirectory=$REPO_DIR
 EnvironmentFile=$INSTALL_DIR/.env
-ExecStart=$VENV/bin/uvicorn miniapp.server:app --host 127.0.0.1 --port 8001
+ExecStart=$VENV/bin/uvicorn miniapp.server:app --host 127.0.0.1 --port 8011
 Restart=always
 RestartSec=5
 
@@ -108,7 +108,7 @@ systemctl enable --now patternshop-bot patternshop-miniapp
 
 echo "✅ نصب پایه کامل شد:"
 echo "   - بات:      systemctl status patternshop-bot      (لاگ: journalctl -u patternshop-bot -f)"
-echo "   - مینی‌اپ:  systemctl status patternshop-miniapp  (روی 127.0.0.1:8001)"
+echo "   - مینی‌اپ:  systemctl status patternshop-miniapp  (روی 127.0.0.1:8011)"
 
 # ---------- 6) دامنه + SSL (اختیاری) ----------
 MODE="${1:-}"
@@ -126,7 +126,7 @@ server {
     client_max_body_size 60m;
 
     location / {
-        proxy_pass http://127.0.0.1:8001;
+        proxy_pass http://127.0.0.1:8011;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -157,7 +157,7 @@ Wants=network-online.target
 [Service]
 WorkingDirectory=$REPO_DIR
 EnvironmentFile=$INSTALL_DIR/.env
-ExecStart=$VENV/bin/uvicorn admin_panel.server:app --host 127.0.0.1 --port 8002
+ExecStart=$VENV/bin/uvicorn admin_panel.server:app --host 127.0.0.1 --port 8012
 Restart=always
 RestartSec=5
 
@@ -174,7 +174,7 @@ server {
     client_max_body_size 60m;
 
     location / {
-        proxy_pass http://127.0.0.1:8002;
+        proxy_pass http://127.0.0.1:8012;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
