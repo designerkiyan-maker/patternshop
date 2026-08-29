@@ -6,6 +6,8 @@
 به‌عنوان پارامتر می‌گیرند - نه اینکه از یک ماژول سراسری import شود.
 """
 
+import json
+
 from aiogram.types import (
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
@@ -66,6 +68,11 @@ def _menu_items(db, is_admin: bool):
             return None
         return (settings.get("btn_wheel", "🎡 گردونه شانس"), settings.get("btn_wheel_style", ""))
 
+    def item_loyalty():
+        if settings.get("loyalty_enabled", "1") != "1":
+            return None
+        return (settings.get("btn_loyalty", "🎁 باشگاه مشتریان"), settings.get("btn_loyalty_style", ""))
+
     def item_contact():
         return (settings.get("btn_contact", "📞 ارتباط با پشتیبانی"), settings.get("btn_contact_style", ""))
 
@@ -81,6 +88,7 @@ def _menu_items(db, is_admin: bool):
         "btn_wallet": item_wallet,
         "btn_referral": item_referral,
         "btn_wheel": item_wheel,
+        "btn_loyalty": item_loyalty,
         "btn_contact": item_contact,
         "btn_admin_panel": item_admin_panel,
     }
@@ -316,6 +324,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_discounts_menu", "🎟 مدیریت کدهای تخفیف", "adm_discounts_menu"),
     ("adm_wheel_settings", "🎡 مدیریت گردونه شانس", "adm_wheel_settings"),
     ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
+    ("adm_loyalty", "⭐ باشگاه مشتریان", "adm_loyalty"),
     ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
     ("adm_main_menu_settings", "🧩 چیدمان/نمایش منوی اصلی", "adm_main_menu_settings"),
     ("adm_set_card", "💳 تنظیم شماره کارت", "adm_set_card"),
@@ -352,6 +361,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_discounts_menu",
         "adm_wheel_settings",
         "adm_referral_settings",
+        "adm_loyalty",
         "adm_broadcast",
     ]),
     ("finance", "💰 مالی و پرداخت", [
@@ -691,6 +701,7 @@ BUTTON_LABELS = {
     "btn_referral": "دکمه زیرمجموعه‌گیری",
     "btn_wallet": "دکمه کیف پول",
     "btn_wheel": "دکمه گردونه شانس",
+    "btn_loyalty": "دکمه باشگاه مشتریان",
     "btn_admin_panel": "دکمه پنل مدیریت",
 }
 
@@ -922,6 +933,49 @@ def wheel_settings_kb(db) -> InlineKeyboardMarkup:
 
 
 # ---------------------------------------------------------------------------
+# باشگاه مشتریان (پنل مدیریت)
+# ---------------------------------------------------------------------------
+
+def loyalty_admin_kb(db) -> InlineKeyboardMarkup:
+    """منوی تنظیمات باشگاه مشتریان؛ مقدار فعلی هر تنظیم، زنده از دیتابیس،
+    روی خودِ دکمه‌ها نمایش داده می‌شود (مثل wheel_settings_kb)."""
+    enabled = db.get_setting("loyalty_enabled", "1") == "1"
+    rate = db.get_setting("loyalty_points_per_toman", "10000")
+    reg = db.get_setting("loyalty_reg_bonus", "0")
+    ref = db.get_setting("loyalty_referral_bonus", "0")
+    rpts = db.get_setting("loyalty_redeem_points", "100")
+    rtoman = db.get_setting("loyalty_redeem_toman", "0")
+    min_redeem = db.get_setting("loyalty_min_redeem", "0")
+    try:
+        max_per_order = int(db.get_setting("loyalty_max_per_order", "0") or 0)
+    except (TypeError, ValueError):
+        max_per_order = 0
+    max_txt = str(max_per_order) if max_per_order > 0 else "نامحدود"
+    try:
+        tiers_count = len(json.loads(db.get_setting("loyalty_tiers", "") or "[]"))
+    except (ValueError, TypeError):
+        tiers_count = 0
+    tiers_txt = f"{tiers_count} سطح" if tiers_count > 0 else "تعریف نشده"
+
+    rows = [
+        [InlineKeyboardButton(
+            text=("🔴 غیرفعال کردن باشگاه مشتریان" if enabled else "🟢 فعال کردن باشگاه مشتریان"),
+            callback_data="adm_loyalty_toggle",
+        )],
+        [InlineKeyboardButton(text=f"نرخ امتیاز: هر {rate} تومان خرید", callback_data="adm_loyalty_edit_rate")],
+        [InlineKeyboardButton(text=f"هدیه ثبت‌نام: {reg}", callback_data="adm_loyalty_edit_reg"),
+         InlineKeyboardButton(text=f"امتیاز معرفی: {ref}", callback_data="adm_loyalty_edit_ref")],
+        [InlineKeyboardButton(text=f"تبدیل: {rpts} امتیاز = {rtoman} تومان", callback_data="adm_loyalty_edit_rpts"),
+         InlineKeyboardButton(text=f"حداقل تبدیل: {min_redeem}", callback_data="adm_loyalty_edit_min")],
+        [InlineKeyboardButton(text=f"سقف هر سفارش: {max_txt}", callback_data="adm_loyalty_edit_max"),
+         InlineKeyboardButton(text=f"سطوح: {tiers_txt}", callback_data="adm_loyalty_edit_tiers")],
+        [InlineKeyboardButton(text="👤 تعدیل امتیاز کاربر", callback_data="adm_loyalty_adjust")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:marketing")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ---------------------------------------------------------------------------
 # کیف پول
 # ---------------------------------------------------------------------------
 
@@ -939,3 +993,51 @@ def topup_review_kb(topup_id) -> InlineKeyboardMarkup:
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ---------------------------------------------------------------------------
+# باشگاه مشتریان (کاربر)
+# ---------------------------------------------------------------------------
+
+def loyalty_menu_kb() -> InlineKeyboardMarkup:
+    """منوی باشگاه مشتریان: تاریخچه‌ی امتیاز، تبدیل به کیف پول و قوانین."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📜 تاریخچه امتیاز", callback_data="loy_hist:0")],
+            [InlineKeyboardButton(text="🔄 تبدیل به کیف پول", callback_data="loy_redeem")],
+            [InlineKeyboardButton(text="❓ قوانین", callback_data="loy_rules")],
+            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="back_main")],
+        ]
+    )
+
+
+def loyalty_rules_kb() -> InlineKeyboardMarkup:
+    """کیبورد صفحه‌ی قوانین باشگاه مشتریان (فقط بازگشت به منوی باشگاه)."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="loy_back")]]
+    )
+
+
+def loyalty_history_kb(page: int, has_prev: bool, has_next: bool) -> InlineKeyboardMarkup:
+    """کیبورد صفحه‌بندی تاریخچه‌ی امتیاز؛ دکمه‌های قبلی/بعدی فقط وقتی صفحه‌ی
+    متناظر وجود داشته باشد نمایش داده می‌شوند."""
+    nav_row = []
+    if has_prev:
+        nav_row.append(InlineKeyboardButton(text="◀️ قبلی", callback_data=f"loy_hist:{page - 1}"))
+    if has_next:
+        nav_row.append(InlineKeyboardButton(text="▶️ بعدی", callback_data=f"loy_hist:{page + 1}"))
+    rows = []
+    if nav_row:
+        rows.append(nav_row)
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="loy_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def loyalty_redeem_confirm_kb(points: int) -> InlineKeyboardMarkup:
+    """تایید نهایی تبدیل امتیاز به اعتبار کیف پول."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ تایید تبدیل", callback_data=f"loy_redeem_ok:{points}")],
+            [InlineKeyboardButton(text="❌ انصراف", callback_data="cancel_flow")],
+        ]
+    )

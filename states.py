@@ -125,3 +125,24 @@ class AdminWheelSettings(StatesGroup):
 class AdminRestoreBackup(StatesGroup):
     waiting_file = State()
     waiting_confirm = State()
+
+
+class LoyaltyRedeem(StatesGroup):
+    waiting_points = State()
+
+
+class AdminLoyaltySettings(StatesGroup):
+    waiting_rate = State()
+    waiting_reg_bonus = State()
+    waiting_referral_bonus = State()
+    waiting_redeem_points = State()
+    waiting_redeem_toman = State()
+    waiting_min_redeem = State()
+    waiting_max_per_order = State()
+    waiting_tiers = State()
+
+
+class AdminLoyaltyAdjust(StatesGroup):
+    waiting_user = State()
+    waiting_amount = State()
+    waiting_reason = State()

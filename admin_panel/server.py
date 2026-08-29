@@ -31,6 +31,7 @@ from admin_panel.telegram_notify import send_message as tg_send, send_document a
 from admin_panel.config_delivery_web import deliver_pattern_to_user_web
 from admin_panel.webpush import PUSH_ENABLED, send_push
 from backup import create_backup, restore_backup, is_valid_sqlite_db
+import loyalty
 
 logger = logging.getLogger("admin_panel.server")
 
@@ -538,6 +539,11 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
         raise HTTPException(409, "هنوز فایلی برای این محصول آپلود نشده است")
 
     (await asyncio.to_thread(db.approve_order, order_id, [f["id"] for f in files]))
+    awarded = 0
+    try:
+        awarded = await asyncio.to_thread(loyalty.award_purchase, db, order_id)
+    except Exception:
+        logger.exception("اعطای امتیاز وفاداری سفارش %s ناموفق بود.", order_id)
     (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "order_approve",
         f"سفارش #{order_id} | کاربر {order['user_id']} | محصول «{product['name'] if product else '---'}» "
@@ -552,7 +558,10 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
         [f["file_id"] for f in files],
         final_price=order["final_price"], order_id=order_id,
     ))
-    return {"ok": True}
+    response = {"ok": True}
+    if awarded > 0:
+        response["loyalty_awarded"] = awarded
+    return response
 
 
 @app.post("/api/orders/{order_id}/reject")
@@ -561,6 +570,10 @@ async def api_reject_order(order_id: int, admin=Depends(require_permission("orde
     if not order or order["status"] != "pending":
         raise HTTPException(400, "سفارش یافت نشد یا قبلاً بررسی شده.")
     (await asyncio.to_thread(db.reject_order, order_id))
+    try:
+        await asyncio.to_thread(loyalty.reverse_purchase, db, order_id)
+    except Exception:
+        logger.exception("برگشت امتیاز وفاداری سفارش %s ناموفق بود.", order_id)
     (await asyncio.to_thread(db.log_admin_action, admin["id"], "order_reject", f"سفارش #{order_id} رد شد (پنل وب - {admin['username']})", "order", order_id))
     await notify_user(order["user_id"], "⛔️ سفارش شما رد شد. در صورت کسر از کیف پول، مبلغ برگشت داده شد.")
     return {"ok": True}
@@ -632,11 +645,23 @@ def api_user_detail(tg_id: int, admin=Depends(get_current_admin)):
     if not user:
         raise HTTPException(404, "کاربر یافت نشد.")
     history = db.get_user_full_history(tg_id)
+    loyalty_summary = None
+    try:
+        s = loyalty.get_summary(db, tg_id)
+        loyalty_summary = {
+            "points": s["current"],
+            "tier": s["tier"]["name"] if s["tier"] else None,
+            "lifetime_earned": s["lifetime_earned"],
+            "lifetime_spent": s["lifetime_spent"],
+        }
+    except Exception:
+        logger.exception("خلاصه‌ی باشگاه وفاداری کاربر %s دریافت نشد.", tg_id)
     return {
         "user": dict(user),
         "orders": rows_to_list(history["orders"]),
         "topups": rows_to_list(history["topups"]),
         "referral": db.get_referral_stats(tg_id),
+        "loyalty": loyalty_summary,
     }
 
 

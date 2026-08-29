@@ -32,10 +32,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("miniapp")
 
 from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER
 from database import Database
 from miniapp.auth import validate_init_data
+import loyalty
 
 app = FastAPI(title="Pattern Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -292,6 +294,16 @@ def api_me(auth=Depends(get_verified_user)):
     wallet = db.get_wallet_credit(tg_id)
     referral = db.get_referral_stats(tg_id)
     orders = db.get_user_orders(tg_id)
+    loyalty_summary = None
+    try:
+        s = loyalty.get_summary(db, tg_id)
+        loyalty_summary = {
+            "points": s["current"],
+            "tier": s["tier"]["name"] if s["tier"] else None,
+            "lifetime_earned": s["lifetime_earned"],
+        }
+    except Exception:
+        logger.exception("خلاصه‌ی باشگاه وفاداری کاربر %s دریافت نشد.", tg_id)
     return {
         "telegram_id": tg_id,
         "first_name": user["first_name"],
@@ -302,6 +314,7 @@ def api_me(auth=Depends(get_verified_user)):
         "orders_count": len(orders),
         "is_admin": db.is_admin(tg_id),
         "admin_role": db.get_admin_role(tg_id),
+        "loyalty": loyalty_summary,
     }
 
 
@@ -468,20 +481,32 @@ async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
         if not files:
             # الگو بدون فایل شده؛ سفارش را رد کن تا مبلغ کسرشده از کیف پول/تخفیف برگردد
             db.reject_order(order_id)
+            try:
+                loyalty.reverse_purchase(db, order_id)
+            except Exception:
+                logger.exception("برگشت امتیاز وفاداری سفارش %s ناموفق بود.", order_id)
             raise HTTPException(
                 status_code=409,
                 detail="این الگو در حال حاضر موجود نیست؛ مبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد.",
             )
         db.approve_order(order_id, [f["id"] for f in files])
+        awarded = 0
+        try:
+            awarded = loyalty.award_purchase(db, order_id)
+        except Exception:
+            logger.exception("اعطای امتیاز وفاداری سفارش %s ناموفق بود.", order_id)
         try:
             db.reward_referrer_if_first_purchase(tg_id, order["base_price"])
         except Exception:
             pass
         await _notify_admins_of_auto_order(db, order_id)
-        return {
+        result = {
             "status": "approved", "order_id": order_id,
             "files": [{"record_id": f["id"]} for f in files],
         }
+        if awarded > 0:
+            result["loyalty_awarded"] = awarded
+        return result
 
     # مبلغی باقی مانده - کاربر باید رسید کارت‌به‌کارت آپلود کند تا ادمین در بات تایید کند
     return {

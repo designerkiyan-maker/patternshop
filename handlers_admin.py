@@ -9,6 +9,7 @@
 
 import os
 import asyncio
+import json
 from datetime import date, timedelta
 import tempfile
 import logging
@@ -21,6 +22,8 @@ from aiogram.exceptions import TelegramBadRequest
 
 import config
 import keyboards as kb
+import loyalty
+from loyalty import LoyaltyError
 from database import MENU_BUTTON_META
 from file_delivery import deliver_pattern_to_user
 from jalali import to_jalali_str
@@ -33,6 +36,8 @@ from states import (
     AdminSampleFiles,
     AdminResetSample,
     AdminForceJoin,
+    AdminLoyaltyAdjust,
+    AdminLoyaltySettings,
     AdminEditButton,
     AdminSetCard,
     AdminBroadcast,
@@ -900,6 +905,15 @@ def create_admin_router(db) -> Router:
             return
 
         (await asyncio.to_thread(db.approve_order, order_id, [f["id"] for f in files]))
+
+        # امتیاز باشگاه مشتریان: بلافاصله بعد از تایید واقعی سفارش اعطا می‌شود.
+        # award_purchase کاملاً idempotent است و خرابی‌اش هم نباید جریان تایید را بشکند.
+        try:
+            awarded = (await asyncio.to_thread(loyalty.award_purchase, db, order_id))
+        except Exception:
+            logger.exception("اعطای امتیاز باشگاه مشتریان برای سفارش #%s ناموفق بود.", order_id)
+            awarded = 0
+
         product_name = product["name"] if product else "---"
         (await asyncio.to_thread(db.log_admin_action, 
             call.from_user.id, "order_approve",
@@ -922,7 +936,10 @@ def create_admin_router(db) -> Router:
                 pass
 
         try:
-            await bot.send_message(order["user_id"], f"✅ خرید شما تایید شد!\n🧵 محصول: {product_name}")
+            loyalty_note = (
+                f"\n🎁 {awarded} امتیاز باشگاه مشتریان به شما اضافه شد." if awarded > 0 else ""
+            )
+            await bot.send_message(order["user_id"], f"✅ خرید شما تایید شد!\n🧵 محصول: {product_name}{loyalty_note}")
             await deliver_pattern_to_user(
                 bot,
                 order["user_id"],
@@ -962,6 +979,14 @@ def create_admin_router(db) -> Router:
             return
 
         (await asyncio.to_thread(db.reject_order, order_id))
+
+        # برگشت امتیاز باشگاه مشتریانِ سفارش ردشده. reverse_purchase خودش idempotent
+        # است و اگر سابقاً امتیازی برای این سفارش اعطا نشده باشد، کاری نمی‌کند؛
+        # خرابی‌اش هم نباید جریان رد سفارش را بشکند.
+        try:
+            (await asyncio.to_thread(loyalty.reverse_purchase, db, order_id))
+        except Exception:
+            logger.exception("برگشت امتیاز باشگاه مشتریان برای سفارش #%s ناموفق بود.", order_id)
         (await asyncio.to_thread(db.log_admin_action, 
             call.from_user.id, "order_reject",
             f"سفارش #{order_id} | کاربر {order['user_id']}",
@@ -1485,6 +1510,387 @@ def create_admin_router(db) -> Router:
         (await asyncio.to_thread(db.set_setting, "wheel_cooldown_hours", text))
         await state.clear()
         await message.answer(f"✅ فاصله بین دو چرخش روی {text} ساعت تنظیم شد.", reply_markup=kb.wheel_settings_kb(db))
+
+    # -------------------------------------------------------------------
+    # باشگاه مشتریان (Loyalty)
+    # -------------------------------------------------------------------
+
+    def _parse_loyalty_tiers(text: str):
+        """متن سطوح ارسالی ادمین را تجزیه می‌کند.
+        خروجی: (tiers, error) — tiers فقط وقتی error برابر None است معتبر است.
+        فرمت هر ردیف: «نام:آستانه:ضریب» و ردیف‌ها با «،» یا «,» جدا می‌شوند.
+        شناسه‌ی هر سطح خودکار t0..tn ساخته می‌شود."""
+        rows_raw = [r.strip() for r in (text or "").replace(",", "،").split("،")]
+        rows_raw = [r for r in rows_raw if r]
+        if not rows_raw:
+            return None, "هیچ ردیفی پیدا نشد."
+        rows = []
+        for row in rows_raw:
+            parts = [p.strip() for p in row.split(":")]
+            if len(parts) != 3 or not parts[0] or not parts[1].isdigit() or not parts[2].isdigit():
+                return None, "فرمت هر سطح باید «نام:آستانه:ضریب» باشد (آستانه و ضریب عدد صحیح)."
+            min_v, mult = int(parts[1]), int(parts[2])
+            if min_v < 0:
+                return None, "آستانه‌ی هر سطح باید ۰ یا بیشتر باشد."
+            if mult < 1:
+                return None, "ضریب هر سطح باید حداقل ۱ باشد (۱۰۰ یعنی ضریب معمولی)."
+            rows.append({"name": parts[0], "min": min_v, "mult": mult})
+        rows.sort(key=lambda r: r["min"])
+        if rows[0]["min"] != 0:
+            return None, "آستانه‌ی اولین سطح (پایین‌ترین سطح) باید ۰ باشد."
+        for a, b in zip(rows, rows[1:]):
+            if a["min"] == b["min"]:
+                return None, "آستانه‌ی دو سطح نباید یکی باشد (سطوح نباید روی هم بیفتند)."
+        tiers = [
+            {"id": f"t{i}", "name": r["name"], "min": r["min"], "mult": r["mult"]}
+            for i, r in enumerate(rows)
+        ]
+        return tiers, None
+
+    async def _loyalty_header() -> str:
+        enabled = (await asyncio.to_thread(db.get_setting, "loyalty_enabled", "1")) == "1"
+        return f"⭐ باشگاه مشتریان ({'🟢 فعال' if enabled else '🔴 غیرفعال'}):"
+
+    @router.callback_query(F.data == "adm_loyalty")
+    async def cb_admin_loyalty(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.clear()
+        await replace_admin_view(call, await _loyalty_header(), reply_markup=kb.loyalty_admin_kb(db))
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_loyalty_toggle")
+    async def cb_admin_loyalty_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        current = (await asyncio.to_thread(db.get_setting, "loyalty_enabled", "1"))
+        new_value = "0" if current == "1" else "1"
+        (await asyncio.to_thread(db.set_setting, "loyalty_enabled", new_value))
+        (await asyncio.to_thread(db.log_admin_action,
+            call.from_user.id, "loyalty_toggle",
+            "باشگاه مشتریان فعال شد" if new_value == "1" else "باشگاه مشتریان غیرفعال شد",
+        ))
+        await safe_edit(call, await _loyalty_header(), reply_markup=kb.loyalty_admin_kb(db))
+        await call.answer("وضعیت تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_loyalty_edit_rate")
+    async def cb_admin_loyalty_edit_rate(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminLoyaltySettings.waiting_rate)
+        rate = (await asyncio.to_thread(db.get_setting, "loyalty_points_per_toman", "10000"))
+        await safe_edit(call,
+            f"نرخ فعلی: هر {rate} تومان خرید = ۱ امتیاز\n\n"
+            "نرخ جدید را بفرست (عدد صحیح حداقل ۱؛ هر چند تومان خرید، ۱ امتیاز حساب می‌شود. مثلاً 10000):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminLoyaltySettings.waiting_rate)
+    async def process_loyalty_rate(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        text = (message.text or "").strip()
+        if not text.isdigit() or int(text) < 1:
+            await message.answer("لطفاً یک عدد صحیح حداقل ۱ ارسال کن (هر چند تومان خرید = ۱ امتیاز).")
+            return
+        (await asyncio.to_thread(db.set_setting, "loyalty_points_per_toman", text))
+        await state.clear()
+        await message.answer(
+            f"✅ نرخ امتیاز ثبت شد: هر {text} تومان خرید = ۱ امتیاز.",
+            reply_markup=kb.loyalty_admin_kb(db),
+        )
+
+    @router.callback_query(F.data == "adm_loyalty_edit_reg")
+    async def cb_admin_loyalty_edit_reg(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminLoyaltySettings.waiting_reg_bonus)
+        reg = (await asyncio.to_thread(db.get_setting, "loyalty_reg_bonus", "0"))
+        await safe_edit(call,
+            f"هدیه ثبت‌نام فعلی: {reg} امتیاز\n\n"
+            "مقدار جدید را بفرست (عدد صحیح ۰ یا بیشتر؛ ۰ یعنی خاموش. مثلاً 50):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminLoyaltySettings.waiting_reg_bonus)
+    async def process_loyalty_reg_bonus(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        text = (message.text or "").strip()
+        if not text.isdigit():
+            await message.answer("لطفاً یک عدد صحیح (۰ یا بیشتر) ارسال کن.")
+            return
+        (await asyncio.to_thread(db.set_setting, "loyalty_reg_bonus", text))
+        await state.clear()
+        if int(text) == 0:
+            await message.answer("✅ هدیه ثبت‌نام خاموش شد.", reply_markup=kb.loyalty_admin_kb(db))
+        else:
+            await message.answer(f"✅ هدیه ثبت‌نام روی {text} امتیاز تنظیم شد.", reply_markup=kb.loyalty_admin_kb(db))
+
+    @router.callback_query(F.data == "adm_loyalty_edit_ref")
+    async def cb_admin_loyalty_edit_ref(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminLoyaltySettings.waiting_referral_bonus)
+        ref = (await asyncio.to_thread(db.get_setting, "loyalty_referral_bonus", "0"))
+        await safe_edit(call,
+            f"امتیاز معرفی فعلی: {ref} امتیاز\n\n"
+            "مقدار جدید را بفرست (عدد صحیح ۰ یا بیشتر؛ امتیازی که به دعوت‌کننده می‌رسد. ۰ یعنی خاموش):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminLoyaltySettings.waiting_referral_bonus)
+    async def process_loyalty_referral_bonus(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        text = (message.text or "").strip()
+        if not text.isdigit():
+            await message.answer("لطفاً یک عدد صحیح (۰ یا بیشتر) ارسال کن.")
+            return
+        (await asyncio.to_thread(db.set_setting, "loyalty_referral_bonus", text))
+        await state.clear()
+        if int(text) == 0:
+            await message.answer("✅ امتیاز معرفی خاموش شد.", reply_markup=kb.loyalty_admin_kb(db))
+        else:
+            await message.answer(f"✅ امتیاز معرفی روی {text} امتیاز تنظیم شد.", reply_markup=kb.loyalty_admin_kb(db))
+
+    @router.callback_query(F.data == "adm_loyalty_edit_rpts")
+    async def cb_admin_loyalty_edit_rpts(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminLoyaltySettings.waiting_redeem_points)
+        rpts = (await asyncio.to_thread(db.get_setting, "loyalty_redeem_points", "100"))
+        rtoman = (await asyncio.to_thread(db.get_setting, "loyalty_redeem_toman", "0"))
+        await safe_edit(call,
+            f"تبدیل فعلی: {rpts} امتیاز = {rtoman} تومان\n\n"
+            "ابتدا تعداد امتیاز تبدیل را بفرست (عدد صحیح حداقل ۱؛ کاربر باید مضرب این عدد امتیاز داشته باشد. مثلاً 100).\n"
+            "بعدش ارزش تومانی‌اش را می‌پرسم.",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminLoyaltySettings.waiting_redeem_points)
+    async def process_loyalty_redeem_points(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        text = (message.text or "").strip()
+        if not text.isdigit() or int(text) < 1:
+            await message.answer("لطفاً یک عدد صحیح حداقل ۱ ارسال کن.")
+            return
+        (await asyncio.to_thread(db.set_setting, "loyalty_redeem_points", text))
+        await state.set_state(AdminLoyaltySettings.waiting_redeem_toman)
+        rtoman = (await asyncio.to_thread(db.get_setting, "loyalty_redeem_toman", "0"))
+        await message.answer(
+            f"✅ تعداد امتیاز تبدیل روی {text} امتیاز ثبت شد.\n\n"
+            f"حالا ارزش تومانی این امتیازها را بفرست (فعلاً {rtoman} تومان؛ عدد صحیح حداقل ۱):"
+        )
+
+    @router.message(AdminLoyaltySettings.waiting_redeem_toman)
+    async def process_loyalty_redeem_toman(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        text = (message.text or "").strip()
+        if not text.isdigit() or int(text) < 1:
+            await message.answer("لطفاً یک عدد صحیح حداقل ۱ ارسال کن.")
+            return
+        (await asyncio.to_thread(db.set_setting, "loyalty_redeem_toman", text))
+        await state.clear()
+        rpts = (await asyncio.to_thread(db.get_setting, "loyalty_redeem_points", "100"))
+        await message.answer(
+            f"✅ نرخ تبدیل ثبت شد: {rpts} امتیاز = {text} تومان.",
+            reply_markup=kb.loyalty_admin_kb(db),
+        )
+
+    @router.callback_query(F.data == "adm_loyalty_edit_min")
+    async def cb_admin_loyalty_edit_min(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminLoyaltySettings.waiting_min_redeem)
+        min_redeem = (await asyncio.to_thread(db.get_setting, "loyalty_min_redeem", "0"))
+        await safe_edit(call,
+            f"حداقل امتیاز قابل تبدیل فعلی: {min_redeem}\n\n"
+            "مقدار جدید را بفرست (عدد صحیح ۰ یا بیشتر؛ ۰ یعنی بدون حداقل):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminLoyaltySettings.waiting_min_redeem)
+    async def process_loyalty_min_redeem(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        text = (message.text or "").strip()
+        if not text.isdigit():
+            await message.answer("لطفاً یک عدد صحیح (۰ یا بیشتر) ارسال کن.")
+            return
+        (await asyncio.to_thread(db.set_setting, "loyalty_min_redeem", text))
+        await state.clear()
+        if int(text) == 0:
+            await message.answer("✅ حداقل امتیاز قابل تبدیل برداشته شد.", reply_markup=kb.loyalty_admin_kb(db))
+        else:
+            await message.answer(
+                f"✅ حداقل امتیاز قابل تبدیل روی {text} امتیاز تنظیم شد.",
+                reply_markup=kb.loyalty_admin_kb(db),
+            )
+
+    @router.callback_query(F.data == "adm_loyalty_edit_max")
+    async def cb_admin_loyalty_edit_max(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminLoyaltySettings.waiting_max_per_order)
+        max_val = (await asyncio.to_thread(db.get_setting, "loyalty_max_per_order", "0"))
+        max_txt = max_val if max_val.isdigit() and int(max_val) > 0 else "نامحدود (۰)"
+        await safe_edit(call,
+            f"سقف امتیاز هر سفارش فعلاً: {max_txt}\n\n"
+            "مقدار جدید را بفرست (عدد صحیح ۰ یا بیشتر؛ ۰ یعنی نامحدود):",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminLoyaltySettings.waiting_max_per_order)
+    async def process_loyalty_max_per_order(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        text = (message.text or "").strip()
+        if not text.isdigit():
+            await message.answer("لطفاً یک عدد صحیح (۰ یا بیشتر) ارسال کن.")
+            return
+        (await asyncio.to_thread(db.set_setting, "loyalty_max_per_order", text))
+        await state.clear()
+        if int(text) == 0:
+            await message.answer("✅ سقف امتیاز هر سفارش «نامحدود» شد.", reply_markup=kb.loyalty_admin_kb(db))
+        else:
+            await message.answer(
+                f"✅ سقف امتیاز هر سفارش روی {text} امتیاز تنظیم شد.",
+                reply_markup=kb.loyalty_admin_kb(db),
+            )
+
+    @router.callback_query(F.data == "adm_loyalty_edit_tiers")
+    async def cb_admin_loyalty_edit_tiers(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminLoyaltySettings.waiting_tiers)
+        tiers = (await asyncio.to_thread(loyalty.load_tiers, db))
+        if tiers:
+            current_txt = "\n".join(
+                f"• {t['name']}: از {t['min']} امتیاز (ضریب {t['mult']}٪)" for t in tiers
+            )
+        else:
+            current_txt = "— هنوز سطحی تعریف نشده است —"
+        await safe_edit(call,
+            "سطوح فعلی:\n"
+            f"{current_txt}\n\n"
+            "سطوح جدید را بفرست؛ هر سطح به شکل «نام:آستانه:ضریب» و سطوح با «،» از هم جدا شوند.\n"
+            "مثال: برنز:0:100، نقره‌ای:500:110، طلایی:2000:125، پلاتینیوم:5000:150\n"
+            "• آستانه‌ی اولین سطح باید ۰ باشد و آستانه‌ها نباید تکراری باشند.\n"
+            "• ضریب درصدی است: ۱۰۰ یعنی ضریب معمولی و ۱۱۰ یعنی ۱۰٪ امتیاز بیشتر.",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminLoyaltySettings.waiting_tiers)
+    async def process_loyalty_tiers(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        tiers, error = _parse_loyalty_tiers(message.text)
+        if error:
+            await message.answer(
+                f"❌ {error}\n\n"
+                "مثال درست: برنز:0:100، نقره‌ای:500:110، طلایی:2000:125، پلاتینیوم:5000:150\n"
+                "لطفاً دوباره تلاش کن."
+            )
+            return
+        (await asyncio.to_thread(db.set_setting, "loyalty_tiers", json.dumps(tiers, ensure_ascii=False)))
+        await state.clear()
+        preview = "\n".join(
+            f"• {t['name']}: از {t['min']} امتیاز (ضریب {t['mult']}٪)" for t in tiers
+        )
+        await message.answer(f"✅ سطوح باشگاه مشتریان ثبت شد:\n{preview}", reply_markup=kb.loyalty_admin_kb(db))
+
+    @router.callback_query(F.data == "adm_loyalty_adjust")
+    async def cb_admin_loyalty_adjust(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminLoyaltyAdjust.waiting_user)
+        await safe_edit(call,
+            "🆔 آیدی عددی تلگرام کاربری که می‌خواهی امتیازش را تعدیل کنی را بفرست:",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminLoyaltyAdjust.waiting_user)
+    async def process_loyalty_adjust_user(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        raw = (message.text or "").strip()
+        if not raw.isdigit():
+            await message.answer("لطفاً فقط آیدی عددی تلگرام کاربر را ارسال کن.")
+            return
+        tg_id = int(raw)
+        user = (await asyncio.to_thread(db.get_user, tg_id))
+        if not user:
+            await message.answer("کاربری با این آیدی پیدا نشد (کاربر باید یک‌بار بات را استارت کرده باشد).")
+            return
+        summary = (await asyncio.to_thread(loyalty.get_summary, db, tg_id))
+        name = (user["first_name"] or "").strip() or f"کاربر {tg_id}"
+        tier_txt = summary["tier"]["name"] if summary["tier"] else "---"
+        await state.update_data(loyalty_adjust_target=tg_id, loyalty_adjust_name=name)
+        await state.set_state(AdminLoyaltyAdjust.waiting_amount)
+        await message.answer(
+            f"👤 کاربر: {name}\n"
+            f"⭐ امتیاز فعلی: {summary['current']} | سطح: {tier_txt}\n\n"
+            "مقدار تعدیل را بفرست (عدد صحیح غیرصفر؛ مثبت = افزودن امتیاز، منفی = کسر امتیاز. مثلاً 50 یا -20):"
+        )
+
+    @router.message(AdminLoyaltyAdjust.waiting_amount)
+    async def process_loyalty_adjust_amount(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        text = (message.text or "").strip()
+        try:
+            amount = int(text)
+        except ValueError:
+            await message.answer("لطفاً یک عدد صحیح غیرصفر بفرست (مثبت = افزودن، منفی = کسر).")
+            return
+        if amount == 0:
+            await message.answer("مقدار تعدیل نمی‌تواند صفر باشد. یک عدد صحیح غیرصفر بفرست.")
+            return
+        await state.update_data(loyalty_adjust_amount=amount)
+        await state.set_state(AdminLoyaltyAdjust.waiting_reason)
+        await message.answer(
+            f"مقدار {amount:+d} ثبت شد. دلیل این تعدیل را کوتاه بنویس (در تاریخچه‌ی امتیاز کاربر ثبت می‌شود):"
+        )
+
+    @router.message(AdminLoyaltyAdjust.waiting_reason)
+    async def process_loyalty_adjust_reason(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        reason = (message.text or "").strip()
+        if not reason:
+            await message.answer("دلیل تعدیل نمی‌تواند خالی باشد. لطفاً یک دلیل کوتاه بنویس:")
+            return
+        data = await state.get_data()
+        tg_id = data.get("loyalty_adjust_target")
+        name = data.get("loyalty_adjust_name") or f"کاربر {tg_id}"
+        amount = data.get("loyalty_adjust_amount") or 0
+        try:
+            new_balance = (await asyncio.to_thread(
+                loyalty.admin_adjust, db, message.from_user.id, tg_id, amount, reason,
+            ))
+        except LoyaltyError as exc:
+            await state.clear()
+            await message.answer(f"❌ {exc}", reply_markup=kb.loyalty_admin_kb(db))
+            return
+        await state.clear()
+        (await asyncio.to_thread(db.log_admin_action,
+            message.from_user.id, "loyalty_adjust", f"کاربر {tg_id} | {amount:+d} | دلیل: {reason}",
+        ))
+        await message.answer(
+            f"✅ امتیاز کاربر {name} به {new_balance} رسید.",
+            reply_markup=kb.loyalty_admin_kb(db),
+        )
 
     # -------------------------------------------------------------------
     # ویرایش متن دکمه‌ها

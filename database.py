@@ -120,8 +120,20 @@ DEFAULT_SETTINGS = {
     "wheel_cooldown_hours": "24",  # فاصله مجاز بین دو چرخش هر کاربر
     "btn_wheel": "🎡 گردونه شانس",
     "btn_wheel_style": "success",
+    # باشگاه مشتریان (Loyalty) - همه‌ی مقادیر از پنل ادمین قابل تغییر هستند
+    "loyalty_enabled": "1",
+    "loyalty_points_per_toman": "10000",  # هر «امتیاز» به ازای این تعداد تومان خرید (مبلغ نهایی پرداختی)
+    "loyalty_reg_bonus": "50",  # هدیه‌ی یک‌بار ثبت‌نام (0 = خاموش)
+    "loyalty_referral_bonus": "20",  # امتیاز معرفی: به دعوت‌کننده وقتی نفر جدید از لینک دعوت می‌آید (0 = خاموش)
+    "loyalty_redeem_points": "100",  # این تعداد امتیاز...
+    "loyalty_redeem_toman": "10000",  # ...به این مقدار تومان کیف پول تبدیل می‌شود
+    "loyalty_min_redeem": "100",  # حداقل امتیاز قابل تبدیل در هر درخواست
+    "loyalty_max_per_order": "0",  # سقف امتیاز یک سفارش (0 = نامحدود)
+    "loyalty_tiers": '[{"id":"bronze","name":"🥉 برنز","min":0,"mult":100},{"id":"silver","name":"🥈 نقره‌ای","min":500,"mult":110},{"id":"gold","name":"🥇 طلایی","min":2000,"mult":125},{"id":"platinum","name":"💎 پلاتینیوم","min":5000,"mult":150}]',
+    "btn_loyalty": "🎁 باشگاه مشتریان",
+    "btn_loyalty_style": "",
     # چیدمان دکمه‌های منوی اصلی (ترتیب و نمایش) - آرایه JSON از کلیدها
-    "menu_order": '["btn_buy","btn_test","btn_my_orders","btn_wallet","btn_referral","btn_wheel","btn_contact","btn_admin_panel"]',
+    "menu_order": '["btn_buy","btn_test","btn_my_orders","btn_wallet","btn_referral","btn_wheel","btn_loyalty","btn_contact","btn_admin_panel"]',
 }
 
 
@@ -135,12 +147,13 @@ MENU_BUTTON_META = {
     "btn_wallet": {"label": "دکمه کیف پول", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
     "btn_referral": {"label": "دکمه زیرمجموعه‌گیری", "toggle_key": "referral_button_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_wheel": {"label": "دکمه گردونه شانس", "toggle_key": "wheel_enabled", "admin_only": False, "has_text": True, "has_style": True},
+    "btn_loyalty": {"label": "دکمه باشگاه مشتریان", "toggle_key": "loyalty_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_contact": {"label": "دکمه ارتباط با پشتیبانی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
     "btn_admin_panel": {"label": "دکمه پنل مدیریت", "toggle_key": None, "admin_only": True, "has_text": True, "has_style": True},
 }
 DEFAULT_MENU_ORDER = [
     "btn_buy", "btn_test", "btn_my_orders", "btn_wallet", "btn_referral",
-    "btn_wheel", "btn_contact", "btn_admin_panel",
+    "btn_wheel", "btn_loyalty", "btn_contact", "btn_admin_panel",
 ]
 
 
@@ -456,6 +469,35 @@ class Database:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_push_subs_admin ON web_push_subscriptions(admin_id);
+
+                CREATE TABLE IF NOT EXISTS loyalty_state (
+                    user_id INTEGER PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
+                    current_points INTEGER NOT NULL DEFAULT 0 CHECK (current_points >= 0),
+                    lifetime_earned INTEGER NOT NULL DEFAULT 0,
+                    lifetime_spent INTEGER NOT NULL DEFAULT 0,
+                    tier TEXT DEFAULT '',
+                    last_activity_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS loyalty_ledger (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+                    tx_type TEXT NOT NULL,
+                    amount INTEGER NOT NULL CHECK (amount <> 0),
+                    balance_after INTEGER NOT NULL CHECK (balance_after >= 0),
+                    reference_type TEXT,
+                    reference_id TEXT,
+                    idem_key TEXT,
+                    description TEXT,
+                    metadata TEXT,
+                    expires_at TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_idem
+                    ON loyalty_ledger(idem_key) WHERE idem_key IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_ledger_user ON loyalty_ledger(user_id, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_ledger_created ON loyalty_ledger(created_at);
+                CREATE INDEX IF NOT EXISTS idx_ledger_ref ON loyalty_ledger(reference_type, reference_id);
                 """
             )
 
@@ -1715,6 +1757,171 @@ class Database:
                 "UPDATE users SET referral_credit = MAX(referral_credit + ?, 0) WHERE telegram_id=?",
                 (delta, user_tg_id),
             )
+
+    # ------------------------------------------------------------------
+    # باشگاه مشتریان (Loyalty) — لایه‌ی داده؛ منطق قواعد در loyalty.py
+    # ------------------------------------------------------------------
+
+    def get_loyalty_state(self, user_tg_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM loyalty_state WHERE user_id=?", (user_tg_id,)
+            ).fetchone()
+
+    def ensure_loyalty_state(self, user_tg_id: int):
+        """ساخت ردیف state برای کاربر اگر وجود نداشته باشد و برگرداندن آن."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO loyalty_state (user_id) VALUES (?)", (user_tg_id,)
+            )
+            return conn.execute(
+                "SELECT * FROM loyalty_state WHERE user_id=?", (user_tg_id,)
+            ).fetchone()
+
+    def find_loyalty_tx(self, idem_key: str):
+        """جست‌وجوی تراکنش دفتر کل با کلید idempotency (برای جلوگیری از دوباره‌کاری)."""
+        if not idem_key:
+            return None
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM loyalty_ledger WHERE idem_key=?", (idem_key,)
+            ).fetchone()
+
+    def apply_loyalty_mutation(
+        self,
+        user_tg_id: int,
+        tx_type: str,
+        amount: int,
+        tier: str = None,
+        idem_key: str = None,
+        reference_type: str = None,
+        reference_id=None,
+        description: str = "",
+        metadata: str = "",
+        expires_at: str = None,
+    ):
+        """هسته‌ی اتمیک هر تغییر موجودی امتیاز: در «یک» تراکنش، بررسی idempotency،
+        بروزرسانی state و درج رکورد غیرقابل‌تغییر در دفتر کل انجام می‌شود.
+
+        - اگر idem_key قبلاً ثبت شده باشد، هیچ کاری نمی‌کند و None برمی‌گرداند
+          (ضد اعطای دوباره‌ی امتیاز برای همان رویداد).
+        - اگر نتیجه موجودی منفی شود، ValueError پرتاب می‌شود و کل تراکنش
+          rollback می‌شود (موجودی منفی غیرممکن است).
+        - tier فقط وقتی به‌روز می‌شود که پاس داده شود (سرویس آن را از قواعد
+          سطح‌ها محاسبه می‌کند)."""
+
+        with self._get_conn() as conn:
+            if idem_key:
+                dup = conn.execute(
+                    "SELECT 1 FROM loyalty_ledger WHERE idem_key=?", (idem_key,)
+                ).fetchone()
+                if dup:
+                    return None
+
+            conn.execute(
+                "INSERT OR IGNORE INTO loyalty_state (user_id) VALUES (?)", (user_tg_id,)
+            )
+            state = conn.execute(
+                "SELECT current_points, lifetime_earned, lifetime_spent FROM loyalty_state WHERE user_id=?",
+                (user_tg_id,),
+            ).fetchone()
+            current = state["current_points"]
+            new_balance = current + amount
+            if new_balance < 0:
+                raise ValueError("insufficient loyalty points")
+
+            new_earned = state["lifetime_earned"] + (amount if amount > 0 else 0)
+            # فقط مصرف واقعی امتیاز در lifetime_spent می‌شمارد؛ برگشتِ خرید
+            # lifetime_earned را که سابقه‌ی واقعی کسب است کاهش نمی‌دهد.
+            spent_delta = -amount if (amount < 0 and tx_type in ("POINTS_REDEEM", "POINTS_EXPIRE")) else 0
+            new_spent = state["lifetime_spent"] + spent_delta
+
+            if tier is None:
+                conn.execute(
+                    "UPDATE loyalty_state SET current_points=?, lifetime_earned=?, "
+                    "lifetime_spent=?, last_activity_at=CURRENT_TIMESTAMP WHERE user_id=?",
+                    (new_balance, new_earned, new_spent, user_tg_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE loyalty_state SET current_points=?, lifetime_earned=?, "
+                    "lifetime_spent=?, tier=?, last_activity_at=CURRENT_TIMESTAMP WHERE user_id=?",
+                    (new_balance, new_earned, new_spent, tier, user_tg_id),
+                )
+
+            cur = conn.execute(
+                "INSERT INTO loyalty_ledger (user_id, tx_type, amount, balance_after, "
+                "reference_type, reference_id, idem_key, description, metadata, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    user_tg_id, tx_type, amount, new_balance,
+                    reference_type,
+                    str(reference_id) if reference_id is not None else None,
+                    idem_key, description, metadata, expires_at,
+                ),
+            )
+            ledger_id = cur.lastrowid
+            row = conn.execute(
+                "SELECT * FROM loyalty_ledger WHERE id=?", (ledger_id,)
+            ).fetchone()
+            return dict(row)
+
+    def redeem_points_for_wallet(self, user_tg_id: int, points: int, toman_value: int, idem_key: str):
+        """تبدیل اتمیک امتیاز به اعتبار کیف پول: کاهش شرطی امتیاز + درج دفتر کل
+        + افزایش referral_credit، همه در «یک» تراکنش.
+
+        None = موجودی ناکافی یا رویداد تکراری؛ در این حالت هیچ تغییری رخ نمی‌دهد."""
+        with self._get_conn() as conn:
+            dup = conn.execute(
+                "SELECT 1 FROM loyalty_ledger WHERE idem_key=?", (idem_key,)
+            ).fetchone()
+            if dup:
+                return None
+
+            conn.execute(
+                "INSERT OR IGNORE INTO loyalty_state (user_id) VALUES (?)", (user_tg_id,)
+            )
+            state = conn.execute(
+                "SELECT current_points FROM loyalty_state WHERE user_id=?", (user_tg_id,)
+            ).fetchone()
+            current = state["current_points"]
+            if current < points:
+                return None
+
+            new_balance = current - points
+            conn.execute(
+                "UPDATE loyalty_state SET current_points=?, lifetime_spent=lifetime_spent+?, "
+                "last_activity_at=CURRENT_TIMESTAMP WHERE user_id=?",
+                (new_balance, points, user_tg_id),
+            )
+            conn.execute(
+                "UPDATE users SET referral_credit = referral_credit + ? WHERE telegram_id=?",
+                (toman_value, user_tg_id),
+            )
+            cur = conn.execute(
+                "INSERT INTO loyalty_ledger (user_id, tx_type, amount, balance_after, "
+                "reference_type, reference_id, idem_key, description) "
+                "VALUES (?, 'POINTS_REDEEM', ?, ?, 'wallet', NULL, ?, ?)",
+                (user_tg_id, -points, new_balance, idem_key,
+                 f"تبدیل {points} امتیاز به {toman_value:,} تومان اعتبار کیف پول"),
+            )
+            row = conn.execute(
+                "SELECT * FROM loyalty_ledger WHERE id=?", (cur.lastrowid,)
+            ).fetchone()
+            return dict(row)
+
+    def get_loyalty_history(self, user_tg_id: int, limit: int = 5, offset: int = 0):
+        """تاریخچه‌ی امتیاز کاربر با صفحه‌بندی؛ خروجی (rows, total) مطابق الگوی
+        search_users/get_admin_logs."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM loyalty_ledger WHERE user_id=? ORDER BY id DESC LIMIT ? OFFSET ?",
+                (user_tg_id, limit, offset),
+            ).fetchall()
+            total = conn.execute(
+                "SELECT COUNT(*) c FROM loyalty_ledger WHERE user_id=?", (user_tg_id,)
+            ).fetchone()["c"]
+            return rows, total
 
     def reward_referrer_if_first_purchase(self, referred_user_tg_id: int, paid_amount: int):
         """حالت ۱ از سه مدل زیرمجموعه‌گیری: پورسانت درصدی، فقط برای اولین خرید هر

@@ -11,6 +11,7 @@
 import random
 import asyncio
 import logging
+import html
 
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, StateFilter
@@ -19,10 +20,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest, TelegramNetworkError
 
 import keyboards as kb
-from states import BuyFlow, ContactFlow, DiscountEntry, WalletTopup
+from states import BuyFlow, ContactFlow, DiscountEntry, WalletTopup, LoyaltyRedeem
 from config import MAX_TEST_PER_USER
 from file_delivery import deliver_pattern_to_user
 from force_join import is_channel_member, CHECK_CALLBACK
+import loyalty
+from loyalty import LoyaltyError
+from jalali import to_jalali_str
 
 
 async def _send_admin_notification(bot, admin_id, send_coro_factory, context_label: str, ref_id: int):
@@ -128,9 +132,19 @@ def create_user_router(db) -> Router:
     @router.message(CommandStart())
     async def cmd_start(message: Message, state: FSMContext, bot: Bot):
         await state.clear()
-        (await asyncio.to_thread(db.add_or_update_user, 
+        (await asyncio.to_thread(db.add_or_update_user,
             message.from_user.id, message.from_user.username or "", message.from_user.first_name or ""
         ))
+
+        # امتیاز خوش‌آمدگویی باشگاه مشتریان (خودکار، یک‌بار برای هر کاربر؛
+        # هر خطا نباید در مسیر /start اختلال ایجاد کند)
+        try:
+            reg_points = (await asyncio.to_thread(loyalty.award_registration, db, message.from_user.id))
+        except Exception:
+            logging.getLogger("handlers_user").exception(
+                "اعطای امتیاز خوش‌آمدگویی به کاربر %s ناموفق بود.", message.from_user.id
+            )
+            reg_points = 0
 
         # پردازش لینک دعوت زیرمجموعه‌گیری: /start ref123456789
         # (نیازی به «کاربر جدید بودن» نیست؛ خود set_referred_by فقط وقتی کاربر
@@ -145,6 +159,24 @@ def create_user_router(db) -> Router:
                 already_referred = bool(already_referred and already_referred["referred_by"])
                 if not already_referred:
                     (await asyncio.to_thread(db.set_referred_by, message.from_user.id, referrer_id))
+                    # امتیاز معرفی باشگاه مشتریان برای دعوت‌کننده (idempotent)
+                    try:
+                        ref_points = (await asyncio.to_thread(
+                            loyalty.award_referral, db, referrer_id, message.from_user.id
+                        ))
+                    except Exception:
+                        logging.getLogger("handlers_user").exception(
+                            "اعطای امتیاز معرفی به دعوت‌کننده %s ناموفق بود.", referrer_id
+                        )
+                        ref_points = 0
+                    if ref_points > 0:
+                        try:
+                            await bot.send_message(
+                                referrer_id,
+                                f"🎁 {ref_points} امتیاز باشگاه مشتریان بابت معرفی دوستتان اضافه شد!",
+                            )
+                        except Exception:
+                            pass
                     reward_info = (await asyncio.to_thread(
                         db.apply_referral_invite_rewards, message.from_user.id, referrer_id
                     ))
@@ -153,6 +185,11 @@ def create_user_router(db) -> Router:
         welcome = (await asyncio.to_thread(db.get_setting, "welcome_text"))
         await message.answer(welcome, reply_markup=kb.menu_for_user(db, message.from_user.id))
         await _send_inline_main_menu(message, message.from_user.id)
+        if reg_points > 0:
+            try:
+                await message.answer(f"🎁 {reg_points} امتیاز خوش‌آمدگویی به شما اضافه شد!")
+            except Exception:
+                pass
 
     async def _handle_referral_invite_rewards(bot: Bot, referrer_id: int, reward_info: dict):
         """پیام و تحویل جوایز حالت‌های ۲ و ۳ زیرمجموعه‌گیری (که با صرفِ دعوت، بدون
@@ -422,6 +459,13 @@ def create_user_router(db) -> Router:
             if not files:
                 # الگو بدون فایل شده: سفارش را رد کن، مبلغ کسرشده از کیف پول/کد تخفیف را برگردان و به ادمین اطلاع بده
                 (await asyncio.to_thread(db.reject_order, order_id))
+                # برگشت امتیاز باشگاه مشتریان این سفارش (اگر قبلاً اعطا شده باشد؛ idempotent)
+                try:
+                    (await asyncio.to_thread(loyalty.reverse_purchase, db, order_id))
+                except Exception:
+                    logging.getLogger("handlers_user").exception(
+                        "برگشت امتیاز سفارش #%s هنگام عدم موجودی ناموفق بود.", order_id
+                    )
                 await _notify_admins_of_order(bot, order_id)
                 await call.message.edit_text(
                     "⛔️ این الگو در حال حاضر موجود نیست.\n"
@@ -431,6 +475,15 @@ def create_user_router(db) -> Router:
                 await call.answer()
                 return
             (await asyncio.to_thread(db.approve_order, order_id, [f["id"] for f in files]))
+            # امتیاز باشگاه مشتریان بابت این خرید (idempotent؛ هر خطا نباید
+            # روند تحویل سفارش را متوقف کند)
+            try:
+                awarded = (await asyncio.to_thread(loyalty.award_purchase, db, order_id))
+            except Exception:
+                logging.getLogger("handlers_user").exception(
+                    "اعطای امتیاز باشگاه مشتریان برای سفارش #%s ناموفق بود.", order_id
+                )
+                awarded = 0
             reward_info = (await asyncio.to_thread(db.reward_referrer_if_first_purchase, call.from_user.id, order["base_price"]))
             if reward_info:
                 reward_amount, referrer_id = reward_info
@@ -449,10 +502,13 @@ def create_user_router(db) -> Router:
             except Exception:
                 pass
 
-            await call.message.edit_text(
+            success_text = (
                 "✅ مبلغ سفارش شما به‌طور کامل از کیف پول/تخفیف پوشش داده شد.\n"
                 "فایل الگوی شما در پیام بعدی ارسال می‌شود 👇"
             )
+            if awarded > 0:
+                success_text += f"\n🎁 {awarded} امتیاز باشگاه مشتریان به شما اضافه شد."
+            await call.message.edit_text(success_text)
             await deliver_pattern_to_user(
                 bot,
                 call.from_user.id,
@@ -494,6 +550,13 @@ def create_user_router(db) -> Router:
             order = (await asyncio.to_thread(db.get_order, order_id))
             if order and order["status"] == "pending":
                 (await asyncio.to_thread(db.reject_order, order_id))
+                # برگشت امتیاز باشگاه مشتریان سفارش لغوشده (اگر اعطا شده باشد؛ idempotent)
+                try:
+                    (await asyncio.to_thread(loyalty.reverse_purchase, db, order_id))
+                except Exception:
+                    logging.getLogger("handlers_user").exception(
+                        "برگشت امتیاز سفارش لغوشده #%s ناموفق بود.", order_id
+                    )
         await state.clear()
         await call.message.edit_text("عملیات لغو شد.")
         await call.answer()
@@ -793,6 +856,232 @@ def create_user_router(db) -> Router:
         await message.answer(text, reply_markup=kb.wallet_menu_kb())
 
     # -----------------------------------------------------------------------
+    # باشگاه مشتریان (Loyalty)
+    # -----------------------------------------------------------------------
+
+    _LOYALTY_TX_ICONS = {
+        loyalty.TX_PURCHASE: "🛍",
+        loyalty.TX_PURCHASE_REFUND: "↩️",
+        loyalty.TX_REGISTRATION: "🎁",
+        loyalty.TX_REFERRAL: "🤝",
+        loyalty.TX_CAMPAIGN: "🎯",
+        loyalty.TX_TIER_BONUS: "🏆",
+        loyalty.TX_ADMIN_ADJUSTMENT: "🛠",
+        loyalty.TX_POINTS_REDEEM: "🔄",
+        loyalty.TX_POINTS_EXPIRE: "⌛️",
+        loyalty.TX_REVERSAL: "🧾",
+    }
+
+    def _loyalty_menu_text(s: dict) -> str:
+        lines = [
+            "🎁 <b>باشگاه مشتریان</b>",
+            "",
+            f"⭐ امتیاز فعلی: {s['current']}",
+            f"🏆 سطح: {s['tier']['name'] if s['tier'] else '—'}",
+        ]
+        if s["next_tier"]:
+            lines.append(f"📈 امتیاز تا سطح بعد: {s['points_to_next']} ({s['next_tier']['name']})")
+        else:
+            lines.append("🎉 در بالاترین سطح هستید!")
+        lines.append("")
+        lines.append(f"هر {s['redeem_points']} امتیاز = {s['redeem_toman']:,} تومان اعتبار کیف پول")
+        return "\n".join(lines)
+
+    async def _edit_or_resend(target, text: str, reply_markup=None):
+        """ویرایش امن پیام موجود (safe_edit)؛ اگر ویرایش ممکن نباشد (پیام قدیمی
+        یا حذف‌شده)، همان متن به‌صورت پیام جدید ارسال می‌شود. خطای بی‌خطر
+        «message is not modified» (کلیک دوباره روی همان صفحه) نادیده گرفته می‌شود."""
+        try:
+            await target.edit_text(text, reply_markup=reply_markup)
+        except TelegramBadRequest as e:
+            if "not modified" in str(e).lower():
+                return
+            await target.answer(text, reply_markup=reply_markup)
+
+    @router.message(F.text.func(lambda t: t == db.get_setting("btn_loyalty")))
+    async def loyalty_menu(message: Message):
+        (await asyncio.to_thread(db.add_or_update_user,
+            message.from_user.id, message.from_user.username or "", message.from_user.first_name or ""
+        ))
+        if not (await asyncio.to_thread(loyalty.is_enabled, db)):
+            await message.answer("باشگاه مشتریان در حال حاضر غیرفعال است.")
+            return
+        s = (await asyncio.to_thread(loyalty.get_summary, db, message.from_user.id))
+        await message.answer(_loyalty_menu_text(s), reply_markup=kb.loyalty_menu_kb())
+
+    @router.callback_query(F.data.startswith("loy_hist:"))
+    async def cb_loyalty_history(call: CallbackQuery, state: FSMContext):
+        await state.clear()
+        try:
+            page = max(int(call.data.split(":", 1)[1]), 0)
+        except (TypeError, ValueError):
+            page = 0
+
+        per_page = 5
+        rows, total = (await asyncio.to_thread(
+            db.get_loyalty_history, call.from_user.id, per_page, page * per_page
+        ))
+        state_row = (await asyncio.to_thread(db.ensure_loyalty_state, call.from_user.id))
+        pages = max(1, -(-total // per_page))
+
+        lines = [
+            f"📜 تاریخچه امتیاز (صفحه {page + 1} از {pages})",
+            f"⭐ موجودی: {state_row['current_points']}",
+            "",
+        ]
+        if not rows:
+            lines.append("هنوز تراکنشی برای شما ثبت نشده است.")
+        for row in rows:
+            amount = row["amount"]
+            if amount >= 0:
+                amount_line = f"⭐ <b>+{amount}</b>"
+            else:
+                amount_line = f"⭐ −{abs(amount)}"
+            icon = _LOYALTY_TX_ICONS.get(row["tx_type"], "⭐")
+            label = loyalty.TX_LABELS_FA.get(row["tx_type"], row["tx_type"])
+            desc = html.escape((row["description"] or "").strip())
+            tx_line = f"{icon} {label}" + (f" — {desc}" if desc else "")
+            try:
+                date_str = to_jalali_str(row["created_at"])
+            except Exception:
+                date_str = "-"
+            lines.append(f"{amount_line}\n{tx_line}\n📅 {date_str} — موجودی: {row['balance_after']}")
+
+        has_prev = page > 0
+        has_next = (page + 1) * per_page < total
+        await _edit_or_resend(
+            call.message, "\n".join(lines), kb.loyalty_history_kb(page, has_prev, has_next)
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "loy_back")
+    async def cb_loyalty_back(call: CallbackQuery, state: FSMContext):
+        await state.clear()
+        if not (await asyncio.to_thread(loyalty.is_enabled, db)):
+            await call.answer("باشگاه مشتریان در حال حاضر غیرفعال است.", show_alert=True)
+            return
+        s = (await asyncio.to_thread(loyalty.get_summary, db, call.from_user.id))
+        await _edit_or_resend(call.message, _loyalty_menu_text(s), kb.loyalty_menu_kb())
+        await call.answer()
+
+    @router.callback_query(F.data == "loy_rules")
+    async def cb_loyalty_rules(call: CallbackQuery, state: FSMContext):
+        await state.clear()
+        if not (await asyncio.to_thread(loyalty.is_enabled, db)):
+            await call.answer("باشگاه مشتریان در حال حاضر غیرفعال است.", show_alert=True)
+            return
+
+        settings = (await asyncio.to_thread(db.get_all_settings))
+
+        def _int_setting(key: str, default: str) -> int:
+            try:
+                return int(settings.get(key, default) or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        points_per_toman = _int_setting("loyalty_points_per_toman", "10000")
+        redeem_points = _int_setting("loyalty_redeem_points", "100")
+        redeem_toman = _int_setting("loyalty_redeem_toman", "0")
+        min_redeem = _int_setting("loyalty_min_redeem", "0")
+        tiers = (await asyncio.to_thread(loyalty.load_tiers, db))
+
+        lines = ["❓ قوانین باشگاه مشتریان", ""]
+        if points_per_toman > 0:
+            lines.append(f"⭐ هر {points_per_toman:,} تومان خرید = ۱ امتیاز")
+        else:
+            lines.append("⭐ امتیازدهی خرید در حال حاضر فعال نیست.")
+        if tiers:
+            lines.append("")
+            lines.append("سطوح باشگاه (بر اساس کل امتیازهای کسب‌شده):")
+            for t in tiers:
+                lines.append(f"• {t['name']} — از {t['min']:,} امتیاز (ضریب {t['mult'] / 100:g}×)")
+        lines.append("")
+        if redeem_points > 0 and redeem_toman > 0:
+            lines.append(f"🔄 هر {redeem_points} امتیاز = {redeem_toman:,} تومان اعتبار کیف پول")
+        else:
+            lines.append("🔄 تبدیل امتیاز به کیف پول در حال حاضر فعال نیست.")
+        if min_redeem > 0:
+            lines.append(f"حداقل امتیاز قابل تبدیل در هر درخواست: {min_redeem}")
+        lines.append("")
+        lines.append("امتیازها پس از تایید سفارش اعطا می‌شوند.")
+
+        await _edit_or_resend(call.message, "\n".join(lines), kb.loyalty_rules_kb())
+        await call.answer()
+
+    @router.callback_query(F.data == "loy_redeem")
+    async def cb_loyalty_redeem(call: CallbackQuery, state: FSMContext):
+        s = (await asyncio.to_thread(loyalty.get_summary, db, call.from_user.id))
+        if not s["redeem_enabled"]:
+            await call.answer("تبدیل امتیاز در حال حاضر فعال نیست.", show_alert=True)
+            return
+        await state.set_state(LoyaltyRedeem.waiting_points)
+        prompt = f"🔄 چند امتیاز می‌خواهید تبدیل کنید؟ (مضرب {s['redeem_points']} — حداقل {s['min_redeem']})"
+        try:
+            await call.message.edit_text(prompt)
+        except TelegramBadRequest as e:
+            if "not modified" not in str(e).lower():
+                await call.message.answer(prompt)
+        await call.answer()
+
+    @router.message(LoyaltyRedeem.waiting_points)
+    async def process_loyalty_redeem_points(message: Message, state: FSMContext):
+        raw = (message.text or "").strip().replace(",", "")
+        if not raw.isdigit() or int(raw) <= 0:
+            await message.answer("لطفاً تعداد امتیاز را به‌صورت عدد ارسال کنید (مثال: 200).")
+            return
+        points = int(raw)
+
+        s = (await asyncio.to_thread(loyalty.get_summary, db, message.from_user.id))
+        if not s["redeem_enabled"]:
+            await state.clear()
+            await message.answer("تبدیل امتیاز در حال حاضر فعال نیست.")
+            return
+        redeem_points = s["redeem_points"]
+        # پیش‌نمایش: همان اعتبارسنجی‌هایی که loyalty.redeem در لحظه‌ی تایید انجام می‌دهد
+        if s["min_redeem"] > 0 and points < s["min_redeem"]:
+            await message.answer(f"❌ حداقل امتیاز قابل تبدیل {s['min_redeem']} امتیاز است.")
+            return
+        if points % redeem_points != 0:
+            await message.answer(f"❌ تعداد امتیاز باید مضربی از {redeem_points} باشد.")
+            return
+        if points > s["current"]:
+            await message.answer("موجودی امتیاز شما کافی نیست.")
+            return
+        toman = (points // redeem_points) * s["redeem_toman"]
+
+        await message.answer(
+            f"🔄 تبدیل {points} امتیاز → {toman:,} تومان اعتبار کیف پول",
+            reply_markup=kb.loyalty_redeem_confirm_kb(points),
+        )
+
+    @router.callback_query(F.data.startswith("loy_redeem_ok:"))
+    async def cb_loyalty_redeem_ok(call: CallbackQuery, state: FSMContext):
+        try:
+            points = int(call.data.split(":", 1)[1])
+        except (TypeError, ValueError):
+            await state.clear()
+            await call.answer("درخواست نامعتبر است.", show_alert=True)
+            return
+        try:
+            result = (await asyncio.to_thread(loyalty.redeem, db, call.from_user.id, points))
+        except LoyaltyError as e:
+            await call.answer(str(e), show_alert=True)
+            return
+        except Exception:
+            logging.getLogger("handlers_user").exception(
+                "تبدیل امتیاز به کیف پول برای کاربر %s ناموفق بود.", call.from_user.id
+            )
+            await call.answer("⚠️ خطایی رخ داد. لطفاً دوباره تلاش کنید.", show_alert=True)
+            return
+        await state.clear()
+        text = (
+            f"✅ {result['points']} امتیاز تبدیل و {result['toman']:,} تومان به کیف پول شما اضافه شد.\n"
+            f"⭐ موجودی امتیاز: {result['balance_after']}"
+        )
+        await _edit_or_resend(call.message, text, kb.loyalty_menu_kb())
+        await call.answer()
+
+    # -----------------------------------------------------------------------
     # گردونه شانس
     # -----------------------------------------------------------------------
 
@@ -1084,6 +1373,8 @@ def create_user_router(db) -> Router:
             await referral_menu(fake_message, bot)
         elif key == "btn_wheel":
             await wheel_of_fortune(fake_message, bot)
+        elif key == "btn_loyalty":
+            await loyalty_menu(fake_message)
         elif key == "btn_contact":
             await contact_start(fake_message, state)
         # کلید دکمه‌ی مدیریت (پنل ادمین) اینجا هندل نمی‌شود؛ هندلر اصلی‌اش در
