@@ -86,6 +86,8 @@ def _menu_items(db, is_admin: bool, is_reseller: bool, is_main_bot: bool, show_r
         return (settings.get("btn_wallet", "👛 کیف پول من"), settings.get("btn_wallet_style", ""))
 
     def item_referral():
+        if settings.get("referral_button_enabled", "1") != "1":
+            return None
         any_mode_enabled = (
             settings.get("referral_enabled", "1") == "1"
             or settings.get("referral_free_config_enabled", "0") == "1"

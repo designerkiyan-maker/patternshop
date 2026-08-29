@@ -112,6 +112,9 @@ DEFAULT_SETTINGS = {
     "store_name": "⚡ SHOP VPN",
     "miniapp_banner_text": "اتصال امن و پایدار برقرار است",
     # سیستم زیرمجموعه‌گیری
+    # کلید مستر: مستقل از سه مدل زیر - غیرفعال کردنش کل سیستم رفرال (دکمه/تب و
+    # هر سه مدل پاداش) را کاملاً خاموش می‌کند، صرف‌نظر از اینکه کدام مدل روشن باشد.
+    "referral_button_enabled": "1",
     # حالت ۱: پورسانت درصدی از اولین خرید هر زیرمجموعه
     "referral_enabled": "1",
     "referral_percent": "10",  # درصدی که به دعوت‌کننده به‌عنوان اعتبار کیف پول تعلق می‌گیرد
@@ -202,7 +205,7 @@ MENU_BUTTON_META = {
     "btn_test": {"label": "دکمه کانفیگ تست", "toggle_key": "test_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_my_orders": {"label": "دکمه سفارش‌های من", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
     "btn_wallet": {"label": "دکمه کیف پول", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
-    "btn_referral": {"label": "دکمه زیرمجموعه‌گیری", "toggle_key": "referral_enabled", "admin_only": False, "has_text": True, "has_style": True},
+    "btn_referral": {"label": "دکمه زیرمجموعه‌گیری", "toggle_key": "referral_button_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_wheel": {"label": "دکمه گردونه شانس", "toggle_key": "wheel_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_contact": {"label": "دکمه ارتباط با پشتیبانی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
     "btn_admin_panel": {"label": "دکمه پنل مدیریت", "toggle_key": None, "admin_only": True, "has_text": True, "has_style": True},
@@ -2217,6 +2220,8 @@ class Database:
                 return None
             referrer_id = row["referred_by"]
 
+            if self.get_setting("referral_button_enabled", "1") != "1":
+                return None
             if self.get_setting("referral_enabled", "1") != "1":
                 return None
 
@@ -2254,6 +2259,8 @@ class Database:
         خروجی: {"invite_bonus": مبلغ یا None, "free_config_product_id": آیدی محصول یا None}
         """
         result = {"invite_bonus": None, "free_config_product_id": None}
+        if self.get_setting("referral_button_enabled", "1") != "1":
+            return result
         with self._get_conn() as conn:
             referrer = conn.execute(
                 "SELECT referral_free_config_given FROM users WHERE telegram_id=?", (referrer_tg_id,)

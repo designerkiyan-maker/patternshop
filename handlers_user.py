@@ -1281,6 +1281,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     @router.message(F.text.func(lambda t: t == db.get_setting("btn_referral")))
     async def referral_menu(message: Message, bot: Bot):
         settings = (await asyncio.to_thread(db.get_all_settings))
+        if settings.get("referral_button_enabled", "1") != "1":
+            await message.answer("در حال حاضر سیستم زیرمجموعه‌گیری غیرفعال است.")
+            return
         commission_on = settings.get("referral_enabled", "1") == "1"
         freeconfig_on = settings.get("referral_free_config_enabled", "0") == "1"
         invitebonus_on = settings.get("referral_invite_bonus_enabled", "0") == "1"
