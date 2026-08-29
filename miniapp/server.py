@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-بک‌اند مینی‌اپ - چندمستأجر (Multi-tenant)
+بک‌اند مینی‌اپ - تک‌فروشنده (تک دیتابیس)
 
-یک سرور واحد، هم برای بات اصلی و هم برای همه‌ی بات‌های نمایندگی.
-شناسه‌ی نماینده از طریق کوئری‌پارامتر ?b=<reseller_id> در URL مینی‌اپ مشخص
-می‌شود (که هنگام ساخت دکمه‌ی مینی‌اپ در keyboards.py به‌صورت خودکار اضافه می‌شود).
-اگر ?b وجود نداشته باشد یا خالی/۰ باشد، یعنی بات اصلی.
-
-هر درخواست بر اساس همین شناسه، دیتابیس و توکن بات درست را resolve می‌کند؛
-یعنی هر نماینده کاملاً مستقل و ایزوله (دیتابیس خودش) از مینی‌اپ استفاده می‌کند.
+فروشگاه الگوی خیاطی: این سرور فقط به همان یک دیتابیسِ بات اصلی وصل است و
+هیچ تفکیک مستأجری (پارامتر ?b=) وجود ندارد. همه‌ی عملیات خرید/تحویل فایل
+از طریق «رسید کارت‌به‌کارت + تایید دستی ادمین در بات» انجام می‌شود؛ یعنی
+تایید/رد سفارش‌ها و شارژ کیف پول فقط با دکمه‌های داخل بات (callback های
+order_approve/order_reject و topup_approve/topup_reject) انجام می‌شود و
+این سرور فقط رسید را به ادمین‌ها گزارش می‌دهد.
 
 اجرا (جدا از پروسه‌ی اصلی بات): uvicorn miniapp.server:app --host 127.0.0.1 --port 8001
 سپس nginx مسیر / را به این پورت proxy می‌کند.
@@ -18,219 +17,163 @@ import sys
 import os
 import json
 import random
-import secrets
-import base64
 import html as html_lib
 import asyncio
-import tempfile
-from dataclasses import dataclass
-from datetime import datetime, timezone
+import logging
 from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import aiohttp
-from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form, Depends, Query, Request
+from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form, Depends
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, Response, FileResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-import logging
-import sqlite3
-
 logging.basicConfig(level=logging.INFO)
 
-from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, resolve_db_path, RESELLER_DBS_DIR, MINIAPP_URL, API_BASE_URL, PLISIO_API_KEY
-import plisio_client
-import exchange_rate
-import crypto_payment
-from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER
+from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER
+from database import Database
 from miniapp.auth import validate_init_data
-from sub_info import fetch_sub_info
-from backup import create_backup, restore_backup, is_valid_sqlite_db
-from jalali import to_jalali_str
-from stock_alerts import check_and_notify_low_stock
-from panel_providers import (
-    get_provider, PanelError, PanelUsernameTakenError, PROVIDERS,
-    SUB_BASE_URL_PANEL_TYPES, INBOUND_SELECT_PANEL_TYPES,
-)
-from reseller_auto_provision import provision_auto_config, provision_test_config, ProvisionError
-from direct_panel_provision import provision_direct, ProvisionError as DirectProvisionError
-from admin_panel.telegram_notify import send_message as _tg_notify, fetch_telegram_file as _tg_fetch_file
 
-app = FastAPI(title="V2Ray Shop Mini App API")
+app = FastAPI(title="Pattern Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
-# تم‌های قابل انتخاب برای مینی‌اپ (هر تننت/نماینده جدا انتخاب می‌کند)
-MINIAPP_THEMES = {
-    "clean-light": "🌿 مینیمال روشن (پیش‌فرض)",
-    "synthwave": "🌅 سینت‌ویو",
-    "neon-mint": "🟢 نئون مینت",
-    "royal-violet": "👑 بنفش سلطنتی",
-    "blood-moon": "🔴 ماه خونین",
-    "aurora-ice": "🧊 یخ شمالی",
-}
-MAX_HEADER_IMAGE_BYTES = 2 * 1024 * 1024  # 2 مگابایت
-
-# دیتابیس بات اصلی - هم برای سرویس‌دهی مستقیم به بات اصلی، هم برای پیدا کردن
-# دیتابیس/توکن بات‌های نمایندگی از روی جدول reseller_bots استفاده می‌شود.
-main_db = Database(DB_PATH)
+# دیتابیس بات اصلی (تک دیتابیس - بدون نمایندگی)
+db = Database(DB_PATH)
 try:
     # اگر این پروسه (uvicorn مینی‌اپ) قبل از بات اصلی اجرا شده و فایل دیتابیس
     # هنوز جدول ندارد، این‌جا هم می‌سازیمش تا هیچ درخواستی با خطای ۵۰۰ مواجه نشود.
-    main_db.init_db(owner_id=OWNER_ID)
+    db.init_db(owner_id=OWNER_ID)
 except Exception:
-    logging.getLogger("miniapp.tenant").exception("مقداردهی اولیه دیتابیس اصلی ناموفق بود.")
-
-_bot_username_cache: dict[str, str] = {}  # bot_token -> username
+    logging.getLogger("miniapp").exception("مقداردهی اولیه دیتابیس ناموفق بود.")
 
 
 # ---------------------------------------------------------------------------
-# تشخیص مستأجر (بات اصلی یا یک نماینده‌ی مشخص)
+# ابزارهای تماس با Bot API (همان سبک اعلان‌های نسخه‌ی قبلی)
 # ---------------------------------------------------------------------------
 
-@dataclass
-class Tenant:
-    db: Database
-    bot_token: str
-    tenant_id: str  # "" برای بات اصلی، در غیر این صورت id عددی نماینده به‌صورت رشته
+_bot_username_cache: Optional[str] = None
 
 
-_tenant_logger = logging.getLogger("miniapp.tenant")
-
-
-def get_tenant(b: str = Query("", description="شناسه یا اسلاگ لینک نماینده؛ خالی یعنی بات اصلی")) -> Tenant:
-    b = (b or "").strip()
-    if not b or b == "0":
-        return Tenant(db=main_db, bot_token=BOT_TOKEN, tenant_id="")
-
+async def get_bot_username() -> str:
+    """یوزرنیم بات (برای ساخت لینک دعوت زیرمجموعه‌گیری) را با getMe می‌گیرد و کش می‌کند."""
+    global _bot_username_cache
+    if _bot_username_cache:
+        return _bot_username_cache
     try:
-        if b.isdigit():
-            row = main_db.get_reseller_bot(int(b))
-        else:
-            row = main_db.get_reseller_bot_by_slug(b)
-    except sqlite3.OperationalError:
-        _tenant_logger.exception(
-            "خطای دیتابیس اصلی هنگام خواندن reseller_bots (b=%s). db_path=%s - احتمالاً جدول‌ها هنوز ساخته نشده‌اند.",
-            b, DB_PATH,
-        )
-        raise HTTPException(status_code=503, detail="سرور موقتاً در دسترس نیست، دوباره تلاش کنید.")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe") as resp:
+                data = await resp.json()
+                if data.get("ok"):
+                    _bot_username_cache = data["result"]["username"]
+    except Exception:
+        pass
+    return _bot_username_cache or ""
 
-    if not row or not row["is_active"]:
-        _tenant_logger.warning(
-            "تننت b=%s پیدا نشد یا غیرفعال است. row=%s", b, dict(row) if row else None
-        )
-        raise HTTPException(status_code=404, detail="این فروشگاه در دسترس نیست.")
 
-    resolved_path = resolve_db_path(row["db_path"])
-    if not os.path.exists(resolved_path):
-        _tenant_logger.error(
-            "تننت b=%s معتبر است ولی فایل دیتابیسش پیدا نشد. stored_path=%s resolved_path=%s",
-            b, row["db_path"], resolved_path,
-        )
-        raise HTTPException(status_code=503, detail="دیتابیس این فروشگاه در دسترس نیست.")
-
-    tenant_db = Database(resolved_path)
+async def _tg_get_file_path(bot_token: str, file_id: str) -> Optional[str]:
+    """file_id تلگرام را با getFile به file_path قابل دانلود تبدیل می‌کند."""
     try:
-        tenant_db.get_all_settings()
-    except sqlite3.OperationalError:
-        _tenant_logger.exception(
-            "تننت b=%s: خواندن settings از %s ناموفق بود (جدول‌ها ساخته نشده؟).", b, resolved_path
-        )
-        raise HTTPException(status_code=503, detail="دیتابیس این فروشگاه هنوز آماده نیست.")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"https://api.telegram.org/bot{bot_token}/getFile",
+                json={"file_id": file_id},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                data = await resp.json()
+        if data.get("ok"):
+            return (data.get("result") or {}).get("file_path")
+    except Exception:
+        logging.getLogger("miniapp.telegram").exception("getFile ناموفق بود.")
+    return None
 
-    _tenant_logger.info(
-        "تننت b=%s resolve شد -> bot_username=%s token=...%s db_path=%s",
-        b, row["bot_username"], row["bot_token"][-6:], resolved_path,
-    )
-    return Tenant(db=tenant_db, bot_token=row["bot_token"], tenant_id=b)
+
+async def _tg_download_file(bot_token: str, file_id: str) -> Optional[bytes]:
+    """محتوای واقعی یک فایل تلگرامی را دانلود می‌کند (پروکسی getFile + file/bot<token>/<path>)."""
+    file_path = await _tg_get_file_path(bot_token, file_id)
+    if not file_path:
+        return None
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://api.telegram.org/file/bot{bot_token}/{file_path}",
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                return await resp.read()
+    except Exception:
+        logging.getLogger("miniapp.telegram").exception("دانلود فایل از تلگرام ناموفق بود.")
+        return None
 
 
-def get_verified_user(x_init_data: str = Header(...), tenant: Tenant = Depends(get_tenant)):
-    """initData را با توکن همان مستأجر تایید می‌کند. خروجی: (tg_id, db, tenant)
+async def send_receipt_media_to_admins(db: Database, bot_token: str, caption: str, reply_markup: str,
+                                       file_bytes: bytes, filename: str, content_type: str,
+                                       as_document: bool):
+    """رسید (عکس یا PDF) را برای همه‌ی ادمین‌ها ارسال می‌کند. (file_id, تعداد تحویل موفق، نتایج) را برمی‌گرداند."""
+    admin_ids = db.list_admins()
+    sent_file_id = None
+    delivered = 0
+    results = []
+    method = "sendDocument" if as_document else "sendPhoto"
+    field = "document" if as_document else "photo"
+    async with aiohttp.ClientSession() as session:
+        for admin_id in admin_ids:
+            form = aiohttp.FormData()
+            form.add_field("chat_id", str(admin_id))
+            form.add_field("caption", caption)
+            form.add_field("reply_markup", reply_markup)
+            form.add_field(field, file_bytes, filename=filename, content_type=content_type)
+            try:
+                async with session.post(
+                    f"https://api.telegram.org/bot{bot_token}/{method}", data=form
+                ) as resp:
+                    data = await resp.json()
+                    if data.get("ok"):
+                        delivered += 1
+                        msg = data["result"]
+                        results.append((admin_id, msg["message_id"]))
+                        if not sent_file_id:
+                            if as_document:
+                                sent_file_id = msg["document"]["file_id"]
+                            else:
+                                sent_file_id = msg["photo"][-1]["file_id"]
+            except Exception:
+                pass
+    return sent_file_id, delivered, results
+
+
+# ---------------------------------------------------------------------------
+# احراز هویت (initData)
+# ---------------------------------------------------------------------------
+
+def get_verified_user(x_init_data: str = Header(...)):
+    """initData را با توکن بات تایید می‌کند. خروجی: (tg_id, db)
 
     نکته: کاربر را همین‌جا هم در جدول users ثبت/به‌روز می‌کنیم (نه فقط داخل
     هندلر /start بات)، چون کاربر می‌تواند مستقیماً وارد مینی‌اپ شود بدون آن‌که
     قبلاً /start را در بات زده باشد. بدون این کار، پیام‌های چت زنده/تیکت چنین
-    کاربری در دیتابیس ثبت می‌شد ولی چون ردیفی در users نداشت، سمت ادمین
-    (هم مینی‌اپ و هم پنل وب) با خطای «کاربر یافت نشد» مواجه می‌شد."""
-    result = validate_init_data(x_init_data, tenant.bot_token)
+    کاربری در دیتابیس ثبت می‌شد ولی چون ردیفی در users نداشت، سمت ادمین با
+    خطای «کاربر یافت نشد» مواجه می‌شد."""
+    result = validate_init_data(x_init_data, BOT_TOKEN)
     if not result or "user" not in result:
         raise HTTPException(status_code=401, detail="initData نامعتبر است.")
     tg_user = result["user"]
     try:
-        tenant.db.add_or_update_user(tg_user["id"], tg_user.get("username"), tg_user.get("first_name"))
+        db.add_or_update_user(tg_user["id"], tg_user.get("username"), tg_user.get("first_name"))
     except Exception:
         logging.getLogger("miniapp.auth").exception("ثبت/به‌روزرسانی کاربر %s ناموفق بود.", tg_user.get("id"))
-    return tg_user["id"], tenant.db, tenant
-
-
-def require_admin(auth=Depends(get_verified_user)):
-    """مثل get_verified_user، ولی فقط اگر کاربر ادمین همان مستأجر باشد اجازه می‌دهد.
-    همچنین حضور آنلاین ادمین را ثبت می‌کند (برای مسیریابی چت زنده به اولین ادمین آنلاین)."""
-    tg_id, db, tenant = auth
-    if not db.is_admin(tg_id):
-        raise HTTPException(status_code=403, detail="دسترسی ادمین لازم است.")
-    db.touch_admin_presence(tg_id)
-    return auth
-
-
-def require_full_admin(auth=Depends(get_verified_user)):
-    """مثل require_admin، ولی نقش «پشتیبان» را رد می‌کند؛ مالک، مدیر کامل یا ادمین میانی."""
-    tg_id, db, tenant = auth
-    if not db.is_full_admin(tg_id):
-        raise HTTPException(status_code=403, detail="این بخش فقط برای مدیران کامل در دسترس است.")
-    db.touch_admin_presence(tg_id)
-    return auth
-
-
-def require_senior_admin(auth=Depends(get_verified_user)):
-    """مثل require_full_admin، ولی نقش «ادمین میانی» را هم رد می‌کند؛ فقط مالک یا مدیر کامل
-    (برای بخش‌های حساس: آمار فروش، چیدمان منو، تنظیمات کمپین‌ها/تخفیف، لاگ ادمین، نمایندگی‌ها)."""
-    tg_id, db, tenant = auth
-    if not db.is_senior_admin(tg_id):
-        raise HTTPException(status_code=403, detail="این بخش فقط برای مالک و مدیر کامل در دسترس است.")
-    return auth
-
-
-def require_full_access_admin(auth=Depends(get_verified_user)):
-    """مثل require_senior_admin، ولی علاوه بر آن بات‌های نمایندگیِ سطح ۲ (محدود) را هم رد می‌کند؛
-    اتصال پنل VPN و ساخت کانفیگ دستی فقط برای بات اصلی و نمایندگی سطح کامل مجاز است."""
-    tg_id, db, tenant = auth
-    if not db.is_senior_admin(tg_id):
-        raise HTTPException(status_code=403, detail="این بخش فقط برای مالک و مدیر کامل در دسترس است.")
-    if not db.is_full_access_bot(not tenant.tenant_id):
-        raise HTTPException(status_code=403, detail="⛔️ اتصال پنل VPN و ساخت کانفیگ دستی فقط از طریق بات اصلی یا نمایندگی کامل مدیریت می‌شود.")
-    return auth
-
-
-def require_main_admin(auth=Depends(get_verified_user)):
-    """مدیریت بات‌های نمایندگی: فقط مالک یا مدیر کامل بات اصلی (نه ادمین میانی/پشتیبان،
-    نه بات‌های نمایندگی)."""
-    tg_id, db, tenant = auth
-    if tenant.tenant_id:
-        raise HTTPException(status_code=403, detail="این بخش فقط در بات اصلی در دسترس است.")
-    if not db.is_senior_admin(tg_id):
-        raise HTTPException(status_code=403, detail="این بخش فقط برای مالک و مدیر کامل در دسترس است.")
-    return auth
-
-
-def require_owner(auth=Depends(get_verified_user)):
-    """فقط مالک اصلی همان مستأجر (بات اصلی یا همان نماینده)؛ برای عملیات حساس
-    مثل بازیابی کامل دیتابیس."""
-    tg_id, db, tenant = auth
-    if not db.is_owner(tg_id):
-        raise HTTPException(status_code=403, detail="این بخش فقط برای مالک بات در دسترس است.")
-    return auth
+    return tg_user["id"], db
 
 
 # ---------------------------------------------------------------------------
 # عضویت اجباری در کانال - هماهنگ با force_join.py که در ربات اصلی اجرا می‌شود.
 # در ربات این چک قبل از هر هندلر (میدل‌ور) اجرا می‌شود؛ این‌جا هم باید همان
-# منطق قبل از هر اکشن نوشتنی (خرید/تاپ‌آپ/کانفیگ تست/گردونه) اجرا شود تا
+# منطق قبل از هر اکشن نوشتنی (خرید/تاپ‌آپ/الگوی نمونه/گردونه) اجرا شود تا
 # کاربر نتواند صرفاً با استفاده از مینی‌اپ این محدودیت را دور بزند.
 async def _is_channel_member_http(bot_token: str, channel: str, tg_id: int) -> bool:
     """مثل force_join.is_channel_member ولی بدون وابستگی به شیء Bot آیوگرم
@@ -254,14 +197,14 @@ async def _is_channel_member_http(bot_token: str, channel: str, tg_id: int) -> b
     return status not in ("left", "kicked")
 
 
-async def _force_join_check(tg_id: int, db: Database, tenant: "Tenant"):
+async def _force_join_check(tg_id: int, db: Database):
     """اگر عضویت لازم باشد و کاربر عضو نباشد، خطای ۴۰۳ با جزئیات کانال می‌دهد."""
     settings = db.get_force_join_settings()
     if not settings.get("enabled") or not settings.get("channel"):
         return
     if db.is_admin(tg_id):
         return
-    member = await _is_channel_member_http(tenant.bot_token, settings["channel"], tg_id)
+    member = await _is_channel_member_http(BOT_TOKEN, settings["channel"], tg_id)
     if member:
         return
     channel_display = str(settings["channel"]).lstrip("@")
@@ -278,9 +221,9 @@ async def _force_join_check(tg_id: int, db: Database, tenant: "Tenant"):
 
 async def require_joined(auth=Depends(get_verified_user)):
     """مثل get_verified_user، به‌علاوه‌ی چک عضویت اجباری کانال - برای همه‌ی
-    اکشن‌های نوشتنی/خرید (سفارش، تاپ‌آپ، کانفیگ تست، گردونه، کانفیگ شخصی)."""
-    tg_id, db, tenant = auth
-    await _force_join_check(tg_id, db, tenant)
+    اکشن‌های نوشتنی/خرید (سفارش، تاپ‌آپ، الگوی نمونه، گردونه)."""
+    tg_id, db = auth
+    await _force_join_check(tg_id, db)
     return auth
 
 
@@ -288,32 +231,16 @@ async def require_joined(auth=Depends(get_verified_user)):
 async def api_force_join_status(auth=Depends(get_verified_user)):
     """فرانت قبل از نمایش دکمه‌های خرید، این را چک می‌کند تا در صورت لزوم
     بنر عضویت در کانال را نشان دهد (هم‌تراز با رفتار ربات اصلی)."""
-    tg_id, db, tenant = auth
+    tg_id, db = auth
     settings = db.get_force_join_settings()
     if not settings.get("enabled") or not settings.get("channel") or db.is_admin(tg_id):
         return {"required": False, "member": True}
-    member = await _is_channel_member_http(tenant.bot_token, settings["channel"], tg_id)
+    member = await _is_channel_member_http(BOT_TOKEN, settings["channel"], tg_id)
     channel_display = str(settings["channel"]).lstrip("@")
     return {
         "required": True, "member": member,
         "channel": settings["channel"], "join_link": f"https://t.me/{channel_display}",
     }
-
-
-async def get_bot_username(tenant: Tenant) -> str:
-    """یوزرنیم همان بات (برای ساخت لینک دعوت زیرمجموعه‌گیری) را می‌گیرد و کش می‌کند."""
-    cached = _bot_username_cache.get(tenant.bot_token)
-    if cached:
-        return cached
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://api.telegram.org/bot{tenant.bot_token}/getMe") as resp:
-                data = await resp.json()
-                if data.get("ok"):
-                    _bot_username_cache[tenant.bot_token] = data["result"]["username"]
-    except Exception:
-        pass
-    return _bot_username_cache.get(tenant.bot_token, "")
 
 
 # ---------------------------------------------------------------------------
@@ -333,29 +260,21 @@ def get_asset_version() -> str:
 
 
 @app.get("/", response_class=HTMLResponse)
-def serve_index(tenant: Tenant = Depends(get_tenant)):
+def serve_index():
     with open(os.path.join(STATIC_DIR, "index.html"), encoding="utf-8") as f:
         html = f.read()
     version = get_asset_version()
     html = html.replace("{{VERSION}}", version)
 
-    store_name = tenant.db.get_setting("store_name", "⚡ SHOP VPN")
-    banner_text = tenant.db.get_setting("miniapp_banner_text", "اتصال امن و پایدار برقرار است")
+    # بنر قدیمی حذف شده است؛ متن بالای صفحه همان نام فروشگاه است.
+    store_name = db.get_setting("store_name", "🧵 الگوشاپ")
     html = html.replace("{{STORE_NAME}}", html_lib.escape(store_name))
-    html = html.replace("{{BANNER_TEXT}}", html_lib.escape(banner_text))
+    html = html.replace("{{BANNER_TEXT}}", html_lib.escape(store_name))
 
-    theme = tenant.db.get_setting("miniapp_theme", "clean-light")
-    if theme not in MINIAPP_THEMES:
-        theme = "clean-light"
-    html = html.replace("{{THEME}}", theme)
-
-    header_image = tenant.db.get_setting("header_image_data", "")
-    if header_image:
-        html = html.replace("{{HEADER_LOGO_CLASS}}", "has-logo")
-        html = html.replace("{{HEADER_LOGO_HTML}}", f'<img class="brand-logo" src="{header_image}" alt="" />')
-    else:
-        html = html.replace("{{HEADER_LOGO_CLASS}}", "")
-        html = html.replace("{{HEADER_LOGO_HTML}}", "")
+    # تم و لوگوی هدر دیگر از پنل وب مدیریت نمی‌شوند؛ مقادیر پیش‌فرض خنثی تزریق می‌شود.
+    html = html.replace("{{THEME}}", "clean-light")
+    html = html.replace("{{HEADER_LOGO_CLASS}}", "")
+    html = html.replace("{{HEADER_LOGO_HTML}}", "")
 
     return HTMLResponse(html)
 
@@ -366,7 +285,7 @@ def serve_index(tenant: Tenant = Depends(get_tenant)):
 
 @app.get("/api/me")
 def api_me(auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
+    tg_id, db = auth
     user = db.get_user(tg_id)
     if not user:
         raise HTTPException(status_code=404, detail="کاربر یافت نشد. ابتدا /start را در بات بزنید.")
@@ -386,245 +305,27 @@ def api_me(auth=Depends(get_verified_user)):
     }
 
 
-@app.get("/api/orders")
-def api_orders(auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
-    orders = db.get_user_orders(tg_id)
-    result = []
-    for o in orders:
-        if o["is_custom_config"]:
-            result.append({
-                "id": o["id"],
-                "product_name": f"کانفیگ شخصی «{o['custom_username']}» ({o['custom_volume_gb']} گیگ)",
-                "quantity": 1,
-                "status": o["status"],
-                "final_price": o["final_price"],
-                "expires_at": None,
-                "link": None,
-                "links": [],
-                "is_custom_config": True,
-            })
-            continue
-        product = db.get_product(o["product_id"])
-        cfg = db.get_config_by_id(o["config_id"]) if o["config_id"] else None
-        configs = db.get_order_configs(o["id"]) if o["status"] == "approved" else []
-        links = [c["link"] for c in configs] if configs else ([cfg["link"]] if cfg else [])
-        config_ids = [c["id"] for c in configs] if configs else ([cfg["id"]] if cfg else [])
-        result.append({
-            "id": o["id"],
-            "product_name": product["name"] if product else "نامشخص",
-            "quantity": o["quantity"] or 1,
-            "status": o["status"],
-            "final_price": o["final_price"],
-            "expires_at": cfg["expires_at"] if cfg else None,
-            "link": cfg["link"] if cfg else None,
-            "links": links,
-            "config_ids": config_ids,
-            "is_custom_config": False,
-        })
-    return result
-
-
-@app.delete("/api/orders/configs/{config_id}")
-def api_delete_order_config(config_id: int, auth=Depends(get_verified_user)):
-    """حذف کامل و برگشت‌ناپذیر یک کانفیگ محصول متعلق به خود کاربر. اگر با این
-    حذف، سفارش دیگر هیچ کانفیگی نداشته باشد، آن سفارش هم از لیست کاربر مخفی
-    می‌شود (این حذف در بات اصلی هم همزمان اعمال می‌شود چون هر دو از یک
-    دیتابیس می‌خوانند)."""
-    tg_id, db, _ = auth
-    removed = db.delete_owned_config(config_id, tg_id)
-    if not removed:
-        raise HTTPException(status_code=404, detail="کانفیگ یافت نشد یا متعلق به شما نیست.")
-    return {"status": "ok"}
-
-
-@app.get("/api/custom-configs")
-def api_custom_configs(auth=Depends(get_verified_user)):
-    """کانفیگ‌های ساخته‌شده مستقیم روی پنل VPN (خرید شخصی/کانفیگ تست پنلی)."""
-    tg_id, db, _ = auth
-    configs = db.get_custom_configs_for_user(tg_id)
-    return [
-        {
-            "id": c["id"],
-            "username": c["username"],
-            "volume_gb": c["volume_gb"],
-            "duration_days": c["duration_days"],
-            "subscription_url": c["subscription_url"],
-            "created_at": c["created_at"],
-            "expires_at": c["expires_at"],
-        }
-        for c in configs
-        if c["source"] != "test"
-    ]
-
-
-@app.delete("/api/custom-configs/{custom_config_id}")
-async def api_delete_custom_config(custom_config_id: int, auth=Depends(get_verified_user)):
-    """حذف کامل و برگشت‌ناپذیر یک کانفیگ شخصی متعلق به خود کاربر؛ قبل از حذف از
-    دیتابیس، تلاش می‌شود کاربر از روی پنل VPN هم حذف شود (best-effort - در
-    صورت خطا در ارتباط با پنل، رکورد همچنان از لیست کاربر حذف می‌شود)."""
-    tg_id, db, _ = auth
-    rows = db.get_custom_configs_for_user(tg_id)
-    cc_row = next((c for c in rows if c["id"] == custom_config_id), None)
-    if not cc_row:
-        raise HTTPException(status_code=404, detail="کانفیگ یافت نشد یا متعلق به شما نیست.")
-    if cc_row["panel_server_id"]:
-        server = db.get_panel_server(cc_row["panel_server_id"])
-        if server:
-            try:
-                provider = get_provider(server)
-                await provider.delete_user(cc_row["username"])
-            except Exception:
-                logging.getLogger("miniapp").exception(
-                    "حذف کاربر «%s» از پنل سرور #%s ناموفق بود؛ در هر صورت از لیست کاربر حذف می‌شود.",
-                    cc_row["username"], cc_row["panel_server_id"],
-                )
-    db.delete_owned_custom_config(custom_config_id, tg_id)
-    return {"status": "ok"}
-
-
 # ---------------------------------------------------------------------------
-# ساخت کانفیگ شخصی (اتصال مستقیم به پنل VPN) - معادل CustomConfigFlow ربات؛
-# قبلاً این‌جا فقط GET/DELETE بود (کاربر فقط می‌توانست کانفیگ‌های ساخته‌شده در
-# ربات را ببیند/حذف کند). این endpoint ساخت واقعی کانفیگ جدید را هم اضافه
-# می‌کند تا کاربر برای این کار مجبور به رفتن سراغ ربات نباشد.
-# همچنین «پنل نمایندگی اعتباری» (ساخت رایگان از استخر گیگ نماینده) را هم
-# اگر کاربر reseller باشد پشتیبانی می‌کند (use_credit=True).
+# کاتالوگ و محصولات
 # ---------------------------------------------------------------------------
 
-@app.get("/api/custom-config/info")
-def api_custom_config_info(auth=Depends(get_verified_user)):
-    tg_id, db, tenant = auth
-    settings = db.get_custom_config_settings()
-    tiers = db.get_pricing_tiers()
-    server = db.get_panel_server_for_usage("custom_config")
-    is_reseller = db.is_reseller(tg_id)
-    reseller_credit = db.get_reseller_credit(tg_id) if is_reseller else 0
-    reseller_server = db.get_reseller_panel(tg_id) if is_reseller else None
+def _product_public(db: Database, p) -> dict:
+    """شکل عمومی محصول برای کاتالوگ/جزئیات. available یعنی حداقل یک فایل الگو
+    در بانک فایل‌ها ثبت شده است (فروش نامحدود است)."""
     return {
-        "enabled": settings["enabled"] and bool(server) and bool(tiers)
-        and bool(db.is_full_access_bot(not tenant.tenant_id)),
-        "min_gb": settings["min_gb"], "max_gb": settings["max_gb"],
-        "duration_days": settings["duration_days"],
-        "tiers": [
-            {"from_gb": t["from_gb"], "to_gb": t["to_gb"], "price_per_gb": t["price_per_gb"]}
-            for t in tiers
-        ],
-        "wallet_credit": db.get_wallet_credit(tg_id),
-        "is_reseller": is_reseller,
-        "reseller_credit_gb": reseller_credit,
-        "reseller_available": is_reseller and reseller_credit > 0 and bool(reseller_server),
-        "crypto_enabled": db.get_setting("crypto_payment_enabled", "0") == "1"
-        and bool(_resolve_plisio_key(db)) and bool(API_BASE_URL),
-        "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
-    }
-
-
-class CustomConfigPurchase(BaseModel):
-    username: str
-    volume_gb: int
-    use_credit: bool = False  # True یعنی از اعتبار گیگ نمایندگی (رایگان) ساخته شود
-
-
-def _valid_custom_username(username: str) -> bool:
-    return bool(re.fullmatch(r"[A-Za-z0-9_]{3,20}", username or ""))
-
-
-@app.post("/api/custom-configs")
-async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(require_joined)):
-    tg_id, db, tenant = auth
-    username = (body.username or "").strip()
-    if not _valid_custom_username(username):
-        raise HTTPException(status_code=400, detail="نام کاربری نامعتبر است. فقط حروف انگلیسی، عدد و آندرلاین، بین ۳ تا ۲۰ کاراکتر.")
-    if db.is_custom_username_taken(username):
-        raise HTTPException(status_code=400, detail="این نام کاربری قبلاً استفاده شده است.")
-
-    # --- مسیر نمایندگی اعتباری: رایگان از استخر حجم خودِ نماینده ---
-    if body.use_credit:
-        if not db.is_reseller(tg_id):
-            raise HTTPException(status_code=403, detail="شما نماینده نیستید.")
-        credit = db.get_reseller_credit(tg_id)
-        if body.volume_gb <= 0 or body.volume_gb > credit:
-            raise HTTPException(status_code=400, detail=f"اعتبار شما کافی نیست. اعتبار باقی‌مانده: {credit:,} گیگ.")
-        server = db.get_reseller_panel(tg_id)
-        if not server or not server["is_active"]:
-            raise HTTPException(status_code=400, detail="سرور نمایندگی در دسترس نیست.")
-        duration_days = db.get_custom_config_settings()["duration_days"]
-        try:
-            provider = get_provider(server)
-            result = await provider.create_user(username, body.volume_gb, duration_days)
-        except PanelUsernameTakenError:
-            raise HTTPException(status_code=409, detail="این نام کاربری روی پنل تکراری است.")
-        except PanelError as e:
-            raise HTTPException(status_code=502, detail=f"خطا در ساخت کانفیگ: {e}")
-        db.adjust_reseller_credit(tg_id, -body.volume_gb, reason=f"ساخت کانفیگ «{result.username}» (مینی‌اپ)")
-        db.add_custom_config(
-            tg_id, server["id"], result.username, body.volume_gb, duration_days,
-            result.subscription_url, source="reseller",
-        )
-        return {
-            "status": "approved", "link": result.subscription_url,
-            "reseller_credit_left": db.get_reseller_credit(tg_id),
-        }
-
-    # --- مسیر خرید عادی (پرداخت از کیف‌پول/کارت/کریپتو) ---
-    settings = db.get_custom_config_settings()
-    if not settings["enabled"] or not db.is_full_access_bot(not tenant.tenant_id):
-        raise HTTPException(status_code=400, detail="این بخش در حال حاضر غیرفعال است.")
-    if body.volume_gb < settings["min_gb"] or body.volume_gb > settings["max_gb"]:
-        raise HTTPException(status_code=400, detail=f"حجم باید بین {settings['min_gb']} تا {settings['max_gb']} گیگابایت باشد.")
-    price = db.calc_custom_config_price(body.volume_gb)
-    if price <= 0:
-        raise HTTPException(status_code=400, detail="قیمت‌گذاری این بخش هنوز تنظیم نشده است.")
-    server = db.get_panel_server_for_usage("custom_config")
-    if not server or not server["is_active"]:
-        raise HTTPException(status_code=400, detail="در حال حاضر سروری برای ساخت کانفیگ شخصی فعال نیست.")
-
-    user_row = db.get_user(tg_id)
-    if user_row and user_row["is_blocked"]:
-        raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
-
-    wallet_credit = db.get_wallet_credit(tg_id)
-    wallet_used = min(wallet_credit, price)
-    if wallet_used > 0:
-        db.add_wallet_credit(tg_id, -wallet_used)
-
-    order_id = db.create_custom_config_order(
-        tg_id, body.volume_gb, username, server["id"], base_price=price, wallet_used=wallet_used,
-    )
-    order = db.get_order(order_id)
-
-    if order["final_price"] <= 0:
-        try:
-            provider = get_provider(server)
-            result = await provider.create_user(username, body.volume_gb, settings["duration_days"])
-        except Exception as e:
-            db.reject_order(order_id)
-            if wallet_used:
-                db.add_wallet_credit(tg_id, wallet_used)
-            raise HTTPException(status_code=502, detail=f"خطا در ساخت کانفیگ روی پنل: {e}")
-        db.approve_custom_config_order(order_id)
-        db.add_custom_config(
-            tg_id, server["id"], result.username, body.volume_gb, settings["duration_days"],
-            result.subscription_url, order_id=order_id, source="custom_config",
-        )
-        try:
-            db.reward_referrer_if_first_purchase(tg_id, price)
-        except Exception:
-            pass
-        return {"status": "approved", "order_id": order_id, "link": result.subscription_url}
-
-    return {
-        "status": "pending_payment", "order_id": order_id, "final_price": order["final_price"],
-        "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
-        "crypto_enabled": db.get_setting("crypto_payment_enabled", "0") == "1"
-        and bool(_resolve_plisio_key(db)) and bool(API_BASE_URL),
+        "id": p["id"],
+        "name": p["name"],
+        "price": p["price"],
+        "description": p["description"],
+        "available": db.has_product_files(p["id"]),
+        "has_preview": bool((p["preview_file_id"] or "").strip()),
+        "category_id": p["category_id"],
     }
 
 
 @app.get("/api/catalog")
 def api_catalog(auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
+    tg_id, db = auth
     categories = db.get_categories(active_only=True)
     result = []
     for c in categories:
@@ -632,93 +333,489 @@ def api_catalog(auth=Depends(get_verified_user)):
         result.append({
             "id": c["id"],
             "name": c["name"],
-            "products": [
-                {
-                    "id": p["id"],
-                    "name": p["name"],
-                    "price": p["price"],
-                    "description": p["description"],
-                    "stock": db.count_available_configs(p["id"]),
-                    "is_auto_provision": bool(p["is_auto_provision"]),
-                }
-                for p in products
-            ],
+            "products": [_product_public(db, p) for p in products],
         })
     return result
 
 
+@app.get("/api/products/{product_id}")
+def api_product_detail(product_id: int, auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    p = db.get_product(product_id)
+    if not p or not p["is_active"]:
+        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
+    return _product_public(db, p)
+
+
+@app.get("/api/products/{product_id}/preview")
+async def api_product_preview(product_id: int):
+    # عکس پیش‌نمایش محصول عمداً بدون احراز هویت (عمومی) سرو می‌شود تا هم با
+    # <img src="..."> مستقیم کار کند و هم با fetch همراه همان هدرهای بقیه‌ی
+    # API ها (هدر اضافه نادیده گرفته می‌شود). محتوای آن فقط یک عکس نمایشی
+    # از الگو است و اطلاعات حساسی ندارد.
+    p = db.get_product(product_id)
+    if not p or not (p["preview_file_id"] or "").strip():
+        raise HTTPException(status_code=404, detail="پیش‌نمایشی برای این محصول ثبت نشده است.")
+    data = await _tg_download_file(BOT_TOKEN, p["preview_file_id"])
+    if not data:
+        raise HTTPException(status_code=502, detail="دانلود پیش‌نمایش از تلگرام ناموفق بود.")
+    # عکس‌های تلگرام JPEG هستند؛ کش مرورگر یک‌ساعته چون تغییر پیش‌نمایش نادر است.
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
 # ---------------------------------------------------------------------------
-# کانفیگ تست
+# سفارش‌ها (رسید کارت‌به‌کارت + تایید دستی ادمین در بات)
 # ---------------------------------------------------------------------------
 
-@app.get("/api/test-config")
-def api_test_config_status(auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
-    user = db.get_user(tg_id)
-    used = bool(user and user["test_used"] >= MAX_TEST_PER_USER)
-    link = None
-    if used:
-        panel_server = db.get_panel_server_for_usage("test_config")
-        if panel_server:
-            row = db.get_test_custom_config_for_user(tg_id)
-            link = row["subscription_url"] if row else None
-        else:
-            row = db.get_assigned_test_config(tg_id)
-            link = row["link"] if row else None
+class OrderCreate(BaseModel):
+    product_id: int
+    discount_code: Optional[str] = None  # کد تخفیف اختیاری است
+
+
+def _order_record_ids(order) -> list:
+    """CSV شناسه‌های رکورد product_files ذخیره‌شده در سفارش را به لیست int تبدیل می‌کند."""
+    raw = order["file_ids"] or ""
+    return [int(s) for s in raw.split(",") if s.strip().isdigit()]
+
+
+async def _order_admin_caption(db: Database, order_id: int, auto_approved: bool) -> str:
+    """کپشن گزارش سفارش برای ادمین - هم‌تراز با _notify_admins_of_order ربات."""
+    order = db.get_order(order_id)
+    product = db.get_product(order["product_id"])
+    user_row = db.get_user(order["user_id"])
+    username = user_row["username"] if user_row else ""
+    first_name = user_row["first_name"] if user_row else ""
+    caption = (
+        f"🧾 سفارش #{order_id}\n"
+        f"👤 کاربر: {first_name or ''} (@{username or '---'})\n"
+        f"🆔 آیدی عددی: {order['user_id']}\n"
+        f"🧵 محصول: {product['name'] if product else '---'}\n"
+        f"💰 قیمت پایه: {order['base_price']:,} تومان\n"
+    )
+    if order["discount_amount"]:
+        caption += f"🎟 تخفیف کد: {order['discount_amount']:,} تومان\n"
+    if order["wallet_used"]:
+        caption += f"👛 استفاده از کیف پول: {order['wallet_used']:,} تومان\n"
+    caption += f"💵 مبلغ قابل پرداخت: {order['final_price']:,} تومان"
+    if auto_approved:
+        caption += "\n\n✅ این سفارش به‌طور خودکار تایید و فایل‌های الگو برای کاربر ارسال شد (پرداخت کامل از کیف پول/کد تخفیف)."
+    return caption
+
+
+async def _notify_admins_of_auto_order(db: Database, order_id: int):
+    """سفارش‌هایی که کامل از کیف پول/کد تخفیف پوشش داده شده‌اند نیازی به تایید
+    دستی ندارند؛ فقط یک پیام اطلاع‌رسانی بدون دکمه برای ادمین‌ها می‌رود."""
+    try:
+        caption = await _order_admin_caption(db, order_id, auto_approved=True)
+        async with aiohttp.ClientSession() as session:
+            for admin_id in db.list_admins():
+                try:
+                    await session.post(
+                        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                        json={"chat_id": admin_id, "text": caption},
+                    )
+                except Exception:
+                    pass
+    except Exception:
+        logging.getLogger("miniapp.orders").exception("اطلاع‌رسانی سفارش خودکار به ادمین‌ها ناموفق بود.")
+
+
+@app.post("/api/orders")
+async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
+    """ایجاد سفارش - آینه‌ی منطق cb_buy_start ربات: اعتبار کد تخفیف، اعمال
+    خودکار کیف پول، و اگر مبلغ نهایی صفر شد تایید خودکار سفارش."""
+    tg_id, db = auth
+    user_row = db.get_user(tg_id)
+    if user_row and user_row["is_blocked"]:
+        raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
+
+    product = db.get_product(body.product_id)
+    if not product or not product["is_active"] or not db.has_product_files(body.product_id):
+        raise HTTPException(status_code=409, detail="این الگو در حال حاضر موجود نیست.")
+
+    total_price = product["price"]
+    discount_code_id = None
+    discount_amount = 0
+    if body.discount_code:
+        code_row = db.get_discount_code(body.discount_code)
+        if not db.is_discount_code_valid(code_row):
+            raise HTTPException(status_code=400, detail="کد تخفیف نامعتبر است.")
+        discount_amount = db.compute_discount_amount(code_row, total_price)
+        discount_code_id = code_row["id"]
+
+    wallet_credit = db.get_wallet_credit(tg_id)
+    price_after_code = max(total_price - discount_amount, 0)
+    wallet_used = min(wallet_credit, price_after_code)
+
+    if wallet_used > 0:
+        db.add_wallet_credit(tg_id, -wallet_used)
+    if discount_code_id:
+        db.increment_discount_usage(discount_code_id)
+
+    order_id = db.create_order(
+        tg_id, body.product_id, base_price=total_price,
+        wallet_used=wallet_used, discount_code_id=discount_code_id,
+        discount_amount=discount_amount,
+    )
+    order = db.get_order(order_id)
+
+    if order["final_price"] <= 0:
+        files = db.get_product_files(body.product_id)
+        if not files:
+            # الگو بدون فایل شده؛ سفارش را رد کن تا مبلغ کسرشده از کیف پول/تخفیف برگردد
+            db.reject_order(order_id)
+            raise HTTPException(
+                status_code=409,
+                detail="این الگو در حال حاضر موجود نیست؛ مبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد.",
+            )
+        db.approve_order(order_id, [f["id"] for f in files])
+        try:
+            db.reward_referrer_if_first_purchase(tg_id, order["base_price"])
+        except Exception:
+            pass
+        await _notify_admins_of_auto_order(db, order_id)
+        return {
+            "status": "approved", "order_id": order_id,
+            "files": [{"record_id": f["id"]} for f in files],
+        }
+
+    # مبلغی باقی مانده - کاربر باید رسید کارت‌به‌کارت آپلود کند تا ادمین در بات تایید کند
     return {
-        "enabled": db.get_setting("test_enabled", "1") == "1",
-        "used": used,
-        "available": db.count_available_test_configs(),
-        "link": link,
+        "status": "pending", "order_id": order_id, "final_price": order["final_price"],
+        "wallet_used": wallet_used, "discount_amount": discount_amount,
+        "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
     }
 
 
-@app.post("/api/test-config/claim")
-async def api_test_config_claim(auth=Depends(require_joined)):
-    tg_id, db, tenant = auth
+@app.get("/api/orders")
+def api_orders(auth=Depends(get_verified_user)):
+    """لیست سفارش‌های کاربر (بدون سفارش‌های حذف‌شده توسط خودش)."""
+    tg_id, db = auth
+    result = []
+    for o in db.get_user_orders(tg_id):
+        item = {
+            "id": o["id"],
+            "product_name": o["product_name"] or "نامشخص",
+            "status": o["status"],
+            "final_price": o["final_price"],
+            "created_at": o["created_at"],
+        }
+        if o["status"] == "approved":
+            # تعداد فایل‌های الگوی تحویلی فقط برای سفارش تاییدشده معنا دارد
+            item["file_count"] = len(_order_record_ids(o))
+        result.append(item)
+    return result
+
+
+@app.get("/api/orders/{order_id}")
+def api_order_detail(order_id: int, auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    order = db.get_order(order_id)
+    if not order or order["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
+    product = db.get_product(order["product_id"])
+    detail = {
+        "id": order["id"],
+        "product_name": product["name"] if product else "نامشخص",
+        "status": order["status"],
+        "final_price": order["final_price"],
+        "base_price": order["base_price"],
+        "wallet_used": order["wallet_used"],
+        "discount_amount": order["discount_amount"],
+        "created_at": order["created_at"],
+    }
+    if order["status"] == "approved":
+        detail["files"] = [{"record_id": rid} for rid in _order_record_ids(order)]
+    return detail
+
+
+@app.delete("/api/orders/{order_id}")
+def api_delete_order(order_id: int, auth=Depends(get_verified_user)):
+    """حذف (مخفی‌کردن) یک سفارش از لیست «سفارش‌های من» توسط خود کاربر؛ همان
+    رفتار بات - رکورد برای گزارش‌های ادمین دست‌نخورده می‌ماند."""
+    tg_id, db = auth
+    removed = db.delete_owned_order(order_id, tg_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="سفارش یافت نشد یا متعلق به شما نیست.")
+    return {"status": "ok"}
+
+
+@app.post("/api/orders/{order_id}/receipt")
+async def api_order_receipt(
+    order_id: int,
+    photo: UploadFile = File(None),
+    file: UploadFile = File(None),
+    auth=Depends(get_verified_user),
+):
+    """آپلود رسید کارت‌به‌کارت سفارش (عکس یا PDF). فایل برای همه‌ی ادمین‌ها با
+    دکمه‌های تایید/رد ارسال می‌شود؛ تایید نهایی فقط با دکمه‌های داخل بات انجام
+    می‌شود (callback های order_approve/order_reject - این‌جا هیچ تاییدی انجام
+    نمی‌شود). فیلد multipart هم «photo» (سازگار با نسخه‌ی قبلی فرانت) و هم
+    «file» پذیرفته می‌شود."""
+    tg_id, db = auth
+    order = db.get_order(order_id)
+    if not order or order["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
+    if order["status"] != "pending":
+        raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
+
+    upload = photo or file
+    if upload is None:
+        raise HTTPException(status_code=400, detail="فایل رسید ارسال نشده است.")
+    content_type = upload.content_type or ""
+    as_document = not content_type.startswith("image/")
+    if not (content_type.startswith("image/") or content_type == "application/pdf"):
+        raise HTTPException(status_code=400, detail="فقط عکس یا فایل PDF رسید پذیرفته می‌شود.")
+
+    file_bytes = await upload.read()
+    if len(file_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="حجم فایل بیش از حد مجاز است.")
+
+    user = db.get_user(tg_id)
+    product = db.get_product(order["product_id"])
+    # کپشن هم‌تراز با _notify_admins_of_order ربات
+    caption = (
+        f"🧾 سفارش #{order_id}\n"
+        f"👤 کاربر: {(user['first_name'] if user else '') or ''} (@{(user['username'] if user else '') or '---'})\n"
+        f"🆔 آیدی عددی: {tg_id}\n"
+        f"🧵 محصول: {product['name'] if product else '---'}\n"
+        f"💰 قیمت پایه: {order['base_price']:,} تومان\n"
+    )
+    if order["discount_amount"]:
+        caption += f"🎟 تخفیف کد: {order['discount_amount']:,} تومان\n"
+    if order["wallet_used"]:
+        caption += f"👛 استفاده از کیف پول: {order['wallet_used']:,} تومان\n"
+    caption += f"💵 مبلغ قابل پرداخت: {order['final_price']:,} تومان"
+
+    reply_markup = json.dumps({
+        "inline_keyboard": [[
+            {"text": "✅ تایید و ارسال فایل‌ها", "callback_data": f"order_approve:{order_id}"},
+            {"text": "❌ رد کردن", "callback_data": f"order_reject:{order_id}"},
+        ]]
+    })
+
+    admin_ids = db.list_admins()
+    if not admin_ids:
+        raise HTTPException(status_code=500, detail="هیچ ادمینی برای بررسی رسید ثبت نشده است.")
+
+    sent_file_id, delivered, results = await send_receipt_media_to_admins(
+        db, BOT_TOKEN, caption, reply_markup, file_bytes,
+        upload.filename or ("receipt.pdf" if as_document else "receipt.jpg"),
+        content_type or ("application/pdf" if as_document else "image/jpeg"),
+        as_document,
+    )
+    if delivered == 0:
+        raise HTTPException(status_code=502, detail="ارسال رسید به ادمین ناموفق بود. دوباره تلاش کنید.")
+
+    for admin_id, message_id in results:
+        db.set_order_admin_message(order_id, admin_id, message_id)
+    if sent_file_id:
+        db.set_order_receipt(order_id, sent_file_id, "document" if as_document else "photo")
+
+    return {"ok": True, "status": "sent"}
+
+
+@app.get("/api/orders/{order_id}/files/{record_id}")
+async def api_order_file(order_id: int, record_id: int, auth=Depends(get_verified_user)):
+    """دانلود مستقیم یکی از فایل‌های الگوی یک سفارش تاییدشده. فقط مالک سفارش،
+    فقط سفارش تاییدشده و فقط رکوردی که واقعاً در file_ids همان سفارش است."""
+    tg_id, db = auth
+    order = db.get_order(order_id)
+    if not order or order["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
+    if order["status"] != "approved":
+        raise HTTPException(status_code=400, detail="فایل‌های این سفارش هنوز تایید نشده‌اند.")
+    if record_id not in _order_record_ids(order):
+        raise HTTPException(status_code=404, detail="این فایل متعلق به این سفارش نیست.")
+
+    row = next((r for r in db.get_product_files(order["product_id"]) if r["id"] == record_id), None)
+    if not row:
+        raise HTTPException(status_code=404, detail="فایل الگو یافت نشد.")
+
+    data = await _tg_download_file(BOT_TOKEN, row["file_id"])
+    if not data:
+        raise HTTPException(status_code=502, detail="دانلود فایل از تلگرام ناموفق بود. دوباره تلاش کنید.")
+
+    # محتوای خصوصی کاربر است؛ کش نشود. فایل‌های الگو PDF هستند.
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="pattern-{record_id}.pdf"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# الگوی نمونه‌ی رایگان
+# ---------------------------------------------------------------------------
+
+@app.get("/api/sample")
+def api_sample_status(auth=Depends(get_verified_user)):
+    """وضعیت الگوی نمونه برای فرانت (جایگزین endpoint وضعیت نسخه‌ی قبلی)."""
+    tg_id, db = auth
+    user = db.get_user(tg_id)
+    return {
+        "enabled": db.get_setting("test_enabled", "1") == "1",
+        "used": bool(user and user["test_used"] >= MAX_TEST_PER_USER),
+        "available": db.count_sample_files(),
+    }
+
+
+@app.post("/api/sample")
+async def api_sample_claim(auth=Depends(require_joined)):
+    """دریافت الگوی نمونه‌ی رایگان. فایل مصرف نمی‌شود (همیشه همان اولین رکورد
+    مخزن sample_files برگردانده می‌شود)؛ شمارنده‌ی test_used کاربر کنترل می‌کند."""
+    tg_id, db = auth
     if db.get_setting("test_enabled", "1") != "1":
-        raise HTTPException(status_code=400, detail="در حال حاضر امکان دریافت کانفیگ تست غیرفعال است.")
+        raise HTTPException(status_code=400, detail="در حال حاضر امکان دریافت الگوی نمونه غیرفعال است.")
     user = db.get_user(tg_id)
     if user and user["test_used"] >= MAX_TEST_PER_USER:
-        raise HTTPException(status_code=400, detail="شما قبلاً کانفیگ تست خود را دریافت کرده‌اید.")
-
-    if not db.is_full_access_bot(not tenant.tenant_id):
-        try:
-            result = await provision_test_config(db, user_id=tg_id)
-        except ProvisionError as e:
-            raise HTTPException(status_code=409, detail=str(e))
-        db.mark_test_used(tg_id)
-        return {"link": result["subscription_url"]}
-
-    panel_server = db.get_panel_server_for_usage("test_config")
-    if panel_server:
-        volume_gb = int(db.get_setting("test_config_panel_volume_gb", "1") or 1)
-        duration_days = int(db.get_setting("test_config_panel_duration_days", "1") or 1)
-        username = None
-        for _ in range(10):
-            candidate = "test" + "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(8))
-            if not db.is_custom_username_taken(candidate):
-                username = candidate
-                break
-        if not username:
-            raise HTTPException(status_code=500, detail="خطا در تولید نام کاربری. دوباره تلاش کنید.")
-        try:
-            provider = get_provider(panel_server)
-            result = await provider.create_user(username, volume_gb, duration_days)
-        except PanelError as e:
-            raise HTTPException(status_code=400, detail=f"خطا در ساخت کانفیگ تست: {e}")
-        db.add_custom_config(
-            tg_id, panel_server["id"], result.username, volume_gb, duration_days,
-            result.subscription_url, source="test",
-        )
-        db.mark_test_used(tg_id)
-        return {"link": result.subscription_url}
-
-    result = db.take_unused_test_config(tg_id)
-    if not result:
-        raise HTTPException(status_code=400, detail="متاسفانه موجودی کانفیگ تست تمام شده است.")
+        raise HTTPException(status_code=400, detail="شما قبلاً الگوی نمونه‌ی رایگان خود را دریافت کرده‌اید.")
+    row = db.take_unused_sample_file()
+    if not row:
+        raise HTTPException(status_code=400, detail="متاسفانه موجودی الگوی نمونه تمام شده است.")
     db.mark_test_used(tg_id)
-    return {"link": result["link"]}
+    return {"ok": True, "download": "/api/sample/file"}
+
+
+@app.get("/api/sample/file")
+async def api_sample_file(auth=Depends(get_verified_user)):
+    """دانلود فایل الگوی نمونه. فقط کاربرِ احراز‌هویت‌شده (tg_id فقط برای احراز
+    هویت است؛ همه‌ی کاربران همان فایل نمونه‌ی اول مخزن را می‌گیرند)."""
+    tg_id, db = auth
+    row = db.take_unused_sample_file()
+    if not row:
+        raise HTTPException(status_code=404, detail="الگوی نمونه‌ای موجود نیست.")
+    data = await _tg_download_file(BOT_TOKEN, row["file_id"])
+    if not data:
+        raise HTTPException(status_code=502, detail="دانلود فایل از تلگرام ناموفق بود. دوباره تلاش کنید.")
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="sample-{row["id"]}.pdf"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# گردونه‌ی شانس
+# ---------------------------------------------------------------------------
+
+@app.get("/api/wheel")
+def api_wheel_status(auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    settings = db.get_wheel_settings()
+    can_spin, remaining_hours = db.can_spin_wheel(tg_id)
+    return {
+        "enabled": settings["enabled"], "can_spin": can_spin,
+        "remaining_hours": round(remaining_hours, 1) if remaining_hours else 0,
+        "prizes": settings["prizes"],
+    }
+
+
+@app.post("/api/wheel/spin")
+def api_wheel_spin(auth=Depends(require_joined)):
+    tg_id, db = auth
+    settings = db.get_wheel_settings()
+    if not settings["enabled"]:
+        raise HTTPException(status_code=400, detail="گردونه غیرفعال است.")
+    can_spin, remaining_hours = db.can_spin_wheel(tg_id)
+    if not can_spin:
+        raise HTTPException(status_code=429, detail=f"حدود {int(remaining_hours)+1} ساعت دیگر دوباره امتحان کن.")
+
+    db.record_wheel_spin(tg_id)
+    won = random.randint(1, 100) <= settings["win_percent"]
+    if won and settings["prizes"]:
+        percent = random.choice(settings["prizes"])
+        code, expires_at = db.generate_wheel_prize_code(tg_id, percent)
+        return {"won": True, "percent": percent, "code": code, "expires_at": expires_at}
+    return {"won": False}
+
+
+# ---------------------------------------------------------------------------
+# کیف پول
+# ---------------------------------------------------------------------------
+
+class TopupCreate(BaseModel):
+    amount: int
+
+
+@app.post("/api/wallet/topup-request")
+def api_topup_request(body: TopupCreate, auth=Depends(require_joined)):
+    tg_id, db = auth
+    user_row = db.get_user(tg_id)
+    if user_row and user_row["is_blocked"]:
+        raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
+    if body.amount < 1000:
+        raise HTTPException(status_code=400, detail="حداقل مبلغ ۱۰۰۰ تومان است.")
+    topup_id = db.create_topup(tg_id, body.amount)
+    return {
+        "topup_id": topup_id, "card_number": db.get_setting("card_number"),
+        "card_holder": db.get_setting("card_holder"),
+        "note": "مبلغ را واریز کرده و عکس رسید را همینجا ارسال کنید.",
+    }
+
+
+@app.post("/api/wallet/topup-receipt")
+async def api_topup_receipt(
+    topup_id: int = Form(...),
+    photo: UploadFile = File(...),
+    auth=Depends(get_verified_user),
+):
+    """آپلود رسید شارژ کیف پول (فقط عکس، مثل نسخه‌ی قبل). تایید/رد فقط با
+    دکمه‌های داخل بات (callback های topup_approve/topup_reject) انجام می‌شود."""
+    tg_id, db = auth
+    topup = db.get_topup(topup_id)
+    if not topup or topup["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="درخواست شارژ یافت نشد.")
+    if topup["status"] != "pending":
+        raise HTTPException(status_code=400, detail="این درخواست قبلاً بررسی شده است.")
+    if not photo.content_type or not photo.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="فقط عکس رسید پذیرفته می‌شود.")
+
+    photo_bytes = await photo.read()
+    if len(photo_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="حجم عکس بیش از حد مجاز است.")
+
+    user = db.get_user(tg_id)
+    caption = (
+        f"👛 درخواست شارژ کیف پول #{topup_id}\n"
+        f"👤 کاربر: {(user['first_name'] if user else '') or ''} (@{(user['username'] if user else '') or '---'})\n"
+        f"🆔 آیدی عددی: {tg_id}\n"
+        f"💰 مبلغ: {topup['amount']:,} تومان"
+    )
+    reply_markup = json.dumps({
+        "inline_keyboard": [[
+            {"text": "✅ تایید و شارژ کیف پول", "callback_data": f"topup_approve:{topup_id}"},
+            {"text": "❌ رد کردن", "callback_data": f"topup_reject:{topup_id}"},
+        ]]
+    })
+
+    admin_ids = db.list_admins()
+    if not admin_ids:
+        raise HTTPException(status_code=500, detail="هیچ ادمینی برای بررسی رسید ثبت نشده است.")
+
+    sent_file_id, delivered, results = await send_receipt_media_to_admins(
+        db, BOT_TOKEN, caption, reply_markup, photo_bytes, photo.filename or "receipt.jpg",
+        photo.content_type, as_document=False,
+    )
+    if delivered == 0:
+        raise HTTPException(status_code=502, detail="ارسال رسید به ادمین ناموفق بود. دوباره تلاش کنید.")
+
+    for admin_id, message_id in results:
+        db.set_topup_admin_message(topup_id, admin_id, message_id)
+    if sent_file_id:
+        db.set_topup_receipt(topup_id, sent_file_id)
+
+    return {"ok": True, "status": "sent"}
 
 
 # ---------------------------------------------------------------------------
@@ -727,7 +824,7 @@ async def api_test_config_claim(auth=Depends(require_joined)):
 
 @app.get("/api/referral")
 async def api_referral(auth=Depends(get_verified_user)):
-    tg_id, db, tenant = auth
+    tg_id, db = auth
     if db.get_setting("referral_button_enabled", "1") != "1":
         return {"enabled": False}
     commission_on = db.get_setting("referral_enabled", "1") == "1"
@@ -735,7 +832,7 @@ async def api_referral(auth=Depends(get_verified_user)):
     ib_on = db.get_setting("referral_invite_bonus_enabled", "0") == "1"
     if not (commission_on or fc_on or ib_on):
         return {"enabled": False}
-    username = await get_bot_username(tenant)
+    username = await get_bot_username()
     ref_start = f"ref{tg_id}"
     link = f"https://t.me/{username}?start={ref_start}" if username else None
     stats = db.get_referral_stats(tg_id)
@@ -756,78 +853,12 @@ async def api_referral(auth=Depends(get_verified_user)):
 
 
 # ---------------------------------------------------------------------------
-# هشدار انقضا
-# ---------------------------------------------------------------------------
-
-@app.get("/api/sub-info")
-async def api_sub_info(link: str = Query(...), auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
-    orders = db.get_user_orders(tg_id)
-    owns_link = False
-    for o in orders:
-        configs = db.get_order_configs(o["id"]) if o["status"] == "approved" else []
-        if configs:
-            if any(c["link"] == link for c in configs):
-                owns_link = True
-                break
-        else:
-            cfg = db.get_config_by_id(o["config_id"]) if o["config_id"] else None
-            if cfg and cfg["link"] == link:
-                owns_link = True
-                break
-    if not owns_link:
-        custom_configs = db.get_custom_configs_for_user(tg_id)
-        owns_link = any(c["subscription_url"] == link for c in custom_configs)
-    if not owns_link:
-        raise HTTPException(status_code=403, detail="forbidden")
-
-    info = await fetch_sub_info(link)
-    return info
-
-
-@app.get("/api/expiring")
-async def api_expiring(auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
-    rows = db.get_expiring_configs_for_user(tg_id)
-    if not rows:
-        return []
-
-    threshold_days = int(db.get_setting("renewal_reminder_days_before", "5") or 5)
-    infos = await asyncio.gather(*[fetch_sub_info(r["link"]) for r in rows])
-
-    result = []
-    for r, info in zip(rows, infos):
-        expires_at = r["expires_at"]
-        if info.get("ok") and info.get("expire"):
-            exp_dt = datetime.fromtimestamp(info["expire"], tz=timezone.utc)
-            real_days_left = (exp_dt - datetime.now(timezone.utc)).days
-            if real_days_left > threshold_days:
-                # طبق داده‌ی واقعی پنل هنوز واقعاً نزدیک انقضا نیست
-                continue
-            expires_at = exp_dt.isoformat()
-
-        product = db.get_product(r["product_id"]) if r["product_id"] else None
-        if product:
-            product_name = product["name"]
-        elif "custom_username" in r.keys() and r["custom_username"]:
-            product_name = f"🛠 کانفیگ شخصی «{r['custom_username']}»"
-        else:
-            product_name = "نامشخص"
-        result.append({
-            "product_name": product_name,
-            "expires_at": expires_at,
-            "link": r["link"],
-        })
-    return result
-
-
-# ---------------------------------------------------------------------------
 # چت پشتیبانی
 # ---------------------------------------------------------------------------
 
 @app.get("/api/support/messages")
 def api_support_messages(since_id: int = 0, auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
+    tg_id, db = auth
     db.mark_support_read_by_user(tg_id)
     rows = db.get_support_messages(tg_id, since_id=since_id)
     return [
@@ -842,7 +873,7 @@ class SupportMessageCreate(BaseModel):
 
 @app.post("/api/support/messages")
 async def api_support_send(body: SupportMessageCreate, auth=Depends(get_verified_user)):
-    tg_id, db, tenant = auth
+    tg_id, db = auth
     text = (body.message or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="پیام نمی‌تواند خالی باشد.")
@@ -869,7 +900,7 @@ async def api_support_send(body: SupportMessageCreate, auth=Depends(get_verified
         for admin_id in admin_ids:
             try:
                 await session.post(
-                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
                     json={
                         "chat_id": admin_id, "text": caption,
                         "parse_mode": "Markdown", "reply_markup": reply_markup,
@@ -904,13 +935,13 @@ def _ticket_to_dict(t):
 
 @app.get("/api/tickets")
 def api_list_my_tickets(auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
+    tg_id, db = auth
     return [_ticket_to_dict(t) for t in db.get_user_tickets(tg_id)]
 
 
 @app.post("/api/tickets")
 async def api_create_ticket(body: TicketCreate, auth=Depends(get_verified_user)):
-    tg_id, db, tenant = auth
+    tg_id, db = auth
     subject = (body.subject or "").strip()
     message = (body.message or "").strip()
     if not subject or not message:
@@ -932,7 +963,7 @@ async def api_create_ticket(body: TicketCreate, auth=Depends(get_verified_user))
         for admin_id in admin_ids:
             try:
                 await session.post(
-                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
                     json={"chat_id": admin_id, "text": caption, "parse_mode": "Markdown"},
                 )
             except Exception:
@@ -943,7 +974,7 @@ async def api_create_ticket(body: TicketCreate, auth=Depends(get_verified_user))
 
 @app.get("/api/tickets/{ticket_id}/messages")
 def api_get_my_ticket_messages(ticket_id: int, since_id: int = 0, auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
+    tg_id, db = auth
     ticket = db.get_ticket(ticket_id)
     if not ticket or ticket["user_id"] != tg_id:
         raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
@@ -960,7 +991,7 @@ def api_get_my_ticket_messages(ticket_id: int, since_id: int = 0, auth=Depends(g
 
 @app.post("/api/tickets/{ticket_id}/messages")
 async def api_send_my_ticket_message(ticket_id: int, body: TicketMessageCreate, auth=Depends(get_verified_user)):
-    tg_id, db, tenant = auth
+    tg_id, db = auth
     ticket = db.get_ticket(ticket_id)
     if not ticket or ticket["user_id"] != tg_id:
         raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
@@ -985,7 +1016,7 @@ async def api_send_my_ticket_message(ticket_id: int, body: TicketMessageCreate, 
         for admin_id in admin_ids:
             try:
                 await session.post(
-                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
                     json={"chat_id": admin_id, "text": caption, "parse_mode": "Markdown"},
                 )
             except Exception:
@@ -996,7 +1027,7 @@ async def api_send_my_ticket_message(ticket_id: int, body: TicketMessageCreate, 
 
 @app.post("/api/tickets/{ticket_id}/close")
 def api_close_my_ticket(ticket_id: int, auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
+    tg_id, db = auth
     ticket = db.get_ticket(ticket_id)
     if not ticket or ticket["user_id"] != tg_id:
         raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
@@ -1004,2501 +1035,10 @@ def api_close_my_ticket(ticket_id: int, auth=Depends(get_verified_user)):
     return {"status": "ok"}
 
 
-async def send_photo_to_admins(db: Database, bot_token: str, caption: str, reply_markup: str,
-                                photo_bytes: bytes, filename: str, content_type: str):
-    """رسید را برای همه‌ی ادمین‌های همین مستأجر ارسال می‌کند. (file_id, تعداد تحویل موفق، نتایج) را برمی‌گرداند."""
-    admin_ids = db.list_admins()
-    sent_file_id = None
-    delivered = 0
-    results = []
-    async with aiohttp.ClientSession() as session:
-        for admin_id in admin_ids:
-            form = aiohttp.FormData()
-            form.add_field("chat_id", str(admin_id))
-            form.add_field("caption", caption)
-            form.add_field("reply_markup", reply_markup)
-            form.add_field("photo", photo_bytes, filename=filename, content_type=content_type)
-            try:
-                async with session.post(
-                    f"https://api.telegram.org/bot{bot_token}/sendPhoto", data=form
-                ) as resp:
-                    data = await resp.json()
-                    if data.get("ok"):
-                        delivered += 1
-                        msg = data["result"]
-                        results.append((admin_id, msg["message_id"]))
-                        if not sent_file_id:
-                            sent_file_id = msg["photo"][-1]["file_id"]
-            except Exception:
-                pass
-    return sent_file_id, delivered, results
-
-
-# ---------------------------------------------------------------------------
-# سفارش‌ها
-# ---------------------------------------------------------------------------
-
-class OrderCreate(BaseModel):
-    product_id: int
-    quantity: int = 1
-    discount_code: Optional[str] = None
-
-
-class TopupCreate(BaseModel):
-    amount: int
-
-
-@app.post("/api/orders")
-async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
-    tg_id, db, tenant = auth
-    user_row = db.get_user(tg_id)
-    if user_row and user_row["is_blocked"]:
-        raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
-    quantity = max(1, body.quantity)
-    product = db.get_product(body.product_id)
-    if not product:
-        raise HTTPException(status_code=400, detail="این محصول موجود نیست.")
-    if product["is_auto_provision"]:
-        pass  # سقفی برای تعداد نیست؛ کافی بودن اعتبار حجمی لحظه‌ی ساخت واقعی چک می‌شود
-    else:
-        stock = db.count_available_configs(body.product_id)
-        if stock <= 0:
-            raise HTTPException(status_code=400, detail="این محصول موجود نیست.")
-        if quantity > stock:
-            raise HTTPException(status_code=400, detail=f"موجودی کافی نیست. فقط {stock} عدد موجود است.")
-
-    total_price = product["price"] * quantity
-    discount_code_id = None
-    discount_amount = 0
-    if body.discount_code:
-        code_row = db.get_discount_code(body.discount_code)
-        if not db.is_discount_code_valid(code_row):
-            raise HTTPException(status_code=400, detail="کد تخفیف نامعتبر است.")
-        discount_amount = db.compute_discount_amount(code_row, total_price)
-        discount_code_id = code_row["id"]
-
-    wallet_credit = db.get_wallet_credit(tg_id)
-    price_after_code = max(total_price - discount_amount, 0)
-    wallet_used = min(wallet_credit, price_after_code)
-
-    if wallet_used > 0:
-        db.add_wallet_credit(tg_id, -wallet_used)
-    if discount_code_id:
-        db.increment_discount_usage(discount_code_id)
-
-    order_id = db.create_order(
-        tg_id, body.product_id, base_price=total_price,
-        wallet_used=wallet_used, discount_code_id=discount_code_id, discount_amount=discount_amount,
-        quantity=quantity,
-    )
-    order = db.get_order(order_id)
-
-    if order["final_price"] <= 0:
-        if product["is_auto_provision"]:
-            try:
-                if product["provision_server_id"]:
-                    prov_results = await provision_direct(db, product, quantity, user_id=tg_id, order_id=order_id)
-                else:
-                    prov_results = await provision_auto_config(db, product, quantity, user_id=tg_id, order_id=order_id)
-            except (ProvisionError, DirectProvisionError) as e:
-                db.reject_order(order_id)
-                raise HTTPException(status_code=409, detail=str(e))
-            db.approve_order_auto(order_id)
-            db.reward_referrer_if_first_purchase(tg_id, order["final_price"] or total_price)
-            links = [r["subscription_url"] for r in prov_results]
-            return {
-                "status": "approved", "order_id": order_id,
-                "link": links[0], "links": links,
-                "expires_at": None,
-            }
-
-        results = db.take_unused_configs(body.product_id, tg_id, quantity)
-        if not results:
-            db.reject_order(order_id)
-            raise HTTPException(status_code=409, detail="موجودی هم‌زمان تمام شد؛ مبلغ بازگردانده شد.")
-        db.approve_order(order_id, [r["id"] for r in results])
-
-        async def _send_admin_msg(admin_id, text):
-            async with aiohttp.ClientSession() as session:
-                await session.post(
-                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
-                    json={"chat_id": admin_id, "text": text},
-                )
-
-        await check_and_notify_low_stock(_send_admin_msg, db, body.product_id)
-
-        db.reward_referrer_if_first_purchase(tg_id, order["final_price"] or total_price)
-        order = db.get_order(order_id)
-        configs = db.get_order_configs(order_id)
-        links = [c["link"] for c in configs] if configs else [db.get_config_by_id(order["config_id"])["link"]]
-        return {
-            "status": "approved", "order_id": order_id,
-            "link": links[0], "links": links,
-            "expires_at": configs[0]["expires_at"] if configs else None,
-        }
-
-    # مبلغی باقی مانده - کاربر باید مثل قبل از طریق بات رسید کارت‌به‌کارت بفرستد
-    return {
-        "status": "pending_payment", "order_id": order_id, "final_price": order["final_price"],
-        "quantity": quantity,
-        "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
-        "crypto_enabled": db.get_setting("crypto_payment_enabled", "0") == "1" and bool(_resolve_plisio_key(db)) and bool(API_BASE_URL),
-    }
-
-
-# ---------------------------------------------------------------------------
-# پرداخت کریپتو (Plisio)
-# ---------------------------------------------------------------------------
-
-def _resolve_plisio_key(db: Database) -> str:
-    return crypto_payment.resolve_plisio_key(db)
-
-
-async def _toman_to_usd(db: Database, amount_toman: int) -> float:
-    try:
-        return await crypto_payment.toman_to_usd(db, amount_toman)
-    except crypto_payment.CryptoPaymentError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-def _crypto_callback_url(tenant_id: str) -> str:
-    try:
-        return crypto_payment.callback_url(tenant_id)
-    except crypto_payment.CryptoPaymentError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-async def _create_crypto_invoice_for(
-    db: Database, tenant, tg_id: int, kind: str, ref_id: int, amount_toman: int,
-    order_name: str,
-):
-    try:
-        return await crypto_payment.create_invoice_for(
-            db, tenant.tenant_id, tg_id, kind, ref_id, amount_toman, order_name,
-        )
-    except crypto_payment.CryptoPaymentError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/orders/{order_id}/crypto-invoice")
-async def api_order_crypto_invoice(order_id: int, auth=Depends(require_joined)):
-    tg_id, db, tenant = auth
-    order = db.get_order(order_id)
-    if not order or order["user_id"] != tg_id:
-        raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
-    if order["status"] != "pending":
-        raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
-    if order["is_custom_config"]:
-        order_label = f"کانفیگ شخصی #{order_id} - {order['custom_username']}"
-    else:
-        product = db.get_product(order["product_id"])
-        order_label = f"سفارش #{order_id} - {product['name'] if product else ''}"
-    result = await _create_crypto_invoice_for(
-        db, tenant, tg_id, "order", order_id, order["final_price"],
-        order_name=order_label,
-    )
-    return result
-
-
-class CryptoWalletInvoiceRequest(BaseModel):
-    topup_id: int
-
-
-@app.post("/api/wallet/crypto-invoice")
-async def api_wallet_crypto_invoice(body: CryptoWalletInvoiceRequest, auth=Depends(require_joined)):
-    tg_id, db, tenant = auth
-    topup = db.get_topup(body.topup_id)
-    if not topup or topup["user_id"] != tg_id:
-        raise HTTPException(status_code=404, detail="درخواست شارژ یافت نشد.")
-    if topup["status"] != "pending":
-        raise HTTPException(status_code=400, detail="این درخواست شارژ قبلاً بررسی شده است.")
-    result = await _create_crypto_invoice_for(
-        db, tenant, tg_id, "wallet_topup", body.topup_id, topup["amount"],
-        order_name=f"شارژ کیف پول #{body.topup_id}",
-    )
-    result["topup_id"] = body.topup_id
-    return result
-
-
-@app.post("/api/webhooks/plisio")
-async def api_plisio_webhook(request: Request, tenant: Tenant = Depends(get_tenant)):
-    try:
-        body = await request.json()
-    except Exception:
-        form = await request.form()
-        body = dict(form)
-
-    if not plisio_client.verify_callback(_resolve_plisio_key(tenant.db), body):
-        raise HTTPException(status_code=401, detail="امضای کال‌بک نامعتبر است.")
-
-    txn_id = body.get("txn_id")
-    status = body.get("status")
-    currency = body.get("currency")
-    if not txn_id or not status:
-        raise HTTPException(status_code=400, detail="داده‌ی کال‌بک ناقص است.")
-
-    db = tenant.db
-    invoice = db.get_crypto_invoice_by_txn(txn_id)
-    if not invoice:
-        return {"status": "ignored"}
-
-    if invoice["status"] == "completed":
-        return {"status": "already_completed"}
-
-    if status in ("new", "pending", "pending internal"):
-        db.update_crypto_invoice_status(txn_id, "pending", currency=currency)
-        return {"status": "ok"}
-
-    if status not in ("completed",):
-        db.update_crypto_invoice_status(txn_id, status, currency=currency)
-        return {"status": "ok"}
-
-    # status == completed
-    db.update_crypto_invoice_status(txn_id, "completed", currency=currency)
-
-    if invoice["kind"] == "wallet_topup":
-        db.approve_topup(invoice["ref_id"])
-        try:
-            async with aiohttp.ClientSession() as session:
-                await session.post(
-                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
-                    json={
-                        "chat_id": invoice["user_id"],
-                        "text": f"✅ پرداخت کریپتو تایید شد و {invoice['amount_toman']:,} تومان به کیف پول شما اضافه شد.",
-                    },
-                )
-        except Exception:
-            pass
-
-    elif invoice["kind"] == "order":
-        order_id = invoice["ref_id"]
-        order = db.get_order(order_id)
-        if order and order["status"] == "pending":
-            product = db.get_product(order["product_id"])
-
-            if product and product["is_auto_provision"]:
-                quantity = order["quantity"] or 1
-                try:
-                    if product["provision_server_id"]:
-                        prov_results = await provision_direct(db, product, quantity, user_id=order["user_id"], order_id=order_id)
-                    else:
-                        prov_results = await provision_auto_config(db, product, quantity, user_id=order["user_id"], order_id=order_id)
-                except (ProvisionError, DirectProvisionError) as e:
-                    admin_ids = db.list_admins()
-                    async with aiohttp.ClientSession() as session:
-                        for admin_id in admin_ids:
-                            try:
-                                await session.post(
-                                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
-                                    json={
-                                        "chat_id": admin_id,
-                                        "text": f"⚠️ سفارش #{order_id} با کریپتو پرداخت شد ولی ساخت خودکار کانفیگ ناموفق بود: {e}\nلطفاً دستی رسیدگی کنید.",
-                                    },
-                                )
-                            except Exception:
-                                pass
-                    return {"status": "ok"}
-
-                db.approve_order_auto(order_id)
-                db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or product["price"])
-                links_text = "\n".join(r["subscription_url"] for r in prov_results)
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        await session.post(
-                            f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
-                            json={
-                                "chat_id": order["user_id"],
-                                "text": f"✅ پرداخت کریپتو تایید شد!\n📦 محصول: {product['name']}\n\n{links_text}",
-                            },
-                        )
-                except Exception:
-                    pass
-                return {"status": "ok"}
-
-            quantity = order["quantity"] or 1
-            results = db.take_unused_configs(order["product_id"], order["user_id"], quantity)
-            if results:
-                db.approve_order(order_id, [r["id"] for r in results])
-                db.reward_referrer_if_first_purchase(order["user_id"], order["final_price"] or (product["price"] if product else 0))
-                links = "\n".join(r["link"] for r in results)
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        await session.post(
-                            f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
-                            json={
-                                "chat_id": order["user_id"],
-                                "text": f"✅ پرداخت کریپتو تایید شد!\n📦 محصول: {product['name'] if product else ''}\n\n{links}",
-                            },
-                        )
-                except Exception:
-                    pass
-            else:
-                # موجودی هم‌زمان تمام شده - به ادمین اطلاع بده تا دستی رسیدگی کند
-                admin_ids = db.list_admins()
-                async with aiohttp.ClientSession() as session:
-                    for admin_id in admin_ids:
-                        try:
-                            await session.post(
-                                f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
-                                json={
-                                    "chat_id": admin_id,
-                                    "text": f"⚠️ سفارش #{order_id} با کریپتو پرداخت شد ولی موجودی محصول تمام شده! لطفاً دستی رسیدگی کنید.",
-                                },
-                            )
-                        except Exception:
-                            pass
-
-    return {"status": "ok"}
-
-
-# ---------------------------------------------------------------------------
-# گردونه‌ی شانس
-# ---------------------------------------------------------------------------
-
-@app.get("/api/wheel")
-def api_wheel_status(auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
-    settings = db.get_wheel_settings()
-    can_spin, remaining_hours = db.can_spin_wheel(tg_id)
-    return {
-        "enabled": settings["enabled"], "can_spin": can_spin,
-        "remaining_hours": round(remaining_hours, 1) if remaining_hours else 0,
-        "prizes": settings["prizes"],
-    }
-
-
-@app.post("/api/wheel/spin")
-def api_wheel_spin(auth=Depends(require_joined)):
-    tg_id, db, _ = auth
-    settings = db.get_wheel_settings()
-    if not settings["enabled"]:
-        raise HTTPException(status_code=400, detail="گردونه غیرفعال است.")
-    can_spin, remaining_hours = db.can_spin_wheel(tg_id)
-    if not can_spin:
-        raise HTTPException(status_code=429, detail=f"حدود {int(remaining_hours)+1} ساعت دیگر دوباره امتحان کن.")
-
-    db.record_wheel_spin(tg_id)
-    won = random.randint(1, 100) <= settings["win_percent"]
-    if won and settings["prizes"]:
-        percent = random.choice(settings["prizes"])
-        code, expires_at = db.generate_wheel_prize_code(tg_id, percent)
-        return {"won": True, "percent": percent, "code": code, "expires_at": expires_at}
-    return {"won": False}
-
-
-# ---------------------------------------------------------------------------
-# کیف پول
-# ---------------------------------------------------------------------------
-
-@app.post("/api/wallet/topup-request")
-def api_topup_request(body: TopupCreate, auth=Depends(require_joined)):
-    tg_id, db, _ = auth
-    user_row = db.get_user(tg_id)
-    if user_row and user_row["is_blocked"]:
-        raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
-    if body.amount < 1000:
-        raise HTTPException(status_code=400, detail="حداقل مبلغ ۱۰۰۰ تومان است.")
-    topup_id = db.create_topup(tg_id, body.amount)
-    return {
-        "topup_id": topup_id, "card_number": db.get_setting("card_number"),
-        "card_holder": db.get_setting("card_holder"),
-        "note": "مبلغ را واریز کرده و عکس رسید را همینجا ارسال کنید.",
-        "crypto_enabled": db.get_setting("crypto_payment_enabled", "0") == "1" and bool(_resolve_plisio_key(db)) and bool(API_BASE_URL),
-    }
-
-
-@app.post("/api/wallet/topup-receipt")
-async def api_topup_receipt(
-    topup_id: int = Form(...),
-    photo: UploadFile = File(...),
-    x_init_data: str = Header(...),
-    tenant: Tenant = Depends(get_tenant),
-):
-    tg_id, db, tenant = get_verified_user(x_init_data, tenant)
-    topup = db.get_topup(topup_id)
-    if not topup or topup["user_id"] != tg_id:
-        raise HTTPException(status_code=404, detail="درخواست شارژ یافت نشد.")
-    if topup["status"] != "pending":
-        raise HTTPException(status_code=400, detail="این درخواست قبلاً بررسی شده است.")
-    if not photo.content_type or not photo.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="فقط عکس رسید پذیرفته می‌شود.")
-
-    photo_bytes = await photo.read()
-    if len(photo_bytes) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="حجم عکس بیش از حد مجاز است.")
-
-    user = db.get_user(tg_id)
-    caption = (
-        f"👛 درخواست شارژ کیف پول #{topup_id}\n"
-        f"👤 کاربر: {(user['first_name'] if user else '') or ''} (@{(user['username'] if user else '') or '---'})\n"
-        f"🆔 آیدی عددی: {tg_id}\n"
-        f"💰 مبلغ: {topup['amount']:,} تومان"
-    )
-    reply_markup = json.dumps({
-        "inline_keyboard": [[
-            {"text": "✅ تایید و شارژ کیف پول", "callback_data": f"topup_approve:{topup_id}"},
-            {"text": "❌ رد کردن", "callback_data": f"topup_reject:{topup_id}"},
-        ]]
-    })
-
-    admin_ids = db.list_admins()
-    if not admin_ids:
-        raise HTTPException(status_code=500, detail="هیچ ادمینی برای بررسی رسید ثبت نشده است.")
-
-    sent_file_id, delivered, results = await send_photo_to_admins(
-        db, tenant.bot_token, caption, reply_markup, photo_bytes, photo.filename or "receipt.jpg", photo.content_type
-    )
-    if delivered == 0:
-        raise HTTPException(status_code=502, detail="ارسال رسید به ادمین ناموفق بود. دوباره تلاش کنید.")
-
-    for admin_id, message_id in results:
-        db.set_topup_admin_message(topup_id, admin_id, message_id)
-    if sent_file_id:
-        db.set_topup_receipt(topup_id, sent_file_id)
-
-    return {"status": "sent"}
-
-
-@app.post("/api/orders/{order_id}/receipt")
-async def api_order_receipt(
-    order_id: int,
-    photo: UploadFile = File(...),
-    x_init_data: str = Header(...),
-    tenant: Tenant = Depends(get_tenant),
-):
-    tg_id, db, tenant = get_verified_user(x_init_data, tenant)
-    order = db.get_order(order_id)
-    if not order or order["user_id"] != tg_id:
-        raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
-    if order["status"] != "pending":
-        raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
-    if not photo.content_type or not photo.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="فقط عکس رسید پذیرفته می‌شود.")
-
-    photo_bytes = await photo.read()
-    if len(photo_bytes) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="حجم عکس بیش از حد مجاز است.")
-
-    user = db.get_user(tg_id)
-    qty = order["quantity"] or 1
-    if order["is_custom_config"]:
-        product_line = f"🛠 کانفیگ شخصی «{order['custom_username']}» ({order['custom_volume_gb']} گیگ)\n"
-    else:
-        product = db.get_product(order["product_id"])
-        product_line = f"📦 محصول: {product['name'] if product else '---'}" + (f" × {qty}\n" if qty > 1 else "\n")
-    caption = (
-        f"🧾 سفارش #{order_id}\n"
-        f"👤 کاربر: {(user['first_name'] if user else '') or ''} (@{(user['username'] if user else '') or '---'})\n"
-        f"🆔 آیدی عددی: {tg_id}\n"
-        f"{product_line}"
-        f"💰 قیمت پایه: {order['base_price']:,} تومان\n"
-    )
-    if order["discount_amount"]:
-        caption += f"🎟 تخفیف کد: {order['discount_amount']:,} تومان\n"
-    if order["wallet_used"]:
-        caption += f"👛 استفاده از کیف پول: {order['wallet_used']:,} تومان\n"
-    caption += f"💵 مبلغ قابل پرداخت: {order['final_price']:,} تومان"
-
-    reply_markup = json.dumps({
-        "inline_keyboard": [[
-            {"text": "✅ تایید و ارسال کانفیگ", "callback_data": f"order_approve:{order_id}"},
-            {"text": "❌ رد کردن", "callback_data": f"order_reject:{order_id}"},
-        ]]
-    })
-
-    admin_ids = db.list_admins()
-    if not admin_ids:
-        raise HTTPException(status_code=500, detail="هیچ ادمینی برای بررسی رسید ثبت نشده است.")
-
-    sent_file_id, delivered, results = await send_photo_to_admins(
-        db, tenant.bot_token, caption, reply_markup, photo_bytes, photo.filename or "receipt.jpg", photo.content_type
-    )
-    if delivered == 0:
-        raise HTTPException(status_code=502, detail="ارسال رسید به ادمین ناموفق بود. دوباره تلاش کنید.")
-
-    for admin_id, message_id in results:
-        db.set_order_admin_message(order_id, admin_id, message_id)
-    if sent_file_id:
-        db.set_order_receipt(order_id, sent_file_id)
-
-    return {"status": "sent"}
-
-
-# ---------------------------------------------------------------------------
-# مدیریت (فقط ادمین) - چیدمان دکمه‌های منوی اصلی
-# ---------------------------------------------------------------------------
-
-class MenuButtonUpdate(BaseModel):
-    key: str
-    text: Optional[str] = None
-    style: Optional[str] = None
-    enabled: Optional[bool] = None
-
-
-class MenuLayoutUpdate(BaseModel):
-    order: list[str]
-    buttons: list[MenuButtonUpdate]
-    # کلیدهایی که باید قبل‌شان یک ردیف جدید در منو شروع شود؛ اگر ارسال نشود
-    # (None) یعنی فرانت‌اند هنوز چیدمان آزاد را ویرایش نکرده و تنظیم قبلی
-    # (تعداد ستون ثابت یا چیدمان سفارشی قبلی) دست‌نخورده باقی می‌ماند.
-    row_breaks: Optional[list[str]] = None
-
-
-@app.get("/api/admin/check")
-def api_admin_check(auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
-    is_admin = db.is_admin(tg_id)
-    if is_admin:
-        # این اندپوینت هنگام باز شدن پنل ادمین و به‌صورت دوره‌ای (heartbeat) از
-        # سمت مینی‌اپ صدا زده می‌شود؛ همین‌جا حضور آنلاین ادمین را هم ثبت می‌کنیم.
-        db.touch_admin_presence(tg_id)
-    return {"is_admin": is_admin, "admin_role": db.get_admin_role(tg_id)}
-
-
-@app.get("/api/admin/menu")
-def api_admin_get_menu(auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    settings = db.get_all_settings()
-    order = db.get_menu_order()
-    row_breaks = db.get_menu_row_breaks()
-    break_set = set(row_breaks) if row_breaks is not None else None
-    result = []
-    for key in order:
-        meta = MENU_BUTTON_META.get(key)
-        if not meta:
-            continue
-        item = {
-            "key": key,
-            "label": meta["label"],
-            "admin_only": meta["admin_only"],
-            "has_text": meta["has_text"],
-            "has_style": meta["has_style"],
-            "togglable": meta["toggle_key"] is not None,
-        }
-        if meta["has_text"]:
-            item["text"] = settings.get(key, "")
-        if meta["has_style"]:
-            item["style"] = settings.get(f"{key}_style", "")
-        if meta["toggle_key"]:
-            item["enabled"] = settings.get(meta["toggle_key"], "1") == "1"
-        # break_before یعنی این دکمه یک ردیف جدید شروع می‌کند (نه کنار دکمه‌ی
-        # قبلی). None یعنی هنوز چیدمان آزاد سفارشی نشده (حالت قدیمی ستون ثابت).
-        item["break_before"] = (key in break_set) if break_set is not None else None
-        result.append(item)
-    return result
-
-
-@app.post("/api/admin/menu")
-def api_admin_save_menu(body: MenuLayoutUpdate, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    for btn in body.buttons:
-        meta = MENU_BUTTON_META.get(btn.key)
-        if not meta:
-            continue
-        if meta["has_text"] and btn.text is not None and btn.text.strip():
-            db.set_setting(btn.key, btn.text.strip())
-        if meta["has_style"] and btn.style is not None:
-            style = btn.style if btn.style in ("primary", "success", "danger") else ""
-            db.set_setting(f"{btn.key}_style", style)
-        if meta["toggle_key"] and btn.enabled is not None:
-            db.set_setting(meta["toggle_key"], "1" if btn.enabled else "0")
-    db.set_menu_order(body.order)
-    if body.row_breaks is not None:
-        db.set_menu_row_breaks(body.row_breaks)
-    return {"status": "ok"}
-
-
-# ---------------------------------------------------------------------------
-# بنرهای کاروسل بالای صفحه‌ی خانه‌ی مینی‌اپ
-# ---------------------------------------------------------------------------
-
-# مقصدهای مجاز برای ضربه‌زدن روی یک بنر؛ باید دقیقاً با کلیدهای شیء `tabs`
-# در app.js (سوییچ تب‌های مینی‌اپ) یکی باشد.
-BANNER_NAV_TARGETS = {
-    "home", "store", "services", "profile", "wallet", "support", "referral", "test", "wheel", "admin",
-}
-
-
-class BannerItem(BaseModel):
-    id: Optional[str] = None
-    icon: str = ""
-    title: str
-    sub: str = ""
-    cta: str = ""
-    nav: str
-    bg: str = ""
-    image: Optional[str] = ""
-    image_only: bool = False
-    enabled: bool = True
-
-
-class BannersUpdate(BaseModel):
-    banners: list[BannerItem]
-
-
-@app.get("/api/banners")
-def api_banners(auth=Depends(get_verified_user)):
-    """لیست بنرهای فعال کاروسل خانه (برای نمایش به همه‌ی کاربران)."""
-    _, db, _ = auth
-    banners = db.get_banners()
-    return [b for b in banners if b.get("enabled", True)]
-
-
-@app.get("/api/admin/banners")
-def api_admin_get_banners(auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    return db.get_banners()
-
-
-@app.post("/api/admin/banners/upload-image")
-async def api_admin_upload_banner_image(photo: UploadFile = File(...), auth=Depends(require_senior_admin)):
-    """آپلود عکس آماده برای یک بنر؛ به‌صورت data URI برمی‌گردد تا در فرم بنر
-    ذخیره و همراه بقیه‌ی بنرها با POST /api/admin/banners ثبت شود."""
-    if not photo.content_type or not photo.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="فقط فایل عکس پذیرفته می‌شود.")
-    photo_bytes = await photo.read()
-    if len(photo_bytes) > MAX_HEADER_IMAGE_BYTES:
-        raise HTTPException(status_code=400, detail="حجم عکس نباید بیشتر از ۲ مگابایت باشد.")
-    data_uri = f"data:{photo.content_type};base64,{base64.b64encode(photo_bytes).decode('ascii')}"
-    return {"status": "ok", "image": data_uri}
-
-
-@app.post("/api/admin/banners")
-def api_admin_save_banners(body: BannersUpdate, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if len(body.banners) > 20:
-        raise HTTPException(status_code=400, detail="حداکثر ۲۰ بنر مجاز است.")
-    clean = []
-    for idx, b in enumerate(body.banners):
-        title = b.title.strip()
-        if not title:
-            raise HTTPException(status_code=400, detail=f"عنوان بنر شماره {idx + 1} نمی‌تواند خالی باشد.")
-        if len(title) > 40:
-            raise HTTPException(status_code=400, detail=f"عنوان بنر شماره {idx + 1} بیش از حد طولانی است.")
-        sub = b.sub.strip()
-        if len(sub) > 120:
-            raise HTTPException(status_code=400, detail=f"توضیح بنر شماره {idx + 1} بیش از حد طولانی است.")
-        cta = b.cta.strip() or "مشاهده"
-        if len(cta) > 30:
-            raise HTTPException(status_code=400, detail=f"متن دکمه‌ی بنر شماره {idx + 1} بیش از حد طولانی است.")
-        if b.nav not in BANNER_NAV_TARGETS:
-            raise HTTPException(status_code=400, detail=f"مقصد بنر شماره {idx + 1} نامعتبر است.")
-        image = (b.image or "").strip()
-        if image and not image.startswith("data:image/"):
-            raise HTTPException(status_code=400, detail=f"تصویر بنر شماره {idx + 1} نامعتبر است.")
-        if len(image) > 2_900_000:  # ~2MB فایل اصلی بعد از base64 حدوداً همین اندازه می‌شود
-            raise HTTPException(status_code=400, detail=f"حجم تصویر بنر شماره {idx + 1} بیش از حد مجاز است.")
-        bg = b.bg.strip() or "linear-gradient(120deg, #0d1420, #142845 55%, #1c3f6e)"
-        clean.append({
-            "id": b.id or f"b_{secrets.token_hex(4)}",
-            "icon": (b.icon or "✨").strip()[:8],
-            "title": title,
-            "sub": sub,
-            "cta": cta,
-            "nav": b.nav,
-            "bg": bg,
-            "image": image,
-            "image_only": bool(b.image_only) and bool(image),
-            "enabled": bool(b.enabled),
-        })
-    db.set_banners(clean)
-    return {"status": "ok", "banners": clean}
-
-
-# ---------------------------------------------------------------------------
-# مدیریت (فقط ادمین) - دسته‌بندی‌ها و محصولات
-# ---------------------------------------------------------------------------
-
-class CategoryCreate(BaseModel):
-    name: str
-
-
-class CategoryUpdate(BaseModel):
-    name: str
-
-
-class ProductCreate(BaseModel):
-    category_id: int
-    name: str
-    price: int
-    description: str = ""
-    duration_days: int = 30
-    is_auto_provision: bool = False
-    auto_provision_volume_gb: Optional[int] = None
-    provision_server_id: Optional[int] = None
-
-
-class ProductUpdate(BaseModel):
-    name: Optional[str] = None
-    price: Optional[int] = None
-    description: Optional[str] = None
-    duration_days: Optional[int] = None
-
-
-class ConfigsAdd(BaseModel):
-    links: list[str]
-
-
-@app.get("/api/admin/categories")
-def api_admin_list_categories(auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    cats = db.get_categories(active_only=False)
-    result = []
-    for c in cats:
-        products = db.get_products(c["id"], active_only=False)
-        result.append({
-            "id": c["id"], "name": c["name"], "is_active": bool(c["is_active"]),
-            "product_count": len(products),
-        })
-    return result
-
-
-@app.post("/api/admin/categories")
-def api_admin_create_category(body: CategoryCreate, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if not body.name.strip():
-        raise HTTPException(status_code=400, detail="نام دسته‌بندی نمی‌تواند خالی باشد.")
-    cat_id = db.add_category(body.name.strip())
-    return {"id": cat_id}
-
-
-@app.patch("/api/admin/categories/{cat_id}")
-def api_admin_edit_category(cat_id: int, body: CategoryUpdate, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if not db.get_category(cat_id):
-        raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
-    if not body.name.strip():
-        raise HTTPException(status_code=400, detail="نام دسته‌بندی نمی‌تواند خالی باشد.")
-    db.edit_category(cat_id, body.name.strip())
-    return {"status": "ok"}
-
-
-@app.post("/api/admin/categories/{cat_id}/toggle")
-def api_admin_toggle_category(cat_id: int, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if not db.get_category(cat_id):
-        raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
-    db.toggle_category(cat_id)
-    return {"status": "ok"}
-
-
-@app.delete("/api/admin/categories/{cat_id}")
-def api_admin_delete_category(cat_id: int, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if not db.get_category(cat_id):
-        raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
-    db.delete_category(cat_id)
-    return {"status": "ok"}
-
-
-class PanelServerCreate(BaseModel):
-    name: str
-    panel_type: str = "pasarguard"
-    api_url: str
-    api_username: str
-    api_password: str
-    template_username: Optional[str] = None
-
-
-class PanelServerUpdate(BaseModel):
-    name: Optional[str] = None
-    api_url: Optional[str] = None
-    api_username: Optional[str] = None
-    api_password: Optional[str] = None
-
-
-class PanelServerSetTemplate(BaseModel):
-    template_username: str
-
-
-class PanelServerXuiConfig(BaseModel):
-    inbound_id: Optional[int] = None
-    sub_base_url: str
-
-
-class PricingTierCreate(BaseModel):
-    from_gb: int
-    to_gb: Optional[int] = None  # None یعنی تا بی‌نهایت
-    price_per_gb: int
-
-
-class CustomConfigSettingsUpdate(BaseModel):
-    enabled: Optional[bool] = None
-    min_gb: Optional[int] = None
-    max_gb: Optional[int] = None
-    test_volume_gb: Optional[int] = None
-    test_duration_days: Optional[int] = None
-
-
-def _panel_server_public(s) -> dict:
-    is_sub_base_type = s["panel_type"] in SUB_BASE_URL_PANEL_TYPES
-    if is_sub_base_type:
-        needs_inbound = s["panel_type"] in INBOUND_SELECT_PANEL_TYPES
-        configured = bool(s["xui_sub_base_url"]) and (bool(s["xui_inbound_id"]) if needs_inbound else True)
-    else:
-        configured = bool(s["group_ids"] and s["proxy_settings"])
-    return {
-        "id": s["id"], "name": s["name"], "panel_type": s["panel_type"],
-        "api_url": s["api_url"], "template_username": s["template_username"],
-        "has_template": bool(s["group_ids"] and s["proxy_settings"]),
-        "xui_inbound_id": s["xui_inbound_id"], "xui_sub_base_url": s["xui_sub_base_url"],
-        "is_configured": configured,
-        "used_for_custom_config": bool(s["used_for_custom_config"]),
-        "used_for_test_config": bool(s["used_for_test_config"]),
-        "default_group": s["default_group"], "is_active": bool(s["is_active"]),
-    }
-
-
-@app.get("/api/admin/panel-servers")
-def api_admin_list_panel_servers(auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    return [_panel_server_public(s) for s in db.get_panel_servers()]
-
-
-@app.post("/api/admin/panel-servers")
-async def api_admin_add_panel_server(body: PanelServerCreate, auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    admin_id, _, _ = auth
-    if not body.name.strip() or not body.api_url.strip() or not body.api_username.strip() or not body.api_password.strip():
-        raise HTTPException(status_code=400, detail="نام، آدرس، یوزرنیم و پسورد الزامی هستند.")
-    if body.panel_type not in PROVIDERS:
-        raise HTTPException(status_code=400, detail="نوع پنل پشتیبانی نمی‌شود.")
-
-    if body.panel_type in INBOUND_SELECT_PANEL_TYPES:
-        server_id = db.add_panel_server(
-            body.name.strip(), body.panel_type, body.api_url.strip(),
-            body.api_username.strip(), body.api_password,
-        )
-        server = db.get_panel_server(server_id)
-        try:
-            provider = get_provider(server)
-            inbounds = await provider.list_inbounds()
-        except PanelError as e:
-            db.delete_panel_server(server_id)
-            raise HTTPException(status_code=400, detail=str(e))
-        if not inbounds:
-            db.delete_panel_server(server_id)
-            raise HTTPException(status_code=400, detail="این پنل هیچ inbound ای ندارد. اول از داخل پنل یک inbound بساز.")
-        db.log_admin_action(admin_id, "panel_server_add", f"سرور «{body.name}» (3X-UI, #{server_id}) از مینی‌اپ")
-        return {"id": server_id, "inbounds": inbounds}
-
-    if body.panel_type in SUB_BASE_URL_PANEL_TYPES:
-        # مثل Hiddify: inbound لازم نیست؛ سرور همین‌جا ساخته می‌شود و بعد باید
-        # با فراخوانی /xui-config (فقط با sub_base_url، بدون inbound_id) تکمیل شود.
-        server_id = db.add_panel_server(
-            body.name.strip(), body.panel_type, body.api_url.strip(),
-            body.api_username.strip(), body.api_password,
-        )
-        db.log_admin_action(admin_id, "panel_server_add", f"سرور «{body.name}» (#{server_id}) از مینی‌اپ")
-        return {"id": server_id, "needs_sub_base_url": True}
-
-    # پنل‌های خانواده‌ی PasarGuard/Marzban/Marzneshin
-    if not body.template_username or not body.template_username.strip():
-        raise HTTPException(status_code=400, detail="نام کاربری نمونه الزامی است.")
-    server_id = db.add_panel_server(
-        body.name.strip(), body.panel_type, body.api_url.strip(),
-        body.api_username.strip(), body.api_password,
-    )
-    server = db.get_panel_server(server_id)
-    try:
-        provider = get_provider(server)
-        template = await provider.fetch_template_from_user(body.template_username.strip())
-    except PanelError as e:
-        db.delete_panel_server(server_id)
-        raise HTTPException(status_code=400, detail=str(e))
-    db.update_panel_server(
-        server_id, group_ids=json.dumps(template["group_ids"]),
-        proxy_settings=json.dumps(template["proxy_settings"]),
-        template_username=body.template_username.strip(),
-    )
-    db.log_admin_action(admin_id, "panel_server_add", f"سرور «{body.name}» (#{server_id}) از مینی‌اپ")
-    return {"id": server_id}
-
-
-@app.get("/api/admin/panel-servers/{server_id}/xui-inbounds")
-async def api_admin_list_xui_inbounds(server_id: int, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    server = db.get_panel_server(server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
-    if server["panel_type"] != "3xui":
-        raise HTTPException(status_code=400, detail="این سرور از نوع 3X-UI نیست.")
-    try:
-        provider = get_provider(server)
-        inbounds = await provider.list_inbounds()
-    except PanelError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return inbounds
-
-
-@app.post("/api/admin/panel-servers/{server_id}/xui-config")
-async def api_admin_set_xui_config(server_id: int, body: PanelServerXuiConfig, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    server = db.get_panel_server(server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
-    if server["panel_type"] not in SUB_BASE_URL_PANEL_TYPES:
-        raise HTTPException(status_code=400, detail="این سرور به این تنظیمات نیاز ندارد.")
-    if server["panel_type"] in INBOUND_SELECT_PANEL_TYPES and not body.inbound_id:
-        raise HTTPException(status_code=400, detail="انتخاب inbound برای این نوع پنل الزامی است.")
-    url = body.sub_base_url.strip()
-    if not url.startswith("http://") and not url.startswith("https://"):
-        raise HTTPException(status_code=400, detail="آدرس Subscription باید با http:// یا https:// شروع شود.")
-    db.update_panel_server(server_id, xui_inbound_id=body.inbound_id, xui_sub_base_url=url)
-    return {"status": "ok"}
-
-
-@app.patch("/api/admin/panel-servers/{server_id}")
-def api_admin_edit_panel_server(server_id: int, body: PanelServerUpdate, auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    if not db.get_panel_server(server_id):
-        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
-    db.update_panel_server(
-        server_id, name=body.name, api_url=body.api_url,
-        api_username=body.api_username, api_password=body.api_password,
-    )
-    return {"status": "ok"}
-
-
-@app.post("/api/admin/panel-servers/{server_id}/template")
-async def api_admin_set_panel_server_template(server_id: int, body: PanelServerSetTemplate, auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    server = db.get_panel_server(server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
-    try:
-        provider = get_provider(server)
-        template = await provider.fetch_template_from_user(body.template_username.strip())
-    except PanelError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    db.update_panel_server(
-        server_id, group_ids=json.dumps(template["group_ids"]),
-        proxy_settings=json.dumps(template["proxy_settings"]),
-        template_username=body.template_username.strip(),
-    )
-    return {"status": "ok"}
-
-
-@app.post("/api/admin/panel-servers/{server_id}/toggle")
-def api_admin_toggle_panel_server(server_id: int, auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    server = db.get_panel_server(server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
-    db.update_panel_server(server_id, is_active=0 if server["is_active"] else 1)
-    return {"status": "ok"}
-
-
-@app.post("/api/admin/panel-servers/{server_id}/usage/{kind}")
-def api_admin_toggle_panel_server_usage(server_id: int, kind: str, auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    if kind not in ("custom", "test"):
-        raise HTTPException(status_code=400, detail="نوع مصرف نامعتبر است.")
-    server = db.get_panel_server(server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
-    field = "used_for_custom_config" if kind == "custom" else "used_for_test_config"
-    db.update_panel_server(server_id, **{field: 0 if server[field] else 1})
-    return {"status": "ok"}
-
-
-@app.post("/api/admin/panel-servers/{server_id}/test")
-async def api_admin_test_panel_server(server_id: int, auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    server = db.get_panel_server(server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
-    try:
-        provider = get_provider(server)
-        ok = await provider.test_connection()
-    except PanelError as e:
-        return {"ok": False, "error": str(e)}
-    return {"ok": ok}
-
-
-@app.delete("/api/admin/panel-servers/{server_id}")
-def api_admin_delete_panel_server(server_id: int, auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    admin_id, _, _ = auth
-    if not db.get_panel_server(server_id):
-        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
-    db.delete_panel_server(server_id)
-    db.log_admin_action(admin_id, "panel_server_delete", f"سرور #{server_id} از مینی‌اپ")
-    return {"status": "ok"}
-
-
-@app.get("/api/admin/custom-config/settings")
-def api_admin_get_custom_config_settings(auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    settings = db.get_custom_config_settings()
-    settings["test_volume_gb"] = int(db.get_setting("test_config_panel_volume_gb", "1") or 1)
-    settings["test_duration_days"] = int(db.get_setting("test_config_panel_duration_days", "1") or 1)
-    return settings
-
-
-@app.post("/api/admin/custom-config/settings")
-def api_admin_update_custom_config_settings(body: CustomConfigSettingsUpdate, auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    if body.enabled is not None:
-        db.set_setting("custom_config_enabled", "1" if body.enabled else "0")
-    if body.min_gb is not None:
-        if body.min_gb <= 0:
-            raise HTTPException(status_code=400, detail="حداقل حجم باید بزرگ‌تر از صفر باشد.")
-        db.set_setting("custom_config_min_gb", str(body.min_gb))
-    if body.max_gb is not None:
-        min_gb = body.min_gb if body.min_gb is not None else db.get_custom_config_settings()["min_gb"]
-        if body.max_gb <= min_gb:
-            raise HTTPException(status_code=400, detail="حداکثر حجم باید بزرگ‌تر از حداقل باشد.")
-        db.set_setting("custom_config_max_gb", str(body.max_gb))
-    if body.test_volume_gb is not None:
-        if body.test_volume_gb <= 0:
-            raise HTTPException(status_code=400, detail="حجم کانفیگ تست باید بزرگ‌تر از صفر باشد.")
-        db.set_setting("test_config_panel_volume_gb", str(body.test_volume_gb))
-    if body.test_duration_days is not None:
-        if body.test_duration_days <= 0:
-            raise HTTPException(status_code=400, detail="مدت کانفیگ تست باید بزرگ‌تر از صفر باشد.")
-        db.set_setting("test_config_panel_duration_days", str(body.test_duration_days))
-    return {"status": "ok"}
-
-
-@app.get("/api/admin/custom-config/pricing-tiers")
-def api_admin_list_pricing_tiers(auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    tiers = db.get_pricing_tiers()
-    return [
-        {"id": t["id"], "from_gb": t["from_gb"], "to_gb": t["to_gb"], "price_per_gb": t["price_per_gb"]}
-        for t in tiers
-    ]
-
-
-@app.post("/api/admin/custom-config/pricing-tiers")
-def api_admin_add_pricing_tier(body: PricingTierCreate, auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    if body.from_gb <= 0 or body.price_per_gb <= 0:
-        raise HTTPException(status_code=400, detail="مقادیر باید مثبت باشند.")
-    if body.to_gb is not None and body.to_gb <= body.from_gb:
-        raise HTTPException(status_code=400, detail="انتهای بازه باید بزرگ‌تر از ابتدای آن باشد.")
-    tier_id = db.add_pricing_tier(body.from_gb, body.to_gb, body.price_per_gb)
-    return {"id": tier_id}
-
-
-@app.delete("/api/admin/custom-config/pricing-tiers/{tier_id}")
-def api_admin_delete_pricing_tier(tier_id: int, auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    db.delete_pricing_tier(tier_id)
-    return {"status": "ok"}
-
-
-@app.get("/api/admin/panel-servers-lite")
-def api_admin_panel_servers_lite(auth=Depends(require_senior_admin)):
-    """لیست سبک پنل‌ها (فقط id/name) برای انتخاب پنل موقع ساخت محصول اتصال مستقیم.
-    مثل بات و پنل وب مستقل، این گزینه فقط برای بات اصلی یا نمایندگی سطح کامل است."""
-    _, db, tenant = auth
-    if not db.is_full_access_bot(not tenant.tenant_id):
-        raise HTTPException(status_code=403, detail="این بخش فقط برای بات اصلی یا نمایندگی کامل در دسترس است.")
-    return [{"id": s["id"], "name": s["name"]} for s in db.get_panel_servers(active_only=True)]
-
-
-@app.get("/api/admin/categories/{cat_id}/products")
-def api_admin_list_products(cat_id: int, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    products = db.get_products(cat_id, active_only=False)
-    return [
-        {
-            "id": p["id"], "name": p["name"], "price": p["price"],
-            "description": p["description"], "duration_days": p["duration_days"],
-            "is_active": bool(p["is_active"]),
-            "is_auto_provision": bool(p["is_auto_provision"]),
-            "provision_server_id": p["provision_server_id"],
-            "auto_provision_volume_gb": p["auto_provision_volume_gb"],
-            "stock": None if p["is_auto_provision"] else db.count_available_configs(p["id"]),
-        }
-        for p in products
-    ]
-
-
-@app.get("/api/admin/products/all")
-def api_admin_list_all_products(auth=Depends(require_senior_admin)):
-    """لیست همه‌ی محصولات (از همه‌ی دسته‌بندی‌ها، فعال و غیرفعال) - برای مصارفی مثل
-    انتخاب «محصول جایزه» در تنظیمات زیرمجموعه‌گیری."""
-    _, db, _ = auth
-    products = db.get_all_products()
-    return [
-        {
-            "id": p["id"], "name": p["name"], "category_name": p["category_name"],
-            "is_active": bool(p["is_active"]),
-            "is_auto_provision": bool(p["is_auto_provision"]),
-            "provision_server_id": p["provision_server_id"],
-        }
-        for p in products
-    ]
-
-
-@app.post("/api/admin/products")
-def api_admin_create_product(body: ProductCreate, auth=Depends(require_senior_admin)):
-    _, db, tenant = auth
-    if not db.get_category(body.category_id):
-        raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
-    if not body.name.strip():
-        raise HTTPException(status_code=400, detail="نام محصول نمی‌تواند خالی باشد.")
-    if body.price < 0:
-        raise HTTPException(status_code=400, detail="قیمت نامعتبر است.")
-
-    is_full_access = db.is_full_access_bot(not tenant.tenant_id)
-    provision_server_id = body.provision_server_id if is_full_access else None
-    is_auto_provision = bool(body.is_auto_provision or provision_server_id)
-    if is_auto_provision and not body.auto_provision_volume_gb:
-        raise HTTPException(status_code=400, detail="برای اتصال مستقیم به پنل باید حجم (گیگابایت) را مشخص کنید.")
-
-    product_id = db.add_product(
-        body.category_id, body.name.strip(), body.price, body.description, body.duration_days,
-        is_auto_provision=is_auto_provision, auto_provision_volume_gb=body.auto_provision_volume_gb,
-        provision_server_id=provision_server_id,
-    )
-    return {"id": product_id}
-
-
-@app.patch("/api/admin/products/{product_id}")
-def api_admin_edit_product(product_id: int, body: ProductUpdate, auth=Depends(require_senior_admin)):
-    admin_id, db, _ = auth
-    old_product = db.get_product(product_id)
-    if not old_product:
-        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
-    if body.price is not None and body.price < 0:
-        raise HTTPException(status_code=400, detail="قیمت نامعتبر است.")
-    db.edit_product(
-        product_id,
-        name=body.name.strip() if body.name else None,
-        price=body.price,
-        description=body.description,
-        duration_days=body.duration_days,
-    )
-    if body.price is not None and body.price != old_product["price"]:
-        db.log_admin_action(
-            admin_id, "product_price_edit",
-            f"محصول «{old_product['name']}» (#{product_id}) | قیمت قبلی: {old_product['price']:,} | قیمت جدید: {body.price:,}",
-        )
-    return {"status": "ok"}
-
-
-@app.post("/api/admin/products/{product_id}/toggle")
-def api_admin_toggle_product(product_id: int, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if not db.get_product(product_id):
-        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
-    db.toggle_product(product_id)
-    return {"status": "ok"}
-
-
-@app.delete("/api/admin/products/{product_id}")
-def api_admin_delete_product(product_id: int, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if not db.get_product(product_id):
-        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
-    db.delete_product(product_id)
-    return {"status": "ok"}
-
-
-@app.get("/api/admin/products/{product_id}/configs")
-def api_admin_list_configs(product_id: int, auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    if not db.get_product(product_id):
-        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
-    rows = db.get_unused_configs(product_id)
-    return [{"id": r["id"], "link": r["link"]} for r in rows]
-
-
-@app.post("/api/admin/products/{product_id}/configs")
-def api_admin_add_configs(product_id: int, body: ConfigsAdd, auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    if not db.get_product(product_id):
-        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
-    links = [l.strip() for l in body.links if l.strip()]
-    if not links:
-        raise HTTPException(status_code=400, detail="هیچ لینک معتبری وارد نشده است.")
-    db.add_configs(product_id, links)
-    return {"added": len(links)}
-
-
-@app.delete("/api/admin/configs/{config_id}")
-def api_admin_delete_config(config_id: int, auth=Depends(require_full_access_admin)):
-    _, db, _ = auth
-    db.delete_config(config_id)
-    return {"status": "ok"}
-
-
-# ---------------------------------------------------------------------------
-# مدیریت نمایندگی‌ها (فقط بات اصلی)
-# ---------------------------------------------------------------------------
-
-class ResellerTokenCheck(BaseModel):
-    token: str
-
-
-class ResellerCreate(BaseModel):
-    token: str
-    username: str
-    owner_telegram_id: int
-    owner_name: str = ""
-
-
-class ResellerUpdate(BaseModel):
-    owner_telegram_id: Optional[int] = None
-    owner_name: Optional[str] = None
-
-
-class ResellerTokenUpdate(BaseModel):
-    token: str
-
-
-def _reseller_miniapp_link(reseller_row) -> Optional[str]:
-    """لینک اختصاصی مینی‌اپ همین نماینده (همان که در دکمه‌ی منوی بات نماینده استفاده می‌شود)."""
-    if not MINIAPP_URL:
-        return None
-    b_value = reseller_row["link_slug"] or str(reseller_row["id"])
-    sep = "&" if "?" in MINIAPP_URL else "?"
-    return f"{MINIAPP_URL}{sep}b={b_value}"
-
-
-# ---------------------------------------------------------------------------
-# نمایندگان اعتباری (Credit Resellers) - معادل adm_credit_resellers_menu/
-# adm_cres_* در ربات؛ قبلاً این بخش فقط داخل ربات در دسترس بود.
-# متمایز از بخش «resellers» زیر که مربوط به بات‌های نمایندگی زیرمجموعه (white-label) است.
-# ---------------------------------------------------------------------------
-
-def _credit_reseller_to_dict(user_id: int, db: Database) -> dict:
-    user = db.get_user(user_id)
-    return {
-        "telegram_id": user_id,
-        "first_name": user["first_name"] if user else None,
-        "username": user["username"] if user else None,
-        "is_reseller": db.is_reseller(user_id),
-        "credit_gb": db.get_reseller_credit(user_id),
-        "panel_server_id": user["reseller_panel_id"] if user else None,
-    }
-
-
-@app.get("/api/admin/credit-resellers")
-def api_admin_list_credit_resellers(auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    rows = db.get_resellers()
-    return [
-        {
-            "telegram_id": r["telegram_id"], "first_name": r["first_name"],
-            "username": r["username"], "credit_gb": r["reseller_credit_gb"],
-            "panel_server_id": r["reseller_panel_id"], "is_reseller": True,
-        }
-        for r in rows
-    ]
-
-
-@app.get("/api/admin/credit-resellers/{telegram_id}")
-def api_admin_get_credit_reseller(telegram_id: int, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    user = db.get_user(telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="این کاربر هنوز با /start بات را استارت نکرده است.")
-    info = _credit_reseller_to_dict(telegram_id, db)
-    info["credit_log"] = [
-        {"delta_gb": l["delta_gb"], "reason": l["reason"], "created_at": l["created_at"]}
-        for l in db.get_reseller_credit_log(telegram_id)
-    ]
-    return info
-
-
-@app.post("/api/admin/credit-resellers/{telegram_id}/toggle")
-def api_admin_toggle_credit_reseller(telegram_id: int, auth=Depends(require_senior_admin)):
-    admin_id, db, _ = auth
-    if not db.get_user(telegram_id):
-        raise HTTPException(status_code=404, detail="این کاربر هنوز با /start بات را استارت نکرده است.")
-    db.set_reseller_status(telegram_id, not db.is_reseller(telegram_id))
-    db.log_admin_action(admin_id, "reseller_credit_toggle", f"کاربر {telegram_id} (مینی‌اپ)")
-    return _credit_reseller_to_dict(telegram_id, db)
-
-
-class CreditAdjust(BaseModel):
-    delta_gb: int
-    reason: Optional[str] = None
-
-
-@app.post("/api/admin/credit-resellers/{telegram_id}/credit")
-def api_admin_adjust_credit_reseller(telegram_id: int, body: CreditAdjust, auth=Depends(require_senior_admin)):
-    admin_id, db, _ = auth
-    if not db.get_user(telegram_id):
-        raise HTTPException(status_code=404, detail="این کاربر هنوز با /start بات را استارت نکرده است.")
-    if body.delta_gb == 0:
-        raise HTTPException(status_code=400, detail="مقدار تغییر نمی‌تواند صفر باشد.")
-    db.adjust_reseller_credit(
-        telegram_id, body.delta_gb, admin_id=admin_id,
-        reason=body.reason or "تنظیم دستی توسط ادمین (مینی‌اپ)",
-    )
-    db.log_admin_action(admin_id, "reseller_credit_adjust", f"کاربر {telegram_id} | {body.delta_gb:+} گیگ (مینی‌اپ)")
-    return _credit_reseller_to_dict(telegram_id, db)
-
-
-class CreditResellerPanelSet(BaseModel):
-    panel_server_id: Optional[int] = None
-
-
-@app.post("/api/admin/credit-resellers/{telegram_id}/panel")
-def api_admin_set_credit_reseller_panel(telegram_id: int, body: CreditResellerPanelSet, auth=Depends(require_senior_admin)):
-    admin_id, db, _ = auth
-    if not db.get_user(telegram_id):
-        raise HTTPException(status_code=404, detail="این کاربر هنوز با /start بات را استارت نکرده است.")
-    if body.panel_server_id and not db.get_panel_server(body.panel_server_id):
-        raise HTTPException(status_code=404, detail="سرور یافت نشد.")
-    db.set_reseller_panel(telegram_id, body.panel_server_id)
-    db.log_admin_action(admin_id, "reseller_credit_panel_set", f"کاربر {telegram_id} (مینی‌اپ)")
-    return _credit_reseller_to_dict(telegram_id, db)
-
-
-# ---------------------------------------------------------------------------
-# درخواست‌های نمایندگی (Reseller Requests) - معادل resreq_* در ربات و
-# /api/reseller-requests در پنل وب مستقل؛ قبلاً در مینی‌اپ اصلاً وجود نداشت.
-# فقط در بات اصلی معنا دارد (کاربر با آن صاحب یک بات نمایندگی زیرمجموعه‌ی
-# جدید می‌شود)، بنابراین require_main_admin.
-# ---------------------------------------------------------------------------
-
-def _set_bot_fsm_state(chat_id: int, state: Optional[str], data: Optional[dict] = None) -> bool:
-    """مستقیم روی فایل SQLite استوریج FSM بات اصلی می‌نویسد؛ همان تکنیکی که
-    admin_panel/server.py برای هدایت کاربر به مرحله‌ی بعدی فلوی نمایندگی
-    استفاده می‌کند (چون این پروسه هم Dispatcher زنده‌ی بات را در اختیار ندارد)."""
-    try:
-        bot_id = int(BOT_TOKEN.split(":")[0])
-        conn = sqlite3.connect(f"{DB_PATH}.fsm.sqlite3", timeout=10)
-        try:
-            conn.execute("PRAGMA busy_timeout=4000")
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS fsm_storage (
-                    bot_id INTEGER NOT NULL, chat_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
-                    thread_id INTEGER, business_connection_id TEXT, destiny TEXT NOT NULL DEFAULT 'default',
-                    state TEXT, data TEXT,
-                    PRIMARY KEY (bot_id, chat_id, user_id, thread_id, business_connection_id, destiny)
-                )
-                """
-            )
-            conn.execute(
-                "INSERT INTO fsm_storage "
-                "(bot_id, chat_id, user_id, thread_id, business_connection_id, destiny, state, data) "
-                "VALUES (?, ?, ?, 0, '', 'default', ?, ?) "
-                "ON CONFLICT (bot_id, chat_id, user_id, thread_id, business_connection_id, destiny) "
-                "DO UPDATE SET state=excluded.state, data=excluded.data",
-                (bot_id, chat_id, chat_id, state, json.dumps(data or {}, ensure_ascii=False)),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-        return True
-    except Exception:
-        logging.getLogger("miniapp.fsm").exception("تنظیم FSM state بات اصلی برای %s ناموفق بود.", chat_id)
-        return False
-
-
-@app.get("/api/admin/reseller-requests")
-def api_admin_reseller_requests(status: Optional[str] = None, auth=Depends(require_main_admin)):
-    _, db, _ = auth
-    out = []
-    for r in db.list_reseller_requests(status):
-        r = dict(r)
-        user = db.get_user(r["user_id"])
-        r["username"] = user["username"] if user else None
-        out.append(r)
-    return out
-
-
-@app.get("/api/admin/reseller-requests/{request_id}/receipt")
-async def api_admin_reseller_request_receipt(request_id: int, auth=Depends(require_main_admin)):
-    _, db, tenant = auth
-    req = db.get_reseller_request(request_id)
-    if not req or not req["receipt_file_id"]:
-        raise HTTPException(status_code=404, detail="رسیدی برای این درخواست ثبت نشده است.")
-    result = await _tg_fetch_file(tenant.bot_token, req["receipt_file_id"])
-    if not result:
-        raise HTTPException(status_code=502, detail="دریافت رسید از تلگرام ناموفق بود.")
-    content, content_type = result
-    return Response(content=content, media_type=content_type)
-
-
-class ResellerRequestQuote(BaseModel):
-    price_toman: int
-    panel_server_id: Optional[int] = None
-
-
-@app.post("/api/admin/reseller-requests/{request_id}/quote")
-async def api_admin_quote_reseller_request(request_id: int, body: ResellerRequestQuote, auth=Depends(require_main_admin)):
-    admin_id, db, tenant = auth
-    req = db.get_reseller_request(request_id)
-    if not req or req["status"] != "pending_review":
-        raise HTTPException(status_code=400, detail="این درخواست دیگر معتبر نیست.")
-    if body.price_toman <= 0:
-        raise HTTPException(status_code=400, detail="هزینه باید عددی مثبت باشد.")
-    db.quote_reseller_request(request_id, body.price_toman, body.panel_server_id, admin_id)
-    db.log_admin_action(admin_id, "reseller_request_quote", f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {body.price_toman:,} (مینی‌اپ)")
-    await _tg_notify(
-        tenant.bot_token, req["user_id"],
-        f"🏪 درخواست نمایندگی #{request_id} شما تایید شد!\n\n"
-        f"💰 هزینه‌ی نمایندگی: {body.price_toman:,} تومان\n"
-        f"📦 حجم: {req['volume_gb']:,} گیگ\n\nدر صورت موافقت از داخل بات روی «پرداخت می‌کنم» بزنید.",
-    )
-    return {"ok": True}
-
-
-@app.post("/api/admin/reseller-requests/{request_id}/approve-payment")
-async def api_admin_approve_reseller_request_payment(request_id: int, auth=Depends(require_main_admin)):
-    admin_id, db, tenant = auth
-    req = db.get_reseller_request(request_id)
-    if not req or req["status"] != "awaiting_payment_review":
-        raise HTTPException(status_code=400, detail="این درخواست دیگر معتبر نیست.")
-    db.approve_reseller_request_payment(request_id, admin_id)
-    db.log_admin_action(admin_id, "reseller_request_payment_approve", f"درخواست #{request_id} | کاربر {req['user_id']} (مینی‌اپ)")
-    _set_bot_fsm_state(req["user_id"], "ResellerRequestFlow:waiting_bot_token", {"resreq_request_id": request_id})
-    await _tg_notify(
-        tenant.bot_token, req["user_id"],
-        "✅ پرداخت شما تایید شد!\n\nحالا از داخل بات، توکن بات نماینده‌ی خودتان را ارسال کنید (همانی که از @BotFather گرفته‌اید):",
-    )
-    return {"ok": True}
-
-
-class ResellerRequestReject(BaseModel):
-    reason: str
-    kind: str = "rejected"
-
-
-@app.post("/api/admin/reseller-requests/{request_id}/reject")
-async def api_admin_reject_reseller_request(request_id: int, body: ResellerRequestReject, auth=Depends(require_main_admin)):
-    admin_id, db, tenant = auth
-    if body.kind not in ("rejected", "payment_rejected"):
-        raise HTTPException(status_code=400, detail="نوع رد نامعتبر است.")
-    req = db.get_reseller_request(request_id)
-    if not req or not db.is_reseller_request_open(req["status"]):
-        raise HTTPException(status_code=400, detail="این درخواست دیگر باز نیست.")
-    reason = (body.reason or "").strip()
-    if not reason:
-        raise HTTPException(status_code=400, detail="دلیل رد الزامی است.")
-    db.reject_reseller_request(request_id, body.kind, admin_id, reason)
-    db.log_admin_action(admin_id, "reseller_request_reject", f"درخواست #{request_id} | کاربر {req['user_id']} | {body.kind}: {reason} (مینی‌اپ)")
-    label = "درخواست نمایندگی" if body.kind == "rejected" else "پرداخت درخواست نمایندگی"
-    await _tg_notify(tenant.bot_token, req["user_id"], f"❌ متاسفانه {label} شما (#{request_id}) رد شد.\n\nدلیل: {reason}")
-    return {"ok": True}
-
-
-@app.post("/api/admin/reseller-requests/{request_id}/cancel")
-async def api_admin_cancel_reseller_request(request_id: int, auth=Depends(require_main_admin)):
-    admin_id, db, tenant = auth
-    req = db.get_reseller_request(request_id)
-    if not req or not db.is_reseller_request_open(req["status"]):
-        raise HTTPException(status_code=400, detail="این درخواست دیگر باز نیست.")
-    db.admin_cancel_reseller_request(request_id, admin_id)
-    if req["status"] == "awaiting_bot_info":
-        _set_bot_fsm_state(req["user_id"], None, {})
-    db.log_admin_action(admin_id, "reseller_request_admin_cancel", f"درخواست #{request_id} | کاربر {req['user_id']} (مینی‌اپ)")
-    await _tg_notify(tenant.bot_token, req["user_id"], f"⚪️ درخواست نمایندگی شما (#{request_id}) توسط مدیریت کنسل شد.")
-    return {"ok": True}
-
-
-@app.get("/api/admin/resellers")
-def api_admin_list_resellers(auth=Depends(require_main_admin)):
-    _, db, _ = auth
-    rows = db.list_reseller_bots()
-    return [
-        {
-            "id": r["id"], "bot_username": r["bot_username"], "owner_telegram_id": r["owner_telegram_id"],
-            "owner_name": r["owner_name"], "is_active": bool(r["is_active"]), "created_at": r["created_at"],
-            "miniapp_link": _reseller_miniapp_link(r),
-            "bot_link": f"https://t.me/{r['bot_username']}",
-        }
-        for r in rows
-    ]
-
-
-@app.post("/api/admin/resellers/validate")
-async def api_admin_validate_reseller_token(body: ResellerTokenCheck, auth=Depends(require_main_admin)):
-    _, db, _ = auth
-    token = body.token.strip()
-    if not token:
-        raise HTTPException(status_code=400, detail="توکن نمی‌تواند خالی باشد.")
-    for r in db.list_reseller_bots():
-        if r["bot_token"] == token:
-            raise HTTPException(status_code=400, detail="این توکن قبلاً ثبت شده است.")
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://api.telegram.org/bot{token}/getMe", timeout=10) as resp:
-                data = await resp.json()
-                if not data.get("ok"):
-                    raise HTTPException(status_code=400, detail="این توکن معتبر نیست.")
-                username = data["result"]["username"]
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=400, detail="این توکن معتبر نیست یا تلگرام در دسترس نیست.")
-    return {"username": username}
-
-
-@app.post("/api/admin/resellers")
-def api_admin_create_reseller(body: ResellerCreate, auth=Depends(require_main_admin)):
-    _, db, _ = auth
-    for r in db.list_reseller_bots():
-        if r["bot_token"] == body.token:
-            raise HTTPException(status_code=400, detail="این توکن قبلاً ثبت شده است.")
-    os.makedirs(RESELLER_DBS_DIR, exist_ok=True)
-    db_path = os.path.join(RESELLER_DBS_DIR, f"{body.username}.db")
-    reseller_id = db.register_reseller_bot(body.token, body.username, body.owner_telegram_id, body.owner_name, db_path)
-
-    # دیتابیس همین نماینده باید بداند شناسه‌ی خودش را تا لینک مینی‌اپ اختصاصی بسازد
-    try:
-        reseller_db = Database(db_path)
-        reseller_db.init_db(owner_id=body.owner_telegram_id)
-        reseller_db.set_setting("miniapp_tenant_id", str(reseller_id))
-    except Exception:
-        logging.getLogger("miniapp.resellers").exception("مقداردهی اولیه دیتابیس نماینده‌ی جدید ناموفق بود.")
-
-    return {
-        "id": reseller_id,
-        "note": "بات نمایندگی ثبت شد. حداکثر تا ۱۰ ثانیه دیگر توسط بات اصلی خودکار روشن می‌شود.",
-    }
-
-
-@app.patch("/api/admin/resellers/{reseller_id}")
-def api_admin_edit_reseller(reseller_id: int, body: ResellerUpdate, auth=Depends(require_main_admin)):
-    _, db, _ = auth
-    if not db.get_reseller_bot(reseller_id):
-        raise HTTPException(status_code=404, detail="نماینده یافت نشد.")
-    db.edit_reseller_bot(
-        reseller_id,
-        owner_telegram_id=body.owner_telegram_id,
-        owner_name=body.owner_name.strip() if body.owner_name else None,
-    )
-    return {"status": "ok"}
-
-
-@app.patch("/api/admin/resellers/{reseller_id}/token")
-async def api_admin_change_reseller_token(reseller_id: int, body: ResellerTokenUpdate, auth=Depends(require_main_admin)):
-    _, db, _ = auth
-    reseller_bot = db.get_reseller_bot(reseller_id)
-    if not reseller_bot:
-        raise HTTPException(status_code=404, detail="نماینده یافت نشد.")
-    token = body.token.strip()
-    if not token:
-        raise HTTPException(status_code=400, detail="توکن نمی‌تواند خالی باشد.")
-    for r in db.list_reseller_bots():
-        if r["id"] != reseller_id and r["bot_token"] == token:
-            raise HTTPException(status_code=400, detail="این توکن قبلاً برای نماینده‌ی دیگری ثبت شده است.")
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://api.telegram.org/bot{token}/getMe", timeout=10) as resp:
-                data = await resp.json()
-                if not data.get("ok"):
-                    raise HTTPException(status_code=400, detail="این توکن معتبر نیست.")
-                username = data["result"]["username"]
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=400, detail="این توکن معتبر نیست یا تلگرام در دسترس نیست.")
-    db.edit_reseller_bot(reseller_id, bot_token=token, bot_username=username)
-    return {
-        "status": "ok",
-        "username": username,
-        "note": "توکن بات نماینده تغییر کرد. حداکثر تا ۱۰ ثانیه دیگر بات قدیمی متوقف و بات جدید روشن می‌شود.",
-    }
-
-
-@app.post("/api/admin/resellers/{reseller_id}/regenerate-link")
-def api_admin_regenerate_reseller_link(reseller_id: int, auth=Depends(require_main_admin)):
-    _, db, _ = auth
-    reseller_bot = db.get_reseller_bot(reseller_id)
-    if not reseller_bot:
-        raise HTTPException(status_code=404, detail="نماینده یافت نشد.")
-    if not MINIAPP_URL:
-        raise HTTPException(status_code=400, detail="آدرس MINIAPP_URL روی سرور تنظیم نشده است.")
-    for _ in range(5):
-        slug = secrets.token_urlsafe(8)
-        if not db.get_reseller_bot_by_slug(slug):
-            break
-    else:
-        raise HTTPException(status_code=500, detail="ساخت لینک یکتا ممکن نشد، دوباره تلاش کن.")
-    db.set_reseller_link_slug(reseller_id, slug)
-    reseller_bot = db.get_reseller_bot(reseller_id)
-    return {
-        "status": "ok",
-        "miniapp_link": _reseller_miniapp_link(reseller_bot),
-        "note": "لینک قبلی مینی‌اپ این نماینده دیگر کار نمی‌کند؛ فقط لینک جدید معتبر است.",
-    }
-
-
-@app.post("/api/admin/resellers/{reseller_id}/toggle")
-def api_admin_toggle_reseller(reseller_id: int, auth=Depends(require_main_admin)):
-    _, db, _ = auth
-    if not db.get_reseller_bot(reseller_id):
-        raise HTTPException(status_code=404, detail="نماینده یافت نشد.")
-    db.toggle_reseller_bot(reseller_id)
-    return {"status": "ok", "note": "تغییر وضعیت حداکثر تا ۱۰ ثانیه دیگر روی بات اعمال می‌شود."}
-
-
-@app.delete("/api/admin/resellers/{reseller_id}")
-def api_admin_delete_reseller(reseller_id: int, purge_db: bool = Query(False), auth=Depends(require_main_admin)):
-    _, db, _ = auth
-    reseller_bot = db.get_reseller_bot(reseller_id)
-    if not reseller_bot:
-        raise HTTPException(status_code=404, detail="نماینده یافت نشد.")
-    db.delete_reseller_bot(reseller_id)
-
-    if purge_db:
-        resolved_path = resolve_db_path(reseller_bot["db_path"])
-        db.queue_db_purge(reseller_bot["bot_token"], resolved_path)
-
-    return {
-        "status": "ok",
-        "db_purged": False,
-        "note": "بات نماینده حداکثر تا ۱۰ ثانیه دیگر متوقف می‌شود"
-        + (" و بلافاصله بعد از توقف، فایل دیتابیسش پاک خواهد شد." if purge_db else "."),
-    }
-
-
-# ---------------------------------------------------------------------------
-# مدیریت تنظیمات - رفرال / گردونه شانس / یادآوری تمدید (ادمین)
-# ---------------------------------------------------------------------------
-
-class ReferralSettingsUpdate(BaseModel):
-    enabled: bool
-    percent: int
-    commission_max_count: int = 0
-    free_config_enabled: bool = False
-    free_config_threshold: int = 10
-    free_config_product_id: Optional[int] = None
-    invite_bonus_enabled: bool = False
-    invite_bonus_amount: int = 0
-    invite_bonus_max_count: int = 0
-
-
-class WheelSettingsUpdate(BaseModel):
-    enabled: bool
-    win_percent: int
-    prizes: list[int]
-    expiry_hours: int
-    cooldown_hours: int
-
-
-class RenewalSettingsUpdate(BaseModel):
-    enabled: bool
-    days_before: int
-    discount_percent: int
-    discount_expiry_hours: int
-
-
-class VolumeReminderSettingsUpdate(BaseModel):
-    enabled: bool
-    mode: str
-    percent: int
-    gb_left: float
-    discount_percent: int
-    discount_expiry_hours: int
-
-
-class CryptoSettingsUpdate(BaseModel):
-    enabled: bool
-    usd_to_toman_rate: int
-
-
-@app.get("/api/admin/settings/referral")
-def api_admin_get_referral_settings(auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    fc_product_id = db.get_setting("referral_free_config_product_id", "") or ""
-    return {
-        "enabled": db.get_setting("referral_enabled", "1") == "1",
-        "percent": int(db.get_setting("referral_percent", "10") or 0),
-        "commission_max_count": int(db.get_setting("referral_commission_max_count", "0") or 0),
-        "free_config_enabled": db.get_setting("referral_free_config_enabled", "0") == "1",
-        "free_config_threshold": int(db.get_setting("referral_free_config_threshold", "10") or 0),
-        "free_config_product_id": int(fc_product_id) if fc_product_id else None,
-        "invite_bonus_enabled": db.get_setting("referral_invite_bonus_enabled", "0") == "1",
-        "invite_bonus_amount": int(db.get_setting("referral_invite_bonus_amount", "0") or 0),
-        "invite_bonus_max_count": int(db.get_setting("referral_invite_bonus_max_count", "0") or 0),
-    }
-
-
-@app.post("/api/admin/settings/referral")
-def api_admin_set_referral_settings(body: ReferralSettingsUpdate, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if body.percent < 0 or body.percent > 100:
-        raise HTTPException(status_code=400, detail="درصد باید بین ۰ تا ۱۰۰ باشد.")
-    if body.commission_max_count < 0:
-        raise HTTPException(status_code=400, detail="سقف تعداد نفرات نمی‌تواند منفی باشد.")
-    if body.free_config_threshold < 0 or body.invite_bonus_amount < 0 or body.invite_bonus_max_count < 0:
-        raise HTTPException(status_code=400, detail="مقادیر عددی نمی‌توانند منفی باشند.")
-
-    if body.free_config_product_id:
-        product = db.get_product(body.free_config_product_id)
-        if not product:
-            raise HTTPException(status_code=400, detail="محصول جایزه یافت نشد.")
-        if not product["is_auto_provision"] or not product["provision_server_id"]:
-            raise HTTPException(status_code=400, detail="محصول جایزه باید «تحویل خودکار» داشته باشد و به یک پنل وصل باشد.")
-    if body.free_config_enabled and (not body.free_config_product_id or body.free_config_threshold < 1):
-        raise HTTPException(status_code=400, detail="برای فعال‌سازی کانفیگ رایگان، محصول جایزه و آستانه‌ی معتبر (حداقل ۱) لازم است.")
-    if body.invite_bonus_enabled and body.invite_bonus_amount <= 0:
-        raise HTTPException(status_code=400, detail="برای فعال‌سازی شارژ به‌ازای دعوت، مبلغ باید بزرگ‌تر از صفر باشد.")
-
-    db.set_setting("referral_enabled", "1" if body.enabled else "0")
-    db.set_setting("referral_percent", str(body.percent))
-    db.set_setting("referral_commission_max_count", str(body.commission_max_count))
-    db.set_setting("referral_free_config_enabled", "1" if body.free_config_enabled else "0")
-    db.set_setting("referral_free_config_threshold", str(body.free_config_threshold))
-    db.set_setting("referral_free_config_product_id", str(body.free_config_product_id) if body.free_config_product_id else "")
-    db.set_setting("referral_invite_bonus_enabled", "1" if body.invite_bonus_enabled else "0")
-    db.set_setting("referral_invite_bonus_amount", str(body.invite_bonus_amount))
-    db.set_setting("referral_invite_bonus_max_count", str(body.invite_bonus_max_count))
-    return {"status": "ok"}
-
-
-@app.get("/api/admin/settings/wheel")
-def api_admin_get_wheel_settings(auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    return db.get_wheel_settings()
-
-
-@app.post("/api/admin/settings/wheel")
-def api_admin_set_wheel_settings(body: WheelSettingsUpdate, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if body.win_percent < 0 or body.win_percent > 100:
-        raise HTTPException(status_code=400, detail="درصد برد باید بین ۰ تا ۱۰۰ باشد.")
-    if not body.prizes or any(p <= 0 for p in body.prizes):
-        raise HTTPException(status_code=400, detail="حداقل یک جایزه‌ی معتبر (بزرگ‌تر از صفر) لازم است.")
-    if body.expiry_hours <= 0 or body.cooldown_hours <= 0:
-        raise HTTPException(status_code=400, detail="مقادیر ساعت باید بزرگ‌تر از صفر باشند.")
-    db.set_setting("wheel_enabled", "1" if body.enabled else "0")
-    db.set_setting("wheel_win_percent", str(body.win_percent))
-    db.set_wheel_prizes(body.prizes)
-    db.set_setting("wheel_code_expiry_hours", str(body.expiry_hours))
-    db.set_setting("wheel_cooldown_hours", str(body.cooldown_hours))
-    return {"status": "ok"}
-
-
-@app.get("/api/admin/settings/crypto")
-def api_admin_get_crypto_settings(auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    api_key = _resolve_plisio_key(db)
-    return {
-        "enabled": db.get_setting("crypto_payment_enabled", "0") == "1",
-        "usd_to_toman_rate": int(float(db.get_setting("usd_to_toman_rate", "0") or 0)),
-        "has_own_key": bool(db.get_setting("plisio_api_key", "")),
-        "gateway_configured": bool(api_key) and bool(API_BASE_URL),
-        "key_source": crypto_payment.resolve_plisio_key_source(db),
-    }
-
-
-@app.post("/api/admin/settings/crypto")
-def api_admin_set_crypto_settings(body: CryptoSettingsUpdate, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    api_key = _resolve_plisio_key(db)
-    if body.enabled and (not api_key or not API_BASE_URL):
-        raise HTTPException(status_code=400, detail="ابتدا از داخل بات، پنل مدیریت → «تنظیم درگاه کریپتو» را انجام بده. (اگر بازم فعال نمی‌شه، یعنی MINIAPP_URL روی سرور تنظیم نشده.)")
-    if body.usd_to_toman_rate < 0:
-        raise HTTPException(status_code=400, detail="نرخ تبدیل نمی‌تواند منفی باشد.")
-    db.set_setting("crypto_payment_enabled", "1" if body.enabled else "0")
-    db.set_setting("usd_to_toman_rate", str(body.usd_to_toman_rate))
-    return {"status": "ok"}
-
-
-@app.get("/api/admin/settings/renewal")
-def api_admin_get_renewal_settings(auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    return db.get_renewal_settings()
-
-
-@app.post("/api/admin/settings/renewal")
-def api_admin_set_renewal_settings(body: RenewalSettingsUpdate, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if body.discount_percent < 0 or body.discount_percent > 100:
-        raise HTTPException(status_code=400, detail="درصد تخفیف باید بین ۰ تا ۱۰۰ باشد.")
-    if body.days_before <= 0 or body.discount_expiry_hours <= 0:
-        raise HTTPException(status_code=400, detail="مقادیر روز/ساعت باید بزرگ‌تر از صفر باشند.")
-    db.set_setting("renewal_reminder_enabled", "1" if body.enabled else "0")
-    db.set_setting("renewal_reminder_days_before", str(body.days_before))
-    db.set_setting("renewal_discount_percent", str(body.discount_percent))
-    db.set_setting("renewal_discount_expiry_hours", str(body.discount_expiry_hours))
-    return {"status": "ok"}
-
-
-@app.get("/api/admin/settings/volume-reminder")
-def api_admin_get_volume_reminder_settings(auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    return db.get_volume_reminder_settings()
-
-
-@app.post("/api/admin/settings/volume-reminder")
-def api_admin_set_volume_reminder_settings(body: VolumeReminderSettingsUpdate, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if body.mode not in ("percent", "gb"):
-        raise HTTPException(status_code=400, detail="مبنای آستانه باید percent یا gb باشد.")
-    if body.discount_percent < 0 or body.discount_percent > 100:
-        raise HTTPException(status_code=400, detail="درصد تخفیف باید بین ۰ تا ۱۰۰ باشد.")
-    if not (0 < body.percent < 100):
-        raise HTTPException(status_code=400, detail="درصد آستانه باید بین ۱ تا ۹۹ باشد.")
-    if body.gb_left <= 0:
-        raise HTTPException(status_code=400, detail="آستانه‌ی گیگابایت باید بزرگ‌تر از صفر باشد.")
-    if body.discount_expiry_hours <= 0:
-        raise HTTPException(status_code=400, detail="اعتبار کد تخفیف باید بزرگ‌تر از صفر باشد.")
-    db.set_setting("volume_reminder_enabled", "1" if body.enabled else "0")
-    db.set_setting("volume_reminder_mode", body.mode)
-    db.set_setting("volume_reminder_percent", str(body.percent))
-    db.set_setting("volume_reminder_gb_left", str(body.gb_left))
-    db.set_setting("volume_discount_percent", str(body.discount_percent))
-    db.set_setting("volume_discount_expiry_hours", str(body.discount_expiry_hours))
-    return {"status": "ok"}
-
-
-# ---------------------------------------------------------------------------
-# مدیریت کدهای تخفیف (ادمین)
-# ---------------------------------------------------------------------------
-
-class DiscountCreate(BaseModel):
-    code: str
-    percent: Optional[int] = None
-    fixed_amount: Optional[int] = None
-    max_uses: int = 0
-    expires_at: Optional[str] = None
-
-
-def _discount_to_dict(d):
-    return {
-        "id": d["id"], "code": d["code"], "percent": d["percent"], "fixed_amount": d["fixed_amount"],
-        "max_uses": d["max_uses"], "used_count": d["used_count"], "is_active": bool(d["is_active"]),
-        "created_at": d["created_at"],
-    }
-
-
-@app.get("/api/admin/discounts")
-def api_admin_list_discounts(auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    return [_discount_to_dict(d) for d in db.list_discount_codes()]
-
-
-@app.post("/api/admin/discounts")
-def api_admin_create_discount(body: DiscountCreate, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    code = (body.code or "").strip().upper()
-    if not code:
-        raise HTTPException(status_code=400, detail="کد تخفیف نمی‌تواند خالی باشد.")
-    if db.get_discount_code(code):
-        raise HTTPException(status_code=400, detail="این کد قبلاً ثبت شده است.")
-    if body.percent is None and body.fixed_amount is None:
-        raise HTTPException(status_code=400, detail="باید درصد یا مبلغ ثابت تخفیف را مشخص کنی.")
-    if body.percent is not None and (body.percent <= 0 or body.percent > 100):
-        raise HTTPException(status_code=400, detail="درصد باید بین ۱ تا ۱۰۰ باشد.")
-    discount_id = db.create_discount_code(
-        code, percent=body.percent, fixed_amount=body.fixed_amount,
-        max_uses=body.max_uses, expires_at=body.expires_at, source="admin",
-    )
-    return _discount_to_dict(db.get_discount_code_by_id(discount_id))
-
-
-@app.post("/api/admin/discounts/{discount_id}/toggle")
-def api_admin_toggle_discount(discount_id: int, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if not db.get_discount_code_by_id(discount_id):
-        raise HTTPException(status_code=404, detail="کد تخفیف یافت نشد.")
-    db.toggle_discount_code(discount_id)
-    return {"status": "ok"}
-
-
-@app.delete("/api/admin/discounts/{discount_id}")
-def api_admin_delete_discount(discount_id: int, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if not db.get_discount_code_by_id(discount_id):
-        raise HTTPException(status_code=404, detail="کد تخفیف یافت نشد.")
-    db.delete_discount_code(discount_id)
-    return {"status": "ok"}
-
-
-# ---------------------------------------------------------------------------
-# داشبورد آماری (ادمین)
-# ---------------------------------------------------------------------------
-
-@app.get("/api/admin/dashboard")
-def api_admin_dashboard(
-    start_date: str = Query(None), end_date: str = Query(None), auth=Depends(require_senior_admin)
-):
-    _, db, _ = auth
-    return db.get_full_stats(start_date=start_date, end_date=end_date)
-
-
-@app.get("/api/admin/orders/export")
-def api_admin_orders_export(
-    start_date: str = Query(None), end_date: str = Query(None), auth=Depends(require_senior_admin)
-):
-    _, db, _ = auth
-    rows = db.get_orders_for_export(start_date=start_date, end_date=end_date)
-
-    status_fa = {"approved": "تاییدشده", "pending": "در انتظار", "rejected": "ردشده"}
-    lines = [
-        "\ufeff" + ",".join([
-            "شناسه سفارش", "تاریخ ثبت (شمسی)", "وضعیت", "آیدی کاربر", "یوزرنیم", "نام",
-            "محصول", "تعداد", "مبلغ نهایی", "مبلغ از کیف‌پول", "تخفیف",
-        ])
-    ]
-    for r in rows:
-        row = [
-            str(r["id"]),
-            to_jalali_str(r["created_at"], with_time=True),
-            status_fa.get(r["status"], r["status"]),
-            str(r["user_id"]),
-            (r["username"] or ""),
-            (r["first_name"] or ""),
-            (r["product_name"] or ""),
-            str(r["quantity"] or 1),
-            str(r["amount"] or 0),
-            str(r["wallet_used"] or 0),
-            str(r["discount_amount"] or 0),
-        ]
-
-        def _csv_cell(v):
-            v = v.replace('"', '""')
-            return f'"{v}"' if ("," in v or '"' in v) else v
-
-        lines.append(",".join(_csv_cell(c) for c in row))
-
-    csv_content = "\n".join(lines)
-    filename = f"orders_{rows[0]['created_at'][:10] if rows else 'export'}.csv"
-    return Response(
-        content=csv_content,
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-# ---------------------------------------------------------------------------
-# مدیریت تیکت‌ها (ادمین)
-# ---------------------------------------------------------------------------
-
-class AdminTicketMessageCreate(BaseModel):
-    message: str
-
-
-@app.get("/api/admin/tickets")
-def api_admin_list_tickets(status: Optional[str] = None, auth=Depends(require_admin)):
-    tg_id, db, _ = auth
-    is_owner = db.is_owner(tg_id)
-    rows = db.get_all_tickets(status=status)
-    result = []
-    for t in rows:
-        user = db.get_user(t["user_id"])
-        result.append({
-            **_ticket_to_dict(t),
-            "user_id": t["user_id"],
-            "user_name": (user["first_name"] if user else "") or "",
-            "user_username": (user["username"] if user else "") or "",
-            "claimed_by_me": t["claimed_by"] == tg_id,
-            "locked_for_me": bool(t["claimed_by"]) and t["claimed_by"] != tg_id and not is_owner,
-        })
-    return result
-
-
-@app.get("/api/admin/tickets/{ticket_id}/messages")
-def api_admin_get_ticket_messages(ticket_id: int, since_id: int = 0, auth=Depends(require_admin)):
-    tg_id, db, _ = auth
-    ticket = db.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
-    db.mark_ticket_read_by_admin(ticket_id)
-    rows = db.get_ticket_messages(ticket_id, since_id=since_id)
-    user = db.get_user(ticket["user_id"])
-    is_owner = db.is_owner(tg_id)
-    return {
-        "ticket": {
-            **_ticket_to_dict(ticket),
-            "user_id": ticket["user_id"],
-            "user_name": (user["first_name"] if user else "") or "",
-            "user_username": (user["username"] if user else "") or "",
-            "claimed_by_me": ticket["claimed_by"] == tg_id,
-            "locked_for_me": bool(ticket["claimed_by"]) and ticket["claimed_by"] != tg_id and not is_owner,
-        },
-        "messages": [
-            {"id": m["id"], "sender": m["sender"], "message": m["message"], "created_at": m["created_at"]}
-            for m in rows
-        ],
-    }
-
-
-@app.post("/api/admin/tickets/{ticket_id}/messages")
-async def api_admin_send_ticket_message(ticket_id: int, body: AdminTicketMessageCreate, auth=Depends(require_admin)):
-    tg_id, db, tenant = auth
-    ticket = db.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
-    if ticket["claimed_by"] and ticket["claimed_by"] != tg_id and not db.is_owner(tg_id):
-        raise HTTPException(status_code=403, detail="این تیکت قبلاً توسط ادمین دیگری پاسخ داده شده و فقط برای او (و مالک) فعال است.")
-    text = (body.message or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="پیام نمی‌تواند خالی باشد.")
-    if len(text) > 2000:
-        raise HTTPException(status_code=400, detail="پیام بیش از حد طولانی است.")
-
-    db.claim_ticket_if_open(ticket_id, tg_id)
-    msg_id = db.add_ticket_message(ticket_id, "admin", text)
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            await session.post(
-                f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
-                json={
-                    "chat_id": ticket["user_id"],
-                    "text": f"🎫 پاسخ پشتیبانی به تیکت «{ticket['subject']}»:\n\n{text}",
-                },
-            )
-    except Exception:
-        pass
-
-    return {"id": msg_id, "sender": "admin", "message": text}
-
-
-@app.post("/api/admin/tickets/{ticket_id}/close")
-def api_admin_close_ticket(ticket_id: int, auth=Depends(require_admin)):
-    _, db, _ = auth
-    if not db.get_ticket(ticket_id):
-        raise HTTPException(status_code=404, detail="تیکت یافت نشد.")
-    db.close_ticket(ticket_id)
-    return {"status": "ok"}
-
-
-# ---------------------------------------------------------------------------
-# چت زنده پشتیبانی - سمت ادمین (پاسخ‌دادن از داخل مینی‌اپ)
-# ---------------------------------------------------------------------------
-
-class AdminSupportMessageCreate(BaseModel):
-    message: str
-
-
-@app.get("/api/admin/support/conversations")
-def api_admin_list_support_conversations(auth=Depends(require_admin)):
-    tg_id, db, _ = auth
-    is_owner = db.is_owner(tg_id)
-    convs = db.list_support_conversations()
-    result = []
-    for c in convs:
-        user = db.get_user(c["user_id"])
-        result.append({
-            **c,
-            "user_name": (user["first_name"] if user else "") or "",
-            "user_username": (user["username"] if user else "") or "",
-            "assigned_to_me": c["assigned_admin_id"] == tg_id,
-            "locked_for_me": bool(c["assigned_admin_id"]) and c["assigned_admin_id"] != tg_id and not is_owner,
-        })
-    return result
-
-
-@app.get("/api/admin/support/{user_id}/messages")
-def api_admin_get_support_messages(user_id: int, since_id: int = 0, auth=Depends(require_admin)):
-    tg_id, db, _ = auth
-    is_owner = db.is_owner(tg_id)
-    user = db.get_user(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="کاربر یافت نشد.")
-    db.mark_support_read_by_admin(user_id)
-    rows = db.get_support_messages(user_id, since_id=since_id)
-    conv = db.get_support_conversation(user_id)
-    assigned_admin_id = conv["assigned_admin_id"] if conv else None
-    return {
-        "user": {
-            "user_id": user_id,
-            "user_name": (user["first_name"] if user else "") or "",
-            "user_username": (user["username"] if user else "") or "",
-            "assigned_admin_id": assigned_admin_id,
-            "assigned_to_me": assigned_admin_id == tg_id,
-            "locked_for_me": bool(assigned_admin_id) and assigned_admin_id != tg_id and not is_owner,
-        },
-        "messages": [
-            {"id": m["id"], "sender": m["sender"], "message": m["message"], "created_at": m["created_at"]}
-            for m in rows
-        ],
-    }
-
-
-@app.post("/api/admin/support/{user_id}/messages")
-async def api_admin_send_support_message(user_id: int, body: AdminSupportMessageCreate, auth=Depends(require_admin)):
-    tg_id, db, tenant = auth
-    user = db.get_user(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="کاربر یافت نشد.")
-    conv = db.get_support_conversation(user_id)
-    assigned_admin_id = conv["assigned_admin_id"] if conv else None
-    if assigned_admin_id and assigned_admin_id != tg_id and not db.is_owner(tg_id):
-        raise HTTPException(
-            status_code=403,
-            detail="این گفتگو در حال حاضر توسط ادمین دیگری پاسخ داده می‌شود و فقط برای او (و مالک) فعال است.",
-        )
-    text = (body.message or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="پیام نمی‌تواند خالی باشد.")
-    if len(text) > 2000:
-        raise HTTPException(status_code=400, detail="پیام بیش از حد طولانی است.")
-
-    # پاسخ‌دادن یعنی از این پس این مکالمه مال همین ادمین است (مگر مالک باشد که
-    # همیشه بدون قفل‌شدن مکالمه اجازه‌ی پاسخ دارد).
-    if not db.is_owner(tg_id):
-        db.set_support_conversation_admin(user_id, tg_id)
-
-    msg_id = db.add_support_message(user_id, "admin", text)
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            await session.post(
-                f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
-                json={"chat_id": user_id, "text": f"📩 پاسخ پشتیبانی:\n\n{text}"},
-            )
-    except Exception:
-        pass
-
-    return {"id": msg_id, "sender": "admin", "message": text}
-
-
-# ---------------------------------------------------------------------------
-# مدیریت برندینگ Mini App (نام فروشگاه / متن بنر) - ادمین
-# ---------------------------------------------------------------------------
-
-class BrandingUpdate(BaseModel):
-    store_name: str
-    banner_text: str
-
-
-@app.get("/api/admin/settings/branding")
-def api_admin_get_branding(auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    theme = db.get_setting("miniapp_theme", "clean-light")
-    if theme not in MINIAPP_THEMES:
-        theme = "clean-light"
-    return {
-        "store_name": db.get_setting("store_name", "⚡ SHOP VPN"),
-        "banner_text": db.get_setting("miniapp_banner_text", "اتصال امن و پایدار برقرار است"),
-        "theme": theme,
-        "themes": [{"id": k, "label": v} for k, v in MINIAPP_THEMES.items()],
-        "header_image": db.get_setting("header_image_data", "") or None,
-    }
-
-
-@app.post("/api/admin/settings/branding")
-def api_admin_set_branding(body: BrandingUpdate, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    store_name = body.store_name.strip()
-    banner_text = body.banner_text.strip()
-    if not store_name:
-        raise HTTPException(status_code=400, detail="نام فروشگاه نمی‌تواند خالی باشد.")
-    if not banner_text:
-        raise HTTPException(status_code=400, detail="متن بنر نمی‌تواند خالی باشد.")
-    if len(store_name) > 40:
-        raise HTTPException(status_code=400, detail="نام فروشگاه بیش از حد طولانی است.")
-    if len(banner_text) > 80:
-        raise HTTPException(status_code=400, detail="متن بنر بیش از حد طولانی است.")
-    db.set_setting("store_name", store_name)
-    db.set_setting("miniapp_banner_text", banner_text)
-    return {"status": "ok"}
-
-
-class ThemeUpdate(BaseModel):
-    theme: str
-
-
-@app.post("/api/admin/settings/theme")
-def api_admin_set_theme(body: ThemeUpdate, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if body.theme not in MINIAPP_THEMES:
-        raise HTTPException(status_code=400, detail="این تم معتبر نیست.")
-    db.set_setting("miniapp_theme", body.theme)
-    return {"status": "ok", "theme": body.theme}
-
-
-@app.post("/api/admin/settings/header-image")
-async def api_admin_set_header_image(photo: UploadFile = File(...), auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if not photo.content_type or not photo.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="فقط فایل عکس پذیرفته می‌شود.")
-    photo_bytes = await photo.read()
-    if len(photo_bytes) > MAX_HEADER_IMAGE_BYTES:
-        raise HTTPException(status_code=400, detail="حجم عکس نباید بیشتر از ۲ مگابایت باشد.")
-    data_uri = f"data:{photo.content_type};base64,{base64.b64encode(photo_bytes).decode('ascii')}"
-    db.set_setting("header_image_data", data_uri)
-    return {"status": "ok", "header_image": data_uri}
-
-
-@app.delete("/api/admin/settings/header-image")
-def api_admin_delete_header_image(auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    db.set_setting("header_image_data", "")
-    return {"status": "ok"}
-
-
-# ---------------------------------------------------------------------------
-# مدیریت کاربران (جستجو/فیلتر/بلاک/تاریخچه/پیام) — ادمین
-# ---------------------------------------------------------------------------
-
-@app.get("/api/admin/users")
-def api_admin_list_users(
-    query: str = "", status: str = "all", limit: int = 30, offset: int = 0,
-    auth=Depends(require_full_admin),
-):
-    _, db, _ = auth
-    if status not in ("all", "active", "expired", "blocked"):
-        status = "all"
-    limit = max(1, min(limit, 100))
-    rows, total = db.search_users(query=query.strip(), status_filter=status, limit=limit, offset=offset)
-    users = []
-    for u in rows:
-        users.append({
-            "telegram_id": u["telegram_id"],
-            "username": u["username"] or "",
-            "first_name": u["first_name"] or "",
-            "is_blocked": bool(u["is_blocked"]),
-            "joined_at": u["joined_at"],
-            "wallet_credit": db.get_wallet_credit(u["telegram_id"]),
-            "status": db.get_user_status(u["telegram_id"]),
-        })
-    return {"users": users, "total": total, "limit": limit, "offset": offset}
-
-
-@app.get("/api/admin/users/{telegram_id}")
-def api_admin_get_user(telegram_id: int, auth=Depends(require_full_admin)):
-    _, db, _ = auth
-    user = db.get_user(telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="کاربری با این آیدی عددی پیدا نشد.")
-    history = db.get_user_full_history(telegram_id)
-    return {
-        "telegram_id": user["telegram_id"],
-        "username": user["username"] or "",
-        "first_name": user["first_name"] or "",
-        "is_blocked": bool(user["is_blocked"]),
-        "joined_at": user["joined_at"],
-        "wallet_credit": db.get_wallet_credit(telegram_id),
-        "status": db.get_user_status(telegram_id),
-        "orders": [dict(o) for o in history["orders"]],
-        "topups": [dict(t) for t in history["topups"]],
-    }
-
-
-class UserBlockUpdate(BaseModel):
-    blocked: bool
-
-
-@app.post("/api/admin/users/{telegram_id}/block")
-def api_admin_set_user_blocked(telegram_id: int, body: UserBlockUpdate, auth=Depends(require_full_admin)):
-    _, db, _ = auth
-    user = db.get_user(telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="کاربری با این آیدی عددی پیدا نشد.")
-    db.set_user_blocked(telegram_id, body.blocked)
-    return {"status": "ok", "is_blocked": body.blocked}
-
-
-class UserMessageSend(BaseModel):
-    text: str
-
-
-@app.post("/api/admin/users/{telegram_id}/message")
-async def api_admin_message_user(telegram_id: int, body: UserMessageSend, tenant: Tenant = Depends(get_tenant), auth=Depends(require_admin)):
-    _, db, _ = auth
-    text = (body.text or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="متن پیام خالی است.")
-    user = db.get_user(telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="کاربری با این آیدی عددی پیدا نشد.")
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
-            f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
-            json={"chat_id": telegram_id, "text": f"📩 پیام از پشتیبانی:\n\n{text}"},
-        ) as resp:
-            if resp.status != 200:
-                raise HTTPException(status_code=502, detail="ارسال پیام به کاربر ناموفق بود (شاید بات را بلاک کرده).")
-    return {"status": "ok"}
-
-
-class BroadcastExpiredSend(BaseModel):
-    text: str
-
-
-@app.post("/api/admin/users/broadcast-expired")
-async def api_admin_broadcast_expired(body: BroadcastExpiredSend, tenant: Tenant = Depends(get_tenant), auth=Depends(require_full_admin)):
-    _, db, _ = auth
-    text = (body.text or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="متن پیام خالی است.")
-    user_ids = db.get_expired_user_ids()
-    success, failed = 0, 0
-    async with aiohttp.ClientSession() as session:
-        for uid in user_ids:
-            try:
-                async with session.post(
-                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
-                    json={"chat_id": uid, "text": text},
-                ) as resp:
-                    if resp.status == 200:
-                        success += 1
-                    else:
-                        failed += 1
-            except Exception:
-                failed += 1
-    return {"status": "ok", "total": len(user_ids), "success": success, "failed": failed}
-
-
-# ---------------------------------------------------------------------------
-# لاگ فعالیت ادمین (audit log)
-# ---------------------------------------------------------------------------
-
-@app.get("/api/admin/logs")
-def api_admin_logs(limit: int = 50, offset: int = 0, admin_id: int = None, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    limit = max(1, min(limit, 100))
-    rows, total = db.get_admin_logs(limit=limit, offset=offset, admin_id=admin_id)
-    logs = []
-    for r in rows:
-        admin_user = db.get_user(r["admin_id"])
-        logs.append({
-            "id": r["id"],
-            "admin_id": r["admin_id"],
-            "admin_name": (admin_user["first_name"] if admin_user else "") or str(r["admin_id"]),
-            "action": r["action"],
-            "details": r["details"],
-            "created_at": r["created_at"],
-        })
-    return {"logs": logs, "total": total, "limit": limit, "offset": offset}
-
-
-@app.get("/api/admin/logs/admins")
-def api_admin_logs_admin_list(auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    admins = db.list_admins_with_roles()
-    out = []
-    for a in admins:
-        u = db.get_user(a["telegram_id"])
-        out.append({
-            "telegram_id": a["telegram_id"],
-            "role": a["role"],
-            "name": (u["first_name"] if u else "") or "",
-        })
-    return {"admins": out}
-
-
-
-@app.get("/api/admin/wallet/lookup")
-def api_admin_wallet_lookup(telegram_id: int, auth=Depends(require_full_admin)):
-    _, db, _ = auth
-    user = db.get_user(telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="کاربری با این آیدی عددی پیدا نشد.")
-    return {
-        "user_name": user["first_name"] or "",
-        "username": user["username"] or "",
-        "wallet_credit": db.get_wallet_credit(telegram_id),
-    }
-
-
-class WalletAdjust(BaseModel):
-    telegram_id: int
-    amount: int  # مثبت = افزایش، منفی = کاهش
-
-
-@app.post("/api/admin/wallet/adjust")
-def api_admin_adjust_wallet(body: WalletAdjust, auth=Depends(require_full_admin)):
-    admin_id, db, _ = auth
-    if body.amount == 0:
-        raise HTTPException(status_code=400, detail="مقدار تغییر نمی‌تواند صفر باشد.")
-    user = db.get_user(body.telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="کاربری با این آیدی عددی پیدا نشد.")
-    db.add_wallet_credit(body.telegram_id, body.amount)
-    new_balance = db.get_wallet_credit(body.telegram_id)
-    db.log_admin_action(
-        admin_id, "wallet_adjust",
-        f"کاربر {body.telegram_id} ({user['first_name'] or ''}) | تغییر: {body.amount:+} | موجودی جدید: {new_balance}",
-    )
-    return {
-        "status": "ok",
-        "user_name": user["first_name"] or "",
-        "new_balance": new_balance,
-    }
-
-
-# ---------------------------------------------------------------------------
-# دریافت یک کانفیگ رندوم آزاد (ادمین)
-# ---------------------------------------------------------------------------
-
-@app.post("/api/admin/products/{product_id}/take-random-config")
-def api_admin_take_random_config(product_id: int, auth=Depends(require_senior_admin)):
-    tg_id, db, _ = auth
-    if not db.get_product(product_id):
-        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
-    result = db.admin_take_random_config(product_id, tg_id)
-    if not result:
-        raise HTTPException(status_code=400, detail="کانفیگ آزادی برای این محصول موجود نیست.")
-    return result
-
-
-# ---------------------------------------------------------------------------
-# بکاپ و بازیابی دیتابیس (فقط مالک اصلی همین مستأجر)
-# ---------------------------------------------------------------------------
-
-@app.post("/api/admin/backup/create")
-async def api_admin_backup_create(auth=Depends(require_owner)):
-    tg_id, db, tenant = auth
-    backup_dir = os.path.join(os.path.dirname(os.path.abspath(db.db_path)), "backups")
-    backup_path = create_backup(db.db_path, backup_dir, keep=14)
-    if not backup_path:
-        raise HTTPException(status_code=404, detail="فایل دیتابیس پیدا نشد.")
-
-    filename = os.path.basename(backup_path)
-    with open(backup_path, "rb") as f:
-        file_bytes = f.read()
-
-    form = aiohttp.FormData()
-    form.add_field("chat_id", str(tg_id))
-    form.add_field("caption", "🗄 بکاپ فوری دیتابیس")
-    form.add_field("document", file_bytes, filename=filename, content_type="application/octet-stream")
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"https://api.telegram.org/bot{tenant.bot_token}/sendDocument", data=form
-            ) as resp:
-                data = await resp.json()
-    except Exception:
-        raise HTTPException(status_code=502, detail="ارسال فایل بکاپ به تلگرام ناموفق بود. دوباره تلاش کن.")
-
-    if not data.get("ok"):
-        raise HTTPException(status_code=502, detail=f"ارسال فایل بکاپ ناموفق بود: {data.get('description', '')}")
-
-    db.log_admin_action(tg_id, "backup_create", "دریافت بکاپ فوری از طریق میان‌اپ")
-    return {"status": "ok", "filename": filename}
-
-
-@app.post("/api/admin/backup/restore")
-async def api_admin_backup_restore(file: UploadFile = File(...), auth=Depends(require_owner)):
-    _, db, _ = auth
-    if not file.filename or not file.filename.lower().endswith((".db", ".sqlite", ".sqlite3")):
-        raise HTTPException(status_code=400, detail="فایل باید پسوند .db یا .sqlite داشته باشد.")
-
-    tmp_dir = tempfile.mkdtemp(prefix="restore_")
-    tmp_path = os.path.join(tmp_dir, "uploaded.db")
-    content = await file.read()
-    with open(tmp_path, "wb") as f:
-        f.write(content)
-
-    if not is_valid_sqlite_db(tmp_path):
-        os.remove(tmp_path)
-        os.rmdir(tmp_dir)
-        raise HTTPException(status_code=400, detail="این فایل یک دیتابیس sqlite معتبر نیست.")
-
-    try:
-        pre_restore_path = await asyncio.to_thread(restore_backup, db, db.db_path, tmp_path)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"بازیابی ناموفق بود: {e}")
-    finally:
-        try:
-            os.remove(tmp_path)
-            os.rmdir(tmp_dir)
-        except OSError:
-            pass
-
-    return {"status": "ok", "pre_restore_backup": os.path.basename(pre_restore_path)}
-
-
+# فایل‌های استاتیک (فرانت مینی‌اپ) - همیشه آخرین route باشد
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8001)

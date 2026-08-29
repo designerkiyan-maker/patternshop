@@ -32,7 +32,7 @@ async def send_message(bot_token: str, chat_id: int, text: str, parse_mode: str 
 
 
 async def send_photo(bot_token: str, chat_id: int, photo_bytes: bytes, filename: str = "photo.png", caption: str = "") -> bool:
-    """ارسال عکس (مثلاً QR کد کانفیگ) به کاربر تلگرامی، بدون وابستگی به aiogram."""
+    """ارسال عکس (مثلاً پیش‌نمایش الگو یا رسید پرداخت) به کاربر تلگرامی، بدون وابستگی به aiogram."""
     if not bot_token:
         return False
     url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"

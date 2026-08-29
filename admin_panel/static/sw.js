@@ -1,5 +1,6 @@
-/* Service Worker پنل ادمین ShopVPN - فقط برای دریافت اعلان Push و باز کردن
-   پنل با کلیک روی اعلان. هیچ کش/آفلاینی پیاده نمی‌کند. */
+/* Service Worker پنل ادمین فروشگاه الگو - فقط برای دریافت اعلان Push و باز کردن
+   پنل با کلیک روی اعلان. هیچ کش/آفلاینی پیاده نمی‌شود (پس نیازی به
+   به‌روزرسانی لیست فایل‌های کش هم نیست). */
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -14,9 +15,9 @@ self.addEventListener('push', (event) => {
   try {
     data = event.data ? event.data.json() : {};
   } catch (e) {
-    data = { title: 'ShopVPN Admin', body: event.data ? event.data.text() : '' };
+    data = { title: 'پنل فروشگاه الگو', body: event.data ? event.data.text() : '' };
   }
-  const title = data.title || 'ShopVPN Admin';
+  const title = data.title || 'پنل فروشگاه الگو';
   const options = {
     body: data.body || '',
     tag: data.tag || undefined,

@@ -2,12 +2,9 @@
 """
 لایه دیتابیس - SQLite
 
-این فایل حالا یک کلاس Database است، نه مجموعه‌ای از توابع سطح بالا.
-دلیلش معماری چندباتی است: بات اصلی و هر بات نمایندگی، هرکدام یک نمونه‌ی
-کاملاً جداگانه از Database (با فایل دیتابیس خودشان) دارند، در نتیجه هرکدام
-به‌طور خودکار و مستقل صاحب تمام امکانات هستند (کد تخفیف، زیرمجموعه‌گیری،
-کیف پول، کانفیگ تست، ...) بدون این‌که غیرفعال‌کردن یک قابلیت در یک بات
-روی بات‌های دیگر اثر بگذارد.
+فروشگاه الگوی خیاطی: محصولات، فایل‌های PDF الگو (به‌صورت file_id تلگرام)،
+سفارش‌ها با تأیید دستی رسید کارت‌به‌کارت، کد تخفیف، زیرمجموعه‌گیری، کیف پول،
+الگوی نمونه رایگان و ... همگی در همین یک دیتابیس نگهداری می‌شوند.
 """
 
 import asyncio
@@ -27,12 +24,10 @@ logger = logging.getLogger(__name__)
 WEB_ADMIN_PERMISSIONS = (
     "orders",      # تأیید/رد سفارش و شارژ کیف پول
     "users",       # بلاک/آنبلاک کاربر، تنظیم دستی موجودی کیف پول
-    "catalog",     # دسته‌بندی‌ها، محصولات، بانک کانفیگ
+    "catalog",     # دسته‌بندی‌ها، محصولات، فایل‌های الگو
     "discounts",   # کدهای تخفیف
     "tickets",     # پاسخ/بستن تیکت و چت زنده پشتیبانی
     "broadcast",   # ارسال پیام همگانی
-    "resellers",   # مدیریت نمایندگی‌ها
-    "panels",      # پنل‌های VPN و نرخ ارز
     "system",      # وضعیت جاب‌های سیستمی، وضعیت بکاپ، لاگ فعالیت ادمین‌ها
     "settings",    # تنظیمات و برندینگ
     "backup",      # ساخت بکاپ فوری دیتابیس (بازیابی همیشه فقط برای owner است)
@@ -42,47 +37,16 @@ WEB_ADMIN_PERMISSIONS = (
 ROLE_PERMISSION_PRESETS = {
     "owner": list(WEB_ADMIN_PERMISSIONS),
     "admin": ["orders", "users", "catalog", "discounts", "tickets", "broadcast",
-              "resellers", "panels", "system", "settings"],
+              "system", "settings"],
     "mid": ["orders", "users", "tickets", "broadcast"],
     "support": [],
 }
 
 
-# بنرهای پیش‌فرض کاروسل بالای صفحه‌ی خانه‌ی مینی‌اپ (قابل مدیریت از پنل ادمین
-# > ظاهر > بنرها). ساختار هر بنر: آیکون (اموجی)، عنوان، توضیح کوتاه، متن دکمه،
-# گرادیانِ پس‌زمینه و اینکه ضربه‌زدن روی بنر کاربر را به کدام تب مینی‌اپ ببرد.
-DEFAULT_BANNERS = [
-    {
-        "id": "b_store",
-        "icon": "🛒",
-        "title": "خرید سرویس جدید!",
-        "sub": "سرویس مورد نظرتو انتخاب کن و در چند ثانیه فعالش کن!",
-        "cta": "شروع خرید",
-        "nav": "store",
-        "bg": "linear-gradient(120deg, #0d1a12, #123a20 55%, #17532c)",
-        "image": "",
-        "image_only": False,
-        "enabled": True,
-    },
-    {
-        "id": "b_support",
-        "icon": "💬",
-        "title": "پشتیبانی ۲۴ ساعته",
-        "sub": "هر سوالی داشتی، همین‌جا از پشتیبانی بپرس.",
-        "cta": "گفت‌وگو با پشتیبانی",
-        "nav": "support",
-        "bg": "linear-gradient(120deg, #150c22, #2a1440 55%, #431f66)",
-        "image": "",
-        "image_only": False,
-        "enabled": True,
-    },
-]
-
-
 DEFAULT_SETTINGS = {
-    "welcome_text": "👋 به فروشگاه کانفیگ V2Ray خوش آمدید!\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید.",
-    "btn_buy": "🛒 خرید کانفیگ",
-    "btn_test": "🧪 کانفیگ تست رایگان",
+    "welcome_text": "👋 به فروشگاه الگوی خیاطی خوش آمدید!\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید.",
+    "btn_buy": "🛒 خرید الگو",
+    "btn_test": "🧪 الگوی نمونه رایگان",
     "btn_contact": "📞 ارتباط با پشتیبانی",
     "btn_my_orders": "📦 سفارش‌های من",
     "btn_referral": "🤝 زیرمجموعه‌گیری من",
@@ -109,8 +73,7 @@ DEFAULT_SETTINGS = {
     "main_menu_reply_enabled": "1",
     "main_menu_inline_enabled": "0",
     "main_menu_columns": "1",
-    "store_name": "⚡ SHOP VPN",
-    "miniapp_banner_text": "اتصال امن و پایدار برقرار است",
+    "store_name": "🧵 الگوشاپ",
     # سیستم زیرمجموعه‌گیری
     # کلید مستر: مستقل از سه مدل زیر - غیرفعال کردنش کل سیستم رفرال (دکمه/تب و
     # هر سه مدل پاداش) را کاملاً خاموش می‌کند، صرف‌نظر از اینکه کدام مدل روشن باشد.
@@ -119,7 +82,7 @@ DEFAULT_SETTINGS = {
     "referral_enabled": "1",
     "referral_percent": "10",  # درصدی که به دعوت‌کننده به‌عنوان اعتبار کیف پول تعلق می‌گیرد
     "referral_commission_max_count": "0",  # حداکثر تعداد نفراتی که پورسانت خریدشان تعلق می‌گیرد (0 = نامحدود)
-    # حالت ۲: دریافت یک محصول/کانفیگ رایگان با رسیدن تعداد دعوت‌شده‌ها به یک آستانه (نیازی به خرید نیست)
+    # حالت ۲: دریافت یک الگوی رایگان با رسیدن تعداد دعوت‌شده‌ها به یک آستانه (نیازی به خرید نیست)
     "referral_free_config_enabled": "0",
     "referral_free_config_threshold": "10",  # تعداد دعوت لازم
     "referral_free_config_product_id": "",  # آیدی محصولی که رایگان تحویل داده می‌شود
@@ -136,7 +99,6 @@ DEFAULT_SETTINGS = {
     "adm_pending_topups_style": "primary",
     "adm_discounts_menu_style": "",
     "adm_referral_settings_style": "",
-    "adm_resellers_menu_style": "success",
     "adm_edit_buttons_style": "",
     "adm_set_card_style": "",
     "adm_edit_welcome_style": "",
@@ -157,42 +119,13 @@ DEFAULT_SETTINGS = {
     "wheel_code_expiry_hours": "24",  # اعتبار کد جایزه پس از برد (ساعت)
     "wheel_cooldown_hours": "24",  # فاصله مجاز بین دو چرخش هر کاربر
     "btn_wheel": "🎡 گردونه شانس",
-    # پرداخت کریپتو (Plisio)
-    "crypto_payment_enabled": "0",
-    "plisio_api_key": "",  # کلید API درگاه Plisio؛ از داخل بات (دکمه‌ی «تنظیم درگاه کریپتو») قابل تنظیم است
-    "usd_to_toman_rate": "0",  # نرخ تبدیل هر ۱ دلار به تومان؛ توسط ادمین دستی تنظیم می‌شود
+    # دکمه‌ی فروشگاه وب (Mini App) - فقط وقتی MINIAPP_URL در .env تنظیم شده باشد نمایش داده می‌شود
+    "btn_miniapp": "🛍 فروشگاه",
+    "btn_miniapp_style": "primary",
+    "miniapp_button_enabled": "1",
     "btn_wheel_style": "success",
-    # یادآوری اتمام سرویس + کد تخفیف تشویقی تمدید
-    "renewal_reminder_enabled": "1",
-    "renewal_reminder_days_before": "5",  # چند روز قبل از اتمام سرویس یادآوری ارسال شود
-    "low_stock_threshold": "3",  # وقتی موجودی یک محصول به این عدد یا کمتر برسد، به ادمین‌ها هشدار داده می‌شود
-    "renewal_discount_percent": "20",  # درصد تخفیف کد تشویقی تمدید
-    "renewal_discount_expiry_hours": "24",  # اعتبار کد تشویقی تمدید (ساعت)
-    "adm_renewal_settings_style": "success",
-    "adm_stock_alert_settings_style": "",
-    # یادآوری اتمام حجم + کد تخفیف تشویقی تمدید (مستقل از یادآوری تاریخ انقضا)
-    "volume_reminder_enabled": "1",
-    "volume_reminder_mode": "percent",  # "percent" یا "gb" - مبنای آستانه‌ی هشدار
-    "volume_reminder_percent": "80",  # وقتی درصد مصرف به این عدد رسید (mode=percent)
-    "volume_reminder_gb_left": "2",  # وقتی حجم باقی‌مانده به این تعداد گیگ رسید (mode=gb)
-    "volume_discount_percent": "20",  # درصد تخفیف کد تشویقی اتمام حجم
-    "volume_discount_expiry_hours": "24",  # اعتبار کد تشویقی اتمام حجم (ساعت)
-    "adm_volume_reminder_settings_style": "success",
-    # ساخت کانفیگ شخصی (اتصال مستقیم به پنل VPN)
-    "custom_config_enabled": "0",
-    "custom_config_min_gb": "5",       # حداقل حجم مجاز (گیگ)
-    "custom_config_max_gb": "1000",    # حداکثر حجم مجاز (گیگ)
-    "custom_config_duration_days": "30",  # فعلاً ثابت؛ در آینده قابل انتخاب کاربر می‌شود
-    "test_config_panel_volume_gb": "1",     # فقط وقتی یک سرور برای «کانفیگ تست» فعال باشد
-    "test_config_panel_duration_days": "1",
-    "btn_custom_config": "🛠 ساخت کانفیگ شخصی",
-    "btn_custom_config_style": "primary",
-    "adm_panel_servers_style": "",
-    "adm_custom_config_settings_style": "",
     # چیدمان دکمه‌های منوی اصلی (ترتیب و نمایش) - آرایه JSON از کلیدها
-    "menu_order": '["miniapp","btn_buy","btn_test","btn_my_orders","btn_wallet","btn_referral","btn_wheel","btn_contact","btn_admin_panel"]',
-    "miniapp_enabled": "1",
-    "reseller_request_enabled": "1",
+    "menu_order": '["btn_buy","btn_test","btn_my_orders","btn_wallet","btn_referral","btn_wheel","btn_contact","btn_admin_panel"]',
 }
 
 
@@ -200,24 +133,19 @@ DEFAULT_SETTINGS = {
 # toggle_key: نام تنظیمی که فعال/غیرفعال بودن دکمه را کنترل می‌کند (None یعنی همیشه نمایش داده می‌شود)
 # admin_only: اگر True فقط برای ادمین‌ها نمایش داده می‌شود
 MENU_BUTTON_META = {
-    "miniapp": {"label": "دکمه مینی‌اپ فروشگاه", "toggle_key": "miniapp_enabled", "admin_only": False, "has_text": False, "has_style": False},
-    "btn_buy": {"label": "دکمه خرید کانفیگ", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
-    "btn_test": {"label": "دکمه کانفیگ تست", "toggle_key": "test_enabled", "admin_only": False, "has_text": True, "has_style": True},
+    "btn_buy": {"label": "دکمه خرید الگو", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
+    "btn_test": {"label": "دکمه الگوی نمونه", "toggle_key": "test_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_my_orders": {"label": "دکمه سفارش‌های من", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
     "btn_wallet": {"label": "دکمه کیف پول", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
     "btn_referral": {"label": "دکمه زیرمجموعه‌گیری", "toggle_key": "referral_button_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_wheel": {"label": "دکمه گردونه شانس", "toggle_key": "wheel_enabled", "admin_only": False, "has_text": True, "has_style": True},
+    "btn_miniapp": {"label": "دکمه فروشگاه وب (Mini App)", "toggle_key": "miniapp_button_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_contact": {"label": "دکمه ارتباط با پشتیبانی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
     "btn_admin_panel": {"label": "دکمه پنل مدیریت", "toggle_key": None, "admin_only": True, "has_text": True, "has_style": True},
-    # btn_reseller_panel بر اساس وضعیت کاربر (نماینده بودن/نبودن) به‌صورت پویا نمایش
-    # داده می‌شود، نه با یک toggle سراسری؛ به همین دلیل toggle_key ندارد ولی مثل
-    # بقیه‌ی دکمه‌ها متن/رنگ قابل تنظیم و در چیدمان منو قابل جابجایی است.
-    "btn_reseller_panel": {"label": "دکمه پنل نمایندگی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
-    "btn_reseller_request": {"label": "دکمه درخواست نمایندگی سطح ۲", "toggle_key": "reseller_request_enabled", "admin_only": False, "has_text": True, "has_style": True},
 }
 DEFAULT_MENU_ORDER = [
-    "miniapp", "btn_reseller_panel", "btn_reseller_request", "btn_buy", "btn_test",
-    "btn_my_orders", "btn_wallet", "btn_referral", "btn_wheel", "btn_contact", "btn_admin_panel",
+    "btn_buy", "btn_test", "btn_my_orders", "btn_wallet", "btn_referral",
+    "btn_wheel", "btn_miniapp", "btn_contact", "btn_admin_panel",
 ]
 
 
@@ -375,26 +303,26 @@ class Database:
                     name TEXT NOT NULL,
                     price INTEGER NOT NULL,
                     description TEXT DEFAULT '',
+                    preview_file_id TEXT DEFAULT '',
                     is_active INTEGER DEFAULT 1,
                     FOREIGN KEY(category_id) REFERENCES categories(id) ON DELETE CASCADE
                 );
 
-                CREATE TABLE IF NOT EXISTS configs (
+                -- فایل‌های الگو (PDF) هر محصول: file_id تلگرام. چون فروش نامحدود است،
+                -- فایل‌ها هرگز مصرف نمی‌شوند (بدون is_used/assigned/order_id).
+                CREATE TABLE IF NOT EXISTS product_files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     product_id INTEGER NOT NULL,
-                    link TEXT NOT NULL,
-                    is_used INTEGER DEFAULT 0,
-                    assigned_user_id INTEGER,
-                    assigned_at TEXT,
+                    file_id TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
                 );
 
-                CREATE TABLE IF NOT EXISTS test_configs (
+                -- الگوهای نمونه رایگان (بدون مصرف - همیشه قابل ارسال مجدد هستند)
+                CREATE TABLE IF NOT EXISTS sample_files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    link TEXT NOT NULL,
-                    is_used INTEGER DEFAULT 0,
-                    assigned_user_id INTEGER,
-                    assigned_at TEXT
+                    file_id TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS orders (
@@ -404,7 +332,7 @@ class Database:
                     status TEXT DEFAULT 'pending',
                     receipt_file_id TEXT,
                     receipt_type TEXT DEFAULT 'photo',
-                    config_id INTEGER,
+                    file_ids TEXT DEFAULT '',
                     admin_chat_id INTEGER,
                     admin_message_id INTEGER,
                     base_price INTEGER,
@@ -412,8 +340,10 @@ class Database:
                     discount_code_id INTEGER,
                     discount_amount INTEGER DEFAULT 0,
                     final_price INTEGER,
+                    quantity INTEGER DEFAULT 1,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT
+                    updated_at TEXT,
+                    user_deleted INTEGER DEFAULT 0
                 );
 
                 CREATE TABLE IF NOT EXISTS settings (
@@ -443,40 +373,6 @@ class Database:
                     admin_message_id INTEGER,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT
-                );
-
-                CREATE TABLE IF NOT EXISTS crypto_invoices (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    txn_id TEXT UNIQUE NOT NULL,
-                    kind TEXT NOT NULL,              -- 'order' یا 'wallet_topup'
-                    ref_id INTEGER NOT NULL,         -- order_id یا topup_id
-                    user_id INTEGER NOT NULL,
-                    amount_toman INTEGER NOT NULL,
-                    source_amount_usd REAL NOT NULL,
-                    currency TEXT,                   -- ارز انتخابی کاربر (مثلاً BTC, USDT_TRX)
-                    invoice_url TEXT,
-                    status TEXT DEFAULT 'new',        -- new/pending/completed/expired/error/cancelled
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT
-                );
-
-                CREATE TABLE IF NOT EXISTS reseller_bots (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    bot_token TEXT UNIQUE NOT NULL,
-                    bot_username TEXT,
-                    owner_telegram_id INTEGER NOT NULL,
-                    owner_name TEXT,
-                    db_path TEXT NOT NULL,
-                    is_active INTEGER DEFAULT 1,
-                    link_slug TEXT UNIQUE,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                );
-
-                CREATE TABLE IF NOT EXISTS pending_db_purges (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    bot_token TEXT NOT NULL,
-                    db_path TEXT NOT NULL,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS support_messages (
@@ -531,11 +427,7 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id);
                 CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by);
                 CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
-                CREATE INDEX IF NOT EXISTS idx_configs_product_id ON configs(product_id);
-                CREATE INDEX IF NOT EXISTS idx_configs_product_unused ON configs(product_id, is_used);
-                CREATE INDEX IF NOT EXISTS idx_configs_assigned_user_id ON configs(assigned_user_id);
-                CREATE INDEX IF NOT EXISTS idx_test_configs_unused ON test_configs(is_used);
-                CREATE INDEX IF NOT EXISTS idx_test_configs_assigned_user_id ON test_configs(assigned_user_id);
+                CREATE INDEX IF NOT EXISTS idx_product_files_product_id ON product_files(product_id);
                 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
                 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
                 CREATE INDEX IF NOT EXISTS idx_orders_product_id ON orders(product_id);
@@ -546,85 +438,6 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets(user_id);
                 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
                 CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket_id ON ticket_messages(ticket_id);
-                CREATE INDEX IF NOT EXISTS idx_reseller_bots_active ON reseller_bots(is_active);
-                CREATE INDEX IF NOT EXISTS idx_crypto_invoices_txn ON crypto_invoices(txn_id);
-                CREATE INDEX IF NOT EXISTS idx_crypto_invoices_ref ON crypto_invoices(kind, ref_id);
-
-                -- ===================== ساخت کانفیگ شخصی (پنل‌های VPN) =====================
-                CREATE TABLE IF NOT EXISTS panel_servers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    panel_type TEXT NOT NULL DEFAULT 'pasarguard',
-                    api_url TEXT NOT NULL,
-                    api_username TEXT,
-                    api_password TEXT,
-                    template_username TEXT,
-                    group_ids TEXT,
-                    proxy_settings TEXT,
-                    default_group TEXT,
-                    used_for_custom_config INTEGER DEFAULT 1,
-                    used_for_test_config INTEGER DEFAULT 0,
-                    is_active INTEGER DEFAULT 1,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                );
-
-                CREATE TABLE IF NOT EXISTS custom_config_pricing_tiers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    from_gb INTEGER NOT NULL,
-                    to_gb INTEGER,
-                    price_per_gb INTEGER NOT NULL,
-                    sort_order INTEGER DEFAULT 0
-                );
-
-                CREATE TABLE IF NOT EXISTS custom_configs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    order_id INTEGER,
-                    user_id INTEGER NOT NULL,
-                    panel_server_id INTEGER NOT NULL,
-                    username TEXT NOT NULL,
-                    volume_gb INTEGER NOT NULL,
-                    duration_days INTEGER NOT NULL DEFAULT 30,
-                    subscription_url TEXT,
-                    status TEXT DEFAULT 'active',
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    expires_at TEXT,
-                    FOREIGN KEY(panel_server_id) REFERENCES panel_servers(id)
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_panel_servers_active ON panel_servers(is_active);
-                CREATE INDEX IF NOT EXISTS idx_custom_configs_user_id ON custom_configs(user_id);
-                CREATE INDEX IF NOT EXISTS idx_custom_configs_order_id ON custom_configs(order_id);
-
-                CREATE TABLE IF NOT EXISTS reseller_credit_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    delta_gb INTEGER NOT NULL,
-                    reason TEXT,
-                    admin_id INTEGER,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE INDEX IF NOT EXISTS idx_reseller_credit_log_user ON reseller_credit_log(user_id);
-
-                CREATE TABLE IF NOT EXISTS reseller_requests (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    volume_gb INTEGER NOT NULL,
-                    request_text TEXT,
-                    status TEXT NOT NULL DEFAULT 'pending_review',
-                    price_toman INTEGER,
-                    panel_server_id INTEGER,
-                    receipt_file_id TEXT,
-                    receipt_type TEXT DEFAULT 'photo',
-                    bot_token TEXT,
-                    bot_username TEXT,
-                    owner_telegram_id INTEGER,
-                    reject_reason TEXT,
-                    reviewed_by INTEGER,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE INDEX IF NOT EXISTS idx_reseller_requests_user ON reseller_requests(user_id);
-                CREATE INDEX IF NOT EXISTS idx_reseller_requests_status ON reseller_requests(status);
 
                 -- ===================== پنل مدیریت وب مستقل (خارج از تلگرام) =====================
                 CREATE TABLE IF NOT EXISTS web_admins (
@@ -662,99 +475,76 @@ class Database:
             conn.execute("UPDATE admins SET role='owner' WHERE telegram_id=?", (owner_id,))
 
     def _column_exists(self, conn, table: str, column: str) -> bool:
-        cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
-        return column in cols
+        # pragma_table_info به‌صورت table-valued function با پارامتر bind صدا زده
+        # می‌شود تا هیچ کوئری داینامیکی ساخته نشود (ضد SQL injection).
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM pragma_table_info(?) WHERE name = ? LIMIT 1",
+                (table, column),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            # جدول وجود ندارد یا نسخه‌ی sqlite از pragma function پشتیبانی نمی‌کند
+            return False
+        return row is not None
 
     def _migrate_columns(self, conn):
-        migrations = [
-            ("users", "referred_by", "INTEGER"),
-            ("users", "referral_credit", "INTEGER DEFAULT 0"),
-            ("users", "referral_first_purchase_rewarded", "INTEGER DEFAULT 0"),
-            ("users", "referral_invite_bonus_given", "INTEGER DEFAULT 0"),
-            ("users", "referral_free_config_given", "INTEGER DEFAULT 0"),
-            ("orders", "status", "TEXT DEFAULT 'pending'"),
-            ("orders", "base_price", "INTEGER"),
-            ("orders", "wallet_used", "INTEGER DEFAULT 0"),
-            ("orders", "discount_code_id", "INTEGER"),
-            ("orders", "discount_amount", "INTEGER DEFAULT 0"),
-            ("orders", "final_price", "INTEGER"),
-            ("orders", "receipt_type", "TEXT DEFAULT 'photo'"),
-            ("wallet_topups", "receipt_type", "TEXT DEFAULT 'photo'"),
-            ("users", "last_wheel_spin_at", "TEXT"),
-            ("discount_codes", "expires_at", "TEXT"),
-            ("discount_codes", "source", "TEXT"),
-            ("products", "duration_days", "INTEGER DEFAULT 30"),
-            ("configs", "expires_at", "TEXT"),
-            ("configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
-            ("configs", "volume_reminder_sent", "INTEGER DEFAULT 0"),
-            ("products", "low_stock_alert_sent", "INTEGER DEFAULT 0"),
-            ("admins", "role", "TEXT DEFAULT 'admin'"),
-            ("support_messages", "is_read_by_admin", "INTEGER DEFAULT 0"),
-            ("tickets", "claimed_by", "INTEGER"),
-            ("orders", "quantity", "INTEGER DEFAULT 1"),
-            ("configs", "order_id", "INTEGER"),
-            ("reseller_bots", "link_slug", "TEXT"),
-            ("reseller_bots", "reseller_level", "INTEGER DEFAULT 2"),
-            ("reseller_bots", "web_panel_enabled", "INTEGER DEFAULT 0"),
-            ("reseller_bots", "web_panel_setup_token", "TEXT"),
-            ("reseller_bots", "web_panel_setup_token_created_at", "TEXT"),
-            ("crypto_invoices", "expires_at", "TEXT"),
-            # ساخت کانفیگ شخصی: سفارش‌های این نوع از همان جدول orders رد می‌شوند
-            # (تا کارت‌به‌کارت/کیف‌پول/کریپتو بدون تغییر کار کنند) و product_id
-            # برایشان 0 (سنتینل، بدون FK) ذخیره می‌شود؛ جزئیات واقعی در ستون‌های زیر است.
-            ("orders", "is_custom_config", "INTEGER DEFAULT 0"),
-            ("orders", "custom_volume_gb", "INTEGER"),
-            ("orders", "custom_username", "TEXT"),
-            ("orders", "custom_panel_server_id", "INTEGER"),
-            ("panel_servers", "api_key", "TEXT"),
-            ("panel_servers", "api_username", "TEXT"),
-            ("panel_servers", "api_password", "TEXT"),
-            ("panel_servers", "template_username", "TEXT"),
-            ("panel_servers", "group_ids", "TEXT"),
-            ("panel_servers", "proxy_settings", "TEXT"),
-            ("panel_servers", "used_for_custom_config", "INTEGER DEFAULT 1"),
-            ("panel_servers", "used_for_test_config", "INTEGER DEFAULT 0"),
-            ("panel_servers", "used_for_reseller", "INTEGER DEFAULT 0"),
-            ("panel_servers", "xui_inbound_id", "INTEGER"),
-            ("panel_servers", "xui_sub_base_url", "TEXT"),
-            ("products", "is_auto_provision", "INTEGER DEFAULT 0"),
-            ("products", "auto_provision_volume_gb", "INTEGER"),
-            ("products", "provision_server_id", "INTEGER"),
-            ("users", "is_reseller", "INTEGER DEFAULT 0"),
-            ("users", "reseller_credit_gb", "INTEGER DEFAULT 0"),
-            ("custom_configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
-            ("custom_configs", "volume_reminder_sent", "INTEGER DEFAULT 0"),
-            ("custom_configs", "source", "TEXT DEFAULT 'custom_config'"),
-            ("users", "reseller_panel_id", "INTEGER"),
-            # نصب‌های قدیمی‌تر ممکن است جدول reseller_requests را قبل از اضافه‌شدن
-            # این ستون‌ها ساخته باشند (چون CREATE TABLE IF NOT EXISTS در آن حالت
-            # هیچ ستونی اضافه نمی‌کند)؛ برای جلوگیری از خطای «no column named ...»
-            # موقع ثبت درخواست نمایندگی، این ستون‌ها را هم مهاجرت می‌کنیم.
-            ("reseller_requests", "volume_gb", "INTEGER DEFAULT 0"),
-            ("reseller_requests", "request_text", "TEXT"),
-            ("reseller_requests", "status", "TEXT DEFAULT 'pending_review'"),
-            ("reseller_requests", "price_toman", "INTEGER"),
-            ("reseller_requests", "panel_server_id", "INTEGER"),
-            ("reseller_requests", "receipt_file_id", "TEXT"),
-            ("reseller_requests", "receipt_type", "TEXT DEFAULT 'photo'"),
-            ("reseller_requests", "bot_token", "TEXT"),
-            ("reseller_requests", "bot_username", "TEXT"),
-            ("reseller_requests", "owner_telegram_id", "INTEGER"),
-            ("reseller_requests", "reject_reason", "TEXT"),
-            ("reseller_requests", "reviewed_by", "INTEGER"),
-            ("reseller_requests", "created_at", "TEXT"),
-            ("reseller_requests", "updated_at", "TEXT"),
-            ("web_admins", "permissions", "TEXT"),
-            ("admin_logs", "record_type", "TEXT"),
-            ("admin_logs", "record_id", "TEXT"),
-            # حذف کانفیگ/سفارش توسط خود کاربر (از منوی «سفارش‌های من» در بات یا
-            # مینی‌اپ)؛ سفارش‌هایی که همه‌ی کانفیگ‌هایشان حذف شده به این صورت از
-            # لیست کاربر مخفی می‌شوند ولی برای گزارش‌های ادمین دست‌نخورده می‌مانند.
-            ("orders", "user_deleted", "INTEGER DEFAULT 0"),
-        ]
-        for table, col, coltype in migrations:
-            if not self._column_exists(conn, table, col):
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+        # هر مهاجرت یک کوئری کاملِ «ثابت» است (بدون ساخت داینامیک رشته‌ی SQL
+        # — ضد SQL injection). قبل از اجرا فقط با _column_exists چک می‌شود.
+        if not self._column_exists(conn, "users", "referred_by"):
+            conn.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER")
+        if not self._column_exists(conn, "users", "referral_credit"):
+            conn.execute("ALTER TABLE users ADD COLUMN referral_credit INTEGER DEFAULT 0")
+        if not self._column_exists(conn, "users", "referral_first_purchase_rewarded"):
+            conn.execute("ALTER TABLE users ADD COLUMN referral_first_purchase_rewarded INTEGER DEFAULT 0")
+        if not self._column_exists(conn, "users", "referral_invite_bonus_given"):
+            conn.execute("ALTER TABLE users ADD COLUMN referral_invite_bonus_given INTEGER DEFAULT 0")
+        if not self._column_exists(conn, "users", "referral_free_config_given"):
+            conn.execute("ALTER TABLE users ADD COLUMN referral_free_config_given INTEGER DEFAULT 0")
+        if not self._column_exists(conn, "users", "last_wheel_spin_at"):
+            conn.execute("ALTER TABLE users ADD COLUMN last_wheel_spin_at TEXT")
+        if not self._column_exists(conn, "orders", "status"):
+            conn.execute("ALTER TABLE orders ADD COLUMN status TEXT DEFAULT 'pending'")
+        if not self._column_exists(conn, "orders", "base_price"):
+            conn.execute("ALTER TABLE orders ADD COLUMN base_price INTEGER")
+        if not self._column_exists(conn, "orders", "wallet_used"):
+            conn.execute("ALTER TABLE orders ADD COLUMN wallet_used INTEGER DEFAULT 0")
+        if not self._column_exists(conn, "orders", "discount_code_id"):
+            conn.execute("ALTER TABLE orders ADD COLUMN discount_code_id INTEGER")
+        if not self._column_exists(conn, "orders", "discount_amount"):
+            conn.execute("ALTER TABLE orders ADD COLUMN discount_amount INTEGER DEFAULT 0")
+        if not self._column_exists(conn, "orders", "final_price"):
+            conn.execute("ALTER TABLE orders ADD COLUMN final_price INTEGER")
+        if not self._column_exists(conn, "orders", "receipt_type"):
+            conn.execute("ALTER TABLE orders ADD COLUMN receipt_type TEXT DEFAULT 'photo'")
+        if not self._column_exists(conn, "orders", "quantity"):
+            conn.execute("ALTER TABLE orders ADD COLUMN quantity INTEGER DEFAULT 1")
+        # شناسه‌های فایل‌های الگوی تحویل‌شده‌ی سفارش (CSV از product_files.id)
+        if not self._column_exists(conn, "orders", "file_ids"):
+            conn.execute("ALTER TABLE orders ADD COLUMN file_ids TEXT DEFAULT ''")
+        # حذف سفارش از لیست «سفارش‌های من» توسط خود کاربر؛ سفارش از دیتابیس و
+        # گزارش‌های ادمین حذف نمی‌شود و فقط از لیست کاربر مخفی می‌شود.
+        if not self._column_exists(conn, "orders", "user_deleted"):
+            conn.execute("ALTER TABLE orders ADD COLUMN user_deleted INTEGER DEFAULT 0")
+        if not self._column_exists(conn, "products", "preview_file_id"):
+            conn.execute("ALTER TABLE products ADD COLUMN preview_file_id TEXT DEFAULT ''")
+        if not self._column_exists(conn, "wallet_topups", "receipt_type"):
+            conn.execute("ALTER TABLE wallet_topups ADD COLUMN receipt_type TEXT DEFAULT 'photo'")
+        if not self._column_exists(conn, "discount_codes", "expires_at"):
+            conn.execute("ALTER TABLE discount_codes ADD COLUMN expires_at TEXT")
+        if not self._column_exists(conn, "discount_codes", "source"):
+            conn.execute("ALTER TABLE discount_codes ADD COLUMN source TEXT")
+        if not self._column_exists(conn, "admins", "role"):
+            conn.execute("ALTER TABLE admins ADD COLUMN role TEXT DEFAULT 'admin'")
+        if not self._column_exists(conn, "support_messages", "is_read_by_admin"):
+            conn.execute("ALTER TABLE support_messages ADD COLUMN is_read_by_admin INTEGER DEFAULT 0")
+        if not self._column_exists(conn, "tickets", "claimed_by"):
+            conn.execute("ALTER TABLE tickets ADD COLUMN claimed_by INTEGER")
+        if not self._column_exists(conn, "web_admins", "permissions"):
+            conn.execute("ALTER TABLE web_admins ADD COLUMN permissions TEXT")
+        if not self._column_exists(conn, "admin_logs", "record_type"):
+            conn.execute("ALTER TABLE admin_logs ADD COLUMN record_type TEXT")
+        if not self._column_exists(conn, "admin_logs", "record_id"):
+            conn.execute("ALTER TABLE admin_logs ADD COLUMN record_id TEXT")
 
         # مهاجرت نقش‌های ثابت قدیمی (owner/admin/mid/support) به مجموعه
         # مجوزهای granular. فقط رکوردهایی که هنوز permissions ندارند پر می‌شوند
@@ -770,19 +560,6 @@ class Database:
                     (json.dumps(perms), row["id"]),
                 )
 
-        # مهاجرت وضعیت درخواست‌های نمایندگی از نسخه‌های قدیمی.
-        # در نسخه‌های قدیمی ممکن است درخواست جدید با status='pending' ذخیره شده
-        # باشد، در حالی که منطق فعلی مدیر فقط 'pending_review' را معتبر می‌داند؛
-        # در نتیجه با زدن «تأیید و تعیین هزینه» پیام «این درخواست دیگر معتبر نیست»
-        # نمایش داده می‌شد. این تبدیل فقط روی جدول reseller_requests اعمال می‌شود
-        # و وضعیت‌های معتبر نسخه فعلی را دست‌نخورده باقی می‌گذارد.
-        if self._column_exists(conn, "reseller_requests", "status"):
-            conn.execute(
-                "UPDATE reseller_requests SET status='pending_review' "
-                "WHERE status IN ('pending', '') OR status IS NULL"
-            )
-
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_configs_order_id ON configs(order_id)")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_admin_logs_record ON admin_logs(record_type, record_id)"
         )
@@ -886,29 +663,6 @@ class Database:
         self.set_setting("main_menu_row_breaks", json.dumps(clean, ensure_ascii=False))
 
     # -----------------------------------------------------------------------
-    # بنرهای کاروسل بالای صفحه‌ی خانه‌ی مینی‌اپ
-    # -----------------------------------------------------------------------
-
-    def get_banners(self) -> list:
-        """لیست بنرهای سفارشی کاروسل خانه را برمی‌گرداند. اولین بار که خوانده
-        می‌شود، با بنرهای پیش‌فرض (خرید سرویس / پشتیبانی) مقداردهی می‌شود تا
-        رفتار مینی‌اپ برای نصب‌های قبلی بدون تغییر بماند."""
-        raw = self.get_setting("miniapp_banners", "")
-        if not raw:
-            self.set_banners(DEFAULT_BANNERS)
-            return [dict(b) for b in DEFAULT_BANNERS]
-        try:
-            banners = json.loads(raw)
-            if not isinstance(banners, list):
-                raise ValueError
-        except (ValueError, TypeError):
-            return [dict(b) for b in DEFAULT_BANNERS]
-        return banners
-
-    def set_banners(self, banners: list):
-        self.set_setting("miniapp_banners", json.dumps(banners, ensure_ascii=False))
-
-    # -----------------------------------------------------------------------
     # کاربران
     # -----------------------------------------------------------------------
 
@@ -936,10 +690,10 @@ class Database:
 
     def search_users(self, query: str = "", status_filter: str = "all", limit: int = 30, offset: int = 0):
         """جستجو/فیلتر کاربران برای پنل مدیریت.
-        status_filter: 'all' | 'active' | 'expired' | 'blocked'
+        status_filter: 'all' | 'active' (حداقل یک خرید تاییدشده دارد) |
+                       'expired' (سفارش ثبت کرده ولی هیچ خرید تاییدشده‌ای ندارد) | 'blocked'
         خروجی: (rows, total_count)
         """
-        now = datetime.utcnow().isoformat()
         conditions = []
         params = []
 
@@ -952,17 +706,13 @@ class Database:
             conditions.append("u.is_blocked=1")
         elif status_filter == "active":
             conditions.append(
-                "EXISTS (SELECT 1 FROM configs c WHERE c.assigned_user_id=u.telegram_id AND c.is_used=1 "
-                "AND (c.expires_at IS NULL OR c.expires_at > ?))"
+                "EXISTS (SELECT 1 FROM orders o WHERE o.user_id=u.telegram_id AND o.status='approved')"
             )
-            params.append(now)
         elif status_filter == "expired":
             conditions.append(
-                "EXISTS (SELECT 1 FROM configs c WHERE c.assigned_user_id=u.telegram_id AND c.is_used=1) "
-                "AND NOT EXISTS (SELECT 1 FROM configs c2 WHERE c2.assigned_user_id=u.telegram_id AND c2.is_used=1 "
-                "AND (c2.expires_at IS NULL OR c2.expires_at > ?))"
+                "EXISTS (SELECT 1 FROM orders o WHERE o.user_id=u.telegram_id) "
+                "AND NOT EXISTS (SELECT 1 FROM orders o2 WHERE o2.user_id=u.telegram_id AND o2.status='approved')"
             )
-            params.append(now)
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         with self._get_conn() as conn:
@@ -974,32 +724,30 @@ class Database:
             return rows, total
 
     def get_user_status(self, tg_id: int) -> str:
-        """وضعیت خلاصه‌ی یک کاربر: 'blocked' | 'active' | 'expired' | 'none' (هیچ سرویسی نداشته)."""
-        now = datetime.utcnow().isoformat()
+        """وضعیت خلاصه‌ی یک کاربر: 'blocked' | 'active' (خرید تاییدشده دارد) |
+        'expired' (سفارش داشته ولی هیچ خرید تاییدشده‌ای ندارد) | 'none' (هیچ سفارشی ندارد)."""
         with self._get_conn() as conn:
             u = conn.execute("SELECT is_blocked FROM users WHERE telegram_id=?", (tg_id,)).fetchone()
             if u and u["is_blocked"]:
                 return "blocked"
             has_active = conn.execute(
-                "SELECT 1 FROM configs WHERE assigned_user_id=? AND is_used=1 "
-                "AND (expires_at IS NULL OR expires_at > ?) LIMIT 1",
-                (tg_id, now),
+                "SELECT 1 FROM orders WHERE user_id=? AND status='approved' LIMIT 1",
+                (tg_id,),
             ).fetchone()
             if has_active:
                 return "active"
             has_any = conn.execute(
-                "SELECT 1 FROM configs WHERE assigned_user_id=? AND is_used=1 LIMIT 1", (tg_id,)
+                "SELECT 1 FROM orders WHERE user_id=? LIMIT 1", (tg_id,)
             ).fetchone()
             return "expired" if has_any else "none"
 
     def get_user_full_history(self, tg_id: int):
-        """تاریخچه‌ی کامل یک کاربر: سفارش‌ها (با نام محصول و لینک کانفیگ) + شارژهای کیف‌پول."""
+        """تاریخچه‌ی کامل یک کاربر: سفارش‌ها (با نام محصول) + شارژهای کیف‌پول."""
         with self._get_conn() as conn:
             orders = conn.execute(
-                "SELECT o.*, p.name as product_name, cf.link as config_link, cf.expires_at as config_expires_at "
+                "SELECT o.*, p.name as product_name "
                 "FROM orders o "
                 "LEFT JOIN products p ON o.product_id = p.id "
-                "LEFT JOIN configs cf ON o.config_id = cf.id "
                 "WHERE o.user_id=? ORDER BY o.id DESC",
                 (tg_id,),
             ).fetchall()
@@ -1008,24 +756,16 @@ class Database:
             ).fetchall()
             return {"orders": orders, "topups": topups}
 
-    def get_expired_user_ids(self):
-        """آیدی کاربرانی که سابقه‌ی سرویس دارند ولی الان هیچ سرویس فعالی ندارند و بلاک نیستند
-        (برای ارسال پیام گروهی تشویق به تمدید)."""
-        now = datetime.utcnow().isoformat()
-        with self._get_conn() as conn:
-            rows = conn.execute(
-                "SELECT DISTINCT u.telegram_id FROM users u "
-                "WHERE u.is_blocked=0 "
-                "AND EXISTS (SELECT 1 FROM configs c WHERE c.assigned_user_id=u.telegram_id AND c.is_used=1) "
-                "AND NOT EXISTS (SELECT 1 FROM configs c2 WHERE c2.assigned_user_id=u.telegram_id AND c2.is_used=1 "
-                "AND (c2.expires_at IS NULL OR c2.expires_at > ?))",
-                (now,),
-            ).fetchall()
-            return [r["telegram_id"] for r in rows]
-
     def mark_test_used(self, tg_id: int):
         with self._get_conn() as conn:
             conn.execute("UPDATE users SET test_used=test_used+1 WHERE telegram_id=?", (tg_id,))
+
+    def reset_user_sample_usage(self, tg_id: int) -> bool:
+        """شمارنده‌ی دریافت الگوی نمونه‌ی یک کاربر مشخص را صفر می‌کند تا بتواند
+        دوباره نمونه بگیرد. True اگر کاربر پیدا شد."""
+        with self._get_conn() as conn:
+            cur = conn.execute("UPDATE users SET test_used=0 WHERE telegram_id=?", (tg_id,))
+            return cur.rowcount > 0
 
     def reset_all_test_usage(self) -> list:
         """test_used همه‌ی کاربرانی که قبلاً کانفیگ تست گرفته‌اند را صفر می‌کند تا
@@ -1087,19 +827,10 @@ class Database:
         return tg_id in self._admin_cache
 
     def get_owner_telegram_id(self):
-        """آیدی تلگرام مالک این بات (نقش owner در جدول admins). برای بات نمایندگی
-        همان کسی است که این بات را می‌گرداند - جهت اتصال به اعتبار حجمی‌اش در بات اصلی."""
+        """آیدی تلگرام مالک این بات (نقش owner در جدول admins)."""
         with self._get_conn() as conn:
             row = conn.execute("SELECT telegram_id FROM admins WHERE role='owner' LIMIT 1").fetchone()
             return row["telegram_id"] if row else None
-
-    def is_full_access_bot(self, is_main_bot: bool) -> bool:
-        """بات اصلی و نماینده‌ی «سطح ۱ (کامل)» به همه‌ی امکانات (پنل VPN شخصی، ساخت
-        کانفیگ دستی، بانک لینک برای محصولات) دسترسی دارند. نماینده‌ی «سطح ۲» فقط
-        می‌تواند محصولات خودکار-از-اعتبار-حجمی بفروشد و به پنل/کانفیگ دستی دسترسی ندارد."""
-        if is_main_bot:
-            return True
-        return self.get_setting("reseller_level", "2") == "1"
 
     def get_admin_role(self, tg_id: int):
         """نقش ادمین را برمی‌گرداند: 'owner' | 'admin' | 'mid' | 'support' | None (اگر ادمین نباشد)."""
@@ -1113,8 +844,8 @@ class Database:
 
     def is_senior_admin(self, tg_id: int) -> bool:
         """فقط مالک یا مدیر کامل؛ برای بخش‌های حساس که حتی ادمین میانی هم به آن‌ها دسترسی ندارد
-        (آمار فروش، چیدمان منو، تنظیمات کمپین‌ها/تخفیف، لاگ ادمین، نمایندگی‌ها،
-        برندینگ فروشگاه، و مدیریت محصولات/دسته‌بندی‌ها/کانفیگ‌بانک)."""
+        (آمار فروش، چیدمان منو، تنظیمات کمپین‌ها/تخفیف، لاگ ادمین،
+        برندینگ فروشگاه، و مدیریت محصولات/دسته‌بندی‌ها/بانک فایل الگوها)."""
         role = self.get_admin_role(tg_id)
         return role in ("owner", "admin")
 
@@ -1336,7 +1067,6 @@ class Database:
                 out.append(r)
         return out
 
-
     def is_senior_web_admin(self, role: str) -> bool:
         return role in ("owner", "admin")
 
@@ -1438,15 +1168,13 @@ class Database:
     # محصولات
     # -----------------------------------------------------------------------
 
-    def add_product(self, category_id: int, name: str, price: int, description: str = "", duration_days: int = 30,
-                     is_auto_provision: bool = False, auto_provision_volume_gb: int = None,
-                     provision_server_id: int = None) -> int:
+    def add_product(self, category_id: int, name: str, price: int, description: str = "",
+                     preview_file_id: str = "") -> int:
+        """ثبت الگوی جدید. preview_file_id: file_id عکس پیش‌نمایش الگو برای نمایش در کاتالوگ."""
         with self._get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO products (category_id, name, price, description, duration_days, "
-                "is_auto_provision, auto_provision_volume_gb, provision_server_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (category_id, name, price, description, duration_days,
-                 1 if is_auto_provision else 0, auto_provision_volume_gb, provision_server_id),
+                "INSERT INTO products (category_id, name, price, description, preview_file_id) VALUES (?, ?, ?, ?, ?)",
+                (category_id, name, price, description, preview_file_id),
             )
             return cur.lastrowid
 
@@ -1482,9 +1210,7 @@ class Database:
                 conn.execute("UPDATE products SET is_active=? WHERE id=?", (new_val, product_id))
 
     def edit_product(self, product_id: int, name: str = None, price: int = None,
-                      description: str = None, duration_days: int = None,
-                      is_auto_provision: bool = None, auto_provision_volume_gb: int = None,
-                      provision_server_id: int = None):
+                      description: str = None, preview_file_id: str = None):
         fields, values = [], []
         if name is not None:
             fields.append("name=?"); values.append(name)
@@ -1492,14 +1218,8 @@ class Database:
             fields.append("price=?"); values.append(price)
         if description is not None:
             fields.append("description=?"); values.append(description)
-        if duration_days is not None:
-            fields.append("duration_days=?"); values.append(duration_days)
-        if is_auto_provision is not None:
-            fields.append("is_auto_provision=?"); values.append(1 if is_auto_provision else 0)
-        if auto_provision_volume_gb is not None:
-            fields.append("auto_provision_volume_gb=?"); values.append(auto_provision_volume_gb)
-        if provision_server_id is not None:
-            fields.append("provision_server_id=?"); values.append(provision_server_id)
+        if preview_file_id is not None:
+            fields.append("preview_file_id=?"); values.append(preview_file_id)
         if not fields:
             return
         values.append(product_id)
@@ -1511,235 +1231,124 @@ class Database:
             conn.execute("DELETE FROM products WHERE id=?", (product_id,))
 
     # -----------------------------------------------------------------------
-    # مخزن کانفیگ (بانک لینک)
+    # بانک فایل‌های الگو (file_id های تلگرام برای PDF هر محصول)
     # -----------------------------------------------------------------------
 
-    def add_configs(self, product_id: int, links: list):
-        """افزودن لینک‌های بانک کانفیگ با حذف تکراری‌ها.
+    def add_product_files(self, product_id: int, file_ids: list) -> tuple:
+        """افزودن فایل‌های الگو (file_id های تلگرام) به بانک فایل‌های یک محصول، با حذف تکراری‌ها.
 
-        تکراری بودن هم نسبت به کل بانک کانفیگ بررسی می‌شود و هم نسبت به
-        لینک‌های تکراری داخل همان پیام. خروجی: (added_count, duplicate_count).
+        تکراری بودن بر اساس (product_id, file_id) بررسی می‌شود - هم نسبت به
+        رکوردهای موجود و هم نسبت به فایل‌های تکراری داخل همان لیست.
+        خروجی: (added, duplicates).
         """
         added = 0
         duplicates = 0
         with self._get_conn() as conn:
-            # normalize فقط برای تشخیص است؛ مقدار ذخیره‌شده همان لینک تمیزشده است.
             existing = {
-                (row["link"] or "").strip()
-                for row in conn.execute("SELECT link FROM configs").fetchall()
-                if (row["link"] or "").strip()
+                (row["file_id"] or "").strip()
+                for row in conn.execute(
+                    "SELECT file_id FROM product_files WHERE product_id=?", (product_id,)
+                )
+                if (row["file_id"] or "").strip()
             }
             seen = set()
-            for raw in links:
-                link = (raw or "").strip()
-                if not link:
+            for raw in file_ids:
+                file_id = (raw or "").strip()
+                if not file_id:
                     continue
-                if link in existing or link in seen:
+                if file_id in existing or file_id in seen:
                     duplicates += 1
                     continue
                 conn.execute(
-                    "INSERT INTO configs (product_id, link) VALUES (?, ?)",
-                    (product_id, link),
+                    "INSERT INTO product_files (product_id, file_id) VALUES (?, ?)",
+                    (product_id, file_id),
                 )
-                seen.add(link)
-                existing.add(link)
+                seen.add(file_id)
+                existing.add(file_id)
                 added += 1
         return added, duplicates
 
-    def count_available_configs(self, product_id: int) -> int:
-        with self._get_conn() as conn:
-            prod = conn.execute(
-                "SELECT is_auto_provision FROM products WHERE id=?", (product_id,)
-            ).fetchone()
-            if prod and prod["is_auto_provision"]:
-                # این محصولات لحظه‌ی خرید و به‌صورت خودکار از اعتبار حجمی نماینده ساخته می‌شوند؛
-                # عدد ثابتی به‌عنوان سقفِ معقول تعداد قابل‌خرید در یک سفارش برمی‌گردد (نه موجودی واقعی)،
-                # کفایت واقعی اعتبار همان لحظه‌ی خرید در provision_auto_config چک می‌شود.
-                return 20
-            row = conn.execute(
-                "SELECT COUNT(*) c FROM configs WHERE product_id=? AND is_used=0", (product_id,)
-            ).fetchone()
-            return row["c"]
-
-    def check_low_stock_alert_state(self, product_id: int, stock: int, threshold: int) -> bool:
-        """مدیریت وضعیت هشدار موجودی کم برای یک محصول.
-        فقط یک‌بار برای هر افت زیر آستانه هشدار می‌دهد (True برمی‌گرداند)، و وقتی موجودی
-        دوباره از آستانه بیشتر شد، وضعیت را ریست می‌کند تا برای افت بعدی دوباره هشدار بدهد."""
-        with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT low_stock_alert_sent FROM products WHERE id=?", (product_id,)
-            ).fetchone()
-            already_sent = bool(row["low_stock_alert_sent"]) if row else False
-            if stock <= threshold and not already_sent:
-                conn.execute("UPDATE products SET low_stock_alert_sent=1 WHERE id=?", (product_id,))
-                return True
-            if stock > threshold and already_sent:
-                conn.execute("UPDATE products SET low_stock_alert_sent=0 WHERE id=?", (product_id,))
-            return False
-
-    def get_low_stock_overview(self):
-        """وضعیت لحظه‌ای موجودی همه‌ی محصولات (غیرِ auto-provision) برای نمایش فقط‌خواندنی
-        در پنل وب — بدون تغییر وضعیت هشدار (بر خلاف check_low_stock_alert_state)."""
-        threshold = int(self.get_setting("low_stock_threshold", "3") or 3)
+    def get_product_files(self, product_id: int) -> list:
+        """لیست فایل‌های الگوی یک محصول (id, file_id, created_at) به ترتیب id."""
         with self._get_conn() as conn:
             rows = conn.execute(
-                """
-                SELECT p.id, p.name, p.low_stock_alert_sent,
-                       (SELECT COUNT(*) FROM configs c WHERE c.product_id = p.id AND c.is_used = 0) AS stock
-                FROM products p
-                WHERE p.is_auto_provision = 0
-                ORDER BY p.name
-                """
-            ).fetchall()
-        out = []
-        for r in rows:
-            out.append({
-                "id": r["id"],
-                "name": r["name"],
-                "stock": r["stock"],
-                "threshold": threshold,
-                "low": r["stock"] <= threshold,
-                "alerted": bool(r["low_stock_alert_sent"]),
-            })
-        return out
-
-    def get_config_stats(self, product_id: int) -> dict:
-        with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT SUM(CASE WHEN is_used=0 THEN 1 ELSE 0 END) unused, "
-                "SUM(CASE WHEN is_used=1 THEN 1 ELSE 0 END) used FROM configs WHERE product_id=?",
+                "SELECT id, file_id, created_at FROM product_files WHERE product_id=? ORDER BY id",
                 (product_id,),
-            ).fetchone()
-            return {"unused": row["unused"] or 0, "used": row["used"] or 0}
+            ).fetchall()
+            return [dict(r) for r in rows]
 
-    def get_unused_configs(self, product_id: int):
+    def count_product_files(self, product_id: int) -> int:
         with self._get_conn() as conn:
             return conn.execute(
-                "SELECT id, link FROM configs WHERE product_id=? AND is_used=0 ORDER BY id", (product_id,)
-            ).fetchall()
+                "SELECT COUNT(*) c FROM product_files WHERE product_id=?", (product_id,)
+            ).fetchone()["c"]
 
-    def delete_config(self, config_id: int):
+    def has_product_files(self, product_id: int) -> bool:
+        """آیا برای این محصول حداقل یک فایل الگو ثبت شده است؟ (فروش نامحدود است؛
+        وجود فقط یک فایل برای تحویل بی‌نهایت خرید کافی است.)"""
+        return self.count_product_files(product_id) > 0
+
+    def delete_product_file(self, file_id: str) -> bool:
+        """حذف یک فایل الگو از بانک، بر اساس file_id تلگرام. True یعنی رکوردی حذف شد."""
         with self._get_conn() as conn:
-            conn.execute("DELETE FROM configs WHERE id=? AND is_used=0", (config_id,))
+            cur = conn.execute("DELETE FROM product_files WHERE file_id=?", (file_id,))
+            return cur.rowcount > 0
 
-    def take_unused_config(self, product_id: int, user_tg_id: int):
+    # -----------------------------------------------------------------------
+    # الگوهای نمونه رایگان (مخزن جدا)
+    # -----------------------------------------------------------------------
+
+    def add_sample_files(self, file_ids: list) -> tuple:
+        """افزودن الگوهای نمونه رایگان (file_id تلگرام) با حذف تکراری‌ها.
+        خروجی: (added, duplicates)."""
+        added = 0
+        duplicates = 0
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT id, link FROM configs WHERE product_id=? AND is_used=0 ORDER BY id LIMIT 1",
-                (product_id,),
-            ).fetchone()
-            if not row:
-                return None
-            prod = conn.execute(
-                "SELECT duration_days FROM products WHERE id=?", (product_id,)
-            ).fetchone()
-            duration_days = (prod["duration_days"] if prod and prod["duration_days"] else 30)
-            now = datetime.utcnow()
-            expires_at = (now + timedelta(days=duration_days)).isoformat()
-            conn.execute(
-                "UPDATE configs SET is_used=1, assigned_user_id=?, assigned_at=?, expires_at=?, "
-                "renewal_reminder_sent=0, volume_reminder_sent=0 WHERE id=?",
-                (user_tg_id, now.isoformat(), expires_at, row["id"]),
-            )
-            return {"id": row["id"], "link": row["link"], "expires_at": expires_at}
+            existing = {
+                (row["file_id"] or "").strip()
+                for row in conn.execute("SELECT file_id FROM sample_files")
+                if (row["file_id"] or "").strip()
+            }
+            seen = set()
+            for raw in file_ids:
+                file_id = (raw or "").strip()
+                if not file_id:
+                    continue
+                if file_id in existing or file_id in seen:
+                    duplicates += 1
+                    continue
+                conn.execute("INSERT INTO sample_files (file_id) VALUES (?)", (file_id,))
+                seen.add(file_id)
+                existing.add(file_id)
+                added += 1
+        return added, duplicates
 
-    def take_unused_configs(self, product_id: int, user_tg_id: int, quantity: int = 1):
-        """مثل take_unused_config ولی چند کانفیگ را یکجا برمی‌دارد. اگر موجودی کافی
-        نباشد، هیچ کانفیگی مصرف نمی‌شود و None برمی‌گردد."""
+    def get_sample_files(self) -> list:
+        """لیست همه‌ی الگوهای نمونه (id, file_id, created_at) به ترتیب id."""
         with self._get_conn() as conn:
             rows = conn.execute(
-                "SELECT id, link FROM configs WHERE product_id=? AND is_used=0 ORDER BY id LIMIT ?",
-                (product_id, quantity),
+                "SELECT id, file_id, created_at FROM sample_files ORDER BY id"
             ).fetchall()
-            if len(rows) < quantity:
-                return None
-            prod = conn.execute(
-                "SELECT duration_days FROM products WHERE id=?", (product_id,)
-            ).fetchone()
-            duration_days = (prod["duration_days"] if prod and prod["duration_days"] else 30)
-            now = datetime.utcnow()
-            expires_at = (now + timedelta(days=duration_days)).isoformat()
-            results = []
-            for row in rows:
-                conn.execute(
-                    "UPDATE configs SET is_used=1, assigned_user_id=?, assigned_at=?, expires_at=?, "
-                    "renewal_reminder_sent=0, volume_reminder_sent=0 WHERE id=?",
-                    (user_tg_id, now.isoformat(), expires_at, row["id"]),
-                )
-                results.append({"id": row["id"], "link": row["link"], "expires_at": expires_at})
-            return results
+            return [dict(r) for r in rows]
 
-    def admin_take_random_config(self, product_id: int, admin_tg_id: int):
-        """برای دکمه‌ی «دریافت کانفیگ رندوم» در پنل ادمین: برخلاف take_unused_config
-        (که برای فروش واقعی به‌ترتیب FIFO عمل می‌کند)، این یکی از کانفیگ‌های آزاد را
-        کاملاً تصادفی برمی‌دارد و مصرف‌شده علامت می‌زند."""
+    def count_sample_files(self) -> int:
+        with self._get_conn() as conn:
+            return conn.execute("SELECT COUNT(*) c FROM sample_files").fetchone()["c"]
+
+    def delete_sample_file(self, file_id: str) -> bool:
+        """حذف یک الگوی نمونه از مخزن، بر اساس file_id تلگرام. True یعنی رکوردی حذف شد."""
+        with self._get_conn() as conn:
+            cur = conn.execute("DELETE FROM sample_files WHERE file_id=?", (file_id,))
+            return cur.rowcount > 0
+
+    def take_unused_sample_file(self):
+        """یک فایل نمونه برمی‌گرداند (id, file_id, created_at) یا None.
+        الگوی نمونه مصرف نمی‌شود (فروش/ارسال نامحدود)؛ همین رکورد دفعه‌ی بعد هم برگردانده می‌شود."""
         with self._get_conn() as conn:
             row = conn.execute(
-                "SELECT id, link FROM configs WHERE product_id=? AND is_used=0 ORDER BY RANDOM() LIMIT 1",
-                (product_id,),
+                "SELECT id, file_id, created_at FROM sample_files ORDER BY id LIMIT 1"
             ).fetchone()
-            if not row:
-                return None
-            prod = conn.execute(
-                "SELECT duration_days FROM products WHERE id=?", (product_id,)
-            ).fetchone()
-            duration_days = (prod["duration_days"] if prod and prod["duration_days"] else 30)
-            now = datetime.utcnow()
-            expires_at = (now + timedelta(days=duration_days)).isoformat()
-            conn.execute(
-                "UPDATE configs SET is_used=1, assigned_user_id=?, assigned_at=?, expires_at=?, "
-                "renewal_reminder_sent=0, volume_reminder_sent=0 WHERE id=?",
-                (admin_tg_id, now.isoformat(), expires_at, row["id"]),
-            )
-            return {"id": row["id"], "link": row["link"], "expires_at": expires_at}
-
-    def get_config_by_id(self, config_id: int):
-        with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM configs WHERE id=?", (config_id,)).fetchone()
-
-    def release_config(self, config_id: int):
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE configs SET is_used=0, assigned_user_id=NULL, assigned_at=NULL, "
-                "expires_at=NULL, renewal_reminder_sent=0, volume_reminder_sent=0 WHERE id=?",
-                (config_id,),
-            )
-
-    # -----------------------------------------------------------------------
-    # کانفیگ تست (مخزن جدا)
-    # -----------------------------------------------------------------------
-
-    def add_test_configs(self, links: list):
-        with self._get_conn() as conn:
-            conn.executemany(
-                "INSERT INTO test_configs (link) VALUES (?)",
-                [(link.strip(),) for link in links if link.strip()],
-            )
-
-    def count_available_test_configs(self) -> int:
-        with self._get_conn() as conn:
-            row = conn.execute("SELECT COUNT(*) c FROM test_configs WHERE is_used=0").fetchone()
-            return row["c"]
-
-    def take_unused_test_config(self, user_tg_id: int):
-        with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT id, link FROM test_configs WHERE is_used=0 ORDER BY id LIMIT 1"
-            ).fetchone()
-            if not row:
-                return None
-            conn.execute(
-                "UPDATE test_configs SET is_used=1, assigned_user_id=?, assigned_at=? WHERE id=?",
-                (user_tg_id, datetime.utcnow().isoformat(), row["id"]),
-            )
-            return {"id": row["id"], "link": row["link"]}
-
-    def get_assigned_test_config(self, user_tg_id: int):
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT id, link FROM test_configs WHERE assigned_user_id=? ORDER BY id DESC LIMIT 1",
-                (user_tg_id,),
-            ).fetchone()
+            return dict(row) if row else None
 
     # -----------------------------------------------------------------------
     # سفارش‌ها
@@ -1764,34 +1373,6 @@ class Database:
             )
             return cur.lastrowid
 
-    def create_custom_config_order(
-        self,
-        user_tg_id: int,
-        volume_gb: int,
-        username: str,
-        panel_server_id: int,
-        base_price: int,
-        wallet_used: int = 0,
-    ) -> int:
-        """سفارش «ساخت کانفیگ شخصی» - از همان جدول orders استفاده می‌کند (product_id=0
-        سنتینل بدون FK) تا مسیر پرداخت کارت/کیف‌پول/کریپتوی فعلی بدون تغییر کار کند."""
-        final_price = max(base_price - wallet_used, 0)
-        with self._get_conn() as conn:
-            cur = conn.execute(
-                "INSERT INTO orders (user_id, product_id, status, base_price, wallet_used, final_price, "
-                "quantity, is_custom_config, custom_volume_gb, custom_username, custom_panel_server_id) "
-                "VALUES (?, 0, 'pending', ?, ?, ?, 1, 1, ?, ?, ?)",
-                (user_tg_id, base_price, wallet_used, final_price, volume_gb, username, panel_server_id),
-            )
-            return cur.lastrowid
-
-    def approve_custom_config_order(self, order_id: int):
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE orders SET status='approved', updated_at=? WHERE id=?",
-                (datetime.utcnow().isoformat(), order_id),
-            )
-
     def set_order_receipt(self, order_id: int, file_id: str, receipt_type: str = "photo"):
         with self._get_conn() as conn:
             conn.execute(
@@ -1810,36 +1391,17 @@ class Database:
         with self._get_conn() as conn:
             return conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
 
-    def approve_order(self, order_id: int, config_ids):
-        """config_ids می‌تواند یک id تکی یا لیستی از id ها باشد (برای سفارش با تعداد بیشتر از ۱).
-        config_id ستون سفارش برای سازگاری با کدهای قدیمی، همیشه اولین کانفیگ را نگه می‌دارد؛
-        برای گرفتن همه‌ی کانفیگ‌های یک سفارش از get_order_configs استفاده کن."""
-        if isinstance(config_ids, int):
-            config_ids = [config_ids]
+    def approve_order(self, order_id: int, file_ids: list):
+        """تایید سفارش: status='approved' و ذخیره‌ی شناسه‌ی فایل‌های الگوی تحویلی
+        (id رکوردهای product_files) به‌صورت CSV در ستون file_ids سفارش.
+        تحویل واقعی فایل‌ها با خواندن file_id از product_files انجام می‌شود."""
+        if not isinstance(file_ids, (list, tuple)):
+            file_ids = [file_ids]
         with self._get_conn() as conn:
             conn.execute(
-                "UPDATE orders SET status='approved', config_id=?, updated_at=? WHERE id=?",
-                (config_ids[0], datetime.utcnow().isoformat(), order_id),
+                "UPDATE orders SET status='approved', file_ids=?, updated_at=? WHERE id=?",
+                (",".join(str(i) for i in file_ids), datetime.utcnow().isoformat(), order_id),
             )
-            conn.executemany(
-                "UPDATE configs SET order_id=? WHERE id=?",
-                [(order_id, cid) for cid in config_ids],
-            )
-
-    def approve_order_auto(self, order_id: int):
-        """تایید سفارش محصولات is_auto_provision که کانفیگشان لحظه‌ی خرید و بدون
-        استفاده از بانک کانفیگ ساخته می‌شود (بدون config_id)."""
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE orders SET status='approved', updated_at=? WHERE id=?",
-                (datetime.utcnow().isoformat(), order_id),
-            )
-
-    def get_order_configs(self, order_id: int):
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT * FROM configs WHERE order_id=? ORDER BY id", (order_id,)
-            ).fetchall()
 
     def reject_order(self, order_id: int):
         order = self.get_order(order_id)
@@ -1861,72 +1423,46 @@ class Database:
             ).fetchall()
 
     def get_pending_orders(self):
-        """سفارش‌های نیازمند بررسی دستی؛ سفارش‌هایی که برایشان فاکتور کریپتو ساخته شده‌اند اینجا نمی‌آیند."""
+        """سفارش‌های نیازمند بررسی دستی (رسید ثبت‌شده یا در انتظار رسید)."""
         with self._get_conn() as conn:
             return conn.execute(
-                "SELECT o.* FROM orders o "
-                "WHERE o.status='pending' "
-                "AND NOT EXISTS (SELECT 1 FROM crypto_invoices ci WHERE ci.kind='order' AND ci.ref_id=o.id) "
-                "ORDER BY o.id"
+                "SELECT * FROM orders WHERE status='pending' ORDER BY id"
             ).fetchall()
 
     def get_latest_pending_order_awaiting_receipt(self, user_tg_id: int):
-        """آخرین سفارش (عادی یا کانفیگ شخصی) این کاربر که هنوز pending است و رسیدی
-        برایش ثبت نشده - برای fallback بازیابی رسیدهایی که به‌خاطر گم‌شدن FSM state
+        """آخرین سفارش این کاربر که هنوز pending است و رسیدی برایش ثبت نشده -
+        برای fallback بازیابی رسیدهایی که به‌خاطر گم‌شدن FSM state
         (مثلاً ری‌استارت بات) به هندلر state-دار اصلی نرسیده‌اند."""
         with self._get_conn() as conn:
             return conn.execute(
                 "SELECT * FROM orders WHERE user_id=? AND status='pending' "
                 "AND receipt_file_id IS NULL "
-                "AND NOT EXISTS (SELECT 1 FROM crypto_invoices ci WHERE ci.kind='order' AND ci.ref_id=orders.id) "
                 "ORDER BY id DESC LIMIT 1",
                 (user_tg_id,),
             ).fetchone()
 
     def get_user_orders(self, user_tg_id: int):
+        """سفارش‌های «سفارش‌های من» کاربر (بدون سفارش‌های حذف‌شده توسط خودش)،
+        همراه با نام محصول برای نمایش."""
         with self._get_conn() as conn:
             return conn.execute(
-                "SELECT * FROM orders WHERE user_id=? AND (user_deleted IS NULL OR user_deleted=0) "
-                "ORDER BY id DESC",
+                "SELECT o.*, p.name AS product_name FROM orders o "
+                "LEFT JOIN products p ON o.product_id = p.id "
+                "WHERE o.user_id=? AND (o.user_deleted IS NULL OR o.user_deleted=0) "
+                "ORDER BY o.id DESC",
                 (user_tg_id,),
             ).fetchall()
 
-    def delete_owned_config(self, config_id: int, user_tg_id: int):
-        """حذف کامل و برگشت‌ناپذیر یک کانفیگ متعلق به همین کاربر (از بانک محصولات).
-        اگر کانفیگ متعلق به این کاربر نباشد، None برمی‌گرداند و کاری انجام نمی‌شود.
-        اگر با این حذف، سفارشی که این کانفیگ از آن بود دیگر هیچ کانفیگی نداشته
-        باشد، آن سفارش هم از لیست «سفارش‌های من» کاربر مخفی می‌شود (بدون این‌که
-        از دیتابیس یا گزارش‌های ادمین حذف شود)."""
+    def delete_owned_order(self, order_id: int, user_tg_id: int) -> bool:
+        """مخفی‌کردن یک سفارش از لیست «سفارش‌های من» توسط خود کاربر. اگر سفارش
+        متعلق به این کاربر نباشد False برمی‌گرداند و کاری انجام نمی‌شود. رکورد سفارش
+        برای گزارش‌های ادمین دست‌نخورده می‌ماند (فقط user_deleted=1 می‌شود)."""
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM configs WHERE id=? AND assigned_user_id=?", (config_id, user_tg_id)
-            ).fetchone()
-            if not row:
-                return None
-            order_id = row["order_id"]
-            conn.execute("DELETE FROM configs WHERE id=?", (config_id,))
-            if order_id:
-                remaining = conn.execute(
-                    "SELECT COUNT(*) c FROM configs WHERE order_id=?", (order_id,)
-                ).fetchone()["c"]
-                if remaining == 0:
-                    conn.execute(
-                        "UPDATE orders SET user_deleted=1 WHERE id=? AND user_id=?", (order_id, user_tg_id)
-                    )
-            return dict(row)
-
-    def delete_owned_custom_config(self, custom_config_id: int, user_tg_id: int):
-        """حذف کامل و برگشت‌ناپذیر یک کانفیگ شخصی متعلق به همین کاربر. فقط ردیف
-        دیتابیس را حذف می‌کند؛ حذف واقعی کاربر از روی پنل VPN (در صورت وجود
-        panel_server_id) باید قبل از فراخوانی این متد و جداگانه انجام شود."""
-        with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM custom_configs WHERE id=? AND user_id=?", (custom_config_id, user_tg_id)
-            ).fetchone()
-            if not row:
-                return None
-            conn.execute("DELETE FROM custom_configs WHERE id=?", (custom_config_id,))
-            return dict(row)
+            cur = conn.execute(
+                "UPDATE orders SET user_deleted=1 WHERE id=? AND user_id=?",
+                (order_id, user_tg_id),
+            )
+            return cur.rowcount > 0
 
     # -----------------------------------------------------------------------
     # آمار
@@ -2062,7 +1598,6 @@ class Database:
             ).fetchall()
 
             total_users = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
-            active_configs_c = conn.execute("SELECT COUNT(*) c FROM configs WHERE is_used=1").fetchone()["c"]
             open_tickets_c = conn.execute(
                 "SELECT COUNT(*) c FROM tickets WHERE status IN ('open','answered')"
             ).fetchone()["c"]
@@ -2072,7 +1607,6 @@ class Database:
                 "start_date": start_date,
                 "end_date": end_date,
                 "total_users": total_users,
-                "active_configs": active_configs_c,
                 "open_tickets": open_tickets_c,
                 "wallet_total": wallet_total,
                 "daily_series": daily_series,
@@ -2082,29 +1616,11 @@ class Database:
             return current
 
     def get_full_stats(self, start_date: str = None, end_date: str = None) -> dict:
-        """آمار کامل: get_sales_stats به‌علاوه‌ی موجودی انبار، تیکت‌ها و مشتریان تکراری.
-        منبع واحد برای بات، مینی‌اپ و پنل وب تا هر سه دقیقاً یک عدد نشان دهند."""
+        """آمار کامل: get_sales_stats به‌علاوه‌ی تیکت‌ها و مشتریان تکراری.
+        منبع واحد برای آمار بات تا همه‌جا دقیقاً یک عدد نشان دهد."""
         stats = self.get_sales_stats(start_date, end_date)
         s, e = stats["start_date"], stats["end_date"]
-        threshold = int(self.get_setting("low_stock_threshold", "3") or 3)
         with self._get_conn() as conn:
-            inventory_rows = conn.execute(
-                "SELECT p.id, p.name name, "
-                "SUM(CASE WHEN c.is_used=0 THEN 1 ELSE 0 END) unused, "
-                "SUM(CASE WHEN c.is_used=1 THEN 1 ELSE 0 END) used "
-                "FROM products p LEFT JOIN configs c ON c.product_id=p.id "
-                "WHERE p.is_active=1 GROUP BY p.id ORDER BY p.name"
-            ).fetchall()
-            inventory = [
-                {
-                    "product_id": r["id"], "name": r["name"],
-                    "unused": r["unused"] or 0, "used": r["used"] or 0,
-                    "low_stock": (r["unused"] or 0) <= threshold,
-                }
-                for r in inventory_rows
-            ]
-            low_stock_products = [i for i in inventory if i["low_stock"]]
-
             ticket_row = conn.execute(
                 "SELECT COUNT(*) c, SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) open_c, "
                 "SUM(CASE WHEN status='closed' THEN 1 ELSE 0 END) closed_c "
@@ -2132,8 +1648,6 @@ class Database:
             repeat_rate = round(repeat_customers / total_customers * 100, 1) if total_customers else 0.0
 
         stats.update({
-            "inventory": inventory,
-            "low_stock_products": low_stock_products,
             "tickets_created": ticket_row["c"] or 0,
             "tickets_open": ticket_row["open_c"] or 0,
             "tickets_closed": ticket_row["closed_c"] or 0,
@@ -2416,7 +1930,6 @@ class Database:
             return conn.execute(
                 "SELECT * FROM wallet_topups WHERE user_id=? AND status='pending' "
                 "AND receipt_file_id IS NULL "
-                "AND NOT EXISTS (SELECT 1 FROM crypto_invoices ci WHERE ci.kind='wallet_topup' AND ci.ref_id=wallet_topups.id) "
                 "ORDER BY id DESC LIMIT 1",
                 (user_tg_id,),
             ).fetchone()
@@ -2447,275 +1960,11 @@ class Database:
             ).fetchall()
 
     def get_pending_topups(self):
-        """شارژهای نیازمند بررسی دستی؛ شارژهای دارای فاکتور کریپتو اینجا نمی‌آیند."""
+        """شارژهای کیف پول نیازمند بررسی دستی."""
         with self._get_conn() as conn:
             return conn.execute(
-                "SELECT t.* FROM wallet_topups t "
-                "WHERE t.status='pending' "
-                "AND NOT EXISTS (SELECT 1 FROM crypto_invoices ci WHERE ci.kind='wallet_topup' AND ci.ref_id=t.id) "
-                "ORDER BY t.id"
+                "SELECT * FROM wallet_topups WHERE status='pending' ORDER BY id"
             ).fetchall()
-
-    # -----------------------------------------------------------------------
-    # ثبت‌نام بات‌های نمایندگی (فقط در دیتابیس بات اصلی معنا دارد)
-    # -----------------------------------------------------------------------
-
-    def register_reseller_bot(self, bot_token: str, bot_username: str, owner_telegram_id: int, owner_name: str,
-                               db_path: str, reseller_level: int = 2) -> int:
-        with self._get_conn() as conn:
-            cur = conn.execute(
-                "INSERT INTO reseller_bots (bot_token, bot_username, owner_telegram_id, owner_name, db_path, reseller_level) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (bot_token, bot_username, owner_telegram_id, owner_name, db_path, reseller_level),
-            )
-            return cur.lastrowid
-
-    def get_reseller_bot_by_token(self, bot_token: str):
-        with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM reseller_bots WHERE bot_token=?", (bot_token,)).fetchone()
-
-    def list_reseller_bots(self, active_only: bool = False):
-        with self._get_conn() as conn:
-            if active_only:
-                return conn.execute("SELECT * FROM reseller_bots WHERE is_active=1 ORDER BY id").fetchall()
-            return conn.execute("SELECT * FROM reseller_bots ORDER BY id").fetchall()
-
-    def get_bot_revenue_summary(self):
-        """جمع فروش (سفارش‌های تاییدشده) روی همین دیتابیس - برای نمایش میزان فروش هر
-        نماینده‌ی کامل (سطح ۱) که دیتابیس/باتِ مستقل خودش را دارد، از پنل وب اصلی."""
-        with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT COALESCE(SUM(CASE WHEN o.status='approved' THEN COALESCE(o.final_price, p.price) ELSE 0 END),0) revenue, "
-                "COUNT(CASE WHEN o.status='approved' THEN 1 END) cnt "
-                "FROM orders o LEFT JOIN products p ON p.id=o.product_id"
-            ).fetchone()
-        return {"revenue_toman": row["revenue"] or 0, "paid_orders": row["cnt"] or 0}
-
-    def get_reseller_sales_map(self):
-        """برای هر نماینده‌ی اعتباری (سطح ۲)، تعداد و مجموع حجم کانفیگ‌هایی که از اعتبار
-        حجمی خودش برای مشتری‌هایش ساخته (source='reseller' در custom_configs)."""
-        with self._get_conn() as conn:
-            rows = conn.execute(
-                "SELECT user_id, COUNT(*) cnt, COALESCE(SUM(volume_gb),0) gb "
-                "FROM custom_configs WHERE source='reseller' GROUP BY user_id"
-            ).fetchall()
-        return {r["user_id"]: {"configs": r["cnt"], "volume_gb": r["gb"]} for r in rows}
-
-    def get_reseller_bot(self, bot_id: int):
-        with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM reseller_bots WHERE id=?", (bot_id,)).fetchone()
-
-    def set_reseller_level(self, bot_id: int, level: int):
-        with self._get_conn() as conn:
-            conn.execute("UPDATE reseller_bots SET reseller_level=? WHERE id=?", (level, bot_id))
-
-    def get_reseller_bot_by_slug(self, slug: str):
-        with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM reseller_bots WHERE link_slug=?", (slug,)).fetchone()
-
-    def set_reseller_link_slug(self, bot_id: int, slug: str):
-        with self._get_conn() as conn:
-            conn.execute("UPDATE reseller_bots SET link_slug=? WHERE id=?", (slug, bot_id))
-
-    def toggle_reseller_bot(self, bot_id: int):
-        with self._get_conn() as conn:
-            row = conn.execute("SELECT is_active FROM reseller_bots WHERE id=?", (bot_id,)).fetchone()
-            if row:
-                conn.execute(
-                    "UPDATE reseller_bots SET is_active=? WHERE id=?", (0 if row["is_active"] else 1, bot_id)
-                )
-
-    def edit_reseller_bot(self, bot_id: int, owner_telegram_id: int = None, owner_name: str = None,
-                           bot_token: str = None, bot_username: str = None):
-        fields, values = [], []
-        if owner_telegram_id is not None:
-            fields.append("owner_telegram_id=?"); values.append(owner_telegram_id)
-        if owner_name is not None:
-            fields.append("owner_name=?"); values.append(owner_name)
-        if bot_token is not None:
-            fields.append("bot_token=?"); values.append(bot_token)
-        if bot_username is not None:
-            fields.append("bot_username=?"); values.append(bot_username)
-        if not fields:
-            return
-        values.append(bot_id)
-        with self._get_conn() as conn:
-            conn.execute(f"UPDATE reseller_bots SET {', '.join(fields)} WHERE id=?", values)
-
-    def delete_reseller_bot(self, bot_id: int):
-        with self._get_conn() as conn:
-            conn.execute("DELETE FROM reseller_bots WHERE id=?", (bot_id,))
-
-    # ---------------------------------------------------- web panel (reseller) --
-
-    def enable_reseller_web_panel(self, bot_id: int) -> str:
-        """پنل وب این نماینده را فعال و یک توکن یک‌بارمصرف راه‌اندازی می‌سازد
-        (برای اولین بار که نماینده یوزر/پس خودش را تنظیم می‌کند). توکن را برمی‌گرداند."""
-        import secrets as _secrets
-        token = _secrets.token_urlsafe(24)
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE reseller_bots SET web_panel_enabled=1, web_panel_setup_token=?, "
-                "web_panel_setup_token_created_at=? WHERE id=?",
-                (token, datetime.utcnow().isoformat(), bot_id),
-            )
-        return token
-
-    def disable_reseller_web_panel(self, bot_id: int):
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE reseller_bots SET web_panel_enabled=0, web_panel_setup_token=NULL, "
-                "web_panel_setup_token_created_at=NULL WHERE id=?", (bot_id,)
-            )
-
-    def regenerate_reseller_web_panel_token(self, bot_id: int) -> str:
-        """لینک راه‌اندازی جدید (مثلاً چون قبلی لو رفته یا نماینده گم کرده)."""
-        import secrets as _secrets
-        token = _secrets.token_urlsafe(24)
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE reseller_bots SET web_panel_setup_token=?, web_panel_setup_token_created_at=? WHERE id=?",
-                (token, datetime.utcnow().isoformat(), bot_id),
-            )
-        return token
-
-    def consume_reseller_web_panel_setup_token(self, bot_id: int):
-        """بعد از اینکه نماینده اولین یوزر/پس را ست کرد، توکن راه‌اندازی باطل می‌شود."""
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE reseller_bots SET web_panel_setup_token=NULL, web_panel_setup_token_created_at=NULL "
-                "WHERE id=?", (bot_id,)
-            )
-
-    # -------------------------------------------------------------------
-    # پاکسازی داده‌های باقی‌مانده از نمایندگی‌های حذف‌شده
-    # وقتی یک بات نمایندگی حذف می‌شود، پرچم/اعتبار/پنل نمایندگی روی رکورد
-    # کاربر در دیتابیس اصلی ممکن است پاک نشده باقی بماند و باعث شود دکمه‌ی
-    # «درخواست نمایندگی» برای او دیگر کار نکند (چون هنوز نماینده تلقی می‌شود).
-    # -------------------------------------------------------------------
-
-    def list_orphaned_reseller_users(self):
-        """کاربرانی که پرچم/اعتبار/پنل نمایندگی روی رکوردشان مانده ولی هیچ
-        بات نمایندگی‌ای (حتی غیرفعال) برایشان در reseller_bots ثبت نیست."""
-        with self._get_conn() as conn:
-            return conn.execute(
-                """
-                SELECT telegram_id, first_name, username, is_reseller,
-                       reseller_credit_gb, reseller_panel_id
-                FROM users
-                WHERE (is_reseller = 1 OR reseller_credit_gb > 0 OR reseller_panel_id IS NOT NULL)
-                  AND telegram_id NOT IN (SELECT owner_telegram_id FROM reseller_bots)
-                ORDER BY telegram_id
-                """
-            ).fetchall()
-
-    def purge_reseller_leftovers(self, user_tg_id: int):
-        """پرچم نماینده‌بودن، اعتبار حجمی و پنل اختصاصی کاربر را در دیتابیس
-        اصلی صفر/خالی می‌کند؛ برای پاکسازی کامل رد پای یک نمایندگی حذف‌شده."""
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE users SET is_reseller=0, reseller_credit_gb=0, reseller_panel_id=NULL "
-                "WHERE telegram_id=?",
-                (user_tg_id,),
-            )
-
-    def queue_db_purge(self, bot_token: str, db_path: str):
-        with self._get_conn() as conn:
-            conn.execute(
-                "INSERT INTO pending_db_purges (bot_token, db_path) VALUES (?, ?)",
-                (bot_token, db_path),
-            )
-
-    def list_pending_db_purges(self):
-        with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM pending_db_purges").fetchall()
-
-    def remove_pending_db_purge(self, purge_id: int):
-        with self._get_conn() as conn:
-            conn.execute("DELETE FROM pending_db_purges WHERE id=?", (purge_id,))
-
-    # -----------------------------------------------------------------------
-    # فاکتورهای پرداخت کریپتو (Plisio)
-    # -----------------------------------------------------------------------
-
-    def create_crypto_invoice(self, txn_id: str, kind: str, ref_id: int, user_id: int,
-                               amount_toman: int, source_amount_usd: float,
-                               invoice_url: str = None, currency: str = None) -> int:
-        with self._get_conn() as conn:
-            cur = conn.execute(
-                "INSERT INTO crypto_invoices (txn_id, kind, ref_id, user_id, amount_toman, "
-                "source_amount_usd, invoice_url, currency, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)",
-                (txn_id, kind, ref_id, user_id, amount_toman, source_amount_usd, invoice_url, currency,
-                 (datetime.utcnow() + timedelta(minutes=80)).isoformat()),
-            )
-            return cur.lastrowid
-
-    def get_crypto_invoice_by_txn(self, txn_id: str):
-        with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM crypto_invoices WHERE txn_id=?", (txn_id,)).fetchone()
-
-    def get_crypto_invoice(self, invoice_id: int):
-        with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM crypto_invoices WHERE id=?", (invoice_id,)).fetchone()
-
-    def update_crypto_invoice_status(self, txn_id: str, status: str, currency: str = None):
-        with self._get_conn() as conn:
-            if currency is not None:
-                conn.execute(
-                    "UPDATE crypto_invoices SET status=?, currency=?, updated_at=? WHERE txn_id=?",
-                    (status, currency, datetime.utcnow().isoformat(), txn_id),
-                )
-            else:
-                conn.execute(
-                    "UPDATE crypto_invoices SET status=?, updated_at=? WHERE txn_id=?",
-                    (status, datetime.utcnow().isoformat(), txn_id),
-                )
-
-    def get_pending_crypto_invoice_for_ref(self, kind: str, ref_id: int):
-        """آخرین فاکتور فعال (new/pending) ثبت‌شده برای یک سفارش یا شارژ کیف پول خاص را برمی‌گرداند."""
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT * FROM crypto_invoices WHERE kind=? AND ref_id=? AND status IN ('new','pending') "
-                "ORDER BY id DESC LIMIT 1",
-                (kind, ref_id),
-            ).fetchone()
-
-    def get_crypto_invoices(self, limit: int = 50):
-        """فهرست پرداخت‌های کریپتو برای پنل مدیریت؛ شامل پرداخت‌های فعال و تاریخچه."""
-        limit = max(1, min(int(limit or 50), 200))
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT * FROM crypto_invoices ORDER BY id DESC LIMIT ?", (limit,)
-            ).fetchall()
-
-    def expire_stale_crypto_invoices(self):
-        """فاکتورهایی که هنوز 'new'/'pending' مانده‌اند ولی زمان اعتبارشان (expires_at)
-        گذشته را 'expired' علامت می‌زند. این‌ها هیچ‌وقت خودشان به‌روزرسانی نمی‌شدند
-        چون کاربر پرداخت نکرده و وبهوکی برایشان نمی‌آید."""
-        now = datetime.utcnow().isoformat()
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE crypto_invoices SET status='expired', updated_at=? "
-                "WHERE status IN ('new','pending') AND expires_at IS NOT NULL AND expires_at < ?",
-                (now, now),
-            )
-
-    def cancel_and_delete_crypto_invoice(self, invoice_id: int):
-        """لغو دستی توسط ادمین: فاکتور بلافاصله از دیتابیس حذف می‌شود (منتظر ۷ روز نمی‌ماند)."""
-        with self._get_conn() as conn:
-            conn.execute("DELETE FROM crypto_invoices WHERE id=?", (invoice_id,))
-
-    def purge_old_crypto_invoices(self, days: int = 7):
-        """فاکتورهای کریپتوی نهایی‌شده (تکمیل/منقضی/لغو/خطا/مغایرت) که بیش از N روز از
-        آخرین به‌روزرسانی‌شان گذشته را برای همیشه حذف می‌کند، تا لیست پنل مدیریت شلوغ نماند."""
-        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-        with self._get_conn() as conn:
-            conn.execute(
-                "DELETE FROM crypto_invoices WHERE status IN "
-                "('completed','expired','cancelled','error','mismatch') "
-                "AND COALESCE(updated_at, created_at) < ?",
-                (cutoff,),
-            )
 
     # -----------------------------------------------------------------------
     # گردونه شانس
@@ -2767,138 +2016,7 @@ class Database:
         return code, expires_at
 
     # -----------------------------------------------------------------------
-    # یادآوری اتمام سرویس + کد تخفیف تشویقی تمدید
-    # -----------------------------------------------------------------------
-
-    def get_renewal_settings(self) -> dict:
-        return {
-            "enabled": self.get_setting("renewal_reminder_enabled", "1") == "1",
-            "days_before": int(self.get_setting("renewal_reminder_days_before", "5") or 5),
-            "discount_percent": int(self.get_setting("renewal_discount_percent", "20") or 20),
-            "discount_expiry_hours": int(self.get_setting("renewal_discount_expiry_hours", "24") or 24),
-        }
-
-    def get_configs_due_for_renewal_reminder(self):
-        """کانفیگ‌های فعال و بدون یادآوری را برمی‌گرداند.
-
-        نکته مهم: زمان انقضای ذخیره‌شده در cf.expires_at عمداً در اینجا
-        برای زمان‌بندی یادآوری استفاده نمی‌شود. زمان واقعی انقضا از لینک
-        Subscription در renewal_reminders.py خوانده می‌شود.
-        """
-        settings = self.get_renewal_settings()
-        if not settings["enabled"]:
-            return []
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT cf.id as config_id, cf.link, cf.assigned_user_id, cf.expires_at, "
-                "p.id as product_id, p.name as product_name "
-                "FROM configs cf JOIN products p ON cf.product_id = p.id "
-                "WHERE cf.is_used=1 AND cf.renewal_reminder_sent=0 "
-                "AND cf.link IS NOT NULL AND TRIM(cf.link) != ''"
-            ).fetchall()
-
-    def mark_renewal_reminder_sent(self, config_id: int):
-        with self._get_conn() as conn:
-            conn.execute("UPDATE configs SET renewal_reminder_sent=1 WHERE id=?", (config_id,))
-
-    def get_custom_configs_due_for_renewal_reminder(self):
-        """معادل get_configs_due_for_renewal_reminder برای کانفیگ‌هایی که مستقیم
-        از پنل VPN ساخته شده‌اند (خرید شخصی/نمایندگی/کانفیگ تست پنلی)."""
-        settings = self.get_renewal_settings()
-        if not settings["enabled"]:
-            return []
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT id as config_id, subscription_url as link, user_id as assigned_user_id, "
-                "username as product_name "
-                "FROM custom_configs "
-                "WHERE renewal_reminder_sent=0 AND status='active' AND source != 'test' "
-                "AND subscription_url IS NOT NULL AND TRIM(subscription_url) != ''"
-            ).fetchall()
-
-    def mark_custom_config_renewal_reminder_sent(self, config_id: int):
-        with self._get_conn() as conn:
-            conn.execute("UPDATE custom_configs SET renewal_reminder_sent=1 WHERE id=?", (config_id,))
-
-    def generate_renewal_discount_code(self, user_tg_id: int) -> tuple:
-        """یک کد تخفیف یکبارمصرف و محدود به زمان برای یادآوری تمدید سرویس کاربر می‌سازد.
-        خروجی: (code, expires_at, percent, expiry_hours)"""
-        settings = self.get_renewal_settings()
-        expires_at = (datetime.utcnow() + timedelta(hours=settings["discount_expiry_hours"])).isoformat()
-        code = f"RENEW{user_tg_id}{secrets.randbelow(9000) + 1000}"
-        self.create_discount_code(
-            code, percent=settings["discount_percent"], max_uses=1, expires_at=expires_at, source="renewal_reminder"
-        )
-        return code, expires_at, settings["discount_percent"], settings["discount_expiry_hours"]
-
-    # -----------------------------------------------------------------------
-    # یادآوری اتمام حجم + کد تخفیف تشویقی تمدید (مستقل از یادآوری تاریخ انقضا)
-    # -----------------------------------------------------------------------
-
-    def get_volume_reminder_settings(self) -> dict:
-        return {
-            "enabled": self.get_setting("volume_reminder_enabled", "1") == "1",
-            "mode": self.get_setting("volume_reminder_mode", "percent"),
-            "percent": int(self.get_setting("volume_reminder_percent", "80") or 80),
-            "gb_left": float(self.get_setting("volume_reminder_gb_left", "2") or 2),
-            "discount_percent": int(self.get_setting("volume_discount_percent", "20") or 20),
-            "discount_expiry_hours": int(self.get_setting("volume_discount_expiry_hours", "24") or 24),
-        }
-
-    def get_configs_due_for_volume_reminder(self):
-        """کانفیگ‌های فعال و بدون یادآوری حجم را برمی‌گرداند.
-
-        آستانه‌ی واقعی (درصد/گیگ) از روی مصرف زنده‌ی Subscription در
-        renewal_reminders.py بررسی می‌شود؛ اینجا فقط کاندیدها فیلتر می‌شوند.
-        """
-        settings = self.get_volume_reminder_settings()
-        if not settings["enabled"]:
-            return []
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT cf.id as config_id, cf.link, cf.assigned_user_id, "
-                "p.id as product_id, p.name as product_name "
-                "FROM configs cf JOIN products p ON cf.product_id = p.id "
-                "WHERE cf.is_used=1 AND cf.volume_reminder_sent=0 "
-                "AND cf.link IS NOT NULL AND TRIM(cf.link) != ''"
-            ).fetchall()
-
-    def mark_volume_reminder_sent(self, config_id: int):
-        with self._get_conn() as conn:
-            conn.execute("UPDATE configs SET volume_reminder_sent=1 WHERE id=?", (config_id,))
-
-    def get_custom_configs_due_for_volume_reminder(self):
-        """معادل get_configs_due_for_volume_reminder برای کانفیگ‌های ساخته‌شده
-        مستقیم روی پنل VPN."""
-        settings = self.get_volume_reminder_settings()
-        if not settings["enabled"]:
-            return []
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT id as config_id, subscription_url as link, user_id as assigned_user_id, "
-                "username as product_name "
-                "FROM custom_configs "
-                "WHERE volume_reminder_sent=0 AND status='active' AND source != 'test' "
-                "AND subscription_url IS NOT NULL AND TRIM(subscription_url) != ''"
-            ).fetchall()
-
-    def mark_custom_config_volume_reminder_sent(self, config_id: int):
-        with self._get_conn() as conn:
-            conn.execute("UPDATE custom_configs SET volume_reminder_sent=1 WHERE id=?", (config_id,))
-
-    def generate_volume_discount_code(self, user_tg_id: int) -> tuple:
-        """یک کد تخفیف یکبارمصرف و محدود به زمان برای یادآوری اتمام حجم کاربر می‌سازد.
-        خروجی: (code, expires_at, percent, expiry_hours)"""
-        settings = self.get_volume_reminder_settings()
-        expires_at = (datetime.utcnow() + timedelta(hours=settings["discount_expiry_hours"])).isoformat()
-        code = f"VOLUME{user_tg_id}{secrets.randbelow(9000) + 1000}"
-        self.create_discount_code(
-            code, percent=settings["discount_percent"], max_uses=1, expires_at=expires_at, source="volume_reminder"
-        )
-        return code, expires_at, settings["discount_percent"], settings["discount_expiry_hours"]
-
-    # -----------------------------------------------------------------------
-    # چت پشتیبانی (مینی‌اپ + بات، یکپارچه)
+    # چت پشتیبانی (بات، یکپارچه)
     # -----------------------------------------------------------------------
 
     def add_support_message(self, user_id: int, sender: str, message: str) -> int:
@@ -3148,30 +2266,6 @@ class Database:
                 (ticket_id,),
             )
 
-    def get_expiring_configs_for_user(self, user_tg_id: int, days_before: int = None):
-        """کانفیگ‌های فعال کاربر (خریداری‌شده از انبار + ساخته‌شده مستقیم روی پنل) که تا چند روز آینده منقضی می‌شوند."""
-        if days_before is None:
-            days_before = int(self.get_setting("renewal_reminder_days_before", "5") or 5)
-        with self._get_conn() as conn:
-            threshold = (datetime.utcnow() + timedelta(days=days_before)).isoformat()
-            now = datetime.utcnow().isoformat()
-            rows = conn.execute(
-                "SELECT cf.id as config_id, cf.link, cf.expires_at, o.product_id "
-                "FROM configs cf JOIN orders o ON (o.id = cf.order_id OR o.config_id = cf.id) "
-                "WHERE cf.assigned_user_id=? AND cf.is_used=1 AND cf.expires_at IS NOT NULL "
-                "AND cf.expires_at > ? AND cf.expires_at <= ? AND o.user_id=?",
-                (user_tg_id, now, threshold, user_tg_id),
-            ).fetchall()
-            custom_rows = conn.execute(
-                "SELECT id as config_id, subscription_url as link, expires_at, NULL as product_id, "
-                "username as custom_username "
-                "FROM custom_configs "
-                "WHERE user_id=? AND status='active' AND source != 'test' AND expires_at IS NOT NULL "
-                "AND expires_at > ? AND expires_at <= ?",
-                (user_tg_id, now, threshold),
-            ).fetchall()
-            return list(rows) + list(custom_rows)
-
     # -----------------------------------------------------------------------
     # عضویت اجباری در کانال
     # -----------------------------------------------------------------------
@@ -3181,515 +2275,3 @@ class Database:
             "enabled": self.get_setting("force_join_enabled", "0") == "1",
             "channel": self.get_setting("force_join_channel", "").strip(),
         }
-
-    # -----------------------------------------------------------------------
-    # پنل‌های VPN (panel_servers) - برای ساخت کانفیگ شخصی
-    # -----------------------------------------------------------------------
-
-    def add_panel_server(self, name: str, panel_type: str, api_url: str,
-                          api_username: str, api_password: str, default_group: str = None) -> int:
-        with self._get_conn() as conn:
-            cur = conn.execute(
-                "INSERT INTO panel_servers (name, panel_type, api_url, api_username, api_password, default_group) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (name, panel_type, api_url.rstrip("/"), api_username, api_password, default_group),
-            )
-            return cur.lastrowid
-
-    def update_panel_server(self, server_id: int, **fields):
-        allowed = {"name", "panel_type", "api_url", "api_username", "api_password",
-                   "default_group", "is_active", "template_username", "group_ids", "proxy_settings",
-                   "used_for_custom_config", "used_for_test_config", "used_for_reseller",
-                   "xui_inbound_id", "xui_sub_base_url"}
-        sets, values = [], []
-        for k, v in fields.items():
-            if k in allowed and v is not None:
-                sets.append(f"{k}=?")
-                values.append(v.rstrip("/") if k == "api_url" else v)
-        if not sets:
-            return
-        values.append(server_id)
-        with self._get_conn() as conn:
-            conn.execute(f"UPDATE panel_servers SET {', '.join(sets)} WHERE id=?", values)
-
-    def count_custom_configs_by_panel(self, server_id: int) -> int:
-        """چند کانفیگ شخصی (custom_configs) به این پنل وصل هستند. چون panel_server_id
-        در custom_configs یک FOREIGN KEY (بدون CASCADE) است، حذف مستقیم پنل در صورت
-        وجود چنین رکوردهایی با IntegrityError شکست می‌خورد."""
-        with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) AS c FROM custom_configs WHERE panel_server_id=?", (server_id,)
-            ).fetchone()
-            return row["c"] if row else 0
-
-    def delete_panel_server(self, server_id: int, force: bool = False) -> int:
-        """پنل را حذف می‌کند. اگر کانفیگ شخصی مرتبط وجود داشته باشد و force=False
-        باشد، به‌جای شکست خوردن با IntegrityError، ValueError با پیام قابل‌فهم می‌دهد.
-        با force=True، رکوردهای custom_configs مرتبط هم حذف می‌شوند (غیرقابل بازگشت)
-        و تعداد رکوردهای حذف‌شده برگردانده می‌شود."""
-        dependent = self.count_custom_configs_by_panel(server_id)
-        if dependent and not force:
-            raise ValueError(
-                f"این پنل {dependent} کانفیگ شخصی ثبت‌شده دارد و به همین دلیل قابل حذف نیست."
-            )
-        with self._get_conn() as conn:
-            if dependent:
-                conn.execute("DELETE FROM custom_configs WHERE panel_server_id=?", (server_id,))
-            conn.execute("DELETE FROM panel_servers WHERE id=?", (server_id,))
-        return dependent
-
-    def get_panel_server(self, server_id: int):
-        with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM panel_servers WHERE id=?", (server_id,)).fetchone()
-
-    def get_panel_servers(self, active_only: bool = False):
-        with self._get_conn() as conn:
-            q = "SELECT * FROM panel_servers"
-            if active_only:
-                q += " WHERE is_active=1"
-            q += " ORDER BY id"
-            return conn.execute(q).fetchall()
-
-    def get_panel_server_for_usage(self, usage: str):
-        """usage: 'custom_config' یا 'test_config' یا 'reseller'. اولین سرور فعالی
-        که برای این مصرف علامت خورده را برمی‌گرداند (چند سرور می‌توانند به یک
-        پنل با یوزر/پس متفاوت اشاره کنند، هرکدام برای یک مصرف)."""
-        column = {
-            "custom_config": "used_for_custom_config",
-            "test_config": "used_for_test_config",
-            "reseller": "used_for_reseller",
-        }.get(usage, "used_for_custom_config")
-        with self._get_conn() as conn:
-            return conn.execute(
-                f"SELECT * FROM panel_servers WHERE is_active=1 AND {column}=1 ORDER BY id LIMIT 1"
-            ).fetchone()
-
-    # -----------------------------------------------------------------------
-    # قیمت‌گذاری پلکانی ساخت کانفیگ شخصی
-    # -----------------------------------------------------------------------
-
-    def get_pricing_tiers(self):
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT * FROM custom_config_pricing_tiers ORDER BY sort_order, from_gb"
-            ).fetchall()
-
-    def add_pricing_tier(self, from_gb: int, to_gb, price_per_gb: int) -> int:
-        with self._get_conn() as conn:
-            max_sort = conn.execute(
-                "SELECT COALESCE(MAX(sort_order), -1) AS m FROM custom_config_pricing_tiers"
-            ).fetchone()["m"]
-            cur = conn.execute(
-                "INSERT INTO custom_config_pricing_tiers (from_gb, to_gb, price_per_gb, sort_order) VALUES (?, ?, ?, ?)",
-                (from_gb, to_gb, price_per_gb, max_sort + 1),
-            )
-            return cur.lastrowid
-
-    def update_pricing_tier(self, tier_id: int, from_gb: int = None, to_gb=None, price_per_gb: int = None):
-        sets, values = [], []
-        if from_gb is not None:
-            sets.append("from_gb=?"); values.append(from_gb)
-        if to_gb is not None or to_gb is None:  # اجازه‌ی ست‌کردن NULL برای «بی‌نهایت» را هم می‌دهیم
-            sets.append("to_gb=?"); values.append(to_gb)
-        if price_per_gb is not None:
-            sets.append("price_per_gb=?"); values.append(price_per_gb)
-        if not sets:
-            return
-        values.append(tier_id)
-        with self._get_conn() as conn:
-            conn.execute(f"UPDATE custom_config_pricing_tiers SET {', '.join(sets)} WHERE id=?", values)
-
-    def delete_pricing_tier(self, tier_id: int):
-        with self._get_conn() as conn:
-            conn.execute("DELETE FROM custom_config_pricing_tiers WHERE id=?", (tier_id,))
-
-    def calc_custom_config_price(self, volume_gb: int) -> int:
-        """قیمت بر اساس نرخ همان بازه‌ای که حجم درخواستی داخلش قرار می‌گیرد
-        محاسبه می‌شود (نه تصاعدی-پلکانی)؛ یعنی کل حجم با یک نرخ ثابت (نرخ آن
-        بازه) ضرب می‌شود. اگر حجم از آخرین بازه هم بیشتر باشد، با نرخ آخرین
-        بازه حساب می‌شود؛ اگر کمتر از اولین بازه باشد، با نرخ اولین بازه."""
-        tiers = self.get_pricing_tiers()
-        if not tiers:
-            return 0
-        for tier in tiers:
-            frm, to = tier["from_gb"], tier["to_gb"]
-            if volume_gb < frm:
-                break
-            if to is None or volume_gb <= to:
-                return int(volume_gb * tier["price_per_gb"])
-        # حجم از آخرین بازه هم بیشتر بوده یا کمتر از اولین بازه:
-        if volume_gb < tiers[0]["from_gb"]:
-            return int(volume_gb * tiers[0]["price_per_gb"])
-        return int(volume_gb * tiers[-1]["price_per_gb"])
-
-    # -----------------------------------------------------------------------
-    # کانفیگ‌های شخصی ساخته‌شده توسط کاربر
-    # -----------------------------------------------------------------------
-
-    def add_custom_config(self, user_id: int, panel_server_id: int, username: str,
-                           volume_gb: int, duration_days: int, subscription_url: str,
-                           order_id: int = None, expires_at: str = None, source: str = "custom_config") -> int:
-        """source: 'custom_config' (خرید شخصی)، 'test' (کانفیگ تست پنلی)، یا 'reseller'."""
-        if expires_at is None:
-            expires_at = (datetime.utcnow() + timedelta(days=duration_days)).isoformat()
-        with self._get_conn() as conn:
-            cur = conn.execute(
-                "INSERT INTO custom_configs (order_id, user_id, panel_server_id, username, volume_gb, "
-                "duration_days, subscription_url, expires_at, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (order_id, user_id, panel_server_id, username, volume_gb, duration_days, subscription_url, expires_at, source),
-            )
-            return cur.lastrowid
-
-    def get_custom_configs_for_user(self, user_id: int, source: str = None):
-        with self._get_conn() as conn:
-            if source:
-                return conn.execute(
-                    "SELECT * FROM custom_configs WHERE user_id=? AND source=? ORDER BY id DESC", (user_id, source)
-                ).fetchall()
-            return conn.execute(
-                "SELECT * FROM custom_configs WHERE user_id=? ORDER BY id DESC", (user_id,)
-            ).fetchall()
-
-    def get_test_custom_config_for_user(self, user_id: int):
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT * FROM custom_configs WHERE user_id=? AND source='test' ORDER BY id DESC LIMIT 1",
-                (user_id,),
-            ).fetchone()
-
-    def is_custom_username_taken(self, username: str) -> bool:
-        with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM custom_configs WHERE username=? LIMIT 1", (username,)
-            ).fetchone()
-            return row is not None
-
-    def get_custom_config_settings(self) -> dict:
-        return {
-            "enabled": self.get_setting("custom_config_enabled", "0") == "1",
-            "min_gb": int(self.get_setting("custom_config_min_gb", "5") or 5),
-            "max_gb": int(self.get_setting("custom_config_max_gb", "1000") or 1000),
-            "duration_days": int(self.get_setting("custom_config_duration_days", "30") or 30),
-        }
-
-    # -----------------------------------------------------------------------
-    # نمایندگی بر پایه‌ی استخر حجم (reseller credit)
-    # -----------------------------------------------------------------------
-
-    def is_reseller(self, user_tg_id: int) -> bool:
-        with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT is_reseller FROM users WHERE telegram_id=?", (user_tg_id,)
-            ).fetchone()
-            return bool(row and row["is_reseller"])
-
-    def get_reseller_credit(self, user_tg_id: int) -> int:
-        with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT reseller_credit_gb FROM users WHERE telegram_id=?", (user_tg_id,)
-            ).fetchone()
-            return row["reseller_credit_gb"] if row else 0
-
-    def set_reseller_status(self, user_tg_id: int, enabled: bool):
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE users SET is_reseller=? WHERE telegram_id=?", (1 if enabled else 0, user_tg_id)
-            )
-
-    def adjust_reseller_credit(self, user_tg_id: int, delta_gb: int, admin_id: int = None, reason: str = None):
-        """delta_gb مثبت (شارژ) یا منفی (کسر بابت ساخت کانفیگ) باشد."""
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE users SET reseller_credit_gb = reseller_credit_gb + ? WHERE telegram_id=?",
-                (delta_gb, user_tg_id),
-            )
-            conn.execute(
-                "INSERT INTO reseller_credit_log (user_id, delta_gb, reason, admin_id) VALUES (?, ?, ?, ?)",
-                (user_tg_id, delta_gb, reason, admin_id),
-            )
-
-    def get_reseller_credit_log(self, user_tg_id: int, limit: int = 20):
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT * FROM reseller_credit_log WHERE user_id=? ORDER BY id DESC LIMIT ?",
-                (user_tg_id, limit),
-            ).fetchall()
-
-    def get_resellers(self):
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT * FROM users WHERE is_reseller=1 ORDER BY reseller_credit_gb DESC"
-            ).fetchall()
-
-    def get_reseller_cohort_churn(self, inactivity_days: int = 30, months: int = 6):
-        """تحلیل کوهورت (cohort) و ریزش (churn) نمایندگی‌ها بر پایه‌ی لاگ اعتبار حجمی.
-
-        کوهورت هر نماینده = ماه اولین رکورد او در reseller_credit_log (یعنی اولین
-        شارژ/فعال‌سازی)؛ اگر نماینده‌ای هیچ لاگی نداشته باشد (مثلاً با ست دستی
-        فلگ is_reseller)، ماه عضویتش (joined_at) به‌عنوان جایگزین در نظر گرفته می‌شود.
-        «فعال بودن در ماه» یعنی حداقل یک رکورد لاگ (شارژ یا مصرف) در آن ماه.
-        «ریزش» یعنی نماینده‌ای که is_reseller=1 است ولی طی inactivity_days روز
-        اخیر هیچ رکورد لاگی نداشته (و بیش از همان مدت از عضویتش گذشته باشد).
-        """
-        with self._get_conn() as conn:
-            first_activity = conn.execute(
-                """
-                SELECT u.telegram_id AS tg_id, u.username AS username, u.reseller_credit_gb AS credit_gb,
-                       u.is_reseller AS is_reseller, u.joined_at AS joined_at,
-                       COALESCE(MIN(l.created_at), u.joined_at) AS cohort_at,
-                       MAX(l.created_at) AS last_activity
-                FROM users u
-                LEFT JOIN reseller_credit_log l ON l.user_id = u.telegram_id
-                WHERE u.is_reseller = 1 OR EXISTS (
-                    SELECT 1 FROM reseller_credit_log l2 WHERE l2.user_id = u.telegram_id
-                )
-                GROUP BY u.telegram_id
-                """
-            ).fetchall()
-
-            monthly_activity = conn.execute(
-                """
-                SELECT user_id, strftime('%Y-%m', created_at) AS ym
-                FROM reseller_credit_log
-                GROUP BY user_id, ym
-                """
-            ).fetchall()
-
-        active_months_by_user = {}
-        for row in monthly_activity:
-            active_months_by_user.setdefault(row["user_id"], set()).add(row["ym"])
-
-        def month_key(dt_str):
-            return (dt_str or "")[:7]
-
-        def add_months(ym: str, n: int) -> str:
-            y, m = int(ym[:4]), int(ym[5:7])
-            total = (y * 12 + (m - 1)) + n
-            return f"{total // 12:04d}-{total % 12 + 1:02d}"
-
-        now = datetime.now()
-        cur_ym = now.strftime("%Y-%m")
-        cohort_months = []
-        ym = cur_ym
-        for _ in range(months):
-            cohort_months.append(ym)
-            ym = add_months(ym, -1)
-        cohort_months.reverse()
-
-        cohorts_map = {m: [] for m in cohort_months}
-        for r in first_activity:
-            cm = month_key(r["cohort_at"])
-            if cm in cohorts_map:
-                cohorts_map[cm].append(r["tg_id"])
-
-        cohorts_out = []
-        for cm in cohort_months:
-            members = cohorts_map[cm]
-            size = len(members)
-            retention = []
-            max_offset = add_months(cur_ym, 0)
-            offset = 0
-            probe = cm
-            while probe <= cur_ym:
-                active = sum(1 for uid in members if probe in active_months_by_user.get(uid, ()))
-                retention.append({
-                    "offset": offset,
-                    "month": probe,
-                    "active": active,
-                    "pct": round(active * 100 / size, 1) if size else 0.0,
-                })
-                offset += 1
-                probe = add_months(probe, 1)
-            cohorts_out.append({"cohort_month": cm, "size": size, "retention": retention})
-
-        churn_list = []
-        active_count = 0
-        cutoff = now.timestamp() - inactivity_days * 86400
-
-        def to_ts(dt_str):
-            if not dt_str:
-                return None
-            try:
-                return datetime.fromisoformat(dt_str.replace("Z", "")).timestamp()
-            except ValueError:
-                return None
-
-        current_resellers = [r for r in first_activity if r["is_reseller"]]
-        for r in current_resellers:
-            last_ts = to_ts(r["last_activity"])
-            joined_ts = to_ts(r["joined_at"]) or 0
-            is_new = joined_ts and joined_ts > cutoff
-            if last_ts and last_ts >= cutoff:
-                active_count += 1
-                continue
-            if not last_ts and is_new:
-                active_count += 1
-                continue
-            days_inactive = int((now.timestamp() - (last_ts or joined_ts)) / 86400)
-            churn_list.append({
-                "telegram_id": r["tg_id"],
-                "username": r["username"],
-                "credit_gb": r["credit_gb"],
-                "last_activity": r["last_activity"],
-                "days_inactive": days_inactive,
-            })
-
-        total_resellers = len(current_resellers)
-        churn_list.sort(key=lambda x: -x["days_inactive"])
-        return {
-            "cohorts": cohorts_out,
-            "churn": {
-                "total": total_resellers,
-                "active": active_count,
-                "churned": len(churn_list),
-                "churn_rate": round(len(churn_list) * 100 / total_resellers, 1) if total_resellers else 0.0,
-                "inactivity_days": inactivity_days,
-                "list": churn_list,
-            },
-        }
-
-    def set_reseller_panel(self, user_tg_id: int, panel_server_id):
-        """پنل اختصاصی که ادمین برای این نماینده تعیین کرده (None = پیش‌فرض خودکار)."""
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE users SET reseller_panel_id=? WHERE telegram_id=?", (panel_server_id, user_tg_id)
-            )
-
-    def get_reseller_panel(self, user_tg_id: int):
-        """پنلی که این نماینده باید رویش کانفیگ بسازد: اول پنل اختصاصی‌اش، وگرنه
-        اولین پنل فعالی که برای «نمایندگی» علامت خورده."""
-        with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT reseller_panel_id FROM users WHERE telegram_id=?", (user_tg_id,)
-            ).fetchone()
-            panel_id = row["reseller_panel_id"] if row else None
-            if panel_id:
-                server = conn.execute(
-                    "SELECT * FROM panel_servers WHERE id=? AND is_active=1", (panel_id,)
-                ).fetchone()
-                if server:
-                    return server
-        return self.get_panel_server_for_usage("reseller")
-
-    # -----------------------------------------------------------------------
-    # درخواست خودکار نمایندگی سطح ۲ (ثبت، تایید هزینه، پرداخت، تحویل)
-    # -----------------------------------------------------------------------
-
-    _RESELLER_REQUEST_OPEN_STATUSES = (
-        "pending_review", "awaiting_payment", "awaiting_payment_review", "awaiting_bot_info",
-    )
-
-    def create_reseller_request(self, user_id: int, volume_gb: int, request_text: str) -> int:
-        with self._get_conn() as conn:
-            # status را صراحتاً اینجا ست می‌کنیم و به مقدار پیش‌فرض ستون در schema
-            # تکیه نمی‌کنیم. روی دیتابیس‌های قدیمی‌تر که ستون status از قبل (قبل از
-            # اضافه‌شدن DEFAULT 'pending_review') با ALTER TABLE ساخته شده بود، تکیه
-            # به دیفالت باعث می‌شد status درخواست‌های تازه NULL بماند و دکمه‌ی
-            # «تایید و تعیین هزینه» همیشه با خطای «این درخواست دیگر معتبر نیست»
-            # مواجه شود (چون NULL != 'pending_review'). ست‌کردن صریح این مشکل را
-            # مستقل از تاریخچه‌ی دیتابیس برای همیشه حل می‌کند.
-            known = {
-                "user_id": user_id, "volume_gb": volume_gb, "request_text": request_text,
-                "status": "pending_review",
-            }
-            fields = list(known.keys())
-            values = list(known.values())
-            # بعضی نصب‌های خیلی قدیمی ممکن است ستون‌های اضافی/الزامی (NOT NULL بدون
-            # مقدار پیش‌فرض) در جدول reseller_requests داشته باشند که کد فعلی اصلاً
-            # از آن‌ها استفاده نمی‌کند (مثلاً باقی‌مانده از نسخه‌های قدیمی‌تر پروژه).
-            # به‌جای اینکه با هر نصب قدیمی دوباره به خطای «NOT NULL constraint
-            # failed» بخوریم، این ستون‌های ناشناخته را این‌جا پویا شناسایی کرده
-            # و برایشان یک مقدار بی‌ضرر بر اساس نوعشان می‌فرستیم.
-            for row in conn.execute("PRAGMA table_info(reseller_requests)").fetchall():
-                name = row["name"]
-                if name in known or name in ("id", "created_at", "updated_at"):
-                    continue
-                if row["notnull"] and row["dflt_value"] is None:
-                    col_type = (row["type"] or "").upper()
-                    if "INT" in col_type:
-                        fallback = 0
-                    elif any(t in col_type for t in ("REAL", "FLOA", "DOUB")):
-                        fallback = 0.0
-                    else:
-                        fallback = ""
-                    fields.append(name)
-                    values.append(fallback)
-            placeholders = ", ".join("?" for _ in fields)
-            cur = conn.execute(
-                f"INSERT INTO reseller_requests ({', '.join(fields)}) VALUES ({placeholders})",
-                values,
-            )
-            return cur.lastrowid
-
-    def get_reseller_request(self, request_id: int):
-        with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM reseller_requests WHERE id=?", (request_id,)).fetchone()
-
-    def get_open_reseller_request(self, user_id: int):
-        placeholders = ",".join("?" * len(self._RESELLER_REQUEST_OPEN_STATUSES))
-        with self._get_conn() as conn:
-            return conn.execute(
-                f"SELECT * FROM reseller_requests WHERE user_id=? AND status IN ({placeholders}) "
-                f"ORDER BY id DESC LIMIT 1",
-                (user_id, *self._RESELLER_REQUEST_OPEN_STATUSES),
-            ).fetchone()
-
-    def list_reseller_requests(self, status: str = None):
-        with self._get_conn() as conn:
-            if status:
-                return conn.execute(
-                    "SELECT * FROM reseller_requests WHERE status=? ORDER BY id DESC", (status,)
-                ).fetchall()
-            return conn.execute("SELECT * FROM reseller_requests ORDER BY id DESC").fetchall()
-
-    def list_open_reseller_requests(self):
-        """درخواست‌های نمایندگی‌ای که هنوز باز هستند (رد/کنسل/تکمیل نشده‌اند)."""
-        placeholders = ",".join("?" * len(self._RESELLER_REQUEST_OPEN_STATUSES))
-        with self._get_conn() as conn:
-            return conn.execute(
-                f"SELECT * FROM reseller_requests WHERE status IN ({placeholders}) ORDER BY id DESC",
-                self._RESELLER_REQUEST_OPEN_STATUSES,
-            ).fetchall()
-
-    def is_reseller_request_open(self, status: str) -> bool:
-        return status in self._RESELLER_REQUEST_OPEN_STATUSES
-
-    def admin_cancel_reseller_request(self, request_id: int, admin_id: int):
-        """کنسل دستی یک درخواست نمایندگی توسط ادمین، در هر مرحله‌ای که باشد."""
-        self.set_reseller_request_status(request_id, "cancelled", reviewed_by=admin_id)
-
-    def set_reseller_request_status(self, request_id: int, status: str, **fields):
-        cols, values = ["status=?", "updated_at=CURRENT_TIMESTAMP"], [status]
-        for key, value in fields.items():
-            cols.append(f"{key}=?")
-            values.append(value)
-        values.append(request_id)
-        with self._get_conn() as conn:
-            conn.execute(f"UPDATE reseller_requests SET {', '.join(cols)} WHERE id=?", values)
-
-    def quote_reseller_request(self, request_id: int, price_toman: int, panel_server_id: int, admin_id: int):
-        self.set_reseller_request_status(
-            request_id, "awaiting_payment",
-            price_toman=price_toman, panel_server_id=panel_server_id, reviewed_by=admin_id,
-        )
-
-    def reject_reseller_request(self, request_id: int, status: str, admin_id: int, reason: str = None):
-        self.set_reseller_request_status(request_id, status, reviewed_by=admin_id, reject_reason=reason)
-
-    def set_reseller_request_receipt(self, request_id: int, file_id: str, receipt_type: str = "photo"):
-        self.set_reseller_request_status(
-            request_id, "awaiting_payment_review", receipt_file_id=file_id, receipt_type=receipt_type
-        )
-
-    def approve_reseller_request_payment(self, request_id: int, admin_id: int):
-        self.set_reseller_request_status(request_id, "awaiting_bot_info", reviewed_by=admin_id)
-
-    def set_reseller_request_bot(self, request_id: int, token: str, username: str):
-        self.set_reseller_request_status(
-            request_id, "awaiting_bot_info", bot_token=token, bot_username=username,
-        )
-
-    def complete_reseller_request(self, request_id: int, owner_telegram_id: int):
-        self.set_reseller_request_status(
-            request_id, "completed", owner_telegram_id=owner_telegram_id,
-        )

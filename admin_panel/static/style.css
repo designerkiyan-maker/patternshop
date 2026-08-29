@@ -1,5 +1,5 @@
 /* ===================================================================
-   ShopVPN Admin Panel — flat design system
+   پنل مدیریت فروشگاه الگو — flat design system
    جهت‌گیری: داشبورد فین‌تک مسطح و تمیز — سطوح تخت با رنگ یک‌دست، بدون
    گرادیان‌های دکوری، بدون سایه‌های نئومورفیک/درخشش نئون. عمق فقط از
    طریق کنتراست رنگ سطح‌ها و یک سایه‌ی خیلی ملایم تأمین می‌شود.
@@ -343,19 +343,6 @@ tbody tr:hover{ background:var(--surface-hi); }
 .form-row > *{ flex:1; }
 .modal-actions{ display:flex; gap:10px; margin-top:18px; }
 
-/* ---- بانک کانفیگ: خلاصه‌ی موجودی + لیست لینک‌ها ---------------------- */
-.cfg-stats{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
-.cfg-stat{
-  display:flex; flex-direction:column; gap:5px; padding:11px 12px; border-radius:var(--radius-sm);
-  background:var(--surface-2); border:1px solid var(--border-soft);
-}
-.cfg-stat span{ font-size:11px; color:var(--text-muted); }
-.cfg-stat b{ font-size:15px; }
-.cfg-list-title{ font-size:13px; margin:18px 0 8px; color:var(--text-muted); font-weight:700; }
-.cfg-table-wrap{ max-height:280px; overflow-y:auto; }
-.cfg-link-cell{ font-size:11px; word-break:break-all; max-width:1px; }
-.cfg-actions{ display:flex; gap:6px; white-space:nowrap; }
-
 /* ---- کارت جزئیات کاربر ------------------------------------------------ */
 .ud-head{ display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
 .ud-avatar{
@@ -375,7 +362,7 @@ tbody tr:hover{ background:var(--surface-hi); }
 .ud-stat span{ font-size:11px; color:var(--text-muted); }
 .ud-stat b{ font-size:13.5px; }
 .ud-section-title{ font-size:13px; margin:18px 0 8px; color:var(--text-muted); font-weight:700; }
-@media (max-width:520px){ .cfg-stats, .ud-stats{ grid-template-columns:repeat(2,1fr); } }
+@media (max-width:520px){ .ud-stats{ grid-template-columns:repeat(2,1fr); } }
 
 .toast-root{ position:fixed; bottom:20px; left:20px; z-index:100; display:flex; flex-direction:column; gap:8px; }
 .toast{
@@ -578,6 +565,36 @@ body{ transition: background .2s ease, color .2s ease; }
 .image-field-preview{ max-width:220px; max-height:100px; border-radius:var(--radius-sm); border:1px solid var(--border); object-fit:contain; background:var(--surface-2); }
 .image-field-actions{ display:flex; gap:8px; }
 
+/* ---- محصولات: پیش‌نمایش تصویر در لیست‌ها + ردیف فایل PDF --------------- */
+/* .thumb: بندانگشتی پیش‌نمایش محصول (img با object-fit:cover، یا fallback
+   بدون تصویر با کلاس thumb-fallback) داخل ردیف‌ها/کارت‌ها */
+.thumb{
+  width:44px; height:44px; border-radius:var(--radius-xs); object-fit:cover; flex-shrink:0;
+  background:var(--surface-2); border:1px solid var(--border-soft); display:block;
+}
+.thumb.thumb-fallback{
+  display:flex; align-items:center; justify-content:center;
+  color:var(--text-dim); font-size:16px;
+}
+/* .file-row: ردیف فایل آپلودشده (PDF الگو) با نام/حجم/دکمه‌های اکشن */
+.file-row{
+  display:flex; align-items:center; gap:10px; padding:10px 12px;
+  border-radius:var(--radius-sm); background:var(--surface-2); border:1px solid var(--border-soft);
+}
+.file-row + .file-row{ margin-top:8px; }
+.file-row-icon{
+  width:30px; height:30px; border-radius:var(--radius-xs); flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  background:rgba(115,103,240,.12); color:var(--primary);
+}
+.file-row-icon .icon{ width:15px; height:15px; }
+.file-row-name{
+  flex:1; min-width:0; font-size:12.5px; direction:ltr; text-align:left;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.file-row-size{ font-size:10.5px; color:var(--text-muted); font-family:var(--font-mono); flex-shrink:0; }
+.file-row-actions{ display:flex; gap:6px; flex-shrink:0; }
+
 .color-pick{ display:flex; align-items:center; gap:10px; }
 .color-swatch{
   width:28px; height:28px; border-radius:50%; cursor:pointer; flex-shrink:0;
@@ -770,7 +787,7 @@ html[data-theme="bento"] .topbar-clock{ background:var(--surface-2); border:none
 .bn-row-amount{ font-size:13px; font-weight:800; }
 .bn-row-actions{ display:flex; gap:8px; padding:0 16px 12px; margin-top:-6px; flex-wrap:wrap; }
 
-/* کارت (برای محصولات/کوپن/نمایندگی/پنل) */
+/* کارت (برای محصولات/کوپن/فایل‌ها) */
 .bn-card-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(215px,1fr)); gap:14px; }
 .bn-card{ background:var(--surface); border-radius:22px; padding:16px; box-shadow:var(--shadow-card);
   display:flex; flex-direction:column; gap:8px; transition:transform .15s cubic-bezier(.2,.8,.3,1.2); }
@@ -1048,32 +1065,6 @@ html[data-theme="brutalist"] .topbar-clock{ border-radius:0; border:2px solid #0
 .bru-inbox-meta{ display:flex; flex-direction:column; align-items:flex-end; gap:4px; font-size:10.5px; flex-shrink:0; }
 .bru-inbox-badge{ display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:20px; padding:0 5px;
   border-radius:50%; background:var(--rose); color:#fff; font-size:11px; font-weight:900; border:2px solid #000; }
-
-/* ---- نمایندگی‌ها: کارت اعتباری ------------------------------------------ */
-.bru-reseller-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px; }
-.bru-reseller-card{ border:2.5px solid #000; background:#fff; box-shadow:var(--shadow-btn); padding:14px;
-  display:flex; flex-direction:column; gap:8px; transition:transform .12s, box-shadow .12s; }
-.bru-reseller-card:hover{ transform:translate(-2px,-2px); box-shadow:6px 6px 0 #000; }
-.bru-reseller-top{ display:flex; align-items:center; justify-content:space-between; }
-.bru-reseller-id{ font-size:11px; font-weight:800; color:var(--text-muted); }
-.bru-reseller-name{ font-size:13.5px; font-weight:800; }
-.bru-reseller-credit{ background:#000; color:var(--primary); padding:8px 10px; display:flex; align-items:baseline; gap:6px; }
-.bru-reseller-credit .mono{ font-size:19px; font-weight:900; }
-.bru-reseller-credit small{ font-size:10.5px; font-weight:700; opacity:.8; }
-
-/* ---- پنل‌های VPN: کارت سرور -------------------------------------------- */
-.bru-panel-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px; }
-.bru-server-card{ border:3px solid #000; background:#fff; box-shadow:var(--shadow-card); padding:14px 16px;
-  display:flex; flex-direction:column; gap:8px; transition:transform .12s, box-shadow .12s; }
-.bru-server-card:hover{ transform:translate(-2px,-2px); box-shadow:7px 7px 0 #000; }
-.bru-server-top{ display:flex; align-items:center; gap:9px; }
-.bru-server-dot{ width:11px; height:11px; border-radius:50%; border:2px solid #000; flex-shrink:0; }
-.bru-server-dot.on{ background:var(--emerald); }
-.bru-server-dot.off{ background:var(--rose); }
-.bru-server-name{ font-weight:800; font-size:14px; }
-.bru-server-url{ font-size:11px; direction:ltr; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-muted); }
-[data-test].bru-testing{ animation:bruPulse .7s ease-in-out infinite; }
-@keyframes bruPulse{ 50%{ opacity:.45; } }
 
 /* ---- تنظیمات: سایدبار عمودی + آکاردئون + سوییچ/سواچ برutalist --------- */
 .bru-settings-layout{ display:flex; gap:20px; align-items:flex-start; flex-wrap:wrap; }
@@ -1636,102 +1627,6 @@ html[data-theme="brutalist"] .menu-order-drag-handle{ font-weight:900; }
 .obs-res-label{ font-family: var(--font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); }
 .obs-res-val{ font-family: var(--font-mono); font-size:18px; font-weight:800; }
 
-/* ====================================================== world map === */
-.sv-map-card{ margin-top:16px; }
-.sv-map-head{ margin-bottom:6px; }
-.sv-map-head h3{ display:flex; align-items:center; gap:8px; }
-.sv-map-actions{ display:flex; align-items:center; gap:10px; }
-.sv-map-updated{ font-size:11px; color:var(--text-muted); font-family:var(--font-mono); }
-.sv-map-card > .card-sub{ margin:-6px 0 12px; display:block; }
-
-.sv-map-linkrow{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
-.sv-map-linkrow .input{ flex:1 1 240px; min-width:0; }
-
-.sv-map-checkrow{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; font-size:13px; color:var(--text-muted); }
-.sv-map-checkrow label{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-.sv-map-checkrow .input-sm{ padding:4px 6px; text-align:center; }
-
-.sv-map-stats{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
-
-.sv-map-wrap{
-  position:relative; width:100%; aspect-ratio:2/1; border-radius:var(--radius-sm);
-  background:var(--bg-2); border:1px solid var(--border-soft); overflow:hidden;
-}
-.sv-map-wrap svg{ width:100%; height:100%; display:block; }
-.sv-map-grid line{ stroke:var(--border); stroke-width:1; opacity:.55; vector-effect:non-scaling-stroke; }
-.sv-map-grid line.sv-map-meridian, .sv-map-grid line.sv-map-equator{ opacity:.9; stroke-width:1.3; }
-.sv-map-graticule-path{ fill:none; stroke:var(--border); stroke-width:1; opacity:.5; vector-effect:non-scaling-stroke; }
-.sv-map-land-poly{
-  fill:var(--primary); fill-opacity:.16; stroke:var(--primary); stroke-opacity:.5; stroke-width:1.2;
-  stroke-linejoin:round; vector-effect:non-scaling-stroke; fill-rule:evenodd;
-}
-
-.sv-map-pin{ cursor:pointer; color:var(--text-dim); }
-.sv-map-pin.online{ color:var(--emerald); }
-.sv-map-pin.offline{ color:var(--rose); }
-.sv-map-pin.unknown{ color:var(--amber); }
-.sv-map-dot{ fill:currentColor; filter:drop-shadow(0 0 4px currentColor); transition:r .15s; }
-.sv-map-pin:hover .sv-map-dot{ filter:drop-shadow(0 0 8px currentColor); }
-.sv-map-pulse{
-  fill:none; stroke:currentColor; stroke-width:1.4; opacity:.55;
-  transform-box:fill-box; transform-origin:center; animation:svMapPulse 2.4s ease-out infinite;
-}
-@keyframes svMapPulse{
-  0%{ transform:scale(.35); opacity:.6; }
-  100%{ transform:scale(1.7); opacity:0; }
-}
-
-.sv-map-tooltip{
-  position:absolute; z-index:5; min-width:190px; max-width:230px; padding:10px 12px;
-  background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-sm);
-  box-shadow:var(--shadow-pop); font-size:12px; pointer-events:none;
-}
-.sv-tt-head{ display:flex; align-items:center; gap:6px; margin-bottom:6px; font-size:13px; }
-.sv-tt-head b{ color:var(--text); }
-.sv-tt-country{ color:var(--text-muted); font-size:11px; }
-.sv-tt-name{ color:var(--text); font-size:12px; margin-bottom:4px; word-break:break-word; }
-.sv-tt-ip{ color:var(--text-muted); margin-bottom:4px; font-size:11.5px; }
-.sv-tt-row{ margin-bottom:6px; color:var(--text-muted); }
-.sv-tt-status-online{ color:var(--emerald); }
-.sv-tt-status-offline{ color:var(--rose); }
-.sv-tt-status-unknown{ color:var(--amber); }
-.sv-tt-protocols{ display:flex; flex-wrap:wrap; gap:4px; }
-.sv-tt-source{ margin-top:6px; padding-top:6px; border-top:1px dashed var(--border); color:var(--text-muted); font-size:10.5px; }
-
-.sv-map-empty, .sv-map-loading{
-  position:absolute; inset:0; z-index:4; display:flex; align-items:center; justify-content:center;
-  gap:8px; text-align:center; padding:20px; color:var(--text-muted); font-size:13px; background:var(--bg-2);
-}
-.sv-map-spinner{
-  width:16px; height:16px; border-radius:50%; flex-shrink:0;
-  border:2.5px solid var(--border); border-top-color:var(--primary); animation:svMapSpin .8s linear infinite;
-}
-@keyframes svMapSpin{ to{ transform:rotate(360deg); } }
-
-.sv-map-legend{ display:flex; gap:16px; margin-top:12px; font-size:12px; color:var(--text-muted); flex-wrap:wrap; }
-.sv-map-legend .dot, .sv-map-list .dot{
-  display:inline-block; width:8px; height:8px; border-radius:50%; margin-inline-end:5px; vertical-align:middle;
-}
-.dot.online{ background:var(--emerald); }
-.dot.offline{ background:var(--rose); }
-.dot.unknown{ background:var(--amber); }
-
-.sv-map-list{ margin-top:12px; display:flex; flex-direction:column; gap:6px; max-height:270px; overflow-y:auto; }
-.sv-map-list-row{
-  display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:var(--radius-xs);
-  background:var(--surface-2); cursor:pointer; font-size:12.5px; transition:background .15s;
-}
-.sv-map-list-row:hover{ background:var(--surface-hi); }
-.sv-ml-flag{ font-size:15px; }
-.sv-ml-name{ flex:1; min-width:0; display:flex; flex-direction:column; overflow:hidden; }
-.sv-ml-name small{ color:var(--text-muted); font-size:10.5px; }
-.sv-ml-ip{ color:var(--text-muted); font-size:11px; }
-.sv-ml-count{ color:var(--text); font-size:11.5px; flex-shrink:0; }
-
-@media (max-width:640px){
-  .sv-map-wrap{ aspect-ratio:2/1; }
-  .sv-ml-ip{ display:none; }
-}
 @keyframes warpDrift{
   0%,100%{ transform:translate(0,0) scale(1); }
   50%{ transform:translate(-30px,26px) scale(1.08); }

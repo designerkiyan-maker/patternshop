@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+"""تعریف State های FSM برای مکالمات چندمرحله‌ای (فروش الگوی خیاطی)."""
+
 from aiogram.fsm.state import State, StatesGroup
 
 
@@ -32,24 +34,26 @@ class AdminAddProduct(StatesGroup):
     waiting_name = State()
     waiting_price = State()
     waiting_desc = State()
-    waiting_duration = State()
-    waiting_provision_choice = State()
-    waiting_provision_server = State()
-    waiting_auto_provision_volume = State()
+    waiting_preview = State()
+    waiting_files = State()
 
 
-class AdminAddConfigs(StatesGroup):
+class AdminProductFiles(StatesGroup):
     waiting_product = State()
-    waiting_links = State()
+    waiting_files = State()
 
 
-class AdminAddTestConfigs(StatesGroup):
-    waiting_links = State()
+class AdminProductPreview(StatesGroup):
+    waiting_product = State()
+    waiting_photo = State()
 
 
-class AdminTestConfigSettings(StatesGroup):
-    waiting_volume = State()
-    waiting_duration = State()
+class AdminSampleFiles(StatesGroup):
+    waiting_files = State()
+
+
+class AdminResetSample(StatesGroup):
+    waiting_message = State()
 
 
 class AdminForceJoin(StatesGroup):
@@ -63,10 +67,6 @@ class AdminEditButton(StatesGroup):
 class AdminSetCard(StatesGroup):
     waiting_number = State()
     waiting_holder = State()
-
-
-class AdminSetPlisio(StatesGroup):
-    waiting_key = State()
 
 
 class AdminBroadcast(StatesGroup):
@@ -115,24 +115,6 @@ class AdminReferralInviteBonusMax(StatesGroup):
     waiting_value = State()
 
 
-class AdminResellerCredit(StatesGroup):
-    waiting_user_id = State()
-    waiting_delta = State()
-
-
-class AdminAddResellerBot(StatesGroup):
-    waiting_token = State()
-    waiting_owner_id = State()
-    waiting_owner_name = State()
-    waiting_level = State()
-
-
-class AdminSetPanelDomain(StatesGroup):
-    """آدرس دامنه‌ی پنل مدیریت وب مستقل (برای ساخت لینک راه‌اندازی پنل نماینده‌های
-    کامل). فقط داخل دیتابیس ذخیره می‌شود، نیازی به دست‌زدن به .env نیست."""
-    waiting_url = State()
-
-
 class AdminWheelSettings(StatesGroup):
     waiting_win_percent = State()
     waiting_prizes = State()
@@ -140,81 +122,6 @@ class AdminWheelSettings(StatesGroup):
     waiting_cooldown = State()
 
 
-class AdminRenewalSettings(StatesGroup):
-    waiting_days_before = State()
-    waiting_percent = State()
-    waiting_expiry_hours = State()
-
-
-class AdminStockAlertSettings(StatesGroup):
-    waiting_threshold = State()
-
-
-class AdminVolumeReminderSettings(StatesGroup):
-    waiting_percent = State()
-    waiting_gb_left = State()
-    waiting_discount_percent = State()
-    waiting_discount_hours = State()
-
-
 class AdminRestoreBackup(StatesGroup):
     waiting_file = State()
     waiting_confirm = State()
-
-
-class AdminAddPanelServer(StatesGroup):
-    waiting_name = State()
-    waiting_type = State()
-    waiting_url = State()
-    waiting_username = State()
-    waiting_password = State()
-    waiting_template_user = State()
-    waiting_inbound_select = State()
-    waiting_sub_base_url = State()
-
-
-class AdminSetPanelTemplate(StatesGroup):
-    waiting_username = State()
-
-
-class AdminSetPanelSubUrl(StatesGroup):
-    waiting_url = State()
-
-
-class AdminAddPricingTier(StatesGroup):
-    waiting_from_gb = State()
-    waiting_to_gb = State()
-    waiting_price = State()
-
-
-class AdminCustomConfigSettings(StatesGroup):
-    waiting_min_gb = State()
-    waiting_max_gb = State()
-
-
-class AdminResetTestConfig(StatesGroup):
-    waiting_message = State()
-
-
-class CustomConfigFlow(StatesGroup):
-    waiting_username = State()
-    waiting_volume = State()
-    waiting_receipt = State()
-
-
-class ResellerFlow(StatesGroup):
-    waiting_username = State()
-    waiting_volume = State()
-
-
-class ResellerRequestFlow(StatesGroup):
-    waiting_volume = State()
-    waiting_text = State()
-    waiting_receipt = State()
-    waiting_bot_token = State()
-    waiting_owner_id = State()
-
-
-class AdminResellerRequestFlow(StatesGroup):
-    waiting_price = State()
-    waiting_reject_reason = State()

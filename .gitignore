@@ -1,0 +1,19 @@
+# secrets
+.env
+
+# runtime data
+*.db
+*.db.fsm.sqlite3*
+*.db-wal
+*.db-shm
+logs/
+backups/
+bot_database.db
+
+# python
+venv/
+__pycache__/
+*.pyc
+
+# tooling
+.mimosa/

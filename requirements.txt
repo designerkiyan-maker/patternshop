@@ -1,11 +1,7 @@
 aiogram>=3.30.0
 python-dotenv>=1.0.0
-qrcode[pil]>=7.4.2
 fastapi>=0.110
 uvicorn>=0.29
 python-multipart>=0.0.9
 aiohttp>=3.9
-aiodns>=3.2
-psutil>=5.9
 pywebpush>=2.0.0
-
