@@ -20,13 +20,20 @@ from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest, TelegramNetworkError
 
 import keyboards as kb
-from states import BuyFlow, ContactFlow, DiscountEntry, WalletTopup, LoyaltyRedeem
+from states import BuyFlow, CartFlow, ContactFlow, DiscountEntry, WalletTopup, LoyaltyRedeem
 from config import MAX_TEST_PER_USER
 from file_delivery import deliver_pattern_to_user
 from force_join import is_channel_member, CHECK_CALLBACK
 import loyalty
 from loyalty import LoyaltyError
 from jalali import to_jalali_str
+from services import cart as cart_svc
+from services import checkout as checkout_svc
+from services import orders as orders_svc
+from services.errors import (
+    CartError, CatalogError, CheckoutError, DiscountError,
+    EmptyCartError, InventoryError, ShopError, WalletError,
+)
 
 
 async def _send_admin_notification(bot, admin_id, send_coro_factory, context_label: str, ref_id: int):
@@ -351,7 +358,8 @@ def create_user_router(db) -> Router:
 
         total_price = product["price"]
         discount_amount = (await asyncio.to_thread(db.compute_discount_amount, code_row, total_price))
-        await state.update_data(discount_code_id=code_row["id"], discount_amount=discount_amount)
+        await state.update_data(discount_code=message.text.strip(),
+                                discount_code_id=code_row["id"], discount_amount=discount_amount)
         await state.set_state(None)
 
         wallet_credit = (await asyncio.to_thread(db.get_wallet_credit, message.from_user.id))
@@ -415,78 +423,138 @@ def create_user_router(db) -> Router:
             if sent:
                 (await asyncio.to_thread(db.set_order_admin_message, order_id, admin_id, sent.message_id))
 
-    @router.callback_query(F.data.startswith("buy_start:"))
-    async def cb_buy_start(call: CallbackQuery, state: FSMContext, bot: Bot):
-        # فروش تک‌عددی است؛ عدد بعدی در callback_data (qty) عمداً نادیده گرفته می‌شود
-        _, product_id, _qty = call.data.split(":")
-        product_id = int(product_id)
-        product = (await asyncio.to_thread(db.get_product, product_id))
-        has_files = (await asyncio.to_thread(db.has_product_files, product_id))
-        if not product or not has_files:
-            await call.answer("این الگو در حال حاضر موجود نیست.", show_alert=True)
-            return
+    async def _cart_menu_text(summary: dict) -> str:
+        lines = ["🛒 سبد خرید شما:", ""]
+        if not summary["items"]:
+            lines.append("سبد شما خالی است.")
+        else:
+            for it in summary["items"]:
+                unit = it["variant_price"] if it["variant_price"] is not None else it["product_price"]
+                var = (it["variant_label"] or "")
+                name = it["product_name"] + (f" ({var})" if var else "")
+                lines.append(f"{name} | {int(it['quantity'])} × {int(unit):,}")
+            lines.append("")
+        lines.append(f"💰 جمع اقلام: {int(summary['subtotal']):,} تومان")
+        return "\n".join(lines)
 
-        data = await state.get_data()
-        discount_code_id = data.get("discount_code_id")
-        discount_amount = data.get("discount_amount", 0) or 0
-
-        total_price = product["price"]
-        wallet_credit = (await asyncio.to_thread(db.get_wallet_credit, call.from_user.id))
-        price_after_code = max(total_price - discount_amount, 0)
-        wallet_used = min(wallet_credit, price_after_code)
-
-        if wallet_used > 0:
-            (await asyncio.to_thread(db.add_wallet_credit, call.from_user.id, -wallet_used))
-        if discount_code_id:
-            (await asyncio.to_thread(db.increment_discount_usage, discount_code_id))
-
-        order_id = (await asyncio.to_thread(db.create_order, 
-            call.from_user.id,
-            product_id,
-            base_price=total_price,
-            wallet_used=wallet_used,
-            discount_code_id=discount_code_id,
-            discount_amount=discount_amount,
-        ))
-        order = (await asyncio.to_thread(db.get_order, order_id))
-        await state.update_data(order_id=order_id)
-        await state.update_data(discount_code_id=None, discount_amount=0, discount_product_id=None)
-
-        if order["final_price"] <= 0:
-            await state.clear()
-
-            files = (await asyncio.to_thread(db.get_product_files, product_id))
+    async def _try_deliver_digital(bot: Bot, tg_id: int, result):
+        """تحویل فایل‌های الگوییِ اقلام دیجیتالِ یک سفارش تأییدشده."""
+        for it in result.items:
+            if it.product_type != "digital":
+                continue
+            files = (await asyncio.to_thread(db.get_product_files, it.product_id))
             if not files:
-                # الگو بدون فایل شده: سفارش را رد کن، مبلغ کسرشده از کیف پول/کد تخفیف را برگردان و به ادمین اطلاع بده
-                (await asyncio.to_thread(db.reject_order, order_id))
-                # برگشت امتیاز باشگاه مشتریان این سفارش (اگر قبلاً اعطا شده باشد؛ idempotent)
-                try:
-                    (await asyncio.to_thread(loyalty.reverse_purchase, db, order_id))
-                except Exception:
-                    logging.getLogger("handlers_user").exception(
-                        "برگشت امتیاز سفارش #%s هنگام عدم موجودی ناموفق بود.", order_id
-                    )
-                await _notify_admins_of_order(bot, order_id)
-                await call.message.edit_text(
-                    "⛔️ این الگو در حال حاضر موجود نیست.\n"
-                    "مبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد. لطفاً بعداً دوباره تلاش کنید "
-                    "یا با پشتیبانی در تماس باشید."
-                )
-                await call.answer()
-                return
-            (await asyncio.to_thread(db.approve_order, order_id, [f["id"] for f in files]))
-            # امتیاز باشگاه مشتریان بابت این خرید (idempotent؛ هر خطا نباید
-            # روند تحویل سفارش را متوقف کند)
+                continue
             try:
-                awarded = (await asyncio.to_thread(loyalty.award_purchase, db, order_id))
+                await deliver_pattern_to_user(
+                    bot, tg_id, it.product_name, [f["file_id"] for f in files], 0, result.order_id
+                )
             except Exception:
                 logging.getLogger("handlers_user").exception(
-                    "اعطای امتیاز باشگاه مشتریان برای سفارش #%s ناموفق بود.", order_id
+                    "تحویل فایل سفارش #%s برای کاربر %s ناموفق بود.", result.order_id, tg_id
                 )
-                awarded = 0
-            reward_info = (await asyncio.to_thread(db.reward_referrer_if_first_purchase, call.from_user.id, order["base_price"]))
-            if reward_info:
-                reward_amount, referrer_id = reward_info
+
+    async def _show_cart_menu(call: CallbackQuery):
+        summary = (await asyncio.to_thread(cart_svc.cart_summary, db, call.from_user.id))
+        await call.message.edit_text(await _cart_menu_text(summary),
+                                     reply_markup=kb.cart_menu_kb(summary))
+        await call.answer()
+
+    async def _run_checkout(call: CallbackQuery, state: FSMContext, bot: Bot):
+        """تسویه‌ی اتمیک سبد از طریق لایه‌ی سرویس (یکسان با Mini App/پنل وب).
+        روش ارسال و آدرس از FSM خوانده می‌شوند؛ در صورت نیاز کاربر به انتخاب
+        روش ارسال / ثبت آدرس هدایت می‌شود."""
+        tg_id = call.from_user.id
+        data = await state.get_data()
+        discount_code = data.get("discount_code") or None
+        shipping_method_id = data.get("cart_ship_id") or None
+        address_id = data.get("cart_address_id") or None
+
+        try:
+            result = (await asyncio.to_thread(
+                checkout_svc.checkout_cart, db, tg_id,
+                discount_code=discount_code,
+                shipping_method_id=shipping_method_id,
+                address_id=address_id,
+            ))
+        except ShopError as e:
+            if e.code == "shipping_required":
+                methods = (await asyncio.to_thread(db.list_shipping_methods, True))
+                if not methods:
+                    return await call.message.edit_text(
+                        "📦 سبد شما شامل کالای فیزیکی است، اما هنوز روش ارسالی ثبت نشده است. "
+                        "لطفاً با پشتیبانی در تماس باشید."
+                    )
+                return await call.message.edit_text(
+                    "📦 این سبد شامل کالای فیزیکی است.\nروش ارسال را انتخاب کنید:",
+                    reply_markup=kb.shipping_methods_kb(methods),
+                )
+            if e.code == "address_required":
+                addresses = (await asyncio.to_thread(db.list_addresses, tg_id))
+                text = "📍 برای کالای فیزیکی، آدرس گیرنده را انتخاب کنید یا آدرس جدید ثبت کنید:"
+                if not addresses:
+                    text = "📍 برای کالای فیزیکی، آدرس گیرنده را ثبت کنید:"
+                return await call.message.edit_text(text, reply_markup=kb.address_choices_kb(addresses))
+            if e.code == "cart_empty":
+                return await call.answer("سبد خرید شما خالی است.", show_alert=True)
+            if isinstance(e, (InventoryError, CatalogError, WalletError)):
+                return await call.answer(e.message, show_alert=True)
+            if isinstance(e, DiscountError) or e.code == "discount_exhausted":
+                # کد تخفیف مصرف/باطل شد: پاکش کن تا کاربر بدون کد ادامه دهد
+                await state.update_data(discount_code=None, discount_code_id=None,
+                                        discount_amount=0, discount_product_id=None)
+                return await call.answer(e.message, show_alert=True)
+            return await call.answer(e.message or "متأسفانه امکان تسویه سبد وجود ندارد.", show_alert=True)
+        except Exception:
+            logging.getLogger("handlers_user").exception("تسویه سبد کاربر %s ناموفق بود.", tg_id)
+            return await call.answer("خطای داخلی در تسویه سبد رخ داد؛ کمی بعد دوباره تلاش کنید.", show_alert=True)
+
+        discount_amount_prev = data.get("discount_amount", 0) or 0
+        await state.update_data(discount_code=None, discount_code_id=None,
+                                discount_amount=0, discount_product_id=None,
+                                cart_ship_id=None, cart_address_id=None)
+
+        if result.status != "approved":
+            # پرداخت ناقص: کاربر رسید می‌فرستد و ادمین تأیید می‌کند (همان مسیر قدیمی)
+            await state.update_data(order_id=result.order_id)
+            await state.set_state(BuyFlow.waiting_receipt)
+
+            card_number = (await asyncio.to_thread(db.get_setting, "card_number"))
+            card_holder = (await asyncio.to_thread(db.get_setting, "card_holder"))
+            after_buy_text = (await asyncio.to_thread(db.get_setting, "after_buy_text"))
+
+            text = f"{after_buy_text}\n\n"
+            text += f"💳 شماره کارت: `{card_number}`\n"
+            text += f"👤 به نام: {card_holder}\n"
+            if discount_amount_prev:
+                text += f"🎟 تخفیف کد: {discount_amount_prev:,} تومان\n"
+            if result.wallet_used:
+                text += f"👛 استفاده از کیف پول: {result.wallet_used:,} تومان\n"
+            if result.shipping_cost:
+                text += f"📦 هزینه ارسال: {result.shipping_cost:,} تومان\n"
+            text += f"💰 مبلغ نهایی قابل پرداخت: {result.final_price:,} تومان\n\n"
+            text += "لطفاً عکس رسید پرداخت را همینجا ارسال کنید."
+
+            await call.message.edit_text(text, parse_mode="Markdown",
+                                          reply_markup=kb.payment_choice_kb())
+            await call.answer()
+            return
+
+        # تأیید خودکار (پرداخت کامل با کیف پول/تخفیف): تحویل فایل + اطلاع ادمین
+        await _try_deliver_digital(bot, tg_id, result)
+        try:
+            await _notify_admins_of_order(bot, result.order_id)
+        except Exception:
+            pass
+
+        # امتیاز باشگاه + پورسانت زیرمجموعه (idempotent؛ یکسان با پنل وب)
+        awarded = 0
+        try:
+            award_info = (await asyncio.to_thread(orders_svc.award_after_approve, db, result.order_id))
+            awarded = award_info["loyalty_points"] or 0
+            reward = award_info["referral"]
+            if reward:
+                reward_amount, referrer_id = reward
                 try:
                     await bot.send_message(
                         referrer_id,
@@ -495,52 +563,120 @@ def create_user_router(db) -> Router:
                     )
                 except Exception:
                     pass
-
-            # اطلاع‌رسانی به ادمین‌ها فقط جهت آگاهی (نیازی به تایید دستی نیست)
-            try:
-                await _notify_admins_of_order(bot, order_id)
-            except Exception:
-                pass
-
-            success_text = (
-                "✅ مبلغ سفارش شما به‌طور کامل از کیف پول/تخفیف پوشش داده شد.\n"
-                "فایل الگوی شما در پیام بعدی ارسال می‌شود 👇"
+        except Exception:
+            logging.getLogger("handlers_user").exception(
+                "اعطای امتیاز/پورسانت سفارش خودکار #%s ناموفق بود.", result.order_id
             )
-            if awarded > 0:
-                success_text += f"\n🎁 {awarded} امتیاز باشگاه مشتریان به شما اضافه شد."
-            await call.message.edit_text(success_text)
-            await deliver_pattern_to_user(
-                bot,
-                call.from_user.id,
-                product["name"],
-                [f["file_id"] for f in files],
-                0,
-                order_id,
-            )
-            await call.answer()
+
+        lines = ["✅ سفارش شما ثبت و تأیید شد."]
+        if result.final_price <= 0:
+            lines.append("مبلغ آن به‌طور کامل از کیف پول/تخفیف پوشش داده شد.")
+        if awarded:
+            lines.append(f"🎁 {awarded} امتیاز باشگاه مشتریان اضافه شد.")
+        if result.items and all(i.product_type == "digital" for i in result.items):
+            lines.append("فایل‌های الگو پس از این پیام ارسال می‌شوند 👇")
+        else:
+            lines.append("سفارش کالای فیزیکی شما وارد جریان ارسال شد.")
+        await call.message.edit_text("\n".join(lines))
+        await state.clear()
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("buy_start:"))
+    async def cb_buy_start(call: CallbackQuery, state: FSMContext, bot: Bot):
+        _, product_id, _qty = call.data.split(":")
+        product_id = int(product_id)
+        product = (await asyncio.to_thread(db.get_product, product_id))
+        if not product:
+            await call.answer("این الگو در حال حاضر موجود نیست.", show_alert=True)
+            return
+        # افزودن به سبدِ سرور؛ تسویه هم از همان لایه‌ی اتمیک انجام می‌شود
+        try:
+            (await asyncio.to_thread(cart_svc.add_to_cart, db, call.from_user.id, product_id, None, 1))
+        except (CartError, CatalogError) as e:
+            await call.answer(e.message, show_alert=True)
             return
 
-        await state.set_state(BuyFlow.waiting_receipt)
+        summary = (await asyncio.to_thread(cart_svc.cart_summary, db, call.from_user.id))
+        if summary["count"] == 1 and not summary["has_physical"]:
+            # خرید تک‌دیجیتال: همان تجربه‌ی قدیمیِ «یک‌کلیکی» - مستقیم تسویه
+            return await _run_checkout(call, state, bot)
+        await _show_cart_menu(call)
 
-        card_number = (await asyncio.to_thread(db.get_setting, "card_number"))
-        card_holder = (await asyncio.to_thread(db.get_setting, "card_holder"))
-        after_buy_text = (await asyncio.to_thread(db.get_setting, "after_buy_text"))
+    @router.callback_query(F.data == "cart_show")
+    async def cb_cart_show(call: CallbackQuery):
+        await _show_cart_menu(call)
 
-        text = f"{after_buy_text}\n\n"
-        text += f"💳 شماره کارت: `{card_number}`\n"
-        text += f"👤 به نام: {card_holder}\n"
-        if discount_amount:
-            text += f"🎟 تخفیف کد: {discount_amount:,} تومان\n"
-        if wallet_used:
-            text += f"👛 استفاده از کیف پول: {wallet_used:,} تومان\n"
-        text += f"💰 مبلغ نهایی قابل پرداخت: {order['final_price']:,} تومان\n\n"
-        text += "لطفاً عکس رسید پرداخت را همینجا ارسال کنید."
+    @router.callback_query(F.data.startswith("cart_dec:") | F.data.startswith("cart_inc:"))
+    async def cb_cart_qty(call: CallbackQuery):
+        op, raw = call.data.split(":")
+        item_id = int(raw)
+        try:
+            target = None
+            for it in (await asyncio.to_thread(cart_svc.cart_summary, db, call.from_user.id))["items"]:
+                if it["id"] == item_id:
+                    target = it
+            if target is None:
+                raise CartError("قلم سبد پیدا نشد.", code="item_not_found")
+            new_qty = int(target["quantity"]) + (1 if op == "cart_inc" else -1)
+            if new_qty < 1:
+                return await call.answer("تعداد نمی‌تواند کمتر از ۱ باشد.")
+            (await asyncio.to_thread(cart_svc.update_quantity, db, call.from_user.id, item_id, new_qty))
+        except CartError as e:
+            return await call.answer(e.message, show_alert=True)
+        await _show_cart_menu(call)
 
+    @router.callback_query(F.data.startswith("cart_del:"))
+    async def cb_cart_del(call: CallbackQuery):
+        item_id = int(call.data.split(":")[1])
+        (await asyncio.to_thread(cart_svc.remove_from_cart, db, call.from_user.id, item_id))
+        await _show_cart_menu(call)
+
+    @router.callback_query(F.data == "cart_clear")
+    async def cb_cart_clear(call: CallbackQuery):
+        (await asyncio.to_thread(cart_svc.clear_cart, db, call.from_user.id))
+        await _show_cart_menu(call)
+
+    @router.callback_query(F.data == "cart_checkout")
+    async def cb_cart_checkout(call: CallbackQuery, state: FSMContext, bot: Bot):
+        await _run_checkout(call, state, bot)
+
+    @router.callback_query(F.data.startswith("cart_ship:"))
+    async def cb_cart_ship(call: CallbackQuery, state: FSMContext, bot: Bot):
+        await state.update_data(cart_ship_id=int(call.data.split(":")[1]))
+        await _run_checkout(call, state, bot)
+
+    @router.callback_query(F.data.startswith("cart_addr:"))
+    async def cb_cart_addr(call: CallbackQuery, state: FSMContext, bot: Bot):
+        await state.update_data(cart_address_id=int(call.data.split(":")[1]))
+        await _run_checkout(call, state, bot)
+
+    @router.callback_query(F.data == "cart_addr_new")
+    async def cb_cart_addr_new(call: CallbackQuery, state: FSMContext):
+        await state.set_state(CartFlow.waiting_address)
         await call.message.edit_text(
-            text, parse_mode="Markdown",
-            reply_markup=kb.payment_choice_kb(),
+            "📍 آدرس گیرنده (استان، شهر، نشانی کامل، کد پستی) را به‌صورت متن ارسال کنید:",
+            reply_markup=kb.cancel_kb(),
         )
         await call.answer()
+
+    @router.message(CartFlow.waiting_address)
+    async def process_cart_address(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("لطفاً آدرس را به‌صورت متن ارسال کنید.", reply_markup=kb.cancel_kb())
+            return
+        addr_id = (await asyncio.to_thread(
+            db.add_address, message.from_user.id,
+            message.from_user.first_name or "", message.from_user.username or "",
+            "", "", text, "",
+        ))
+        await state.update_data(cart_address_id=addr_id)
+        await state.set_state(None)
+        summary = (await asyncio.to_thread(cart_svc.cart_summary, db, message.from_user.id))
+        await message.answer(
+            "✅ آدرس ذخیره شد. برای تکمیل خرید، دکمه‌ی تسویه را بزنید:",
+            reply_markup=kb.cart_menu_kb(summary),
+        )
 
     @router.callback_query(F.data == "cancel_flow")
     async def cb_cancel_flow(call: CallbackQuery, state: FSMContext):

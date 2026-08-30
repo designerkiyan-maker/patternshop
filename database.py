@@ -19,27 +19,34 @@ from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
-# مجوزهای granular پنل وب مدیریت. هر ادمین (به‌جز owner که همیشه دسترسی کامل
-# دارد) یک زیرمجموعه دلخواه از این کلیدها را می‌تواند داشته باشد.
+# مجوزهای granular پنل مدیریت (وب و تلگرام مشترک هستند؛ یک سیستم مدیریت واحد).
+# هر ادمین (به‌جز owner که همیشه دسترسی کامل دارد) یک زیرمجموعه دلخواه از این
+# کلیدها را می‌تواند داشته باشد.
 WEB_ADMIN_PERMISSIONS = (
     "orders",      # تأیید/رد سفارش و شارژ کیف پول
     "users",       # بلاک/آنبلاک کاربر، تنظیم دستی موجودی کیف پول
-    "catalog",     # دسته‌بندی‌ها، محصولات، فایل‌های الگو
+    "catalog",     # دسته‌بندی‌ها، محصولات، فایل‌های الگو، واریانت‌ها
     "discounts",   # کدهای تخفیف
     "tickets",     # پاسخ/بستن تیکت و چت زنده پشتیبانی
     "broadcast",   # ارسال پیام همگانی
     "system",      # وضعیت جاب‌های سیستمی، وضعیت بکاپ، لاگ فعالیت ادمین‌ها
     "settings",    # تنظیمات و برندینگ
     "backup",      # ساخت بکاپ فوری دیتابیس (بازیابی همیشه فقط برای owner است)
+    "inventory",   # مدیریت موجودی/آستانه‌ی هشدار واریانت‌های فیزیکی
+    "shipping",    # روش‌های ارسال و تکمیل/پیگیری ارسال فیزیکی
 )
 
-# نگاشت نقش‌های ثابت قدیمی به مجوزهای معادل، فقط برای مهاجرت داده‌های قبلی.
+# نگاشت نقش‌های ثابت (تلگرام و وب هر دو) به مجوزهای معادل - این همان «ماتریس
+# کانونیکال» است و هر دو رابط باید از همین یک ماتریس بخوانند تا تضاد نقش وجود
+# نداشته باشد (آسیب P1-3: تلگرام به پشتیبان اجازه‌ی تایید سفارش می‌داد ولی وب به
+# او هیچ مجوزی نمی‌داد). پشتیبان (support) دقیقاً همان کاری که از نقشش برمی‌آید
+# - پشتیبانی/تیکت - را در هر دو سطح انجام می‌دهد؛ تصمیمات مالی (سفارش/شارژ) نه.
 ROLE_PERMISSION_PRESETS = {
     "owner": list(WEB_ADMIN_PERMISSIONS),
     "admin": ["orders", "users", "catalog", "discounts", "tickets", "broadcast",
-              "system", "settings"],
-    "mid": ["orders", "users", "tickets", "broadcast"],
-    "support": [],
+              "system", "settings", "inventory", "shipping"],
+    "mid": ["orders", "users", "tickets", "broadcast", "inventory"],
+    "support": ["tickets"],
 }
 
 
@@ -132,6 +139,8 @@ DEFAULT_SETTINGS = {
     "loyalty_tiers": '[{"id":"bronze","name":"🥉 برنز","min":0,"mult":100},{"id":"silver","name":"🥈 نقره‌ای","min":500,"mult":110},{"id":"gold","name":"🥇 طلایی","min":2000,"mult":125},{"id":"platinum","name":"💎 پلاتینیوم","min":5000,"mult":150}]',
     "btn_loyalty": "🎁 باشگاه مشتریان",
     "btn_loyalty_style": "",
+    # بنرهای مینی‌اپ (پیش‌فرض‌های مینی‌اپ فروشگاه الگو)
+    "miniapp_banners": '',
     # چیدمان دکمه‌های منوی اصلی (ترتیب و نمایش) - آرایه JSON از کلیدها
     "menu_order": '["btn_buy","btn_test","btn_my_orders","btn_wallet","btn_referral","btn_wheel","btn_loyalty","btn_contact","btn_admin_panel"]',
 }
@@ -154,6 +163,35 @@ MENU_BUTTON_META = {
 DEFAULT_MENU_ORDER = [
     "btn_buy", "btn_test", "btn_my_orders", "btn_wallet", "btn_referral",
     "btn_wheel", "btn_loyalty", "btn_contact", "btn_admin_panel",
+]
+
+
+# بنرهای پیش‌فرض مینی‌اپ (پیش‌فرض‌های مینی‌اپ فروشگاه الگو)
+DEFAULT_BANNERS = [
+    {
+        "id": "b_store",
+        "icon": "🧵",
+        "title": "الگوهای جدید را ببین!",
+        "sub": "کاتالوگ الگوهای خیاطی با دانلود آنی",
+        "cta": "بریم فروشگاه",
+        "nav": "store",
+        "bg": "linear-gradient(120deg, #0d1a12, #123a20 55%, #17532c)",
+        "image": "",
+        "image_only": False,
+        "enabled": True,
+    },
+    {
+        "id": "b_referral",
+        "icon": "🤝",
+        "title": "دوستاتو دعوت کن",
+        "sub": "با دعوت از دوستان، اعتبار رایگان به کیف پولت اضافه کن.",
+        "cta": "مشاهده لینک دعوت",
+        "nav": "referral",
+        "bg": "linear-gradient(120deg,#1a0d24,#3a1c33 55%,#53174a)",
+        "image": "",
+        "image_only": False,
+        "enabled": True,
+    },
 ]
 
 
@@ -181,7 +219,16 @@ class Database:
         # (مثلاً main_db) دسترسی داشته باشند. بات‌های aiogram هم در یک
         # event loop تک‌رشته‌ای هستند، پس این لاک برای آن‌ها overhead
         # واقعی ندارد ولی برای مینی‌اپ لازم است.
-        self._lock = threading.Lock()
+        #
+        # RLock (به‌جای Lock): توابعی مثل reward_referrer_if_first_purchase
+        # قبلاً داخل خودشان (در حالی که اتصال را گرفته‌اند) get_setting صدا
+        # می‌زدند که آن هم دوباره _get_conn را صدا می‌زند؛ با Lock معمولی این
+        # دقیقاً مسیر deadlock (قفل روی همان اتصال مشترک) بود. RLock اجازه‌ی
+        # ورود مجدد همان ترد را می‌دهد و چون تمام دسترسی‌ها به اتصال همچنان
+        # زیر همین قفل سری‌سازی می‌شوند، کلاس ترد-ایمن می‌ماند. (با این حال
+        # از نظر بهترین‌روش، به‌جای تکیه بر RLock، خواندن تنظیمات را هم از
+        # داخل بلوک‌های دارای اتصال بیرون کشیده‌ایم.)
+        self._lock = threading.RLock()
 
     async def cache_autorefresh_loop(self, interval: float = 2.0):
         """فقط برای پردازش بات (aiogram) استفاده می‌شود، نه مینی‌اپ/پنل وب.
@@ -257,6 +304,34 @@ class Database:
             except Exception:
                 self._conn.rollback()
                 raise
+
+    @contextmanager
+    def transaction(self):
+        """تراکنش فوری (`BEGIN IMMEDIATE`) روی اتصال مشترک، برای عملیات مرکب
+        اتمیک (تسویه‌ی سبد، رزرو موجودی، تأیید/رد مالی).
+
+        BEGIN IMMEDIATE هنگام شروع، قفل نوشتن را رزرو می‌کند؛ نتیجه در حالت
+        concurrent (مثلاً دو تسویه‌ی هم‌زمان از یک سبد بین پردازش بات و Mini App)
+        سری‌سازیِ خودکار است: فراخوانی دوم تا commit شدن فراخوانی اول صبر می‌کند
+        و سپس وضعیت متعهدشده را می‌بیند.
+
+        هشدار: داخل این بلوک فقط باید دستور SQL مستقیم روی conn اجرا شود.
+        صدا زدن متدهای دیگر دیتابیس (که _get_conn را باز می‌کنند) باعث commit
+        زودهنگام/تداخل می‌شود - برای همین سرویس‌ها همه‌ی منطق تراکنش را با
+        SQL روی همین conn می‌نویسند.
+        """
+        with self._lock:
+            if self._conn is None:
+                self._conn = self._connect()
+            conn = self._conn
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield conn
+            except Exception:
+                conn.rollback()
+                raise
+            else:
+                conn.commit()
 
     def close(self):
         """اتصال persistent فعلی را می‌بندد و کش تنظیمات را پاک می‌کند. فراخوانی
@@ -507,6 +582,7 @@ class Database:
                 c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
 
             self._migrate_columns(conn)
+            self._migrate_commerce(conn)
             # اطمینان از این‌که همیشه مالک اصلی (از env) نقش «owner» را داشته باشد،
             # چه در نصب تازه و چه در ارتقای نصب‌های قدیمی‌تر که این ستون را نداشتند.
             conn.execute("UPDATE admins SET role='owner' WHERE telegram_id=?", (owner_id,))
@@ -601,6 +677,197 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_admin_logs_record ON admin_logs(record_type, record_id)"
         )
 
+    def _migrate_commerce(self, conn):
+        """مهاجرت‌های لایه‌ی تجارت یکپارچه (سبد، واریانت، موجودی، ارسال، سبدچندقلمی).
+        همه‌ی دستورات idempotent هستند (CREATE TABLE IF NOT EXISTS / ALTER بر اساس
+        _column_exists) و هیچ‌کدام داده‌ی موجود را حذف/تخریب نمی‌کنند."""
+        conn.executescript(
+            """
+            -- سبد خرید کاربر (سرور-ساید). واریانت NULL یعنی محصول دیجیتال.
+            CREATE TABLE IF NOT EXISTS cart_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
+                variant_id INTEGER,
+                quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+                FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE,
+                FOREIGN KEY(variant_id) REFERENCES product_variants(id) ON DELETE CASCADE
+            );
+
+            -- واریانت‌های یک محصول فیزیکی (سایز/رنگ و...). محصول دیجیتال واریانت ندارد.
+            CREATE TABLE IF NOT EXISTS product_variants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL,
+                label TEXT NOT NULL,
+                price INTEGER,
+                attributes TEXT DEFAULT '{}',
+                sort_order INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT,
+                FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
+            );
+
+            -- موجودی هر واریانت (فقط محصولات فیزیکی). available = on_hand - reserved
+            CREATE TABLE IF NOT EXISTS inventory (
+                variant_id INTEGER PRIMARY KEY REFERENCES product_variants(id) ON DELETE CASCADE,
+                on_hand INTEGER NOT NULL DEFAULT 0 CHECK (on_hand >= 0),
+                reserved INTEGER NOT NULL DEFAULT 0 CHECK (reserved >= 0),
+                low_stock_threshold INTEGER DEFAULT 0,
+                updated_at TEXT
+            );
+
+            -- دفتر کل تغییرات موجودی (منبع ممیزی/گزارش)
+            CREATE TABLE IF NOT EXISTS inventory_transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                variant_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
+                delta INTEGER NOT NULL,
+                on_hand_after INTEGER NOT NULL,
+                reason TEXT NOT NULL DEFAULT '',
+                order_id INTEGER,
+                actor TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(variant_id) REFERENCES product_variants(id) ON DELETE CASCADE
+            );
+
+            -- روش‌های ارسال (هزینه متعلق به روش؛ برای سبد‌های فیزیکی الزامی)
+            CREATE TABLE IF NOT EXISTS shipping_methods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                cost INTEGER NOT NULL DEFAULT 0 CHECK (cost >= 0),
+                delivery_note TEXT DEFAULT '',
+                is_active INTEGER DEFAULT 1,
+                position INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT
+            );
+
+            -- آدرس‌های مشتری (خانه در checkout فیزیکی آب‌نخورده per-order snapshot می‌شود)
+            CREATE TABLE IF NOT EXISTS customer_addresses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                recipient_name TEXT NOT NULL,
+                mobile TEXT NOT NULL,
+                province TEXT NOT NULL,
+                city TEXT NOT NULL,
+                address TEXT NOT NULL,
+                postal_code TEXT DEFAULT '',
+                is_default INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+            );
+
+            -- اقلامِ هر سفارش (یک سفارش می‌تواند چند قلم داشته باشد؛ فروش قدیمی
+            -- تک‌محصولی همیشه یک قلم خواهد داشت). product_name/unit_price snapshot
+            -- هستند تا تغییر بعدی کاتالوگ به تاریخچه‌ی سفارش برخورد نکند.
+            CREATE TABLE IF NOT EXISTS order_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
+                variant_id INTEGER,
+                product_type TEXT DEFAULT 'digital',
+                product_name TEXT NOT NULL,
+                quantity INTEGER NOT NULL DEFAULT 1,
+                unit_price INTEGER NOT NULL,
+                total_price INTEGER NOT NULL,
+                file_ids TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
+            );
+
+            -- کلید idempotency تسویه: کلید یکتا؛ برخوردِ هم‌زمان با UNIQUE رهگیری
+            -- می‌شود و فقط یک تسویه واقعی اتفاق می‌افتد.
+            CREATE TABLE IF NOT EXISTS checkout_idem (
+                idem_key TEXT PRIMARY KEY,
+                order_id INTEGER NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
+            -- بایگانی وضعیت ارسال/تکمیل فیزیکی (چه کسی، از چه به چه، کی)
+            CREATE TABLE IF NOT EXISTS fulfillment_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                from_status TEXT DEFAULT '',
+                to_status TEXT NOT NULL,
+                actor_type TEXT DEFAULT '',
+                actor_id TEXT DEFAULT '',
+                note TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_cart_user ON cart_items(user_id);
+            DROP INDEX IF EXISTS idx_cart_item_user;
+            -- شاخص یکتای مؤثر بر (کاربر، محصول، واریانت)؛ تا کلیدِ ON CONFLICT در
+            -- upsert سبد match کند و یک کاربر برای یک محصولِ هم‌واریانت یک قلم داشته باشد
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_cart_item_user
+                ON cart_items(user_id, product_id, COALESCE(variant_id, 0));
+            CREATE INDEX IF NOT EXISTS idx_variants_product ON product_variants(product_id);
+            CREATE INDEX IF NOT EXISTS idx_inv_tx_variant ON inventory_transactions(variant_id, id);
+            CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+            CREATE INDEX IF NOT EXISTS idx_addresses_user ON customer_addresses(user_id);
+            CREATE INDEX IF NOT EXISTS idx_fulfillment_order ON fulfillment_events(order_id, id);
+            """
+        )
+
+        # ستون‌های جدید روی جدول‌های موجود (همه‌ی ALTER ها بر اساس _column_exists)
+        if not self._column_exists(conn, "products", "type"):
+            conn.execute("ALTER TABLE products ADD COLUMN type TEXT DEFAULT 'digital'")
+        if not self._column_exists(conn, "orders", "payment_status"):
+            conn.execute("ALTER TABLE orders ADD COLUMN payment_status TEXT DEFAULT 'pending'")
+        if not self._column_exists(conn, "orders", "order_type"):
+            conn.execute("ALTER TABLE orders ADD COLUMN order_type TEXT DEFAULT 'digital'")
+        if not self._column_exists(conn, "orders", "shipping_cost"):
+            conn.execute("ALTER TABLE orders ADD COLUMN shipping_cost INTEGER DEFAULT 0")
+        if not self._column_exists(conn, "orders", "shipping_method_id"):
+            conn.execute("ALTER TABLE orders ADD COLUMN shipping_method_id INTEGER")
+        if not self._column_exists(conn, "orders", "tracking_number"):
+            conn.execute("ALTER TABLE orders ADD COLUMN tracking_number TEXT DEFAULT ''")
+        if not self._column_exists(conn, "orders", "physical_fulfillment_status"):
+            conn.execute("ALTER TABLE orders ADD COLUMN physical_fulfillment_status TEXT DEFAULT 'processing'")
+        if not self._column_exists(conn, "orders", "fulfillment_note"):
+            conn.execute("ALTER TABLE orders ADD COLUMN fulfillment_note TEXT DEFAULT ''")
+        if not self._column_exists(conn, "orders", "address_id"):
+            conn.execute("ALTER TABLE orders ADD COLUMN address_id INTEGER")
+        if not self._column_exists(conn, "orders", "recipient_name"):
+            conn.execute("ALTER TABLE orders ADD COLUMN recipient_name TEXT DEFAULT ''")
+        if not self._column_exists(conn, "orders", "recipient_mobile"):
+            conn.execute("ALTER TABLE orders ADD COLUMN recipient_mobile TEXT DEFAULT ''")
+        if not self._column_exists(conn, "orders", "recipient_address"):
+            conn.execute("ALTER TABLE orders ADD COLUMN recipient_address TEXT DEFAULT ''")
+        if not self._column_exists(conn, "orders", "customer_note"):
+            conn.execute("ALTER TABLE orders ADD COLUMN customer_note TEXT DEFAULT ''")
+        if not self._column_exists(conn, "orders", "idem_key"):
+            conn.execute("ALTER TABLE orders ADD COLUMN idem_key TEXT DEFAULT ''")
+
+        # backfill وضعیت پرداخت از وضعیت قدیمی (فقط رکوردهای دارای NULL/پیش‌فرض)
+        conn.execute(
+            "UPDATE orders SET payment_status='paid' "
+            "WHERE status='approved' AND (payment_status IS NULL OR payment_status='pending')"
+        )
+        conn.execute(
+            "UPDATE orders SET payment_status='refunded' "
+            "WHERE status='rejected' AND (payment_status IS NULL OR payment_status='pending')"
+        )
+
+        # تنظیماتِ جدیدِ لایه‌ی تجارت (فقط در صورت نبودن ثبت می‌شوند تا تنظیم
+        # دستیِ اپراتور overwrite نشود)
+        for _key, _val in (
+            ("btn_cart", "🛒 سبد خرید"),
+            ("btn_cart_style", "primary"),
+            ("cart_enabled", "1"),
+            ("physical_products_enabled", "1"),
+            ("checkout_auto_approve_wallet", "1"),
+        ):
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (_key, _val)
+            )
+
     # -----------------------------------------------------------------------
     # تنظیمات (settings)
     # -----------------------------------------------------------------------
@@ -637,6 +904,16 @@ class Database:
                 (key, value),
             )
         if self._settings_cache is not None:
+            self._settings_cache[key] = value
+
+    def set_setting_default(self, key: str, value: str):
+        """فقط اگر کلید هنوز وجود ندارد، مقدار پیش‌فرض را ثبت می‌کند
+        (INSERT OR IGNORE) تا برای نصب‌های قدیمی، کلیدهای تجارت جدید ظاهر شوند."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value)
+            )
+        if self._settings_cache is not None and key not in self._settings_cache:
             self._settings_cache[key] = value
 
     def get_all_settings(self) -> dict:
@@ -1428,35 +1705,107 @@ class Database:
         with self._get_conn() as conn:
             return conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
 
-    def approve_order(self, order_id: int, file_ids: list):
+    def approve_order(self, order_id: int, file_ids: list,
+                      payment_status: str = "paid",
+                      physical_fulfillment_status: str = "processing") -> bool:
         """تایید سفارش: status='approved' و ذخیره‌ی شناسه‌ی فایل‌های الگوی تحویلی
         (id رکوردهای product_files) به‌صورت CSV در ستون file_ids سفارش.
-        تحویل واقعی فایل‌ها با خواندن file_id از product_files انجام می‌شود."""
+        تحویل واقعی فایل‌ها با خواندن file_id از product_files انجام می‌شود.
+
+        ضدِrace/P1-2: انتقال فقط از status='pending' انجام می‌شود؛ اگر سفارش قبلاً
+        بررسی شده باشد (approved/rejected) False برمی‌گرداند و هیچ اثری ندارد
+        (در حالی که نسخه‌ی قبلی بدون شرط، رکورد را دوباره overwrite می‌کرد و
+        مسیر دو ساختِ هم‌زمان approve+reject را باز می‌گذاشت)."""
         if not isinstance(file_ids, (list, tuple)):
             file_ids = [file_ids]
+        now_iso = datetime.utcnow().isoformat()
+        csv_ids = ",".join(str(i) for i in file_ids)
         with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE orders SET status='approved', file_ids=?, updated_at=? WHERE id=?",
-                (",".join(str(i) for i in file_ids), datetime.utcnow().isoformat(), order_id),
+            cur = conn.execute(
+                "UPDATE orders SET status='approved', file_ids=?, updated_at=?, "
+                "payment_status=?, physical_fulfillment_status=? "
+                "WHERE id=? AND status='pending'",
+                (csv_ids, now_iso, payment_status, physical_fulfillment_status, order_id),
             )
+            return cur.rowcount > 0
 
-    def reject_order(self, order_id: int):
-        order = self.get_order(order_id)
+    def reject_order(self, order_id: int) -> bool:
+        """رد سفارش: بازگشت کیف پول و کاهش مصرف کد تخفیف، همه در «یک» تراکنش.
+
+        ضدِrace/P1-2: انتقال فقط از status='pending' انجام می‌شود (شرط rowcount).
+        اگر دو فراخوانِ هم‌زمان (بات + پنل وب) هر دو reject بزنند، فقط یکی
+        rowcount>0 می‌گیرد و بازگشت کیف پول دقیقاً یک‌بار اتفاق می‌افتد.
+        بازگشت False یعنی سفارش قبلاً بررسی شده بود."""
+        now_iso = datetime.utcnow().isoformat()
         with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE orders SET status='rejected', updated_at=? WHERE id=?",
-                (datetime.utcnow().isoformat(), order_id),
+            cur = conn.execute(
+                "UPDATE orders SET status='rejected', updated_at=?, payment_status='refunded' "
+                "WHERE id=? AND status='pending'",
+                (now_iso, order_id),
             )
-        if order:
-            if order["wallet_used"]:
-                self.add_wallet_credit(order["user_id"], order["wallet_used"])
-            if order["discount_code_id"]:
-                self.decrement_discount_usage(order["discount_code_id"])
+            if cur.rowcount == 0:
+                return False
+            order = conn.execute(
+                "SELECT user_id, wallet_used, discount_code_id, shipping_cost, order_type "
+                "FROM orders WHERE id=?",
+                (order_id,),
+            ).fetchone()
+            if order and order["wallet_used"]:
+                conn.execute(
+                    "UPDATE users SET referral_credit = MAX(referral_credit + ?, 0) WHERE telegram_id=?",
+                    (order["wallet_used"], order["user_id"]),
+                )
+            if order and order["discount_code_id"]:
+                conn.execute(
+                    "UPDATE discount_codes SET used_count = MAX(used_count - 1, 0) WHERE id=?",
+                    (order["discount_code_id"],),
+                )
+            # آزادسازی رزروِ اقلام فیزیکیِ سفارش ردشده (همان رفتاری که
+            # cancel_physical_fulfillment دارد؛ رد سفارش = رزرو دیگر به‌جاست)
+            if order and order["order_type"] != "digital":
+                items = conn.execute(
+                    "SELECT variant_id, quantity FROM order_items "
+                    "WHERE order_id=? AND variant_id IS NOT NULL", (order_id,)
+                ).fetchall()
+                for it in items:
+                    conn.execute(
+                        "UPDATE inventory SET reserved = MAX(reserved - ?, 0) WHERE variant_id=?",
+                        (it["quantity"], it["variant_id"]),
+                    )
+                    conn.execute(
+                        "INSERT INTO inventory_transactions "
+                        "(variant_id, product_id, delta, on_hand_after, reason, order_id, actor) "
+                        "SELECT inv.variant_id, v.product_id, 0, inv.on_hand, 'reject', ?, 'system' "
+                        "FROM inventory inv JOIN product_variants v ON v.id = inv.variant_id "
+                        "WHERE inv.variant_id=?",
+                        (order_id, it["variant_id"]),
+                    )
+            return True
 
     def get_orders_by_status(self, status: str, limit: int = 200):
         with self._get_conn() as conn:
             return conn.execute(
                 "SELECT * FROM orders WHERE status=? ORDER BY id DESC LIMIT ?", (status, limit)
+            ).fetchall()
+
+    def list_physical_orders(self, limit: int = 200):
+        """سفارش‌های دارای کالای فیزیکی (برای مدیریت ارسال/وضعیت فیزیکی)."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT o.*, p.name AS product_name FROM orders o "
+                "LEFT JOIN products p ON o.product_id = p.id "
+                "WHERE o.order_type IS NOT NULL AND o.order_type != 'digital' "
+                "ORDER BY o.id DESC LIMIT ?", (limit,)
+            ).fetchall()
+
+    def get_physical_order_items(self, order_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT oi.*, v.label AS variant_label, p.name AS product_name "
+                "FROM order_items oi "
+                "LEFT JOIN product_variants v ON v.id = oi.variant_id "
+                "LEFT JOIN products p ON p.id = oi.product_id "
+                "WHERE oi.order_id=? AND oi.product_type='physical'", (order_id,)
             ).fetchall()
 
     def get_pending_orders(self):
@@ -1926,7 +2275,19 @@ class Database:
     def reward_referrer_if_first_purchase(self, referred_user_tg_id: int, paid_amount: int):
         """حالت ۱ از سه مدل زیرمجموعه‌گیری: پورسانت درصدی، فقط برای اولین خرید هر
         زیرمجموعه، و در صورت تنظیم بودن سقف (referral_commission_max_count)، فقط برای
-        همان تعداد اول از زیرمجموعه‌هایی که خرید کرده‌اند."""
+        همان تعداد اول از زیرمجموعه‌هایی که خرید کرده‌اند.
+
+        نکته‌ی اتمیک: علامت reward باید شرطی (rowcount) شود تا دو تأییدِ هم‌زمان
+        از یک خریدِ اول (مثلاً پنل وب و بات) هر دو پورسانت ندهند."""
+        # خواندن تنظیمات بیرون از بلوکِ دارای اتصال (جلوگیری از ورود مجدد به
+        # _get_conn در حین نگه‌داشتن اتصال - که با Lock قبلی می‌توانست deadlock کند).
+        if self.get_setting("referral_button_enabled", "1") != "1":
+            return None
+        if self.get_setting("referral_enabled", "1") != "1":
+            return None
+        max_count = int(self.get_setting("referral_commission_max_count", "0") or 0)
+        percent = int(self.get_setting("referral_percent", "10") or 0)
+
         with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT referred_by, referral_first_purchase_rewarded FROM users WHERE telegram_id=?",
@@ -1936,12 +2297,6 @@ class Database:
                 return None
             referrer_id = row["referred_by"]
 
-            if self.get_setting("referral_button_enabled", "1") != "1":
-                return None
-            if self.get_setting("referral_enabled", "1") != "1":
-                return None
-
-            max_count = int(self.get_setting("referral_commission_max_count", "0") or 0)
             if max_count > 0:
                 already = conn.execute(
                     "SELECT COUNT(*) c FROM users WHERE referred_by=? AND referral_first_purchase_rewarded=1",
@@ -1955,12 +2310,15 @@ class Database:
                     )
                     return None
 
-            conn.execute(
-                "UPDATE users SET referral_first_purchase_rewarded=1 WHERE telegram_id=?",
+            # ادعای اتمیک: فقط یکی از فراخوان‌های هم‌زمان می‌تواند این UPDATE را ببرد.
+            cur = conn.execute(
+                "UPDATE users SET referral_first_purchase_rewarded=1 "
+                "WHERE telegram_id=? AND referral_first_purchase_rewarded=0",
                 (referred_user_tg_id,),
             )
+            if cur.rowcount == 0:
+                return None
 
-        percent = int(self.get_setting("referral_percent", "10") or 0)
         reward = (paid_amount * percent) // 100
         if reward > 0:
             self.add_wallet_credit(referrer_id, reward)
@@ -1977,6 +2335,14 @@ class Database:
         result = {"invite_bonus": None, "free_config_product_id": None}
         if self.get_setting("referral_button_enabled", "1") != "1":
             return result
+        # خواندن تمام تنظیمات بیرون از بلوکِ دارای اتصال (جلوگیری از ورود مجدد
+        # به _get_conn - anti-deadlock)
+        invite_enabled = self.get_setting("referral_invite_bonus_enabled", "0") == "1"
+        invite_amount = int(self.get_setting("referral_invite_bonus_amount", "0") or 0)
+        invite_max = int(self.get_setting("referral_invite_bonus_max_count", "0") or 0)
+        free_enabled = self.get_setting("referral_free_config_enabled", "0") == "1"
+        free_threshold = int(self.get_setting("referral_free_config_threshold", "0") or 0)
+        free_product_raw = self.get_setting("referral_free_config_product_id", "") or ""
         with self._get_conn() as conn:
             referrer = conn.execute(
                 "SELECT referral_free_config_given FROM users WHERE telegram_id=?", (referrer_tg_id,)
@@ -1985,41 +2351,41 @@ class Database:
                 return result
 
             # --- حالت ۳: شارژ ثابت کیف پول برای هر دعوت، تا سقف مشخص ---
-            if self.get_setting("referral_invite_bonus_enabled", "0") == "1":
-                amount = int(self.get_setting("referral_invite_bonus_amount", "0") or 0)
-                max_count = int(self.get_setting("referral_invite_bonus_max_count", "0") or 0)
-                already = conn.execute(
-                    "SELECT COUNT(*) c FROM users WHERE referred_by=? AND referral_invite_bonus_given=1",
-                    (referrer_tg_id,),
-                ).fetchone()["c"]
-                if amount > 0 and (max_count == 0 or already < max_count):
-                    conn.execute(
-                        "UPDATE users SET referral_invite_bonus_given=1 WHERE telegram_id=?",
-                        (referred_user_tg_id,),
-                    )
-                    conn.execute(
-                        "UPDATE users SET referral_credit = MAX(referral_credit + ?, 0) WHERE telegram_id=?",
-                        (amount, referrer_tg_id),
-                    )
-                    result["invite_bonus"] = amount
+            if invite_enabled and invite_amount > 0:
+                # ادعای اتمیک: هر نفرِ دعوت‌شده فقط یک‌بار در این حالت شمارش می‌شود
+                # (جلوگیری از شارژِ دوباره در برخورد هم‌زمان چند فراخوان).
+                cur = conn.execute(
+                    "UPDATE users SET referral_invite_bonus_given=1 "
+                    "WHERE telegram_id=? AND referral_invite_bonus_given=0",
+                    (referred_user_tg_id,),
+                )
+                if cur.rowcount:
+                    already = conn.execute(
+                        "SELECT COUNT(*) c FROM users WHERE referred_by=? AND referral_invite_bonus_given=1",
+                        (referrer_tg_id,),
+                    ).fetchone()["c"]
+                    if invite_max == 0 or already <= invite_max:
+                        conn.execute(
+                            "UPDATE users SET referral_credit = MAX(referral_credit + ?, 0) WHERE telegram_id=?",
+                            (invite_amount, referrer_tg_id),
+                        )
+                        result["invite_bonus"] = invite_amount
 
             # --- حالت ۲: محصول رایگان با رسیدن تعداد دعوت‌ها به یک آستانه (یک‌بار) ---
             if (
-                self.get_setting("referral_free_config_enabled", "0") == "1"
+                free_enabled
                 and not referrer["referral_free_config_given"]
             ):
-                threshold = int(self.get_setting("referral_free_config_threshold", "0") or 0)
-                product_id = self.get_setting("referral_free_config_product_id", "") or ""
-                if threshold > 0 and product_id:
+                if free_threshold > 0 and free_product_raw.strip().isdigit():
                     invited_count = conn.execute(
                         "SELECT COUNT(*) c FROM users WHERE referred_by=?", (referrer_tg_id,)
                     ).fetchone()["c"]
-                    if invited_count >= threshold:
+                    if invited_count >= free_threshold:
                         conn.execute(
                             "UPDATE users SET referral_free_config_given=1 WHERE telegram_id=?",
                             (referrer_tg_id,),
                         )
-                        result["free_config_product_id"] = int(product_id)
+                        result["free_config_product_id"] = int(free_product_raw)
 
         return result
 
@@ -2137,23 +2503,41 @@ class Database:
             ).fetchone()
 
     def approve_topup(self, topup_id: int) -> bool:
-        topup = self.get_topup(topup_id)
-        if not topup or topup["status"] != "pending":
-            return False
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE wallet_topups SET status='approved', updated_at=? WHERE id=?",
-                (datetime.utcnow().isoformat(), topup_id),
-            )
-        self.add_wallet_credit(topup["user_id"], topup["amount"])
-        return True
+        """تایید شارژ کیف پول - ضدِ P0-1.
 
-    def reject_topup(self, topup_id: int):
+        نسخه‌ی قبلی: SELECT (pending) → UPDATE بدون شرط status → add_wallet_credit
+        در یک بلوک جدا. بین آن سه قدم، دو فراخوانِ هم‌زمان (بات + پنل وب) هر دو
+        `pending` را می‌دیدند و هر دو شارژ می‌کردند (credit دوبار). این نسخه همه
+        را در یک تراکنش با UPDATE شرطی `status='pending'` انجام می‌دهد:
+        فقط برنده (rowcount>0) اعتبار می‌گیرد."""
+        now_iso = datetime.utcnow().isoformat()
         with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE wallet_topups SET status='approved', updated_at=? "
+                "WHERE id=? AND status='pending'",
+                (now_iso, topup_id),
+            )
+            if cur.rowcount == 0:
+                return False
+            row = conn.execute(
+                "SELECT user_id, amount FROM wallet_topups WHERE id=?", (topup_id,)
+            ).fetchone()
+            if not row:
+                return False
             conn.execute(
-                "UPDATE wallet_topups SET status='rejected', updated_at=? WHERE id=?",
+                "UPDATE users SET referral_credit = referral_credit + ? WHERE telegram_id=?",
+                (row["amount"], row["user_id"]),
+            )
+            return True
+
+    def reject_topup(self, topup_id: int) -> bool:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE wallet_topups SET status='rejected', updated_at=? "
+                "WHERE id=? AND status='pending'",
                 (datetime.utcnow().isoformat(), topup_id),
             )
+            return cur.rowcount > 0
 
     def get_topups_by_status(self, status: str, limit: int = 200):
         with self._get_conn() as conn:
@@ -2477,3 +2861,476 @@ class Database:
             "enabled": self.get_setting("force_join_enabled", "0") == "1",
             "channel": self.get_setting("force_join_channel", "").strip(),
         }
+
+    # -----------------------------------------------------------------------
+    # تجارت یکپارچه: سبد خرید
+    # -----------------------------------------------------------------------
+
+    def set_cart_item(self, user_tg_id: int, product_id: int, variant_id=None, quantity: int = 1):
+        """درج/به‌روزرسانی یک قلم سبد (upsert اتمیک بر اساس شاخص یکتای
+        (user_id, product_id, COALESCE(variant_id,0))). تعداد را «تنظیم» می‌کند
+        نه جمع؛ جمع کردن بر عهده‌ی سرویس است. quantity باید >= 1 باشد."""
+        if variant_id is None:
+            variant_id = None
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO cart_items (user_id, product_id, variant_id, quantity) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(user_id, product_id, COALESCE(variant_id,0)) "
+                "DO UPDATE SET quantity=excluded.quantity, updated_at=CURRENT_TIMESTAMP",
+                (user_tg_id, product_id, variant_id, max(quantity, 1)),
+            )
+
+    def change_cart_quantity(self, user_tg_id: int, item_id: int, quantity: int) -> bool:
+        """تغییر تعداد یک قلم سبد (دقیقاً برای همان کاربر - ownership guard)."""
+        if quantity < 1:
+            return False
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE cart_items SET quantity=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND user_id=?",
+                (quantity, item_id, user_tg_id),
+            )
+            return cur.rowcount > 0
+
+    def remove_cart_item(self, user_tg_id: int, item_id: int) -> bool:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM cart_items WHERE id=? AND user_id=?", (item_id, user_tg_id)
+            )
+            return cur.rowcount > 0
+
+    def clear_cart(self, user_tg_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM cart_items WHERE user_id=?", (user_tg_id,))
+
+    def count_cart_items(self, user_tg_id: int) -> int:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) c FROM cart_items WHERE user_id=?", (user_tg_id,)
+            ).fetchone()
+            return row["c"] or 0
+
+    def get_cart_items(self, user_tg_id: int):
+        """اقلام سبد به‌همراه اطلاعات محصول/واریانت/موجودی برای نمایش و تسویه.
+        available برای هر قلم فیزیکی = on_hand - reserved. available_ok می‌گوید
+        آیا تعداد درخواستی هنوز تأمین است."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT ci.*, "
+                "p.name AS product_name, p.price AS product_price, p.type AS product_type, "
+                "v.label AS variant_label, v.price AS variant_price, v.is_active AS variant_active, "
+                "COALESCE(i.on_hand, 0) AS on_hand, COALESCE(i.reserved, 0) AS reserved, "
+                "COALESCE(i.low_stock_threshold, 0) AS low_stock_threshold "
+                "FROM cart_items ci "
+                "JOIN products p ON p.id = ci.product_id "
+                "LEFT JOIN product_variants v ON v.id = ci.variant_id "
+                "LEFT JOIN inventory i ON i.variant_id = ci.variant_id "
+                "WHERE ci.user_id=? ORDER BY ci.id",
+                (user_tg_id,),
+            ).fetchall()
+            result = []
+            for r in rows:
+                d = dict(r)
+                d["available"] = d["on_hand"] - d["reserved"]
+                d["available_ok"] = True if d["product_type"] == "digital" else (d["available"] >= d["quantity"])
+                result.append(d)
+            return result
+
+    # -----------------------------------------------------------------------
+    # تجارت یکپارچه: واریانت محصول
+    # -----------------------------------------------------------------------
+
+    def add_variant(self, product_id: int, label: str, price=None, attributes: str = "{}",
+                    sort_order: int = 0) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO product_variants (product_id, label, price, attributes, sort_order) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (product_id, label, price, attributes, sort_order),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO inventory (variant_id) VALUES (?)", (cur.lastrowid,)
+            )
+            return cur.lastrowid
+
+    def get_variant(self, variant_id: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM product_variants WHERE id=?", (variant_id,)).fetchone()
+
+    def list_variants(self, product_id: int, active_only=False):
+        with self._get_conn() as conn:
+            if active_only:
+                return conn.execute(
+                    "SELECT * FROM product_variants WHERE product_id=? AND is_active=1 ORDER BY sort_order, id",
+                    (product_id,),
+                ).fetchall()
+            return conn.execute(
+                "SELECT * FROM product_variants WHERE product_id=? ORDER BY sort_order, id",
+                (product_id,),
+            ).fetchall()
+
+    def toggle_variant(self, variant_id: int):
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT is_active FROM product_variants WHERE id=?", (variant_id,)).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE product_variants SET is_active=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (0 if row["is_active"] else 1, variant_id),
+                )
+
+    def edit_variant(self, variant_id: int, label=None, price=None, attributes=None, sort_order=None):
+        fields, values = [], []
+        if label is not None:
+            fields.append("label=?"); values.append(label)
+        if price is not None:
+            fields.append("price=?"); values.append(price)
+        if attributes is not None:
+            fields.append("attributes=?"); values.append(attributes)
+        if sort_order is not None:
+            fields.append("sort_order=?"); values.append(sort_order)
+        if not fields:
+            return
+        fields.append("updated_at=CURRENT_TIMESTAMP")
+        values.append(variant_id)
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE product_variants SET {', '.join(fields)} WHERE id=?", values)
+
+    def delete_variant(self, variant_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM product_variants WHERE id=?", (variant_id,))
+
+    def set_product_type(self, product_id: int, product_type: str) -> bool:
+        if product_type not in ("digital", "physical"):
+            return False
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE products SET type=? WHERE id=?", (product_type, product_id)
+            )
+            return cur.rowcount > 0
+
+    # -----------------------------------------------------------------------
+    # تجارت یکپارچه: موجودی
+    # -----------------------------------------------------------------------
+
+    def _inv_login(self, conn, variant_id, product_id, delta, on_hand_after, reason, order_id, actor):
+        conn.execute(
+            "INSERT INTO inventory_transactions "
+            "(variant_id, product_id, delta, on_hand_after, reason, order_id, actor) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (variant_id, product_id, delta, on_hand_after, reason, order_id, actor),
+        )
+
+    def adjust_inventory(self, variant_id: int, delta: int, reason: str = "manual",
+                         actor: str = "", order_id=None) -> bool:
+        """افزایش/کاهش مستقیم on_hand با شرطِ روی هم نبودن منفی (rowcount).
+        خطا برای موجودی ناکافی False برمی‌گرداند؛ برای واریانت ناموجود هم False."""
+        with self._get_conn() as conn:
+            conn.execute("INSERT OR IGNORE INTO inventory (variant_id) VALUES (?)", (variant_id,))
+            cur = conn.execute(
+                "UPDATE inventory SET on_hand = on_hand + ?, reserved = reserved, "
+                "updated_at=CURRENT_TIMESTAMP "
+                "WHERE variant_id=? AND (on_hand + ?) >= 0",
+                (delta, variant_id, delta),
+            )
+            if cur.rowcount == 0:
+                return False
+            row = conn.execute(
+                "SELECT on_hand, product_id FROM inventory inv "
+                "JOIN product_variants v ON v.id = inv.variant_id WHERE inv.variant_id=?",
+                (variant_id,),
+            ).fetchone()
+            self._inv_login(conn, variant_id, row["product_id"], delta, row["on_hand"],
+                            reason, order_id, actor)
+            return True
+
+    def set_inventory(self, variant_id: int, on_hand: int, low_stock_threshold: int = 0) -> bool:
+        """تنظیم مطلق موجودی و آستانه‌ی هشدار (بدون تغییر reserved)."""
+        with self._get_conn() as conn:
+            conn.execute("INSERT OR IGNORE INTO inventory (variant_id) VALUES (?)", (variant_id,))
+            cur = conn.execute(
+                "UPDATE inventory SET on_hand=?, low_stock_threshold=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE variant_id=?",
+                (on_hand, low_stock_threshold, variant_id),
+            )
+            return cur.rowcount > 0
+
+    def reserve_inventory(self, variant_id: int, qty: int, reason: str = "sale",
+                          actor: str = "", order_id=None) -> bool:
+        """رزرو اتمیک: `reserved += qty` فقط اگر available کافی باشد
+        (`UPDATE ... WHERE (on_hand - reserved) >= qty` → rowcount)."""
+        if qty <= 0:
+            return False
+        with self._get_conn() as conn:
+            conn.execute("INSERT OR IGNORE INTO inventory (variant_id) VALUES (?)", (variant_id,))
+            cur = conn.execute(
+                "UPDATE inventory SET reserved = reserved + ?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE variant_id=? AND (on_hand - reserved) >= ?",
+                (qty, variant_id, qty),
+            )
+            return cur.rowcount > 0
+
+    def release_inventory(self, variant_id: int, qty: int, reason: str = "release",
+                          actor: str = "", order_id=None):
+        """آزادسازی رزرو (بدون تغییر on_hand)."""
+        if qty <= 0:
+            return
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE inventory SET reserved = MAX(reserved - ?, 0), updated_at=CURRENT_TIMESTAMP "
+                "WHERE variant_id=?",
+                (qty, variant_id),
+            )
+
+    def commit_inventory(self, variant_id: int, qty: int, reason: str = "shipped",
+                         actor: str = "", order_id=None) -> bool:
+        """کاهش on_hand و آزادسازی رزرو هنگام ارسال/تحویل فیزیکی."""
+        if qty <= 0:
+            return False
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE inventory SET on_hand = on_hand - ?, reserved = MAX(reserved - ?, 0), "
+                "updated_at=CURRENT_TIMESTAMP WHERE variant_id=? AND on_hand - ? >= 0",
+                (qty, qty, variant_id, qty),
+            )
+            return cur.rowcount > 0
+
+    def get_inventory(self, variant_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT inv.*, v.product_id, v.label, COALESCE(v.price, p.price) AS sell_price "
+                "FROM inventory inv JOIN product_variants v ON v.id=inv.variant_id "
+                "JOIN products p ON p.id=v.product_id WHERE inv.variant_id=?",
+                (variant_id,),
+            ).fetchone()
+
+    def list_inventory(self, active_only=True):
+        """وضعیت موجودی همه‌ی واریانت‌ها، همراه با نام محصول."""
+        with self._get_conn() as conn:
+            cond = " AND p.is_active=1" if active_only else ""
+            return conn.execute(
+                "SELECT inv.*, v.product_id, v.label, v.price AS variant_price, "
+                "p.name AS product_name, p.price AS product_price, p.type AS product_type "
+                "FROM inventory inv JOIN product_variants v ON v.id=inv.variant_id "
+                "JOIN products p ON p.id=v.product_id WHERE 1=1" + cond + " ORDER BY v.id"
+            ).fetchall()
+
+    def list_low_stock(self):
+        """واریانت‌هایی که available به زیر آستانه رسیده (یا آستانه صفر و موجودی صفر)."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT inv.*, v.product_id, v.label, p.name AS product_name "
+                "FROM inventory inv JOIN product_variants v ON v.id=inv.variant_id "
+                "JOIN products p ON p.id=v.product_id "
+                "WHERE p.is_active=1 AND (inv.on_hand - inv.reserved) <= inv.low_stock_threshold "
+                "AND (inv.low_stock_threshold > 0 OR inv.on_hand = 0) "
+                "ORDER BY (inv.on_hand - inv.reserved) ASC"
+            ).fetchall()
+
+    def get_inventory_transactions(self, variant_id: int, limit: int = 50):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM inventory_transactions WHERE variant_id=? ORDER BY id DESC LIMIT ?",
+                (variant_id, limit),
+            ).fetchall()
+
+    # -----------------------------------------------------------------------
+    # تجارت یکپارچه: روش‌های ارسال
+    # -----------------------------------------------------------------------
+
+    def add_shipping_method(self, name: str, cost: int, delivery_note: str = "", position: int = 0) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO shipping_methods (name, cost, delivery_note, position) VALUES (?, ?, ?, ?)",
+                (name, cost, delivery_note, position),
+            )
+            return cur.lastrowid
+
+    def list_shipping_methods(self, active_only=True):
+        with self._get_conn() as conn:
+            if active_only:
+                return conn.execute(
+                    "SELECT * FROM shipping_methods WHERE is_active=1 ORDER BY position, id"
+                ).fetchall()
+            return conn.execute("SELECT * FROM shipping_methods ORDER BY position, id").fetchall()
+
+    def get_shipping_method(self, method_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM shipping_methods WHERE id=?", (method_id,)
+            ).fetchone()
+
+    def toggle_shipping_method(self, method_id: int):
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT is_active FROM shipping_methods WHERE id=?", (method_id,)).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE shipping_methods SET is_active=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (0 if row["is_active"] else 1, method_id),
+                )
+
+    def edit_shipping_method(self, method_id: int, name=None, cost=None, delivery_note=None,
+                             position=None):
+        fields, values = [], []
+        if name is not None:
+            fields.append("name=?"); values.append(name)
+        if cost is not None:
+            fields.append("cost=?"); values.append(cost)
+        if delivery_note is not None:
+            fields.append("delivery_note=?"); values.append(delivery_note)
+        if position is not None:
+            fields.append("position=?"); values.append(position)
+        if not fields:
+            return
+        fields.append("updated_at=CURRENT_TIMESTAMP")
+        values.append(method_id)
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE shipping_methods SET {', '.join(fields)} WHERE id=?", values)
+
+    def delete_shipping_method(self, method_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM shipping_methods WHERE id=?", (method_id,))
+
+    # -----------------------------------------------------------------------
+    # تجارت یکپارچه: آدرس‌های مشتری
+    # -----------------------------------------------------------------------
+
+    def add_address(self, user_tg_id: int, recipient_name: str, mobile: str, province: str,
+                    city: str, address: str, postal_code: str = "") -> int:
+        with self._get_conn() as conn:
+            first = conn.execute(
+                "SELECT COUNT(*) c FROM customer_addresses WHERE user_id=?", (user_tg_id,)
+            ).fetchone()["c"]
+            cur = conn.execute(
+                "INSERT INTO customer_addresses (user_id, recipient_name, mobile, province, city, address, postal_code, is_default) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_tg_id, recipient_name, mobile, province, city, address, postal_code, 1 if first == 0 else 0),
+            )
+            return cur.lastrowid
+
+    def list_addresses(self, user_tg_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM customer_addresses WHERE user_id=? ORDER BY is_default DESC, id DESC",
+                (user_tg_id,),
+            ).fetchall()
+
+    def get_address(self, address_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM customer_addresses WHERE id=?", (address_id,)
+            ).fetchone()
+
+    def delete_address(self, address_id: int, user_tg_id: int) -> bool:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM customer_addresses WHERE id=? AND user_id=?", (address_id, user_tg_id)
+            )
+            return cur.rowcount > 0
+
+    def set_default_address(self, address_id: int, user_tg_id: int) -> bool:
+        with self._get_conn() as conn:
+            owned = conn.execute(
+                "SELECT is_default FROM customer_addresses WHERE id=? AND user_id=?",
+                (address_id, user_tg_id),
+            ).fetchone()
+            if not owned:
+                return False
+            conn.execute("UPDATE customer_addresses SET is_default=0 WHERE user_id=?", (user_tg_id,))
+            conn.execute(
+                "UPDATE customer_addresses SET is_default=1 WHERE id=? AND user_id=?",
+                (address_id, user_tg_id),
+            )
+            return True
+
+    # -----------------------------------------------------------------------
+    # تجارت یکپارچه: اقلام سفارش و idempotency تسویه
+    # -----------------------------------------------------------------------
+
+    def insert_order_item(self, conn, order_id: int, product_id: int, product_type: str,
+                          product_name: str, quantity: int, unit_price: int, total_price: int,
+                          variant_id=None, file_ids: str = ""):
+        conn.execute(
+            "INSERT INTO order_items (order_id, product_id, variant_id, product_type, product_name, "
+            "quantity, unit_price, total_price, file_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (order_id, product_id, variant_id, product_type, product_name, quantity,
+             unit_price, total_price, file_ids),
+        )
+
+    def get_order_items(self, order_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM order_items WHERE order_id=? ORDER BY id", (order_id,)
+            ).fetchall()
+
+    def get_checkout_order_id(self, idem_key: str):
+        if not idem_key:
+            return None
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT order_id FROM checkout_idem WHERE idem_key=?", (idem_key,)
+            ).fetchone()
+            return row["order_id"] if row else None
+
+    def add_fulfillment_event(self, order_id: int, from_status: str, to_status: str,
+                              actor_type: str = "", actor_id: str = "", note: str = ""):
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO fulfillment_events (order_id, from_status, to_status, actor_type, actor_id, note) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (order_id, from_status, to_status, actor_type, actor_id, note),
+            )
+
+    def get_fulfillment_events(self, order_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM fulfillment_events WHERE order_id=? ORDER BY id", (order_id,)
+            ).fetchall()
+
+    def set_physical_fulfillment_status(self, order_id: int, new_status: str) -> bool:
+        """انتقال وضعیت ارسال فیزیکی (processing/packed/shipped/delivered)."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE orders SET physical_fulfillment_status=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=?",
+                (new_status, order_id),
+            )
+            return cur.rowcount > 0
+
+    def set_order_tracking(self, order_id: int, tracking_number: str) -> bool:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE orders SET tracking_number=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (tracking_number, order_id),
+            )
+            return cur.rowcount > 0
+
+    def cancel_physical_fulfillment(self, order_id: int) -> bool:
+        """لغو وضعیت فیزیکیِ یک سفارش: رزروِ اقلام فیزیکیِ آن آزاد می‌شود و
+        physical_fulfillment_status به cancelled می‌رود. (بازگرداندن پول جداگانه
+        توسط مسیرِ ردِ سفارش انجام می‌شود.)"""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE orders SET physical_fulfillment_status='cancelled', "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=? AND order_type != 'digital'",
+                (order_id,),
+            )
+            if cur.rowcount == 0:
+                return False
+            items = conn.execute(
+                "SELECT variant_id, quantity FROM order_items "
+                "WHERE order_id=? AND variant_id IS NOT NULL", (order_id,)
+            ).fetchall()
+            for it in items:
+                conn.execute(
+                    "UPDATE inventory SET reserved = MAX(reserved - ?, 0) WHERE variant_id=?",
+                    (it["quantity"], it["variant_id"]),
+                )
+                conn.execute(
+                    "INSERT INTO inventory_transactions "
+                    "(variant_id, product_id, delta, on_hand_after, reason, order_id, actor) "
+                    "SELECT inv.variant_id, v.product_id, 0, inv.on_hand, 'cancel', ?, 'system' "
+                    "FROM inventory inv JOIN product_variants v ON v.id = inv.variant_id "
+                    "WHERE inv.variant_id=?",
+                    (order_id, it["variant_id"]),
+                )
+            return True

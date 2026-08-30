@@ -38,6 +38,12 @@ from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER
 from database import Database
 from miniapp.auth import validate_init_data
 import loyalty
+from services import cart as cart_svc
+from services import checkout as checkout_svc
+from services import orders as orders_svc
+from services.errors import (
+    ShopError, CartError, CatalogError, InventoryError, WalletError,
+)
 
 app = FastAPI(title="Pattern Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -442,81 +448,187 @@ async def _notify_admins_of_auto_order(db: Database, order_id: int):
 
 @app.post("/api/orders")
 async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
-    """ایجاد سفارش - آینه‌ی منطق cb_buy_start ربات: اعتبار کد تخفیف، اعمال
-    خودکار کیف پول، و اگر مبلغ نهایی صفر شد تایید خودکار سفارش."""
+    """ایجاد سفارش - همان منطق یکپارچه‌ی سبد/تسویه (services.checkout) که بات هم
+    از آن استفاده می‌کند: اعتبار کد تخفیف، اعمال خودکار کیف پول، و اگر مبلغ نهایی
+    صفر شد تأیید خودکار. قرارداد JSON با نسخه‌ی قبلی یکسان است."""
     tg_id, db = auth
     user_row = db.get_user(tg_id)
     if user_row and user_row["is_blocked"]:
         raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
 
-    product = db.get_product(body.product_id)
-    if not product or not product["is_active"] or not db.has_product_files(body.product_id):
-        raise HTTPException(status_code=409, detail="این الگو در حال حاضر موجود نیست.")
+    # افزودن به سبد سرور (تک‌دیجیتال) و تسویه‌ی اتمیک از لایه‌ی سرویس
+    try:
+        cart_svc.add_to_cart(db, tg_id, body.product_id, None, 1)
+        result = checkout_svc.checkout_cart(
+            db, tg_id, discount_code=body.discount_code,
+        )
+    except ShopError as e:
+        status = 400
+        if e.code in ("cart_empty", "checkout_disabled", "product_unavailable",
+                      "no_files", "stock_unavailable"):
+            status = 409
+        if e.code == "cart_empty":
+            detail = "سبد خرید خالی است."
+        elif e.code == "checkout_disabled":
+            detail = "خرید در حال حاضر غیرفعال است."
+        elif e.code == "no_files":
+            detail = "این الگو در حال حاضر موجود نیست."
+        elif e.code == "product_unavailable":
+            detail = "این الگو در حال حاضر موجود نیست."
+        elif e.code == "shipping_required":
+            detail = "برای کالای فیزیکی، روش ارسال و آدرس الزامی است."
+        elif isinstance(e, (InventoryError, CatalogError, WalletError)):
+            detail = e.message
+        else:
+            detail = e.message or "امکان ایجاد سفارش وجود ندارد."
+        raise HTTPException(status_code=status, detail=detail)
+    except Exception:
+        logger.exception("ایجاد سفارش Mini App برای کاربر %s ناموفق بود.", tg_id)
+        raise HTTPException(status_code=500, detail="خطای داخلی در ثبت سفارش.")
 
-    total_price = product["price"]
-    discount_code_id = None
-    discount_amount = 0
-    if body.discount_code:
-        code_row = db.get_discount_code(body.discount_code)
-        if not db.is_discount_code_valid(code_row):
-            raise HTTPException(status_code=400, detail="کد تخفیف نامعتبر است.")
-        discount_amount = db.compute_discount_amount(code_row, total_price)
-        discount_code_id = code_row["id"]
-
-    wallet_credit = db.get_wallet_credit(tg_id)
-    price_after_code = max(total_price - discount_amount, 0)
-    wallet_used = min(wallet_credit, price_after_code)
-
-    if wallet_used > 0:
-        db.add_wallet_credit(tg_id, -wallet_used)
-    if discount_code_id:
-        db.increment_discount_usage(discount_code_id)
-
-    order_id = db.create_order(
-        tg_id, body.product_id, base_price=total_price,
-        wallet_used=wallet_used, discount_code_id=discount_code_id,
-        discount_amount=discount_amount,
-    )
-    order = db.get_order(order_id)
-
-    if order["final_price"] <= 0:
-        files = db.get_product_files(body.product_id)
-        if not files:
-            # الگو بدون فایل شده؛ سفارش را رد کن تا مبلغ کسرشده از کیف پول/تخفیف برگردد
-            db.reject_order(order_id)
-            try:
-                loyalty.reverse_purchase(db, order_id)
-            except Exception:
-                logger.exception("برگشت امتیاز وفاداری سفارش %s ناموفق بود.", order_id)
-            raise HTTPException(
-                status_code=409,
-                detail="این الگو در حال حاضر موجود نیست؛ مبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد.",
-            )
-        db.approve_order(order_id, [f["id"] for f in files])
+    if result.status == "approved":
+        # تأیید خودکار (پرداخت کامل با کیف پول/تخفیف): اعلان ادمین + امتیاز/پورسانت
+        await _notify_admins_of_auto_order(db, result.order_id)
         awarded = 0
         try:
-            awarded = loyalty.award_purchase(db, order_id)
+            award_info = orders_svc.award_after_approve(db, result.order_id)
+            awarded = award_info["loyalty_points"] or 0
         except Exception:
-            logger.exception("اعطای امتیاز وفاداری سفارش %s ناموفق بود.", order_id)
-        try:
-            db.reward_referrer_if_first_purchase(tg_id, order["base_price"])
-        except Exception:
-            pass
-        await _notify_admins_of_auto_order(db, order_id)
-        result = {
-            "status": "approved", "order_id": order_id,
-            "files": [{"record_id": f["id"]} for f in files],
-        }
+            logger.exception("اعطای امتیاز/پورسانت سفارش Mini App %s ناموفق بود.", result.order_id)
+
+        files = []
+        for it in result.items:
+            if it.product_type != "digital":
+                continue
+            for f in db.get_product_files(it.product_id):
+                files.append({"record_id": f["id"]})
+        resp = {"status": "approved", "order_id": result.order_id, "files": files}
         if awarded > 0:
-            result["loyalty_awarded"] = awarded
-        return result
+            resp["loyalty_awarded"] = awarded
+        return resp
 
     # مبلغی باقی مانده - کاربر باید رسید کارت‌به‌کارت آپلود کند تا ادمین در بات تایید کند
     return {
-        "status": "pending", "order_id": order_id, "final_price": order["final_price"],
-        "wallet_used": wallet_used, "discount_amount": discount_amount,
+        "status": "pending", "order_id": result.order_id,
+        "final_price": result.final_price, "wallet_used": result.wallet_used,
+        "discount_amount": result.discount_amount,
         "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
     }
+
+
+# ---------------------------------------------------------------------------
+# سبد خرید / آدرس‌ها / روش‌های ارسال (هم‌تراز با بات؛ همان لایه‌ی سرویس)
+# ---------------------------------------------------------------------------
+
+class CartAddBody(BaseModel):
+    product_id: int
+    quantity: int = 1
+
+
+class CartQtyBody(BaseModel):
+    item_id: int
+    quantity: int = 1
+
+
+class AddressCreate(BaseModel):
+    recipient_name: str = ""
+    mobile: str = ""
+    province: str = ""
+    city: str = ""
+    address: str
+    postal_code: str = ""
+
+
+@app.get("/api/cart")
+def api_cart(auth=Depends(get_verified_user)):
+    """سبد فعلی کاربر (اقلام + جمع)."""
+    tg_id, db = auth
+    summary = cart_svc.cart_summary(db, tg_id)
+    items = []
+    for it in summary["items"]:
+        unit = it["variant_price"] if it["variant_price"] is not None else it["product_price"]
+        avail = True
+        if it["product_type"] == "physical":
+            avail = (int(it["on_hand"] or 0) - int(it["reserved"] or 0)) >= int(it["quantity"])
+        items.append({
+            "item_id": it["id"],
+            "product_id": it["product_id"],
+            "product_name": it["product_name"],
+            "variant_id": it["variant_id"],
+            "variant_label": it["variant_label"],
+            "unit_price": unit,
+            "total_price": unit * it["quantity"],
+            "quantity": it["quantity"],
+            "product_type": it["product_type"],
+            "available_ok": avail,
+        })
+    return {
+        "items": items, "subtotal": summary["subtotal"],
+        "total_qty": summary["total_qty"], "has_physical": summary["has_physical"],
+        "wallet_credit": summary["wallet_credit"],
+    }
+
+
+@app.post("/api/cart")
+def api_cart_add(body: CartAddBody, auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    try:
+        count = cart_svc.add_to_cart(db, tg_id, body.product_id, None, body.quantity)
+    except (CartError, CatalogError) as e:
+        raise HTTPException(status_code=409, detail=e.message)
+    return {"count": count}
+
+
+@app.patch("/api/cart")
+def api_cart_qty(body: CartQtyBody, auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    try:
+        cart_svc.update_quantity(db, tg_id, body.item_id, body.quantity)
+    except CartError as e:
+        raise HTTPException(status_code=409, detail=e.message)
+    return {"ok": True}
+
+
+@app.delete("/api/cart")
+def api_cart_clear(auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    cart_svc.clear_cart(db, tg_id)
+    return {"ok": True}
+
+
+@app.delete("/api/cart/{item_id}")
+def api_cart_remove(item_id: int, auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    ok = cart_svc.remove_from_cart(db, tg_id, item_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="قلم سبد پیدا نشد.")
+    return {"ok": True}
+
+
+@app.get("/api/shipping/methods")
+def api_shipping_methods(auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    return [
+        {"id": m["id"], "name": m["name"], "cost": int(m["cost"] or 0),
+         "delivery_note": m.get("delivery_note") or ""}
+        for m in db.list_shipping_methods(active_only=True)
+    ]
+
+
+@app.get("/api/addresses")
+def api_addresses(auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    return [dict(a) for a in db.list_addresses(tg_id)]
+
+
+@app.post("/api/addresses")
+def api_address_create(body: AddressCreate, auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    addr_id = db.add_address(
+        tg_id, body.recipient_name, body.mobile,
+        body.province, body.city, body.address, body.postal_code,
+    )
+    return {"id": addr_id}
 
 
 @app.get("/api/orders")

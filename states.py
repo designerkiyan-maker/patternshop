@@ -17,6 +17,13 @@ class WalletTopup(StatesGroup):
     waiting_receipt = State()
 
 
+class CartFlow(StatesGroup):
+    """سبد خرید: ثبت آدرس گیرنده‌ی کالای فیزیکی. وضعیت‌های دیگرِ سبد (روش ارسال،
+    انتخاب آدرس ذخیره‌شده) با دکمه‌ی inline و داده‌ی FSM اداره می‌شوند و State جدا
+    لازم ندارند."""
+    waiting_address = State()
+
+
 class ContactFlow(StatesGroup):
     waiting_message = State()
 
