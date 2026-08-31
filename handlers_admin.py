@@ -24,6 +24,7 @@ import config
 import keyboards as kb
 import loyalty
 from loyalty import LoyaltyError
+from services import orders as service_orders
 from database import MENU_BUTTON_META
 from file_delivery import deliver_pattern_to_user
 from jalali import to_jalali_str
@@ -880,7 +881,7 @@ def create_admin_router(db) -> Router:
 
     @router.callback_query(F.data.startswith("order_approve:"))
     async def cb_order_approve(call: CallbackQuery, bot: Bot):
-        if not admin_only(call.from_user.id):
+        if not full_admin_only(call.from_user.id):
             return await call.answer()
 
         order_id = callback_id(call.data, "order_approve")
@@ -904,15 +905,23 @@ def create_admin_router(db) -> Router:
             await call.answer("⛔️ هنوز فایلی برای این محصول آپلود نشده است.", show_alert=True)
             return
 
-        (await asyncio.to_thread(db.approve_order, order_id, [f["id"] for f in files]))
+        # تصمیمِ اتمیک (ضدِ تصمیمِ دوگانه‌ی هم‌زمان تلگرام/وب) از طریق لایه‌ی سرویس
+        ok, reason = (await asyncio.to_thread(
+            service_orders.decide_order, db, order_id, True,
+            [f["id"] for f in files], str(call.from_user.id)))
+        if not ok:
+            await call.answer("این سفارش قبلاً بررسی شده است.", show_alert=True)
+            return
 
-        # امتیاز باشگاه مشتریان: بلافاصله بعد از تایید واقعی سفارش اعطا می‌شود.
-        # award_purchase کاملاً idempotent است و خرابی‌اش هم نباید جریان تایید را بشکند.
+        # امتیاز باشگاه + پورسانت زیرمجموعه (هر دو idempotent) - یکسان با پنل وب
         try:
-            awarded = (await asyncio.to_thread(loyalty.award_purchase, db, order_id))
+            awarded_info = (await asyncio.to_thread(service_orders.award_after_approve, db, order_id))
+            awarded = awarded_info["loyalty_points"] or 0
+            reward_info = awarded_info["referral"]
         except Exception:
-            logger.exception("اعطای امتیاز باشگاه مشتریان برای سفارش #%s ناموفق بود.", order_id)
+            logger.exception("اعطای امتیاز/پورسانت برای سفارش #%s ناموفق بود.", order_id)
             awarded = 0
+            reward_info = None
 
         product_name = product["name"] if product else "---"
         (await asyncio.to_thread(db.log_admin_action, 
@@ -921,9 +930,6 @@ def create_admin_router(db) -> Router:
             f"مبلغ: {(order['final_price'] or (product['price'] if product else 0)):,}",
         ))
 
-        reward_info = (await asyncio.to_thread(db.reward_referrer_if_first_purchase, 
-            order["user_id"], order["final_price"] or (product["price"] if product else 0),
-        ))
         if reward_info:
             reward_amount, referrer_id = reward_info
             try:
@@ -963,7 +969,7 @@ def create_admin_router(db) -> Router:
 
     @router.callback_query(F.data.startswith("order_reject:"))
     async def cb_order_reject(call: CallbackQuery, bot: Bot):
-        if not admin_only(call.from_user.id):
+        if not full_admin_only(call.from_user.id):
             return await call.answer()
 
         order_id = callback_id(call.data, "order_reject")
@@ -978,13 +984,18 @@ def create_admin_router(db) -> Router:
             await call.answer("این سفارش قبلاً بررسی شده است.", show_alert=True)
             return
 
-        (await asyncio.to_thread(db.reject_order, order_id))
+        # ردِ اتمیک (بازگرداندن کیف پول/استفاده‌ی کد در «یک» تراکنش)
+        ok, _ = (await asyncio.to_thread(service_orders.decide_order, db, order_id, False,
+                                        actor=str(call.from_user.id)))
+        if not ok:
+            await call.answer("این سفارش قبلاً بررسی شده است.", show_alert=True)
+            return
 
         # برگشت امتیاز باشگاه مشتریانِ سفارش ردشده. reverse_purchase خودش idempotent
         # است و اگر سابقاً امتیازی برای این سفارش اعطا نشده باشد، کاری نمی‌کند؛
         # خرابی‌اش هم نباید جریان رد سفارش را بشکند.
         try:
-            (await asyncio.to_thread(loyalty.reverse_purchase, db, order_id))
+            (await asyncio.to_thread(service_orders.refund_loyalty_for_rejected, db, order_id))
         except Exception:
             logger.exception("برگشت امتیاز باشگاه مشتریان برای سفارش #%s ناموفق بود.", order_id)
         (await asyncio.to_thread(db.log_admin_action, 

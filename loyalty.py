@@ -170,7 +170,17 @@ def award_purchase(db, order_id: int) -> int:
         return 0
 
     user_id = order["user_id"]
-    paid = order["final_price"] if order["final_price"] else order["base_price"]
+    # امتیاز فقط روی مبلغِ «کالا» محاسبه می‌شود (و نه هزینه‌ی ارسال که هزینه‌ی
+    # عبوریِ پیمانکار است). برای سفارش‌های قدیمی/دیجیتال shipping_cost=0 است و
+    # رفتار عیناً مثل قبل می‌شود.
+    shipping = 0
+    if "shipping_cost" in order.keys() and order["shipping_cost"]:
+        try:
+            shipping = int(order["shipping_cost"] or 0)
+        except (ValueError, TypeError):
+            shipping = 0
+    paid = (int(order["final_price"]) - shipping) if order["final_price"] else order["base_price"]
+    paid = max(paid, 0)
     state = db.ensure_loyalty_state(user_id)
     points = _purchase_points(db, paid, state["lifetime_earned"])
     if points <= 0:

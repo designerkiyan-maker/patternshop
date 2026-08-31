@@ -251,6 +251,77 @@ def cancel_kb() -> InlineKeyboardMarkup:
 
 
 # ---------------------------------------------------------------------------
+# سبد خرید (معماری یکپارچه: بات + Mini App از همین لایه)
+# ---------------------------------------------------------------------------
+
+def cart_menu_kb(summary) -> InlineKeyboardMarkup:
+    """منوی سبد خرید. summary خروجی services.cart.cart_summary است.
+    برای اقلام فیزیکی دکمه‌های افزایش/کاهش تعداد و حذف؛ برای دیجیتال فقط حذف."""
+    rows = []
+    for it in summary["items"]:
+        item_id = it["id"]
+        name = it["product_name"]
+        if it.get("variant_label"):
+            name = f"{name} ({it['variant_label']})"
+        unit = it["variant_price"] if it["variant_price"] is not None else it["product_price"]
+        total = int(unit) * int(it["quantity"])
+        if it["product_type"] == "physical":
+            rows.append([
+                InlineKeyboardButton(
+                    text=f"⬇️ {int(it['quantity'])} ⬆️ | {name} | {total:,} تومان",
+                    callback_data="noop",
+                )
+            ])
+            rows.append([
+                InlineKeyboardButton(text="➖", callback_data=f"cart_dec:{item_id}"),
+                InlineKeyboardButton(text="➕", callback_data=f"cart_inc:{item_id}"),
+                InlineKeyboardButton(text="🗑 حذف", callback_data=f"cart_del:{item_id}"),
+            ])
+        else:
+            rows.append([
+                InlineKeyboardButton(
+                    text=f"🧵 {name} | {total:,} تومان", callback_data="noop"
+                )
+            ])
+            rows.append([
+                InlineKeyboardButton(text="🗑 حذف", callback_data=f"cart_del:{item_id}")
+            ])
+    rows.append([InlineKeyboardButton(text="💰 تسویه سبد", callback_data="cart_checkout")])
+    if summary["items"]:
+        rows.append([InlineKeyboardButton(text="🧹 خالی کردن سبد", callback_data="cart_clear")])
+    rows.append([InlineKeyboardButton(text="🛍 ادامه خرید", callback_data="back_categories")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="back_main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def shipping_methods_kb(methods) -> InlineKeyboardMarkup:
+    """انتخاب روش ارسال برای سبد دارای کالای فیزیکی."""
+    rows = []
+    for m in methods:
+        rows.append([
+            InlineKeyboardButton(
+                text=f"📦 {m['name']} | {int(m['cost'] or 0):,} تومان",
+                callback_data=f"cart_ship:{m['id']}",
+            )
+        ])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="cart_show")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def address_choices_kb(addresses) -> InlineKeyboardMarkup:
+    """انتخاب آدرس ذخیره‌شده‌ی گیرنده یا ثبت آدرس جدید."""
+    rows = []
+    for a in addresses:
+        label = a.get("recipient_name") or (a.get("mobile") or f"آدرس #{a['id']}")
+        if a.get("is_default"):
+            label += " ⭐"
+        rows.append([InlineKeyboardButton(text=f"📍 {label}", callback_data=f"cart_addr:{a['id']}")])
+    rows.append([InlineKeyboardButton(text="✍️ ثبت آدرس جدید", callback_data="cart_addr_new")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="cart_show")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ---------------------------------------------------------------------------
 # سفارش‌های من (منوی سفارش‌ها با قابلیت دانلود مجدد فایل و حذف)
 # ---------------------------------------------------------------------------
 

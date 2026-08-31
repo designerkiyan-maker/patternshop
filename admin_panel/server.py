@@ -33,6 +33,11 @@ from admin_panel.config_delivery_web import deliver_pattern_to_user_web
 from admin_panel.webpush import PUSH_ENABLED, send_push
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 import loyalty
+from services import orders as orders_svc
+from services import inventory as inv_svc
+from services import shipping as ship_svc
+from services import settings as settings_svc
+from services.errors import ShopError, CheckoutError
 
 logger = logging.getLogger("admin_panel.server")
 
@@ -527,39 +532,62 @@ async def api_order_receipt(order_id: int, admin=Depends(get_current_admin)):
 
 @app.post("/api/orders/{order_id}/approve")
 async def api_approve_order(order_id: int, admin=Depends(require_permission("orders"))):
-    """تایید سفارش کارت‌به‌کارت: همه‌ی فایل‌های الگوی محصول از بانک فایل خوانده و
-    هم در رکورد سفارش ثبت و هم مستقیم برای خریدار ارسال می‌شوند (فروش نامحدود است؛
-    هر خریدار همان فایل‌ها را دریافت می‌کند)."""
+    """تایید سفارش: تصمیمِ اتمیکِ ضدِ race از طریق لایه‌ی سرویس (هم‌تراز با بات).
+    برای سفارش‌های دیجیتال فایل‌های الگو تحویل داده می‌شوند؛ برای فیزیکی فقط
+    تأیید و ورود به جریان ارسال."""
     order = (await asyncio.to_thread(db.get_order, order_id))
-    if not order or order["status"] != "pending":
+    if not order:
+        raise HTTPException(404, "سفارش یافت نشد.")
+
+    items = (await asyncio.to_thread(db.get_order_items, order_id))
+    if not items:
+        # سفارش‌های دیجیتالِ قدیمی (قبل از جدول order_items) روی product_id اول هستند
+        items = [{"product_id": order["product_id"], "product_type": "digital"}]
+    digital_ids = [it["product_id"] for it in items if it["product_type"] == "digital"]
+
+    file_ids = []
+    for pid in digital_ids:
+        files = (await asyncio.to_thread(db.get_product_files, pid))
+        if not files:
+            raise HTTPException(409, "هنوز فایلی برای یکی از محصولات این سفارش آپلود نشده است.")
+        file_ids.extend(f["id"] for f in files)
+
+    ok, _reason = (await asyncio.to_thread(
+        orders_svc.decide_order, db, order_id, True, file_ids, str(admin["id"])))
+    if not ok:
         raise HTTPException(400, "سفارش یافت نشد یا قبلاً بررسی شده.")
 
-    product = (await asyncio.to_thread(db.get_product, order["product_id"]))
-    files = (await asyncio.to_thread(db.get_product_files, order["product_id"]))
-    if not files:
-        raise HTTPException(409, "هنوز فایلی برای این محصول آپلود نشده است")
-
-    (await asyncio.to_thread(db.approve_order, order_id, [f["id"] for f in files]))
     awarded = 0
     try:
-        awarded = await asyncio.to_thread(loyalty.award_purchase, db, order_id)
+        award_info = await asyncio.to_thread(orders_svc.award_after_approve, db, order_id)
+        awarded = award_info["loyalty_points"] or 0
     except Exception:
-        logger.exception("اعطای امتیاز وفاداری سفارش %s ناموفق بود.", order_id)
-    (await asyncio.to_thread(db.log_admin_action, 
+        logger.exception("اعطای امتیاز/پورسانت سفارش %s ناموفق بود.", order_id)
+
+    product = (await asyncio.to_thread(db.get_product, order["product_id"]))
+    (await asyncio.to_thread(db.log_admin_action,
         admin["id"], "order_approve",
         f"سفارش #{order_id} | کاربر {order['user_id']} | محصول «{product['name'] if product else '---'}» "
-        f"| تحویل {len(files)} فایل الگو (پنل وب - {admin['username']})",
+        f"| تحویل {len(file_ids)} فایل الگو (پنل وب - {admin['username']})",
         "order", order_id,
     ))
-    (await asyncio.to_thread(db.reward_referrer_if_first_purchase,
-                             order["user_id"], order["final_price"] or (product["price"] if product else 0)))
     await notify_user(order["user_id"], "✅ خرید شما تایید شد!")
-    asyncio.create_task(deliver_pattern_to_user_web(
-        _bot_token(), order["user_id"], product["name"] if product else "",
-        [f["file_id"] for f in files],
-        final_price=order["final_price"], order_id=order_id,
-    ))
-    response = {"ok": True}
+
+    # تحویل فایل‌های الگوی اقلام دیجیتال (برای هر قلم یک‌بار)
+    for it in items:
+        if it["product_type"] != "digital":
+            continue
+        frows = (await asyncio.to_thread(db.get_product_files, it["product_id"]))
+        if not frows:
+            continue
+        p = (await asyncio.to_thread(db.get_product, it["product_id"]))
+        asyncio.create_task(deliver_pattern_to_user_web(
+            _bot_token(), order["user_id"], p["name"] if p else "الگو",
+            [f["file_id"] for f in frows],
+            final_price=order["final_price"], order_id=order_id,
+        ))
+
+    response = {"ok": True, "digital_file_count": len(file_ids)}
     if awarded > 0:
         response["loyalty_awarded"] = awarded
     return response
@@ -570,9 +598,12 @@ async def api_reject_order(order_id: int, admin=Depends(require_permission("orde
     order = (await asyncio.to_thread(db.get_order, order_id))
     if not order or order["status"] != "pending":
         raise HTTPException(400, "سفارش یافت نشد یا قبلاً بررسی شده.")
-    (await asyncio.to_thread(db.reject_order, order_id))
+    ok, _ = (await asyncio.to_thread(
+        orders_svc.decide_order, db, order_id, False, actor=str(admin["id"])))
+    if not ok:
+        raise HTTPException(400, "سفارش یافت نشد یا قبلاً بررسی شده.")
     try:
-        await asyncio.to_thread(loyalty.reverse_purchase, db, order_id)
+        await asyncio.to_thread(orders_svc.refund_loyalty_for_rejected, db, order_id)
     except Exception:
         logger.exception("برگشت امتیاز وفاداری سفارش %s ناموفق بود.", order_id)
     (await asyncio.to_thread(db.log_admin_action, admin["id"], "order_reject", f"سفارش #{order_id} رد شد (پنل وب - {admin['username']})", "order", order_id))
@@ -1179,8 +1210,145 @@ class SettingBody(BaseModel):
 
 @app.post("/api/settings")
 def api_set_setting(body: SettingBody, admin=Depends(require_permission("settings"))):
-    db.set_setting(body.key, body.value)
-    db.log_admin_action(admin["id"], "setting_change", f"{body.key}={body.value} (پنل وب - {admin['username']})", "setting", body.key)
+    # allow-list + اعتبارسنجی نوع از لایه‌ی سرویس (یکسان با ربات)
+    try:
+        normalized = settings_svc.set_setting(db, body.key, body.value)
+    except ShopError as e:
+        raise HTTPException(400, e.message)
+    db.log_admin_action(admin["id"], "setting_change", f"{body.key}={normalized} (پنل وب - {admin['username']})", "setting", body.key)
+    return {"ok": True, "value": normalized}
+
+
+# ------------------------------------------------- commerce (سبد/موجودی/ارسال) --
+
+
+class InventoryAdjustBody(BaseModel):
+    delta: int
+    reason: str = "manual"
+
+
+class ShippingMethodBody(BaseModel):
+    name: str
+    cost: int = 0
+    delivery_note: str = ""
+    position: int = 0
+
+
+class ShippingMethodEditBody(BaseModel):
+    name: Optional[str] = None
+    cost: Optional[int] = None
+    delivery_note: Optional[str] = None
+    position: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class FulfillmentBody(BaseModel):
+    to_status: str
+
+
+class TrackingBody(BaseModel):
+    tracking_number: str
+
+
+@app.get("/api/inventory")
+def api_inventory(admin=Depends(require_permission("inventory"))):
+    out = []
+    for r in db.list_inventory(active_only=False):
+        row = dict(r)
+        row["available"] = int(row["on_hand"] or 0) - int(row["reserved"] or 0)
+        row["low_stock"] = (int(row["on_hand"] or 0) - int(row["reserved"] or 0)) <= int(row["low_stock_threshold"] or 0)
+        out.append(row)
+    return out
+
+
+@app.post("/api/inventory/{variant_id}")
+def api_inventory_adjust(variant_id: int, body: InventoryAdjustBody,
+                         admin=Depends(require_permission("inventory"))):
+    ok = inv_svc.adjust(db, variant_id, body.delta, reason=body.reason, actor=f"web:{admin['username']}")
+    if not ok:
+        raise HTTPException(409, "تصحیح موجودی ناموفق بود (موجودی نمی‌تواند منفی شود).")
+    db.log_admin_action(admin["id"], "inventory_adjust",
+                        f"واریانت #{variant_id} به‌میزان {body.delta} (پنل وب - {admin['username']})",
+                        "variant", variant_id)
+    return {"ok": True, "available": inv_svc.stock(db, variant_id)}
+
+
+@app.get("/api/shipping/methods")
+def api_shipping_methods(admin=Depends(require_permission("shipping"))):
+    return [dict(m) for m in db.list_shipping_methods(active_only=False)]
+
+
+@app.post("/api/shipping/methods")
+def api_shipping_add(body: ShippingMethodBody, admin=Depends(require_permission("shipping"))):
+    try:
+        mid = ship_svc.add_method(db, body.name, body.cost, body.delivery_note, body.position)
+    except CheckoutError as e:
+        raise HTTPException(400, e.message)
+    db.log_admin_action(admin["id"], "shipping_add",
+                        f"روش ارسال «{body.name}» (پنل وب - {admin['username']})", "shipping", mid)
+    return {"id": mid}
+
+
+@app.put("/api/shipping/methods/{method_id}")
+def api_shipping_edit(method_id: int, body: ShippingMethodEditBody,
+                      admin=Depends(require_permission("shipping"))):
+    fields = {}
+    if body.name is not None:
+        fields["name"] = body.name
+    if body.cost is not None:
+        fields["cost"] = body.cost
+    if body.delivery_note is not None:
+        fields["delivery_note"] = body.delivery_note
+    if body.position is not None:
+        fields["position"] = body.position
+    if not fields:
+        raise HTTPException(400, "هیچ فیلدی برای ویرایش ارسال نشده است.")
+    try:
+        ship_svc.edit_method(db, method_id, **fields)
+    except CheckoutError as e:
+        raise HTTPException(400, e.message)
+    if body.is_active is not None:
+        method = db.get_shipping_method(method_id)
+        if method and bool(method["is_active"]) != bool(body.is_active):
+            db.toggle_shipping_method(method_id)
+    return {"ok": True}
+
+
+@app.get("/api/orders/physical")
+def api_physical_orders(admin=Depends(require_permission("orders"))):
+    out = []
+    for o in db.list_physical_orders():
+        row = dict(o)
+        row["items"] = [dict(i) for i in db.get_physical_order_items(o["id"])]
+        out.append(row)
+    return out
+
+
+@app.post("/api/orders/{order_id}/fulfillment")
+def api_fulfillment(order_id: int, body: FulfillmentBody,
+                    admin=Depends(require_permission("orders"))):
+    ok, reason = orders_svc.set_fulfillment_status(
+        db, order_id, body.to_status, actor=f"web:{admin['username']}")
+    if not ok:
+        raise HTTPException(409, {
+            "invalid_status": "وضعیت نامعتبر است.",
+            "not_physical": "این سفارش فیزیکی نیست.",
+            "invalid_transition": "وضعیت باید به‌ترتیب قدم‌به‌قدم جلو برود.",
+            "order_state": "تغییر وضعیت سفارش ممکن نیست.",
+            "not_found": "سفارش یافت نشد.",
+        }.get(reason, "تغییر وضعیت ممکن نیست."))
+    return {"ok": True}
+
+
+@app.post("/api/orders/{order_id}/tracking")
+def api_tracking(order_id: int, body: TrackingBody,
+                 admin=Depends(require_permission("orders"))):
+    if not (body.tracking_number or "").strip():
+        raise HTTPException(400, "شماره‌ی پیگیری الزامی است.")
+    ok = orders_svc.set_tracking(db, order_id, body.tracking_number.strip(),
+                                 actor=f"web:{admin['username']}")
+    if not ok:
+        raise HTTPException(404, "سفارش یافت نشد.")
     return {"ok": True}
 
 
