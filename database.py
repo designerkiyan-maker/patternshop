@@ -132,6 +132,8 @@ DEFAULT_SETTINGS = {
     "loyalty_tiers": '[{"id":"bronze","name":"🥉 برنز","min":0,"mult":100},{"id":"silver","name":"🥈 نقره‌ای","min":500,"mult":110},{"id":"gold","name":"🥇 طلایی","min":2000,"mult":125},{"id":"platinum","name":"💎 پلاتینیوم","min":5000,"mult":150}]',
     "btn_loyalty": "🎁 باشگاه مشتریان",
     "btn_loyalty_style": "",
+    # بنرهای مینی‌اپ (پیش‌فرض‌های مینی‌اپ فروشگاه الگو)
+    "miniapp_banners": '',
     # چیدمان دکمه‌های منوی اصلی (ترتیب و نمایش) - آرایه JSON از کلیدها
     "menu_order": '["btn_buy","btn_test","btn_my_orders","btn_wallet","btn_referral","btn_wheel","btn_loyalty","btn_contact","btn_admin_panel"]',
 }
@@ -154,6 +156,35 @@ MENU_BUTTON_META = {
 DEFAULT_MENU_ORDER = [
     "btn_buy", "btn_test", "btn_my_orders", "btn_wallet", "btn_referral",
     "btn_wheel", "btn_loyalty", "btn_contact", "btn_admin_panel",
+]
+
+
+# بنرهای پیش‌فرض مینی‌اپ (پیش‌فرض‌های مینی‌اپ فروشگاه الگو)
+DEFAULT_BANNERS = [
+    {
+        "id": "b_store",
+        "icon": "🧵",
+        "title": "الگوهای جدید را ببین!",
+        "sub": "کاتالوگ الگوهای خیاطی با دانلود آنی",
+        "cta": "بریم فروشگاه",
+        "nav": "store",
+        "bg": "linear-gradient(120deg, #0d1a12, #123a20 55%, #17532c)",
+        "image": "",
+        "image_only": False,
+        "enabled": True,
+    },
+    {
+        "id": "b_referral",
+        "icon": "🤝",
+        "title": "دوستاتو دعوت کن",
+        "sub": "با دعوت از دوستان، اعتبار رایگان به کیف پولت اضافه کن.",
+        "cta": "مشاهده لینک دعوت",
+        "nav": "referral",
+        "bg": "linear-gradient(120deg,#1a0d24,#3a1c33 55%,#53174a)",
+        "image": "",
+        "image_only": False,
+        "enabled": True,
+    },
 ]
 
 
