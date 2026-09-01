@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # PatternShop Installation Wizard
-# Similar to 3x-ui interactive installer
 # Run: bash <(curl -sSL https://raw.githubusercontent.com/designerkiyan-maker/patternshop/main/install_wizard.sh)
 
 set -euo pipefail
@@ -21,8 +20,8 @@ print_banner() {
     clear
     echo -e "${CYAN}"
     echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║                  PatternShop Installer                        ║"
-    echo "║           Telegram Bot + MiniApp + Admin Panel                ║"
+    echo "║                    PatternShop Installer                       ║"
+    echo "║         Telegram Bot + MiniApp + Admin Panel                   ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
@@ -58,7 +57,7 @@ prompt_input() {
         fi
         
         if [[ -z "$value" && -z "$default" ]]; then
-            log_err "این فیلد الزامی است."
+            log_err "This field is required."
         fi
     done
     
@@ -81,14 +80,14 @@ prompt_yes_no() {
         case "${answer,,}" in
             y|yes) return 0 ;;
             n|no) return 1 ;;
-            *) log_err "لطفاً y یا n وارد کنید." ;;
+            *) log_err "Please enter y or n." ;;
         esac
     done
 }
 
 check_root() {
     if [[ $EUID -ne 0 ]]; then
-        log_err "این اسکریپت باید با root اجرا شود: sudo bash $0"
+        log_err "This script must be run as root: sudo bash $0"
         exit 1
     fi
 }
@@ -99,33 +98,33 @@ detect_os() {
         OS=$ID
         VER=$VERSION_ID
     else
-        log_err "نمی‌توان سیستم‌عامل را تشخیص داد."
+        log_err "Cannot detect OS."
         exit 1
     fi
-    log_ok "سیستم‌عامل: $PRETTY_NAME"
+    log_ok "OS: $PRETTY_NAME"
 }
 
 install_deps() {
-    log_info "نصب پیش‌نیازها..."
+    log_info "Installing dependencies..."
     apt update -qq
     apt install -y -qq python3 python3-venv python3-pip git nginx certbot python3-certbot-nginx curl wget 2>/dev/null | tail -5
-    log_ok "پیش‌نیازها نصب شدند."
+    log_ok "Dependencies installed."
 }
 
 clone_repo() {
-    log_info "کلون مخزن..."
+    log_info "Cloning repository..."
     if [[ -d "$INSTALL_DIR" ]]; then
-        log_warn "موجود است، به‌روزرسانی..."
+        log_warn "Exists, updating..."
         cd "$INSTALL_DIR" && git pull origin main
     else
         git clone "$REPO_URL" "$INSTALL_DIR"
     fi
     cd "$INSTALL_DIR"
-    log_ok "مخزن در $INSTALL_DIR آماده است."
+    log_ok "Repository ready at $INSTALL_DIR."
 }
 
 setup_venv() {
-    log_info "ساخت محیط مجازی پایتون..."
+    log_info "Creating Python virtual environment..."
     python3 -m venv "$INSTALL_DIR/venv"
     source "$INSTALL_DIR/venv/bin/activate"
     pip install --upgrade pip -q
@@ -134,7 +133,7 @@ setup_venv() {
     else
         pip install aiogram fastapi uvicorn aiohttp aiosqlite python-dotenv python-multipart pyjwt cryptography pywebpush -q
     fi
-    log_ok "محیط مجازی و وابستگی‌ها نصب شدند."
+    log_ok "Virtual environment and dependencies ready."
 }
 
 generate_secret() {
@@ -142,7 +141,7 @@ generate_secret() {
 }
 
 generate_vapid() {
-    log_info "تولید کلیدهای VAPID برای Push Notification..."
+    log_info "Generating VAPID keys for push notifications..."
     local priv pub
     priv=$(openssl ecparam -genkey -name prime256v1 -noout -outform PEM 2>/dev/null | openssl ec -outform DER 2>/dev/null | tail -c +8 | head -c 32 | base64 | tr -d "=+/" | cut -c1-43)
     pub=$(echo "$priv" | openssl ec -inform DER -pubout -outform DER 2>/dev/null | tail -c 65 | base64 | tr -d "=+/" | cut -c1-43)
@@ -151,40 +150,40 @@ generate_vapid() {
 
 collect_config() {
     print_banner
-    echo -e "${YELLOW}مرحله ۱: پیکربندی اصلی${NC}"
+    echo -e "${YELLOW}Step 1: Core Configuration${NC}"
     echo "----------------------------------------"
     
-    prompt_input "توکن ربات تلگرام (BOT_TOKEN)" BOT_TOKEN "" true
-    prompt_input "آیدی عددی اونر (OWNER_ID)" OWNER_ID "" false
+    prompt_input "Telegram Bot Token (BOT_TOKEN)" BOT_TOKEN "" true
+    prompt_input "Owner Telegram ID (OWNER_ID)" OWNER_ID "" false
     
     print_banner
-    echo -e "${YELLOW}مرحله ۲: دامنه‌ها و SSL${NC}"
+    echo -e "${YELLOW}Step 2: Domains & SSL${NC}"
     echo "----------------------------------------"
-    prompt_yes_no "آیا دامنه دارید و می‌خواهید SSL (Let's Encrypt) تنظیم شود؟" "y" && SETUP_SSL=true || SETUP_SSL=false
+    prompt_yes_no "Do you have domains and want SSL (Let's Encrypt)?" "y" && SETUP_SSL=true || SETUP_SSL=false
     
     if [[ "$SETUP_SSL" == "true" ]]; then
-        prompt_input "دامنه پنل ادمین (مثال: panel.example.com)" PANEL_DOMAIN "" false
-        prompt_input "دامنه مینی‌اپ (مثال: miniapp.example.com)" MINIAPP_DOMAIN "" false
-        prompt_input "ایمیل برای Let's Encrypt" LE_EMAIL "" false
+        prompt_input "Admin Panel Domain (e.g., panel.example.com)" PANEL_DOMAIN "" false
+        prompt_input "MiniApp Domain (e.g., miniapp.example.com)" MINIAPP_DOMAIN "" false
+        prompt_input "Email for Let's Encrypt" LE_EMAIL "" false
     fi
     
     print_banner
-    echo -e "${YELLOW}مرحله ۳: کلیدهای امنیتی (خالی بگذارید برای تولید خودکار)${NC}"
+    echo -e "${YELLOW}Step 3: Security Keys (leave empty for auto-generation)${NC}"
     echo "----------------------------------------"
     prompt_input "ADMIN_PANEL_SECRET (JWT secret)" ADMIN_PANEL_SECRET "$(generate_secret)" false
     prompt_input "VAPID_PRIVATE_KEY" VAPID_PRIVATE_KEY "$(generate_vapid | awk '{print $1}')" false
     prompt_input "VAPID_PUBLIC_KEY" VAPID_PUBLIC_KEY "$(generate_vapid | awk '{print $2}')" false
-    prompt_input "VAPID_CLAIMS (مثال: {\"sub\": \"mailto:admin@example.com\"})" VAPID_CLAIMS '{"sub": "mailto:admin@example.com"}' false
+    prompt_input "VAPID_CLAIMS (e.g., {\"sub\": \"mailto:admin@example.com\"})" VAPID_CLAIMS '{"sub": "mailto:admin@example.com"}' false
     
     print_banner
-    echo -e "${YELLOW}مرحله ۴: تنظیمات پیشرفته${NC}"
+    echo -e "${YELLOW}Step 4: Advanced Options${NC}"
     echo "----------------------------------------"
-    prompt_yes_no "فایروال (UFW) فعال شود؟" "y" && SETUP_FIREWALL=true || SETUP_FIREWALL=false
-    prompt_yes_no "Fail2Ban برای SSH نصب شود؟" "y" && SETUP_FAIL2BAN=true || SETUP_FAIL2BAN=false
+    prompt_yes_no "Enable UFW firewall?" "y" && SETUP_FIREWALL=true || SETUP_FIREWALL=false
+    prompt_yes_no "Install Fail2Ban for SSH?" "y" && SETUP_FAIL2BAN=true || SETUP_FAIL2BAN=false
 }
 
 write_env() {
-    log_info "نوشتن فایل .env..."
+    log_info "Writing .env file..."
     cat > "$INSTALL_DIR/.env" <<EOF
 # PatternShop Configuration
 # Generated by install_wizard.sh on $(date)
@@ -199,11 +198,11 @@ VAPID_PRIVATE_KEY=$VAPID_PRIVATE_KEY
 VAPID_CLAIMS=$VAPID_CLAIMS
 EOF
     chmod 600 "$INSTALL_DIR/.env"
-    log_ok ".env ساخته شد."
+    log_ok ".env created."
 }
 
 init_database() {
-    log_info "راه‌اندازی دیتابیس (اجرای مایگریشن‌ها)..."
+    log_info "Initializing database (running migrations)..."
     cd "$INSTALL_DIR"
     source "$INSTALL_DIR/venv/bin/activate"
     python3 -c "
@@ -212,26 +211,26 @@ db = Database('bot_database.db')
 db.init_db(owner_id=$OWNER_ID)
 print('Database initialized successfully')
 "
-    log_ok "دیتابیس راه‌اندازی شد."
+    log_ok "Database initialized."
 }
 
 create_admin() {
     print_banner
-    echo -e "${YELLOW}مرحله ۵: ساخت ادمین پنل وب${NC}"
+    echo -e "${YELLOW}Step 5: Create Admin Panel User${NC}"
     echo "----------------------------------------"
     
     local username password
-    prompt_input "نام کاربری ادمین" ADMIN_USER "admin" false
-    prompt_input "رمز عبور ادمین" ADMIN_PASS "" true
+    prompt_input "Admin Username" ADMIN_USER "admin" false
+    prompt_input "Admin Password" ADMIN_PASS "" true
     
     cd "$INSTALL_DIR"
     source "$INSTALL_DIR/venv/bin/activate"
     python3 -m admin_panel.create_admin "$ADMIN_USER" "$ADMIN_PASS"
-    log_ok "ادمین '$ADMIN_USER' ساخته شد."
+    log_ok "Admin '$ADMIN_USER' created."
 }
 
 create_services() {
-    log_info "ساخت سرویس‌های systemd..."
+    log_info "Creating systemd services..."
     
     cat > /etc/systemd/system/patternshop-bot.service <<EOF
 [Unit]
@@ -295,7 +294,7 @@ EOF
 
     systemctl daemon-reload
     systemctl enable --now patternshop-bot patternshop-miniapp patternshop-panel
-    log_ok "سرویس‌ها ساخته و فعال شدند."
+    log_ok "Services created and enabled."
 }
 
 setup_nginx() {
@@ -303,7 +302,7 @@ setup_nginx() {
         return
     fi
     
-    log_info "پیکربندی Nginx و SSL..."
+    log_info "Configuring Nginx and SSL..."
     
     cat > /etc/nginx/sites-available/patternshop <<EOF
 server {
@@ -322,13 +321,13 @@ EOF
     ln -sf /etc/nginx/sites-available/patternshop /etc/nginx/sites-enabled/
     nginx -t && systemctl reload nginx
     
-    log_info "درخواست گواهی SSL از Let's Encrypt..."
+    log_info "Requesting SSL certificate from Let's Encrypt..."
     certbot --nginx -d "$PANEL_DOMAIN" -d "$MINIAPP_DOMAIN" --email "$LE_EMAIL" --agree-tos --non-interactive --redirect
     
     # SSL renewal cron
     (crontab -l 2>/dev/null | grep -v certbot; echo "0 3 * * * certbot renew --quiet --nginx") | crontab -
     
-    log_ok "Nginx و SSL پیکربندی شدند."
+    log_ok "Nginx and SSL configured."
 }
 
 setup_firewall() {
@@ -336,13 +335,13 @@ setup_firewall() {
         return
     fi
     
-    log_info "پیکربندی فایروال (UFW)..."
+    log_info "Configuring firewall (UFW)..."
     ufw --force enable
     ufw allow 22/tcp comment "SSH"
     ufw allow 80/tcp comment "HTTP"
     ufw allow 443/tcp comment "HTTPS"
     ufw reload
-    log_ok "فایروال فعال شد."
+    log_ok "Firewall enabled."
 }
 
 setup_fail2ban() {
@@ -350,7 +349,7 @@ setup_fail2ban() {
         return
     fi
     
-    log_info "نصب و پیکربندی Fail2Ban..."
+    log_info "Installing and configuring Fail2Ban..."
     apt install -y -qq fail2ban
     
     cat > /etc/fail2ban/jail.local <<EOF
@@ -368,32 +367,32 @@ maxretry = 3
 EOF
     
     systemctl enable --now fail2ban
-    log_ok "Fail2Ban نصب و فعال شد."
+    log_ok "Fail2Ban installed and enabled."
 }
 
 print_summary() {
     print_banner
-    echo -e "${GREEN}✅ نصب با موفقیت تکمیل شد!${NC}"
+    echo -e "${GREEN}✅ Installation completed successfully!${NC}"
     echo "----------------------------------------"
-    echo -e "${CYAN}اطلاعات دسترسی:${NC}"
-    echo "  پنل ادمین:     https://$PANEL_DOMAIN"
-    echo "  مینی‌اپ:        https://$MINIAPP_DOMAIN"
-    echo "  ادمین یوزر:    $ADMIN_USER"
-    echo "  ادمین پسورد:   (مخفی)"
+    echo -e "${CYAN}Access Information:${NC}"
+    echo "  Admin Panel:     https://$PANEL_DOMAIN"
+    echo "  MiniApp:         https://$MINIAPP_DOMAIN"
+    echo "  Admin User:      $ADMIN_USER"
+    echo "  Admin Password:  (hidden)"
     echo ""
-    echo -e "${CYAN}سرویس‌ها:${NC}"
+    echo -e "${CYAN}Services:${NC}"
     echo "  systemctl status patternshop-bot"
     echo "  systemctl status patternshop-miniapp"
     echo "  systemctl status patternshop-panel"
     echo ""
-    echo -e "${CYAN}لاگ‌ها:${NC}"
+    echo -e "${CYAN}Logs:${NC}"
     echo "  journalctl -u patternshop-bot -f"
     echo "  journalctl -u patternshop-panel -f"
     echo ""
-    echo -e "${CYAN}بروزرسانی در آینده:${NC}"
+    echo -e "${CYAN}Future Updates:${NC}"
     echo "  cd $INSTALL_DIR && git pull && systemctl restart patternshop-bot patternshop-miniapp patternshop-panel"
     echo ""
-    echo -e "${YELLOW}نکته:${NC} فایل .env در $INSTALL_DIR/.env ذخیره شده (دسترسی 600)."
+    echo -e "${YELLOW}Note:${NC} .env file stored at $INSTALL_DIR/.env (permissions 600)."
 }
 
 main() {
@@ -401,10 +400,10 @@ main() {
     detect_os
     print_banner
     
-    echo -e "${CYAN}خوش آمدید به ویزارد نصب PatternShop${NC}"
-    echo "این اسکریپت به‌صورت تعاملی تمام مراحل نصب را انجام می‌دهد."
+    echo -e "${CYAN}Welcome to PatternShop Installation Wizard${NC}"
+    echo "This script will interactively guide you through the complete installation."
     echo ""
-    prompt_yes_no "آیا می‌خواهید ادامه دهید؟" "y" || { log_info "لغو شد."; exit 0; }
+    prompt_yes_no "Continue with installation?" "y" || { log_info "Cancelled."; exit 0; }
     
     collect_config
     install_deps
@@ -420,5 +419,4 @@ main() {
     print_summary
 }
 
-# Run
 main "$@"
