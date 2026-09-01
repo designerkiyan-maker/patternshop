@@ -500,7 +500,44 @@ async def api_backup_restore(
     return {"ok": True, "pre_restore_backup": os.path.basename(pre_restore_path)}
 
 
-# ------------------------------------------------------------------ orders --
+# ------------------------------------------------------------------ db reset --
+
+class ResetDBConfirm(BaseModel):
+    confirm_phrase: str = ""
+    keep_owner: bool = True  # پیش‌فرض: owner ادمین وب نگه داشته شود
+
+
+@app.post("/api/system/db/reset")
+async def api_db_reset(body: ResetDBConfirm, admin=Depends(require_owner)):
+    """
+    ریست کامل دیتابیس (truncate همه جداول و بازسازی اسکیمای اولیه).
+    چون این کار تمام داده‌ها را پاک می‌کند (سفارش‌ها، کاربران، محصولات، موجودی، تنظیمات و...)،
+    نیاز به تایید صریح دارد و فقط برای owner قابل دسترسی است.
+    عبارت تایید دقیقاً باید «RESET DATABASE» باشد.
+    """
+    if body.confirm_phrase.strip().upper() != "RESET DATABASE":
+        raise HTTPException(400, "برای تایید ریست دیتابیس، عبارت RESET DATABASE را دقیقاً وارد کن.")
+    
+    owner_id = OWNER_ID
+    if body.keep_owner:
+        # شناسه عددی owner در web_admins (نه telegram_id)
+        wa = db.get_web_admin_by_username("owner")  # فرض: username='owner'
+        if wa:
+            owner_id = wa["id"]
+    
+    # اجرای ریست
+    ok = await asyncio.to_thread(db.reset_database, owner_id)
+    if not ok:
+        raise HTTPException(500, "ریست دیتابیس ناموفق بود.")
+    
+    # لاگ امنیتی مهم
+    await asyncio.to_thread(db.log_admin_action,
+        admin["id"], "db_reset",
+        f"دیتابیس به حالت اولیه بازگردانده شد (keep_owner={body.keep_owner}) (پنل وب - {admin['username']})",
+        "system", 0,
+    )
+    
+    return {"ok": True, "message": "دیتابیس به حالت اولیه بازگردانده شد. owner_id:", "owner_id": owner_id}
 
 
 @app.get("/api/orders")

@@ -1463,9 +1463,43 @@ class Database:
                 if row:
                     new_val = 0 if row["is_active"] else 1
                     conn.execute("UPDATE categories SET is_active=? WHERE id=?", (new_val, cat_id))
-                    return True
-                return False
-        return self._sqlite_retry(op)
+            return True
+        return op()
+
+    def reset_database(self, owner_id: int) -> bool:
+        """
+        ریست کامل دیتابیس: همه جداول truncate می‌شوند و اسکیمای اولیه بازسازی می‌شود.
+        فقط owner_id نگه داشته می‌شود (web_admin owner باقی می‌ماند).
+        باید با احتیاط و فقط توسط owner استفاده شود.
+        """
+        with self._get_conn() as conn:
+            # Foreign key constraints را موقتاً غیرفعال کن
+            conn.execute("PRAGMA foreign_keys = OFF")
+            
+            # لیست تمام جداول (به جز sqlite_sequence)
+            tables = [
+                "fulfillment_events", "checkout_idem", "order_items", "orders",
+                "inventory_transactions", "inventory", "product_variants", "products",
+                "cart_items", "customer_addresses", "shipping_methods",
+                "discount_codes", "product_files", "categories",
+                "users", "web_admins", "web_admin_permissions", "settings",
+                "push_subscriptions", "support_conversations", "support_messages",
+                "tickets", "loyalty_transactions", "referral_rewards",
+                "wheel_spins", "sample_files", "bot_settings"
+            ]
+            for table in tables:
+                try:
+                    conn.execute(f"DELETE FROM {table}")
+                    conn.execute(f"DELETE FROM sqlite_sequence WHERE name='{table}'")
+                except Exception:
+                    pass  # جدولی که وجود نداشته باشد نادیده گرفته شود
+            
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.commit()
+        
+        # اسکیمای کامل را دوباره بساز (owner_id حفظ می‌شود)
+        self.init_db(owner_id=owner_id)
+        return True
 
     def edit_category(self, cat_id: int, name: str):
         with self._get_conn() as conn:
