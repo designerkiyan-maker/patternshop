@@ -151,6 +151,7 @@ DEFAULT_SETTINGS = {
 # admin_only: اگر True فقط برای ادمین‌ها نمایش داده می‌شود
 MENU_BUTTON_META = {
     "btn_buy": {"label": "دکمه خرید الگو", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
+    "btn_cart": {"label": "دکمه سبد خرید", "toggle_key": "cart_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_test": {"label": "دکمه الگوی نمونه", "toggle_key": "test_enabled", "admin_only": False, "has_text": True, "has_style": True},
     "btn_my_orders": {"label": "دکمه سفارش‌های من", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
     "btn_wallet": {"label": "دکمه کیف پول", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
@@ -161,7 +162,7 @@ MENU_BUTTON_META = {
     "btn_admin_panel": {"label": "دکمه پنل مدیریت", "toggle_key": None, "admin_only": True, "has_text": True, "has_style": True},
 }
 DEFAULT_MENU_ORDER = [
-    "btn_buy", "btn_test", "btn_my_orders", "btn_wallet", "btn_referral",
+    "btn_buy", "btn_cart", "btn_test", "btn_my_orders", "btn_wallet", "btn_referral",
     "btn_wheel", "btn_loyalty", "btn_contact", "btn_admin_panel",
 ]
 

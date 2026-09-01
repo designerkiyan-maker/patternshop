@@ -1259,6 +1259,43 @@ def api_set_setting(body: SettingBody, admin=Depends(require_permission("setting
 # ------------------------------------------------- commerce (سبد/موجودی/ارسال) --
 
 
+class CommerceToggleBody(BaseModel):
+    key: str
+    enabled: bool
+
+
+@app.post("/api/settings/commerce/toggle")
+def api_commerce_toggle(body: CommerceToggleBody, admin=Depends(require_permission("settings"))):
+    """تغییر وضعیت فعال/غیرفعال تنظیمات تجارت (سبد خرید، محصولات فیزیکی، تایید خودکار)."""
+    allowed_keys = {"cart_enabled", "physical_products_enabled", "checkout_auto_approve_wallet"}
+    if body.key not in allowed_keys:
+        raise HTTPException(400, "تنظیم نامعتبر.")
+    normalized = settings_svc.set_setting(db, body.key, "1" if body.enabled else "0")
+    db.log_admin_action(admin["id"], "commerce_toggle", f"{body.key}={normalized} (پنل وب - {admin['username']})", "setting", body.key)
+    return {"ok": True, "key": body.key, "enabled": body.enabled, "value": normalized}
+
+
+class CommerceSettingsBody(BaseModel):
+    cart_enabled: Optional[bool] = None
+    physical_products_enabled: Optional[bool] = None
+    checkout_auto_approve_wallet: Optional[bool] = None
+
+
+@app.post("/api/settings/commerce")
+def api_commerce_settings(body: CommerceSettingsBody, admin=Depends(require_permission("settings"))):
+    """تنظیمات پیشرفته تجارت (سبد خرید، محصولات فیزیکی، تایید خودکار)."""
+    updated = {}
+    for key, val in body.model_dump(exclude_unset=True).items():
+        normalized = settings_svc.set_setting(db, key, "1" if val else "0")
+        updated[key] = normalized
+    if updated:
+        db.log_admin_action(admin["id"], "commerce_settings", f"تنظیمات تجارت بروزرسانی شدند: {updated} (پنل وب - {admin['username']})", "setting", "commerce")
+    return {"ok": True, "updated": updated}
+
+
+# ------------------------------------------------- commerce (سبد/موجودی/ارسال) --
+
+
 class InventoryAdjustBody(BaseModel):
     delta: int
     reason: str = "manual"
