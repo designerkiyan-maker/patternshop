@@ -11,7 +11,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Security Score](https://img.shields.io/badge/Security-82%2F100-orange)](SECURITY_AUDIT_REPORT.md)
 
----
+<div dir="rtl">
 
 ## 🗺 نقشه کلی قابلیت‌ها
 
@@ -504,6 +504,7 @@ curl http://127.0.0.1:8001/api/catalog
 ```
 
 ---
+</div>
 
 ## 📄 مجوز
 
