@@ -1,30 +1,6 @@
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
-
-/* =========================================================
-   TELEGRAM SAFE AREA
-   ========================================================= */
-function updateTelegramSafeArea() {
-  const root = document.documentElement;
-  const sa = tg.safeAreaInset || {};
-  const csa = tg.contentSafeAreaInset || {};
-
-  root.style.setProperty("--telegram-safe-top", `${Number(sa.top || 0)}px`);
-  root.style.setProperty("--telegram-safe-bottom", `${Number(sa.bottom || 0)}px`);
-  root.style.setProperty("--telegram-safe-left", `${Number(sa.left || 0)}px`);
-  root.style.setProperty("--telegram-safe-right", `${Number(sa.right || 0)}px`);
-
-  root.style.setProperty("--telegram-content-safe-top", `${Number(csa.top || 0)}px`);
-  root.style.setProperty("--telegram-content-safe-bottom", `${Number(csa.bottom || 0)}px`);
-  root.style.setProperty("--telegram-content-safe-left", `${Number(csa.left || 0)}px`);
-  root.style.setProperty("--telegram-content-safe-right", `${Number(csa.right || 0)}px`);
-}
-
-updateTelegramSafeArea();
-
-tg.onEvent("safeAreaChanged", updateTelegramSafeArea);
-tg.onEvent("contentSafeAreaChanged", updateTelegramSafeArea);
 try { tg.setHeaderColor("#0a0e17"); tg.setBackgroundColor("#0a0e17"); } catch (e) {}
 
 function getInitData() {
@@ -1130,395 +1106,65 @@ async function renderStore() {
 
 async function openProductDetail(productId) {
   content.innerHTML = skeleton(3);
-
   try {
     const p = catalogProductsById[productId] || await api(`/api/products/${productId}`);
     const available = p.available !== false;
-
     content.innerHTML = `
-      <button class="btn outline small" id="back-to-store-btn"
-        style="width:auto;margin-bottom:12px">→ بازگشت به فروشگاه</button>
-
+      <button class="btn outline small" id="back-to-store-btn" style="width:auto;margin-bottom:12px">→ بازگشت به فروشگاه</button>
       <div class="card">
         ${p.has_preview
           ? `<img class="product-thumb pattern-hero" alt="" />`
           : `<div class="product-thumb-ph">🧵</div>`}
-
-        <h3 style="margin-top:12px">
-          <span class="ic">🧵</span>${escHtml(p.name)}
-        </h3>
-
+        <h3 style="margin-top:12px"><span class="ic">🧵</span>${escHtml(p.name)}</h3>
         <div class="pattern-badge-row">
-          <span class="badge ${available ? "approved" : "rejected"}">
-            ${available ? "✅ موجود" : "⛔️ ناموجود"}
-          </span>
+          <span class="badge ${available ? "approved" : "rejected"}">${available ? "✅ موجود" : "⛔️ ناموجود"}</span>
           <span class="price" style="margin:0">${fmt(p.price)} تومان</span>
         </div>
-
-        ${p.description
-          ? `<p class="hint-text" style="white-space:pre-wrap">${escHtml(p.description)}</p>`
-          : ""}
-
+        ${p.description ? `<p class="hint-text" style="white-space:pre-wrap">${escHtml(p.description)}</p>` : ""}
         ${available ? `
-          <button class="btn" id="add-cart-btn" style="margin-top:10px">
-            🛒 افزودن به سبد خرید
-          </button>
-
-          <button class="btn outline" id="buy-now-btn"
-            style="margin-top:8px">
-            ⚡ خرید فوری
-          </button>
-        ` : `
-          <div class="state-msg" style="margin-top:10px">
-            <span class="ic">⛔️</span>
-            این الگو در حال حاضر ناموجود است.
-          </div>
-        `}
+        <input class="input" id="purchase-discount-code" type="text" placeholder="کد تخفیف (اختیاری)"
+          style="direction:ltr;text-align:left;margin-top:10px" />
+        <button class="btn" id="buy-btn" style="margin-top:10px">🛍 خرید الگو</button>
+        ` : `<div class="state-msg" style="margin-top:10px"><span class="ic">⛔️</span>این الگو در حال حاضر ناموجود است.</div>`}
       </div>
     `;
-
-    const backBtn = document.getElementById("back-to-store-btn");
-    if (backBtn) backBtn.onclick = renderStore;
-
+    document.getElementById("back-to-store-btn").onclick = renderStore;
     const img = content.querySelector("img.product-thumb");
     if (img) loadProductPreview(img, p.id);
-
-    const addBtn = document.getElementById("add-cart-btn");
-    if (addBtn) {
-      addBtn.onclick = async () => {
-        addBtn.disabled = true;
-        addBtn.textContent = "در حال افزودن...";
-
-        try {
-          const result = await api("/api/cart", {
-            method: "POST",
-            body: JSON.stringify({
-              product_id: p.id,
-              quantity: 1
-            }),
-          });
-
-          tg.HapticFeedback?.notificationOccurred("success");
-          notify("✅ الگو به سبد خرید اضافه شد.");
-          updateMiniCartBadge(result.count);
-
-          addBtn.textContent = "✅ در سبد خرید";
-          setTimeout(() => {
-            if (addBtn) {
-              addBtn.disabled = false;
-              addBtn.textContent = "🛒 افزودن دوباره به سبد";
-            }
-          }, 900);
-        } catch (e) {
-          notify("خطا: " + e.message);
-          addBtn.disabled = false;
-          addBtn.textContent = "🛒 افزودن به سبد خرید";
-        }
+    const buyBtn = document.getElementById("buy-btn");
+    if (buyBtn) {
+      buyBtn.onclick = () => {
+        const code = document.getElementById("purchase-discount-code").value.trim();
+        buyProduct(p.id, code || null);
       };
     }
-
-    const buyNowBtn = document.getElementById("buy-now-btn");
-    if (buyNowBtn) {
-      buyNowBtn.onclick = async () => {
-        buyNowBtn.disabled = true;
-        buyNowBtn.textContent = "در حال آماده‌سازی...";
-
-        try {
-          await api("/api/cart", {
-            method: "POST",
-            body: JSON.stringify({
-              product_id: p.id,
-              quantity: 1
-            }),
-          });
-
-          await renderCart();
-        } catch (e) {
-          notify("خطا: " + e.message);
-          buyNowBtn.disabled = false;
-          buyNowBtn.textContent = "⚡ خرید فوری";
-        }
-      };
-    }
-
   } catch (e) {
     content.innerHTML = errorState(e.message);
   }
 }
 
-
-/* ===========================================================
-   سبد خرید چندمحصولی
-   =========================================================== */
-
-function updateMiniCartBadge(count) {
-  const btn = document.getElementById("mini-cart-floating-btn");
-  const badge = document.getElementById("mini-cart-count");
-
-  if (!btn || !badge) return;
-
-  const n = Number(count || 0);
-  badge.textContent = fmt(n);
-  badge.style.display = n > 0 ? "inline-flex" : "none";
-}
-
-async function refreshMiniCartBadge() {
+// ---------------------------------------------------------------------------
+// خرید الگو + پرداخت کارت‌به‌کارت
+// ---------------------------------------------------------------------------
+async function buyProduct(productId, code) {
+  const btn = document.getElementById("buy-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "در حال ثبت سفارش..."; }
   try {
-    const cart = await api("/api/cart");
-    updateMiniCartBadge(cart.total_qty || 0);
-    return cart;
-  } catch (e) {
-    return null;
-  }
-}
-
-function installMiniCartButton() {
-  if (document.getElementById("mini-cart-floating-btn")) return;
-
-  const btn = document.createElement("button");
-  btn.id = "mini-cart-floating-btn";
-  btn.type = "button";
-  btn.innerHTML = `
-    <span style="font-size:18px">🛒</span>
-    <span>سبد خرید</span>
-    <span id="mini-cart-count"
-      style="
-        display:none;
-        min-width:22px;
-        height:22px;
-        padding:0 6px;
-        border-radius:999px;
-        align-items:center;
-        justify-content:center;
-        font-size:12px;
-        font-weight:800;
-        background:#ef4444;
-        color:#fff;
-      ">0</span>
-  `;
-
-  Object.assign(btn.style, {
-    position: "fixed",
-    top: "12px",
-    left: "12px",
-    zIndex: "99999",
-    display: "flex",
-    alignItems: "center",
-    gap: "7px",
-    border: "1px solid rgba(255,255,255,.15)",
-    borderRadius: "14px",
-    padding: "9px 12px",
-    background: "rgba(20,20,30,.92)",
-    color: "#fff",
-    boxShadow: "0 8px 25px rgba(0,0,0,.25)",
-    cursor: "pointer",
-    fontFamily: "inherit",
-    fontSize: "13px",
-    fontWeight: "700",
-    backdropFilter: "blur(12px)"
-  });
-
-  btn.onclick = () => renderCart();
-
-  document.body.appendChild(btn);
-
-  setTimeout(refreshMiniCartBadge, 1200);
-}
-
-async function renderCart() {
-  content.innerHTML = skeleton(4);
-
-  try {
-    const cart = await api("/api/cart");
-
-    updateMiniCartBadge(cart.total_qty || 0);
-
-    if (!cart.items || cart.items.length === 0) {
-      content.innerHTML = `
-        <button class="btn outline small"
-          id="cart-back-store"
-          style="width:auto;margin-bottom:12px">
-          → ادامه خرید
-        </button>
-
-        <div class="card" style="text-align:center;padding:34px 18px">
-          <div style="font-size:46px;margin-bottom:10px">🛒</div>
-          <h3>سبد خرید خالی است</h3>
-          <p class="hint-text">
-            محصولات موردنظر را به سبد اضافه کن و بعد همه را یکجا تسویه کن.
-          </p>
-        </div>
-      `;
-
-      document.getElementById("cart-back-store").onclick = renderStore;
-      return;
-    }
-
-    const rows = cart.items.map((item, index) => `
-      <div class="card" style="margin-bottom:10px">
-        <div style="
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:10px;
-        ">
-          <div style="flex:1">
-            <div style="font-weight:800">
-              ${fmt(index + 1)}. ${escHtml(item.product_name)}
-            </div>
-
-            ${item.variant_label
-              ? `<div class="hint-text">${escHtml(item.variant_label)}</div>`
-              : ""}
-
-            <div class="hint-text" style="margin-top:5px">
-              ${fmt(item.unit_price)} تومان
-            </div>
-          </div>
-
-          <button
-            class="btn outline small cart-remove-btn"
-            data-cart-item="${item.item_id}"
-            style="width:auto">
-            🗑 حذف
-          </button>
-        </div>
-
-        <div style="
-          display:flex;
-          justify-content:space-between;
-          align-items:center;
-          margin-top:12px;
-          padding-top:10px;
-          border-top:1px solid var(--border,rgba(128,128,128,.15));
-        ">
-          <span>تعداد</span>
-          <b>${fmt(item.quantity)}</b>
-          <b>${fmt(item.total_price)} تومان</b>
-        </div>
-      </div>
-    `).join("");
-
-    content.innerHTML = `
-      <div style="
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        margin-bottom:12px;
-      ">
-        <h3 style="margin:0">🛒 سبد خرید</h3>
-        <button class="btn outline small" id="cart-back-store"
-          style="width:auto">
-          ادامه خرید
-        </button>
-      </div>
-
-      ${rows}
-
-      <div class="card">
-        <div class="stat-row">
-          <span>تعداد اقلام</span>
-          <b>${fmt(cart.total_qty)}</b>
-        </div>
-
-        <div class="stat-row">
-          <span>جمع سبد</span>
-          <b>${fmt(cart.subtotal)} تومان</b>
-        </div>
-
-        <div class="stat-row">
-          <span>موجودی کیف پول</span>
-          <b>${fmt(cart.wallet_credit)} تومان</b>
-        </div>
-
-        <input
-          class="input"
-          id="cart-discount-code"
-          type="text"
-          placeholder="کد تخفیف (اختیاری)"
-          style="margin-top:12px;direction:ltr;text-align:left"
-        />
-
-        <button class="btn" id="cart-checkout-btn"
-          style="margin-top:10px">
-          💳 تسویه ${fmt(cart.subtotal)} تومان
-        </button>
-
-        <button class="btn outline" id="cart-clear-btn"
-          style="margin-top:8px">
-          🗑 خالی کردن سبد
-        </button>
-      </div>
-    `;
-
-    document.getElementById("cart-back-store").onclick = renderStore;
-
-    content.querySelectorAll(".cart-remove-btn").forEach(btn => {
-      btn.onclick = async () => {
-        const itemId = Number(btn.dataset.cartItem);
-        btn.disabled = true;
-
-        try {
-          await api(`/api/cart/${itemId}`, {
-            method: "DELETE"
-          });
-
-          notify("قلم از سبد حذف شد.");
-          await renderCart();
-        } catch (e) {
-          notify("خطا: " + e.message);
-          btn.disabled = false;
-        }
-      };
+    const result = await api("/api/orders", {
+      method: "POST",
+      body: JSON.stringify({ product_id: productId, discount_code: code || null }),
     });
-
-    document.getElementById("cart-clear-btn").onclick = async () => {
-      try {
-        await api("/api/cart", { method: "DELETE" });
-        notify("سبد خرید خالی شد.");
-        await renderCart();
-      } catch (e) {
-        notify("خطا: " + e.message);
-      }
-    };
-
-    document.getElementById("cart-checkout-btn").onclick = async () => {
-      const btn = document.getElementById("cart-checkout-btn");
-      const code = document.getElementById("cart-discount-code").value.trim();
-
-      btn.disabled = true;
-      btn.textContent = "در حال ثبت سفارش...";
-
-      try {
-        const result = await api("/api/cart/checkout", {
-          method: "POST",
-          body: JSON.stringify({
-            discount_code: code || null
-          }),
-        });
-
-        updateMiniCartBadge(0);
-
-        if (result.status === "approved") {
-          tg.HapticFeedback?.notificationOccurred("success");
-          renderOrderSuccess(result);
-        } else {
-          renderOrderPendingPayment(result);
-        }
-
-      } catch (e) {
-        notify("خطا: " + e.message);
-        btn.disabled = false;
-        btn.textContent = "💳 تسویه سبد";
-      }
-    };
-
+    if (result.status === "approved") {
+      tg.HapticFeedback.notificationOccurred("success");
+      renderOrderSuccess(result);
+    } else {
+      renderOrderPendingPayment(result);
+    }
   } catch (e) {
-    content.innerHTML = errorState(e.message);
+    notify("خطا: " + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = "🛍 خرید الگو"; }
   }
 }
-
-
 
 function renderOrderSuccess(result) {
   const files = result.files || [];
@@ -1847,7 +1493,6 @@ function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder) {
 const tabs = {
   home: renderHome,
   store: enterStoreTab,
-  cart: renderCart,
   services: renderOrders, // سازگار با برچسب قدیمی نوار پایین
   orders: renderOrders,
   profile: renderProfile,

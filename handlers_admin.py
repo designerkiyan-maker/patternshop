@@ -1346,7 +1346,14 @@ def create_admin_router(db) -> Router:
     async def cb_admin_referral_freeconfig_setprod(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        product_id = call.data.split(":")[1]
+        try:
+            parts = call.data.split(":", 1)
+            if len(parts) != 2 or not parts[1].isdigit():
+                raise ValueError
+            product_id = int(parts[1])
+        except (ValueError, IndexError):
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
         product = (await asyncio.to_thread(db.get_product, int(product_id)))
         if not product:
             await call.answer("این محصول یافت نشد.", show_alert=True)
@@ -1916,7 +1923,14 @@ def create_admin_router(db) -> Router:
 
     @router.callback_query(F.data.startswith("adm_btn_edit:"))
     async def cb_admin_btn_edit(call: CallbackQuery, state: FSMContext):
-        key = call.data.split(":")[1]
+        try:
+            parts = call.data.split(":", 1)
+            if len(parts) != 2:
+                raise ValueError
+            key = parts[1]
+        except (ValueError, IndexError):
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
         await state.update_data(setting_key=key)
         await state.set_state(AdminEditButton.waiting_text)
         current = (await asyncio.to_thread(db.get_setting, key))
@@ -1938,7 +1952,14 @@ def create_admin_router(db) -> Router:
     async def cb_admin_btn_toggle(call: CallbackQuery):
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
-        key = call.data.split(":")[1]
+        try:
+            parts = call.data.split(":", 1)
+            if len(parts) != 2:
+                raise ValueError
+            key = parts[1]
+        except (ValueError, IndexError):
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
         meta = MENU_BUTTON_META.get(key)
         if not meta or not meta["toggle_key"]:
             await call.answer("❌ این دکمه قابل فعال/غیرفعال کردن نیست.", show_alert=True)
@@ -2024,7 +2045,14 @@ def create_admin_router(db) -> Router:
 
     @router.callback_query(F.data.startswith("adm_btn_color_menu:"))
     async def cb_admin_btn_color_menu(call: CallbackQuery):
-        key = call.data.split(":")[1]
+        try:
+            parts = call.data.split(":", 1)
+            if len(parts) != 2:
+                raise ValueError
+            key = parts[1]
+        except (ValueError, IndexError):
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
         label = _lookup_button_label(key)
         if _is_panel_item_key(key):
             back_callback = "adm_panel_colors_menu"
@@ -2331,10 +2359,14 @@ def create_admin_router(db) -> Router:
             await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
             return
         conv = (await asyncio.to_thread(db.get_support_conversation, user_id))
+        # بررسی مالکیت گفتگو: آیدی استخراج‌شده باید با user_id واقعی گفتگو مطابقت داشته باشد
+        if conv and conv["user_id"] != user_id:
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
         assigned_admin_id = conv["assigned_admin_id"] if conv else None
         if assigned_admin_id and assigned_admin_id != call.from_user.id and not owner_only(call.from_user.id):
             await call.answer(
-                "⛔️ این گفتگو در حال حاضر توسط ادمین دیگری پاسخ داده می‌شود.", show_alert=True
+                "⛔️ این گفتگو در حال حاضر توسط ادمین دیگری پاسخ داده میشود.", show_alert=True
             )
             return
         await state.update_data(reply_to_user=user_id)

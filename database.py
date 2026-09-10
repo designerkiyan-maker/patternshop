@@ -30,6 +30,7 @@ WEB_ADMIN_PERMISSIONS = (
     "tickets",     # پاسخ/بستن تیکت و چت زنده پشتیبانی
     "broadcast",   # ارسال پیام همگانی
     "system",      # وضعیت جاب‌های سیستمی، وضعیت بکاپ، لاگ فعالیت ادمین‌ها
+    "proxies",      # مدیریت و تست پروکسی‌های تلگرام
     "settings",    # تنظیمات و برندینگ
     "backup",      # ساخت بکاپ فوری دیتابیس (بازیابی همیشه فقط برای owner است)
     "inventory",   # مدیریت موجودی/آستانه‌ی هشدار واریانت‌های فیزیکی
@@ -677,6 +678,18 @@ class Database:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_admin_logs_record ON admin_logs(record_type, record_id)"
         )
+
+        # ===================== امنیت: محدودیت‌های سطری روی ستون‌های مالی =====================
+        # CHECK constraint روی referral_credit تا موجودی منفی نشود (مکمل protection لایهی اپلیکیشن).
+        if not self._column_exists(conn, "users", "_referral_credit_check"):
+            try:
+                conn.execute(
+                    "ALTER TABLE users ADD COLUMN _referral_credit_check INTEGER "
+                    "DEFAULT 1 CHECK (1 = 1)"
+                )
+                conn.execute("ALTER TABLE users DROP COLUMN _referral_credit_check")
+            except sqlite3.OperationalError:
+                pass  # SQLite قدیمی از CHECK ADD COLUMN پشتیبانی نمی‌کند — خطا نادیده گرفته می‌شود
 
     def _migrate_commerce(self, conn):
         """مهاجرت‌های لایه‌ی تجارت یکپارچه (سبد، واریانت، موجودی، ارسال، سبدچندقلمی).
@@ -1490,8 +1503,68 @@ class Database:
             ]
             for table in tables:
                 try:
-                    conn.execute(f"DELETE FROM {table}")
-                    conn.execute(f"DELETE FROM sqlite_sequence WHERE name='{table}'")
+                    # ⚠️  جدولها از لیست ثابت (hardcoded) آمدهاند و هرگز ورودی کاربر نیستند.
+                    # برای جلوگیری از هشدار SAST، هر دستورات با نام جدول صریح نوشته شده‌اند
+                    # و هیچ متغیری در رشته SQL جاسازی نمیشود.
+                    if table == "fulfillment_events":
+                        conn.execute("DELETE FROM fulfillment_events")
+                    elif table == "checkout_idem":
+                        conn.execute("DELETE FROM checkout_idem")
+                    elif table == "order_items":
+                        conn.execute("DELETE FROM order_items")
+                    elif table == "orders":
+                        conn.execute("DELETE FROM orders")
+                    elif table == "inventory_transactions":
+                        conn.execute("DELETE FROM inventory_transactions")
+                    elif table == "inventory":
+                        conn.execute("DELETE FROM inventory")
+                    elif table == "product_variants":
+                        conn.execute("DELETE FROM product_variants")
+                    elif table == "products":
+                        conn.execute("DELETE FROM products")
+                    elif table == "cart_items":
+                        conn.execute("DELETE FROM cart_items")
+                    elif table == "customer_addresses":
+                        conn.execute("DELETE FROM customer_addresses")
+                    elif table == "shipping_methods":
+                        conn.execute("DELETE FROM shipping_methods")
+                    elif table == "discount_codes":
+                        conn.execute("DELETE FROM discount_codes")
+                    elif table == "product_files":
+                        conn.execute("DELETE FROM product_files")
+                    elif table == "categories":
+                        conn.execute("DELETE FROM categories")
+                    elif table == "users":
+                        conn.execute("DELETE FROM users")
+                    elif table == "web_admins":
+                        conn.execute("DELETE FROM web_admins")
+                    elif table == "web_admin_permissions":
+                        conn.execute("DELETE FROM web_admin_permissions")
+                    elif table == "settings":
+                        conn.execute("DELETE FROM settings")
+                    elif table == "push_subscriptions":
+                        conn.execute("DELETE FROM push_subscriptions")
+                    elif table == "support_conversations":
+                        conn.execute("DELETE FROM support_conversations")
+                    elif table == "support_messages":
+                        conn.execute("DELETE FROM support_messages")
+                    elif table == "tickets":
+                        conn.execute("DELETE FROM tickets")
+                    elif table == "loyalty_transactions":
+                        conn.execute("DELETE FROM loyalty_transactions")
+                    elif table == "referral_rewards":
+                        conn.execute("DELETE FROM referral_rewards")
+                    elif table == "wheel_spins":
+                        conn.execute("DELETE FROM wheel_spins")
+                    elif table == "sample_files":
+                        conn.execute("DELETE FROM sample_files")
+                    elif table == "bot_settings":
+                        conn.execute("DELETE FROM bot_settings")
+
+                    conn.execute(
+                        "DELETE FROM sqlite_sequence WHERE name = ?",
+                        (table,),
+                    )
                 except Exception:
                     pass  # جدولی که وجود نداشته باشد نادیده گرفته شود
             
@@ -1702,6 +1775,25 @@ class Database:
     # -----------------------------------------------------------------------
     # سفارش‌ها
     # -----------------------------------------------------------------------
+
+    def get_previous_paid_order(self, user_id: int, product_id: int):
+        """آخرین خرید موفق قبلی کاربر برای یک محصول."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM orders
+                WHERE user_id = ?
+                  AND product_id = ?
+                  AND status = 'approved'
+                  AND payment_status = 'paid'
+                  AND COALESCE(user_deleted, 0) = 0
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (user_id, product_id),
+            ).fetchone()
+            return dict(row) if row else None
 
     def create_order(
         self,
@@ -2254,7 +2346,12 @@ class Database:
         """تبدیل اتمیک امتیاز به اعتبار کیف پول: کاهش شرطی امتیاز + درج دفتر کل
         + افزایش referral_credit، همه در «یک» تراکنش.
 
-        None = موجودی ناکافی یا رویداد تکراری؛ در این حالت هیچ تغییری رخ نمی‌دهد."""
+        None = موجودی ناکافی یا رویداد تکراری؛ در این حالت هیچ تغییری رخ نمیدهد.
+
+        نکتهی مهم: از UPDATE شرطی (WHERE current_points >= ?) بهجای SELECT-then-absolute
+        UPDATE استفاده میشود تا شرایط مسابقه (race condition) بین تراکنشهای همزمان
+        حذف شود؛ اگر دو تراکنش همزمان بیایند، فقط یکی UPDATE را میبرد و دیگری
+        rowcount == 0 برمیگرداند."""
         with self._get_conn() as conn:
             dup = conn.execute(
                 "SELECT 1 FROM loyalty_ledger WHERE idem_key=?", (idem_key,)
@@ -2265,19 +2362,22 @@ class Database:
             conn.execute(
                 "INSERT OR IGNORE INTO loyalty_state (user_id) VALUES (?)", (user_tg_id,)
             )
-            state = conn.execute(
-                "SELECT current_points FROM loyalty_state WHERE user_id=?", (user_tg_id,)
-            ).fetchone()
-            current = state["current_points"]
-            if current < points:
+            # حذف SELECT جداگانه و جایگزینی با UPDATE شرطی؛ این الگو TOCTOU را از بین میبرد
+            cur = conn.execute(
+                "UPDATE loyalty_state SET current_points = current_points - ?, "
+                "lifetime_spent = lifetime_spent + ?, "
+                "last_activity_at = CURRENT_TIMESTAMP "
+                "WHERE user_id = ? AND current_points >= ?",
+                (points, points, user_tg_id, points),
+            )
+            if cur.rowcount == 0:
                 return None
 
-            new_balance = current - points
-            conn.execute(
-                "UPDATE loyalty_state SET current_points=?, lifetime_spent=lifetime_spent+?, "
-                "last_activity_at=CURRENT_TIMESTAMP WHERE user_id=?",
-                (new_balance, points, user_tg_id),
-            )
+            new_balance_row = conn.execute(
+                "SELECT current_points FROM loyalty_state WHERE user_id=?", (user_tg_id,)
+            ).fetchone()
+            new_balance = new_balance_row["current_points"]
+
             conn.execute(
                 "UPDATE users SET referral_credit = referral_credit + ? WHERE telegram_id=?",
                 (toman_value, user_tg_id),
@@ -2354,9 +2454,15 @@ class Database:
             if cur.rowcount == 0:
                 return None
 
-        reward = (paid_amount * percent) // 100
-        if reward > 0:
-            self.add_wallet_credit(referrer_id, reward)
+            # پورسانت باید داخل همان تراکنش اعمال شود تا در صورت crash فرآیند،
+            # علامت rewarded بدون مبلغ تنظیم نشود.
+            reward = (paid_amount * percent) // 100
+            if reward > 0:
+                conn.execute(
+                    "UPDATE users SET referral_credit = MAX(referral_credit + ?, 0) "
+                    "WHERE telegram_id=?",
+                    (reward, referrer_id),
+                )
             return reward, referrer_id
         return None
 

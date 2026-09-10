@@ -16,7 +16,7 @@ order_approve/order_reject و topup_approve/topup_reject) انجام می‌شو
 import sys
 import os
 import json
-import random
+import secrets
 import html as html_lib
 import asyncio
 import logging
@@ -34,7 +34,7 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("miniapp")
 
-from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER
+from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, TELEGRAM_PROXY, MINIAPP_URL
 from database import Database
 from miniapp.auth import validate_init_data
 import loyalty
@@ -45,8 +45,30 @@ from services.errors import (
     ShopError, CartError, CatalogError, InventoryError, WalletError,
 )
 
+def telegram_session():
+    return aiohttp.ClientSession(proxy=TELEGRAM_PROXY)
+
 app = FastAPI(title="Pattern Shop Mini App API")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# Originها بهصورت صریح لیست میشوند؛ wildcard ممنوع. از MINIAPP_URL env استفاده
+# میشود; اگر ست نشده باشد فقط localhost اجازه دسترسی دارد (حالت توسعه).
+_allowed_origins = [o.strip() for o in (os.getenv("MINIAPP_ALLOWED_ORIGINS") or MINIAPP_URL) if o.strip()] if MINIAPP_URL else ["http://127.0.0.1"]
+app.add_middleware(CORSMiddleware, allow_origins=_allowed_origins, allow_methods=["GET", "POST", "PATCH", "DELETE"], allow_headers=["X-Init-Data", "Content-Type"])
+
+# Security headers
+from fastapi import Request as _Request
+from starlette.middleware.base import BaseHTTPMiddleware as _BaseHTTPMiddleware
+
+
+class _SecMiddleware(_BaseHTTPMiddleware):
+    async def dispatch(self, request: _Request, call_next):
+        resp = await call_next(request)
+        resp.headers["X-Frame-Options"] = "DENY"
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return resp
+
+
+app.add_middleware(_SecMiddleware)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -73,7 +95,7 @@ async def get_bot_username() -> str:
     if _bot_username_cache:
         return _bot_username_cache
     try:
-        async with aiohttp.ClientSession() as session:
+        async with telegram_session() as session:
             async with session.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe") as resp:
                 data = await resp.json()
                 if data.get("ok"):
@@ -86,7 +108,7 @@ async def get_bot_username() -> str:
 async def _tg_get_file_path(bot_token: str, file_id: str) -> Optional[str]:
     """file_id تلگرام را با getFile به file_path قابل دانلود تبدیل می‌کند."""
     try:
-        async with aiohttp.ClientSession() as session:
+        async with telegram_session() as session:
             async with session.post(
                 f"https://api.telegram.org/bot{bot_token}/getFile",
                 json={"file_id": file_id},
@@ -106,7 +128,7 @@ async def _tg_download_file(bot_token: str, file_id: str) -> Optional[bytes]:
     if not file_path:
         return None
     try:
-        async with aiohttp.ClientSession() as session:
+        async with telegram_session() as session:
             async with session.get(
                 f"https://api.telegram.org/file/bot{bot_token}/{file_path}",
                 timeout=aiohttp.ClientTimeout(total=30),
@@ -129,7 +151,7 @@ async def send_receipt_media_to_admins(db: Database, bot_token: str, caption: st
     results = []
     method = "sendDocument" if as_document else "sendPhoto"
     field = "document" if as_document else "photo"
-    async with aiohttp.ClientSession() as session:
+    async with telegram_session() as session:
         for admin_id in admin_ids:
             form = aiohttp.FormData()
             form.add_field("chat_id", str(admin_id))
@@ -190,7 +212,7 @@ async def _is_channel_member_http(bot_token: str, channel: str, tg_id: int) -> b
         return True
     url = f"https://api.telegram.org/bot{bot_token}/getChatMember"
     try:
-        async with aiohttp.ClientSession() as session:
+        async with telegram_session() as session:
             async with session.get(
                 url, params={"chat_id": channel, "user_id": tg_id},
                 timeout=aiohttp.ClientTimeout(total=8),
@@ -433,7 +455,7 @@ async def _notify_admins_of_auto_order(db: Database, order_id: int):
     دستی ندارند؛ فقط یک پیام اطلاع‌رسانی بدون دکمه برای ادمین‌ها می‌رود."""
     try:
         caption = await _order_admin_caption(db, order_id, auto_approved=True)
-        async with aiohttp.ClientSession() as session:
+        async with telegram_session() as session:
             for admin_id in db.list_admins():
                 try:
                     await session.post(
@@ -604,6 +626,28 @@ def api_cart_remove(item_id: int, auth=Depends(get_verified_user)):
         raise HTTPException(status_code=404, detail="قلم سبد پیدا نشد.")
     return {"ok": True}
 
+
+
+class CartCheckoutBody(BaseModel):
+    discount_code: Optional[str] = None
+
+
+@app.post("/api/cart/checkout")
+def api_cart_checkout(body: CartCheckoutBody, auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    try:
+        result = checkout_svc.checkout_cart(
+            db,
+            tg_id,
+            discount_code=(body.discount_code or "").strip() or None,
+            actor="miniapp_cart",
+        )
+        return result.to_dict()
+    except ShopError as e:
+        raise HTTPException(status_code=409, detail=e.message)
+    except Exception as e:
+        logger.exception("خطا در تسویه سبد خرید Mini App")
+        raise HTTPException(status_code=500, detail="خطا در تسویه سبد خرید.")
 
 @app.get("/api/shipping/methods")
 def api_shipping_methods(auth=Depends(get_verified_user)):
@@ -872,9 +916,9 @@ def api_wheel_spin(auth=Depends(require_joined)):
         raise HTTPException(status_code=429, detail=f"حدود {int(remaining_hours)+1} ساعت دیگر دوباره امتحان کن.")
 
     db.record_wheel_spin(tg_id)
-    won = random.randint(1, 100) <= settings["win_percent"]
+    won = secrets.randbelow(100) < settings["win_percent"]
     if won and settings["prizes"]:
-        percent = random.choice(settings["prizes"])
+        percent = secrets.choice(settings["prizes"])
         code, expires_at = db.generate_wheel_prize_code(tg_id, percent)
         return {"won": True, "percent": percent, "code": code, "expires_at": expires_at}
     return {"won": False}
@@ -1036,7 +1080,7 @@ async def api_support_send(body: SupportMessageCreate, auth=Depends(get_verified
     # اگر هیچ‌کس آنلاین نبود، طبق روال قدیم به همه‌ی ادمین‌ها اطلاع بده.
     target_admin = db.resolve_support_admin_for_message(tg_id)
     admin_ids = [target_admin] if target_admin else db.list_admins()
-    async with aiohttp.ClientSession() as session:
+    async with telegram_session() as session:
         for admin_id in admin_ids:
             try:
                 await session.post(
@@ -1099,7 +1143,7 @@ async def api_create_ticket(body: TicketCreate, auth=Depends(get_verified_user))
         f"📌 {subject}\n✉️ {message}"
     )
     admin_ids = db.list_admins()
-    async with aiohttp.ClientSession() as session:
+    async with telegram_session() as session:
         for admin_id in admin_ids:
             try:
                 await session.post(
@@ -1152,7 +1196,7 @@ async def api_send_my_ticket_message(ticket_id: int, body: TicketMessageCreate, 
         f"✉️ {text}"
     )
     admin_ids = db.list_admins()
-    async with aiohttp.ClientSession() as session:
+    async with telegram_session() as session:
         for admin_id in admin_ids:
             try:
                 await session.post(
@@ -1187,3 +1231,4 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8001)
     args = parser.parse_args()
     uvicorn.run(app, host=args.host, port=args.port)
+

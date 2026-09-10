@@ -8,6 +8,8 @@ import logging
 
 import aiohttp
 
+from config import TELEGRAM_PROXY
+
 logger = logging.getLogger("admin_panel.telegram_notify")
 
 
@@ -21,7 +23,7 @@ async def send_message(bot_token: str, chat_id: int, text: str, parse_mode: str 
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(proxy=TELEGRAM_PROXY) as session:
             async with session.post(
                 url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
             ) as resp:
@@ -42,7 +44,7 @@ async def send_photo(bot_token: str, chat_id: int, photo_bytes: bytes, filename:
         if caption:
             form.add_field("caption", caption)
         form.add_field("photo", photo_bytes, filename=filename, content_type="image/png")
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(proxy=TELEGRAM_PROXY) as session:
             async with session.post(url, data=form, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                 return resp.status == 200
     except Exception:
@@ -63,7 +65,7 @@ async def fetch_telegram_file(bot_token: str, file_id: str):
     if not bot_token or not file_id:
         return None
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(proxy=TELEGRAM_PROXY) as session:
             async with session.get(
                 f"https://api.telegram.org/bot{bot_token}/getFile",
                 params={"file_id": file_id},
@@ -107,7 +109,7 @@ async def send_document(bot_token: str, chat_id: int, file_path: str, caption: s
             "document", file_bytes,
             filename=os.path.basename(file_path), content_type="application/octet-stream",
         )
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(proxy=TELEGRAM_PROXY) as session:
             async with session.post(url, data=form, timeout=aiohttp.ClientTimeout(total=60)) as resp:
                 return resp.status == 200
     except Exception:

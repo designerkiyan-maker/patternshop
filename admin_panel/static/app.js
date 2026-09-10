@@ -337,6 +337,7 @@ const NAV = [
   { key: 'support', label: 'چت زنده', icon: 'support', role: 'any', section: 'کاربران و پشتیبانی' },
 
   // محصولات و بازاریابی
+  { key: 'carts', label: 'سبدهای خرید', icon: 'catalog', role: 'any', section: 'محصولات و بازاریابی' },
   { key: 'catalog', label: 'محصولات و فایل‌های الگو', icon: 'catalog', role: 'catalog', section: 'محصولات و بازاریابی' },
   { key: 'discounts', label: 'کدهای تخفیف', icon: 'discounts', role: 'discounts', section: 'محصولات و بازاریابی' },
   { key: 'broadcast', label: 'پیام همگانی', icon: 'broadcast', role: 'broadcast', section: 'محصولات و بازاریابی' },
@@ -346,6 +347,7 @@ const NAV = [
   { key: 'salessettings', label: 'تنظیمات فروش', icon: 'settings', role: 'settings', section: 'تنظیمات و سیستم' },
   { key: 'webadmins', label: 'کاربران پنل', icon: 'webadmins', role: 'owner', section: 'تنظیمات و سیستم' },
   { key: 'tgadmins', label: '👤 ادمین‌های تلگرام', icon: 'webadmins', role: 'owner', section: 'تنظیمات و سیستم' },
+  { key: 'proxies', label: '🔐 مدیریت VLESS', icon: 'system', role: 'proxies', section: 'تنظیمات و سیستم' },
   { key: 'system', label: 'سیستم و نگهداری', icon: 'system', role: 'system', section: 'تنظیمات و سیستم' },
   { key: 'logs', label: 'لاگ فعالیت ادمین‌ها', icon: 'logs', role: 'system', section: 'تنظیمات و سیستم' },
 
@@ -711,10 +713,12 @@ async function renderPage(tab) {
       case 'topups': return renderTopups();
       case 'users': return renderUsers();
       case 'catalog': return renderCatalog();
+      case 'carts': return renderCarts();
       case 'discounts': return renderDiscounts();
       case 'tickets': return renderTickets();
       case 'support': return renderSupport();
       case 'broadcast': return renderBroadcast();
+      case 'proxies': return renderProxies();
       case 'system': return renderSystem();
       case 'settings': return renderSettings();
       case 'salessettings': return renderSalesSettings();
@@ -725,6 +729,150 @@ async function renderPage(tab) {
     }
   } catch (e) { handleErr(e); setContent(`<div class="empty-state">${esc(e.message)}</div>`); }
 }
+
+
+/* ============================================================ carts === */
+
+async function renderCarts() {
+  try {
+    const carts = await apiGet('/carts');
+
+    if (!carts.length) {
+      setContent(`
+        <div class="card">
+          <h3>🛒 سبدهای خرید</h3>
+          <div class="empty-state">در حال حاضر سبد فعالی وجود ندارد.</div>
+        </div>
+      `);
+      return;
+    }
+
+    setContent(`
+      <div class="card">
+        <div class="card-head">
+          <h3>🛒 سبدهای خرید کاربران</h3>
+          <span class="card-sub">${fmt(carts.length)} سبد فعال</span>
+        </div>
+
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>کاربر</th>
+                <th>اقلام</th>
+                <th>تعداد</th>
+                <th>مبلغ</th>
+                <th>عملیات</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${carts.map(c => `
+                <tr>
+                  <td>
+                    <strong>${esc(c.first_name || 'کاربر')}</strong>
+                    ${c.username ? `<div class="card-sub">@${esc(c.username)}</div>` : ''}
+                    <div class="card-sub mono">${c.user_id}</div>
+                  </td>
+                  <td>${fmt(c.item_count)}</td>
+                  <td>${fmt(c.total_qty)}</td>
+                  <td class="mono">${fmt(c.subtotal)} تومان</td>
+                  <td>
+                    <button class="btn btn-sm cart-view-btn"
+                      data-user-id="${c.user_id}">
+                      مشاهده
+                    </button>
+                    <button class="btn btn-danger btn-sm cart-clear-user-btn"
+                      data-user-id="${c.user_id}">
+                      خالی کردن
+                    </button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `);
+
+    $$('.cart-view-btn').forEach(btn => {
+      btn.onclick = () => openCartAdminDetail(Number(btn.dataset.userId));
+    });
+
+    $$('.cart-clear-user-btn').forEach(btn => {
+      btn.onclick = async () => {
+        const uid = Number(btn.dataset.userId);
+        if (!confirm('سبد این کاربر خالی شود؟')) return;
+
+        try {
+          await api(`/carts/${uid}`, { method: 'DELETE' });
+          toast('سبد کاربر خالی شد.');
+          renderCarts();
+        } catch (e) {
+          handleErr(e);
+        }
+      };
+    });
+
+  } catch (e) {
+    handleErr(e);
+    setContent(`<div class="empty-state">${esc(e.message)}</div>`);
+  }
+}
+
+async function openCartAdminDetail(userId) {
+  try {
+    const cart = await apiGet(`/carts/${userId}`);
+
+    const rows = (cart.items || []).map(item => `
+      <div class="card" style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+          <div>
+            <strong>${esc(item.product_name || 'محصول')}</strong>
+            <div class="card-sub">تعداد: ${fmt(item.quantity)}</div>
+            <div class="card-sub">قیمت: ${fmt(item.product_price || item.variant_price || 0)} تومان</div>
+          </div>
+          <button class="btn btn-danger btn-sm admin-cart-delete"
+            data-user-id="${userId}" data-item-id="${item.id}">
+            حذف
+          </button>
+        </div>
+      </div>
+    `).join('');
+
+    openModal(
+      `🛒 سبد کاربر ${userId}`,
+      `
+        <div style="margin-bottom:12px">
+          ${rows || '<div class="empty-state">سبد خالی است.</div>'}
+        </div>
+        <div class="card">
+          <div class="stat-row"><span>تعداد کل</span><b>${fmt(cart.total_qty)}</b></div>
+          <div class="stat-row"><span>جمع</span><b>${fmt(cart.subtotal)} تومان</b></div>
+          <div class="stat-row"><span>کیف پول</span><b>${fmt(cart.wallet_credit)} تومان</b></div>
+        </div>
+      `,
+      body => {
+        $$('.admin-cart-delete', body).forEach(btn => {
+          btn.onclick = async () => {
+            try {
+              await api(`/carts/${btn.dataset.userId}/${btn.dataset.itemId}`, {
+                method: 'DELETE'
+              });
+              toast('قلم از سبد حذف شد.');
+              openCartAdminDetail(userId);
+            } catch (e) {
+              handleErr(e);
+            }
+          };
+        });
+      }
+    );
+
+  } catch (e) {
+    handleErr(e);
+  }
+}
+
 
 /* ========================================================= dashboard === */
 function greetingByHour() {
@@ -4358,3 +4506,1898 @@ async function renderAccount() {
 }
 
 boot();
+
+// =========================================================
+// PROXY MANAGEMENT PAGE
+// =========================================================
+
+async function renderProxies() {
+  const root = document.getElementById('content');
+  if (!root) return;
+
+  root.innerHTML = `
+    <div class="proxy-page">
+
+      <div class="proxy-page-header">
+
+        <div class="proxy-page-title">
+          <h2>🔐 مدیریت VLESS</h2>
+
+          <div class="proxy-page-subtitle">
+            مدیریت چند Subscription، Nodeهای VLESS و اتصال Xray
+          </div>
+        </div>
+
+        <div class="proxy-page-actions">
+
+          <button
+            class="btn btn-primary"
+            onclick="openAddVLESSSubscriptionModal()"
+          >
+            ➕ افزودن Subscription
+          </button>
+
+          <button
+            id="vless-sync-all-btn"
+            class="btn btn-secondary"
+            onclick="syncAllVLESSSubscriptions()"
+          >
+            🔄 Sync همه
+          </button>
+
+          <button
+            class="btn btn-secondary"
+            onclick="loadVLESSPage()"
+          >
+            🔄 بروزرسانی
+          </button>
+
+        </div>
+
+      </div>
+
+      <div class="proxy-stats-grid">
+
+        <div class="proxy-stat-card">
+          <div class="proxy-stat-top">
+            <div class="proxy-stat-label">کل Subscription</div>
+            <div class="proxy-stat-icon">📚</div>
+          </div>
+          <span id="vless-subscriptions-count" class="proxy-stat-value">-</span>
+        </div>
+
+        <div class="proxy-stat-card">
+          <div class="proxy-stat-top">
+            <div class="proxy-stat-label">Subscription فعال</div>
+            <div class="proxy-stat-icon">🟢</div>
+          </div>
+          <span id="vless-enabled-subscriptions" class="proxy-stat-value">-</span>
+        </div>
+
+        <div class="proxy-stat-card">
+          <div class="proxy-stat-top">
+            <div class="proxy-stat-label">کل Node</div>
+            <div class="proxy-stat-icon">🔗</div>
+          </div>
+          <span id="vless-nodes-count" class="proxy-stat-value">-</span>
+        </div>
+
+        <div class="proxy-stat-card">
+          <div class="proxy-stat-top">
+            <div class="proxy-stat-label">Node فعال</div>
+            <div class="proxy-stat-icon">✅</div>
+          </div>
+          <span id="vless-enabled-nodes" class="proxy-stat-value">-</span>
+        </div>
+
+        <div class="proxy-stat-card">
+          <div class="proxy-stat-top">
+            <div class="proxy-stat-label">Healthy</div>
+            <div class="proxy-stat-icon">💚</div>
+          </div>
+          <span id="vless-healthy-nodes" class="proxy-stat-value">-</span>
+        </div>
+
+        <div class="proxy-stat-card">
+          <div class="proxy-stat-top">
+            <div class="proxy-stat-label">Telegram OK</div>
+            <div class="proxy-stat-icon">✈️</div>
+          </div>
+          <span id="vless-telegram-nodes" class="proxy-stat-value">-</span>
+        </div>
+
+      </div>
+
+      <div id="vless-subscriptions-container">
+
+        <div class="card">
+          <div class="card-body">
+            <div class="proxy-loading">
+              در حال دریافت Subscriptionها...
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div id="vless-nodes-container" style="margin-top:16px;"></div>
+
+    </div>
+  `;
+
+  await loadVLESSPage();
+}
+
+
+async function loadVLESSPage() {
+  try {
+    const [stats, subscriptions] = await Promise.all([
+      api('/vless/stats'),
+      api('/vless/subscriptions')
+    ]);
+
+    setText('vless-subscriptions-count', stats.subscriptions);
+    setText('vless-enabled-subscriptions', stats.enabled_subscriptions);
+    setText('vless-nodes-count', stats.nodes);
+    setText('vless-enabled-nodes', stats.enabled_nodes);
+    setText('vless-healthy-nodes', stats.healthy_nodes);
+    setText('vless-telegram-nodes', stats.telegram_nodes);
+
+    renderVLESSSubscriptions(subscriptions.items || []);
+
+  } catch (error) {
+    console.error(error);
+
+    const box = document.getElementById('vless-subscriptions-container');
+
+    if (box) {
+      box.innerHTML = `
+        <div class="card">
+          <div class="card-body">
+            <div class="proxy-empty">
+              خطا در دریافت Subscriptionها.
+              <br>
+              <button
+                class="btn btn-sm"
+                style="margin-top:10px"
+                onclick="loadVLESSPage()"
+              >
+                🔄 تلاش مجدد
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+  }
+}
+
+
+function renderVLESSSubscriptions(items) {
+  const box = document.getElementById('vless-subscriptions-container');
+
+  if (!box) return;
+
+  if (!items.length) {
+    box.innerHTML = `
+      <div class="card">
+        <div class="card-body">
+          <div class="proxy-empty">
+            هنوز هیچ Subscriptionی ثبت نشده است.
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('vless-nodes-container').innerHTML = '';
+    return;
+  }
+
+  box.innerHTML = `
+    <div class="card">
+      <div class="card-body">
+
+        <div class="proxy-table-wrap">
+
+          <table class="proxy-table">
+
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>نام</th>
+                <th>وضعیت</th>
+                <th>Nodes</th>
+                <th>Telegram</th>
+                <th>Auto Sync</th>
+                <th>Priority</th>
+                <th>آخرین Sync</th>
+                <th>عملیات</th>
+              </tr>
+            </thead>
+
+            <tbody>
+
+              ${items.map(sub => `
+                <tr>
+
+                  <td>${escapeHtml(sub.id)}</td>
+
+                  <td>
+                    <strong>${escapeHtml(sub.name || '-')}</strong>
+                  </td>
+
+                  <td>
+                    ${
+                      sub.enabled
+                        ? '<span class="badge badge-success">فعال</span>'
+                        : '<span class="badge">غیرفعال</span>'
+                    }
+                  </td>
+
+                  <td>
+                    <strong>${escapeHtml(sub.nodes_count ?? 0)}</strong>
+                    <div style="font-size:12px;opacity:.65;">
+                      فعال: ${escapeHtml(sub.enabled_nodes ?? 0)}
+                    </div>
+                  </td>
+
+                  <td>
+                    ${escapeHtml(sub.telegram_nodes ?? 0)}
+                  </td>
+
+                  <td>
+                    ${
+                      sub.auto_sync
+                        ? '<span class="badge badge-success">روشن</span>'
+                        : '<span class="badge">خاموش</span>'
+                    }
+                  </td>
+
+                  <td>${escapeHtml(sub.priority ?? 100)}</td>
+
+                  <td style="white-space:nowrap;">
+                    ${
+                      sub.last_sync_at
+                        ? escapeHtml(formatVLESSDate(sub.last_sync_at))
+                        : '-'
+                    }
+                  </td>
+
+                  <td>
+                    <div class="proxy-actions">
+
+                      <button
+                        class="btn btn-sm proxy-action-btn"
+                        onclick="toggleVLESSSubscription(${sub.id}, ${sub.enabled ? 'false' : 'true'})"
+                      >
+                        ${sub.enabled ? 'غیرفعال' : 'فعال'}
+                      </button>
+
+                      <button
+                        class="btn btn-sm btn-secondary proxy-action-btn"
+                        onclick="syncVLESSSubscription(${sub.id})"
+                      >
+                        🔄 Sync
+                      </button>
+
+                      <button
+                        class="btn btn-sm proxy-action-btn"
+                        onclick="openEditVLESSSubscriptionModal(${sub.id})"
+                      >
+                        ✏️ ویرایش
+                      </button>
+
+                      <button
+                        class="btn btn-sm btn-danger proxy-action-btn"
+                        onclick="deleteVLESSSubscription(${sub.id})"
+                      >
+                        حذف
+                      </button>
+
+                      <button
+                        class="btn btn-sm proxy-action-btn"
+                        onclick="loadVLESSNodes(${sub.id}, '${escapeJsString(sub.name || '')}')"
+                      >
+                        👁 Nodes
+                      </button>
+
+                    </div>
+                  </td>
+
+                </tr>
+
+                ${
+                  sub.last_error
+                    ? `
+                      <tr>
+                        <td colspan="9">
+                          <div style="font-size:12px;color:#b42318;">
+                            ⚠️ آخرین خطا: ${escapeHtml(sub.last_error)}
+                          </div>
+                        </td>
+                      </tr>
+                    `
+                    : ''
+                }
+
+              `).join('')}
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+      </div>
+    </div>
+  `;
+}
+
+
+async function loadVLESSNodes(subscriptionId, subscriptionName = '') {
+  const container = document.getElementById('vless-nodes-container');
+
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="card">
+      <div class="card-body">
+        <div class="proxy-loading">
+          در حال دریافت Nodeهای ${escapeHtml(subscriptionName || '')}...
+        </div>
+      </div>
+    </div>
+  `;
+
+  try {
+    const result = await api(
+      '/vless/nodes?' +
+      new URLSearchParams({
+        subscription_id: String(subscriptionId)
+      }).toString()
+    );
+
+    renderVLESSNodes(
+      result.items || [],
+      subscriptionName
+    );
+
+  } catch (error) {
+    console.error(error);
+
+    container.innerHTML = `
+      <div class="card">
+        <div class="card-body">
+          <div class="proxy-empty">
+            خطا در دریافت Nodeها.
+          </div>
+        </div>
+      </div>
+    `;
+  }
+}
+
+
+function renderVLESSNodes(nodes, subscriptionName = '') {
+  const container = document.getElementById('vless-nodes-container');
+
+  if (!container) return;
+
+  if (!nodes.length) {
+    container.innerHTML = `
+      <div class="card">
+        <div class="card-body">
+          <div class="proxy-empty">
+            Nodeای برای این Subscription وجود ندارد.
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="card">
+
+      <div class="card-body">
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <div>
+            <h3 style="margin:0;">🔗 Nodes ${escapeHtml(subscriptionName ? '— ' + subscriptionName : '')}</h3>
+            <div style="font-size:12px;opacity:.65;">
+              تعداد: ${nodes.length}
+            </div>
+          </div>
+
+          <button
+            class="btn btn-sm btn-secondary"
+            onclick="document.getElementById('vless-nodes-container').innerHTML=''"
+          >
+            ✕ بستن
+          </button>
+        </div>
+
+        <div class="proxy-table-wrap">
+
+          <table class="proxy-table">
+
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>نام</th>
+                <th>Host</th>
+                <th>Port</th>
+                <th>Network</th>
+                <th>Security</th>
+                <th>وضعیت</th>
+                <th>Telegram</th>
+                <th>Latency</th>
+                <th>فعال</th>
+              </tr>
+            </thead>
+
+            <tbody>
+
+              ${nodes.map(node => {
+
+                let statusText = node.status || 'unknown';
+                let statusIcon = '⚪';
+
+                if (node.status === 'healthy') {
+                  statusText = 'Healthy';
+                  statusIcon = '🟢';
+                } else if (node.status === 'slow') {
+                  statusText = 'Slow';
+                  statusIcon = '🟡';
+                } else if (node.status === 'dead') {
+                  statusText = 'Dead';
+                  statusIcon = '🔴';
+                }
+
+                return `
+                  <tr>
+
+                    <td>${escapeHtml(node.id)}</td>
+
+                    <td>
+                      ${escapeHtml(node.name || '-')}
+                    </td>
+
+                    <td>
+                      <code>${escapeHtml(node.host || '-')}</code>
+                    </td>
+
+                    <td>${escapeHtml(node.port || '-')}</td>
+
+                    <td>
+                      <span class="badge">${escapeHtml(node.network || '-')}</span>
+                    </td>
+
+                    <td>
+                      <span class="badge">${escapeHtml(node.security || '-')}</span>
+                    </td>
+
+                    <td>
+                      ${statusIcon} ${escapeHtml(statusText)}
+                    </td>
+
+                    <td>
+                      ${
+                        node.telegram_ok === 1
+                          ? '<span class="badge badge-success">✅ OK</span>'
+                          : node.telegram_ok === 0
+                            ? '<span class="badge">❌ Failed</span>'
+                            : '<span class="badge">تست نشده</span>'
+                      }
+                    </td>
+
+                    <td>
+                      ${
+                        node.latency_ms != null
+                          ? escapeHtml(node.latency_ms) + ' ms'
+                          : '-'
+                      }
+                    </td>
+
+                    <td>
+
+                      <button
+                        class="btn btn-sm proxy-action-btn"
+                        onclick="toggleVLESSNode(${node.id}, ${node.enabled ? 'false' : 'true'})"
+                      >
+                        ${node.enabled ? 'فعال' : 'غیرفعال'}
+                      </button>
+
+                    </td>
+
+                  </tr>
+                `;
+              }).join('')}
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+      </div>
+    </div>
+  `;
+}
+
+
+function formatVLESSDate(value) {
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+
+    return d.toLocaleString('fa-IR', {
+      dateStyle: 'short',
+      timeStyle: 'short'
+    });
+  } catch {
+    return value;
+  }
+}
+
+
+function escapeJsString(value) {
+  return String(value ?? '')
+    .replaceAll('\\', '\\\\')
+    .replaceAll("'", "\\'")
+    .replaceAll('"', '\\"')
+    .replaceAll('\n', '\\n')
+    .replaceAll('\r', '\\r');
+}
+
+
+function openAddVLESSSubscriptionModal() {
+  openVLESSSubscriptionImportModal();
+}
+
+
+async function openEditVLESSSubscriptionModal(id) {
+  try {
+    const sub = await api('/vless/subscriptions/' + id);
+    openVLESSSubscriptionSettingsModal(sub);
+  } catch (error) {
+    console.error(error);
+    alert(error?.message || 'دریافت اطلاعات Subscription ناموفق بود.');
+  }
+}
+
+
+function openVLESSSubscriptionImportModal() {
+
+  const body = `
+    <div dir="rtl">
+
+      <div
+        style="
+          display:flex;
+          gap:8px;
+          margin-bottom:18px;
+          border-bottom:1px solid rgba(127,127,127,.18);
+        "
+      >
+
+        <button
+          type="button"
+          id="vless-import-link-tab"
+          class="btn btn-primary"
+          style="border-radius:10px 10px 0 0;"
+        >
+          🔗 لینک Subscription
+        </button>
+
+        <button
+          type="button"
+          id="vless-import-qr-tab"
+          class="btn"
+          style="border-radius:10px 10px 0 0;"
+        >
+          📷 QR Code
+        </button>
+
+      </div>
+
+      <div id="vless-import-link-panel">
+
+        <div class="form-group">
+          <label>لینک Subscription</label>
+
+          <input
+            id="vless-import-url"
+            class="field input"
+            type="url"
+            dir="ltr"
+            autocomplete="off"
+            placeholder="https://example.com/sub/..."
+          >
+
+          <div
+            style="
+              margin-top:7px;
+              font-size:12px;
+              opacity:.65;
+            "
+          >
+            لینک را وارد کنید؛ سیستم به‌صورت خودکار Subscription را
+            دریافت و بررسی می‌کند.
+          </div>
+        </div>
+
+        <button
+          id="vless-preview-btn"
+          type="button"
+          class="btn btn-primary"
+        >
+          🔍 دریافت و بررسی
+        </button>
+
+      </div>
+
+      <div
+        id="vless-import-qr-panel"
+        style="display:none;"
+      >
+
+        <input
+          id="vless-qr-file"
+          type="file"
+          accept="image/*"
+          style="display:none;"
+        >
+
+        <label
+          for="vless-qr-file"
+          id="vless-qr-dropzone"
+          style="
+            display:flex;
+            min-height:190px;
+            align-items:center;
+            justify-content:center;
+            text-align:center;
+            border:2px dashed rgba(127,127,127,.35);
+            border-radius:14px;
+            padding:25px;
+            cursor:pointer;
+          "
+        >
+          <div>
+            <div style="font-size:42px;margin-bottom:10px;">📷</div>
+            <strong>QR Code را انتخاب کنید</strong>
+            <div style="font-size:12px;opacity:.65;margin-top:6px;">
+              فایل تصویر QR را اینجا انتخاب یا روی آن رها کنید.
+            </div>
+          </div>
+        </label>
+
+        <canvas
+          id="vless-qr-canvas"
+          style="display:none;"
+        ></canvas>
+
+        <div
+          id="vless-qr-status"
+          style="
+            margin-top:12px;
+            font-size:13px;
+          "
+        ></div>
+
+      </div>
+
+      <div
+        id="vless-import-preview"
+        style="margin-top:18px;"
+      ></div>
+
+      <div
+        id="vless-import-settings"
+        style="display:none;margin-top:18px;"
+      >
+
+        <div class="form-group">
+          <label>نام Subscription</label>
+
+          <input
+            id="vless-import-name"
+            class="field input"
+            type="text"
+            placeholder="مثلاً BPB اصلی"
+          >
+        </div>
+
+        <div
+          style="
+            display:grid;
+            grid-template-columns:repeat(2,minmax(0,1fr));
+            gap:12px;
+          "
+        >
+
+          <div class="form-group">
+            <label>Priority</label>
+            <input
+              id="vless-import-priority"
+              class="field input"
+              type="number"
+              min="0"
+              value="100"
+            >
+          </div>
+
+          <div class="form-group">
+            <label>Sync Interval (دقیقه)</label>
+            <input
+              id="vless-import-interval"
+              class="field input"
+              type="number"
+              min="5"
+              value="60"
+            >
+          </div>
+
+        </div>
+
+        <div
+          style="
+            display:flex;
+            gap:20px;
+            flex-wrap:wrap;
+            margin-top:8px;
+          "
+        >
+
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input id="vless-import-enabled" type="checkbox" checked>
+            فعال
+          </label>
+
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input id="vless-import-autosync" type="checkbox" checked>
+            Auto Sync
+          </label>
+
+        </div>
+
+        <div class="modal-actions">
+
+          <button
+            type="button"
+            class="btn"
+            id="vless-import-cancel-btn"
+          >
+            انصراف
+          </button>
+
+          <button
+            type="button"
+            class="btn btn-primary"
+            id="vless-import-save-btn"
+          >
+            💾 ذخیره Subscription
+          </button>
+
+        </div>
+
+      </div>
+
+    </div>
+  `;
+
+  const modal = openModal(
+    '➕ افزودن Subscription',
+    body,
+    (modalBody, closeModal) => {
+
+      const linkTab = modalBody.querySelector('#vless-import-link-tab');
+      const qrTab = modalBody.querySelector('#vless-import-qr-tab');
+
+      const linkPanel = modalBody.querySelector('#vless-import-link-panel');
+      const qrPanel = modalBody.querySelector('#vless-import-qr-panel');
+
+      const urlInput = modalBody.querySelector('#vless-import-url');
+      const previewBtn = modalBody.querySelector('#vless-preview-btn');
+      const qrFile = modalBody.querySelector('#vless-qr-file');
+      const dropzone = modalBody.querySelector('#vless-qr-dropzone');
+      const cancelBtn = modalBody.querySelector('#vless-import-cancel-btn');
+      const saveBtn = modalBody.querySelector('#vless-import-save-btn');
+
+      let importedUrl = '';
+      let importedName = '';
+
+      function activateTab(tab) {
+
+        const isLink = tab === 'link';
+
+        linkPanel.style.display = isLink ? '' : 'none';
+        qrPanel.style.display = isLink ? 'none' : '';
+
+        linkTab.classList.toggle('btn-primary', isLink);
+        qrTab.classList.toggle('btn-primary', !isLink);
+
+      }
+
+      function showPreview(data) {
+
+        const preview = modalBody.querySelector('#vless-import-preview');
+        const settings = modalBody.querySelector('#vless-import-settings');
+
+        if (!preview || !settings) return;
+
+        importedName = data.suggested_name || 'VLESS Subscription';
+
+        preview.innerHTML = `
+          <div
+            style="
+              padding:14px;
+              border-radius:12px;
+              border:1px solid rgba(20,160,90,.25);
+              background:rgba(20,160,90,.07);
+            "
+          >
+            <div style="font-weight:800;font-size:15px;">
+              ✅ Subscription معتبر است
+            </div>
+
+            <div
+              style="
+                display:grid;
+                grid-template-columns:repeat(3,minmax(0,1fr));
+                gap:10px;
+                margin-top:12px;
+              "
+            >
+              <div>
+                <div style="font-size:11px;opacity:.6;">Protocol</div>
+                <strong>${escapeHtml(data.protocol || 'VLESS')}</strong>
+              </div>
+
+              <div>
+                <div style="font-size:11px;opacity:.6;">Nodes</div>
+                <strong>${escapeHtml(data.node_count || 0)}</strong>
+              </div>
+
+              <div>
+                <div style="font-size:11px;opacity:.6;">نام پیشنهادی</div>
+                <strong>${escapeHtml(importedName)}</strong>
+              </div>
+            </div>
+          </div>
+        `;
+
+        settings.style.display = '';
+
+        const nameInput = modalBody.querySelector('#vless-import-name');
+
+        if (nameInput && !nameInput.value) {
+          nameInput.value = importedName;
+        }
+      }
+
+      async function previewUrl(url) {
+
+        url = String(url || '').trim();
+
+        if (!url) {
+          alert('لینک Subscription را وارد کنید.');
+          return;
+        }
+
+        importedUrl = url;
+
+        previewBtn.disabled = true;
+        previewBtn.textContent = '⏳ در حال دریافت...';
+
+        const preview = modalBody.querySelector('#vless-import-preview');
+        const settings = modalBody.querySelector('#vless-import-settings');
+
+        if (preview) preview.innerHTML = '';
+        if (settings) settings.style.display = 'none';
+
+        try {
+
+          const result = await api(
+            '/vless/import/preview',
+            {
+              method: 'POST',
+              body: {
+                url
+              }
+            }
+          );
+
+          showPreview(result);
+
+        } catch (error) {
+
+          console.error(error);
+
+          if (preview) {
+            preview.innerHTML = `
+              <div
+                style="
+                  padding:12px;
+                  border-radius:10px;
+                  background:rgba(190,30,30,.08);
+                  color:#b42318;
+                "
+              >
+                ❌ ${escapeHtml(error?.message || 'Subscription معتبر نیست.')}
+              </div>
+            `;
+          }
+
+        } finally {
+
+          previewBtn.disabled = false;
+          previewBtn.textContent = '🔍 دریافت و بررسی';
+
+        }
+      }
+
+      async function decodeQR(file) {
+
+        if (!file) return;
+
+        const status = modalBody.querySelector('#vless-qr-status');
+
+        if (status) {
+          status.innerHTML = '⏳ در حال خواندن QR...';
+        }
+
+        try {
+
+          if (typeof jsQR !== 'function') {
+            throw new Error('QR Decoder در پنل بارگذاری نشده است.');
+          }
+
+          const image = new Image();
+
+          const objectUrl = URL.createObjectURL(file);
+
+          image.onload = async () => {
+
+            try {
+
+              const canvas = modalBody.querySelector('#vless-qr-canvas');
+
+              canvas.width = image.naturalWidth;
+              canvas.height = image.naturalHeight;
+
+              const ctx = canvas.getContext('2d', {
+                willReadFrequently: true
+              });
+
+              ctx.drawImage(image, 0, 0);
+
+              const imageData = ctx.getImageData(
+                0,
+                0,
+                canvas.width,
+                canvas.height
+              );
+
+              const code = jsQR(
+                imageData.data,
+                imageData.width,
+                imageData.height,
+                {
+                  inversionAttempts: 'attemptBoth'
+                }
+              );
+
+              URL.revokeObjectURL(objectUrl);
+
+              if (!code || !code.data) {
+                throw new Error('QR Code قابل خواندن نیست.');
+              }
+
+              const data = code.data.trim();
+
+              if (
+                !data.startsWith('http://') &&
+                !data.startsWith('https://') &&
+                !data.startsWith('vless://')
+              ) {
+                throw new Error('QR Code شامل Subscription/VLESS معتبر نیست.');
+              }
+
+              if (data.startsWith('vless://')) {
+
+                const preview = modalBody.querySelector('#vless-import-preview');
+
+                if (preview) {
+                  preview.innerHTML = `
+                    <div
+                      style="
+                        padding:12px;
+                        border-radius:10px;
+                        background:rgba(20,120,200,.08);
+                      "
+                    >
+                      ℹ️ QR شامل یک VLESS Node مستقیم است.
+                      <br>
+                      برای این Node بعداً آن را به قابلیت
+                      <strong>افزودن Node دستی</strong> متصل می‌کنیم.
+                    </div>
+                  `;
+                }
+
+                importedUrl = data;
+
+              } else {
+
+                importedUrl = data;
+                await previewUrl(data);
+
+              }
+
+              if (status) {
+                status.innerHTML = '✅ QR با موفقیت خوانده شد.';
+              }
+
+            } catch (error) {
+
+              if (status) {
+                status.innerHTML =
+                  '❌ ' + escapeHtml(error?.message || 'خطا در خواندن QR.');
+              }
+
+            }
+
+          };
+
+          image.onerror = () => {
+            URL.revokeObjectURL(objectUrl);
+
+            if (status) {
+              status.innerHTML = '❌ تصویر QR قابل بارگذاری نیست.';
+            }
+          };
+
+          image.src = objectUrl;
+
+        } catch (error) {
+
+          if (status) {
+            status.innerHTML =
+              '❌ ' + escapeHtml(error?.message || 'خطا در خواندن QR.');
+          }
+
+        }
+      }
+
+      linkTab?.addEventListener('click', () => activateTab('link'));
+      qrTab?.addEventListener('click', () => activateTab('qr'));
+
+      previewBtn?.addEventListener('click', () => {
+        previewUrl(urlInput?.value || '');
+      });
+
+      urlInput?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          previewUrl(urlInput.value);
+        }
+      });
+
+      qrFile?.addEventListener('change', () => {
+        decodeQR(qrFile.files?.[0]);
+      });
+
+      dropzone?.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        dropzone.style.borderColor = 'currentColor';
+      });
+
+      dropzone?.addEventListener('dragleave', () => {
+        dropzone.style.borderColor = '';
+      });
+
+      dropzone?.addEventListener('drop', (event) => {
+        event.preventDefault();
+        dropzone.style.borderColor = '';
+
+        const file = event.dataTransfer?.files?.[0];
+
+        if (file && qrFile) {
+          decodeQR(file);
+        }
+      });
+
+      cancelBtn?.addEventListener('click', closeModal);
+
+      saveBtn?.addEventListener('click', async () => {
+
+        const name =
+          modalBody.querySelector('#vless-import-name')?.value.trim();
+
+        const priority = Number(
+          modalBody.querySelector('#vless-import-priority')?.value || 100
+        );
+
+        const interval = Number(
+          modalBody.querySelector('#vless-import-interval')?.value || 60
+        );
+
+        const enabled =
+          !!modalBody.querySelector('#vless-import-enabled')?.checked;
+
+        const autoSync =
+          !!modalBody.querySelector('#vless-import-autosync')?.checked;
+
+        if (!importedUrl) {
+          alert('ابتدا Subscription را دریافت و بررسی کنید.');
+          return;
+        }
+
+        if (!name) {
+          alert('نام Subscription را وارد کنید.');
+          return;
+        }
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = '⏳ در حال ذخیره...';
+
+        try {
+
+          await api('/vless/subscriptions', {
+            method: 'POST',
+            body: {
+              name,
+              url: importedUrl,
+              priority,
+              sync_interval_minutes: Math.max(5, interval),
+              enabled,
+              auto_sync: autoSync
+            }
+          });
+
+          closeModal();
+          await loadVLESSPage();
+
+        } catch (error) {
+
+          console.error(error);
+          alert(error?.message || 'ذخیره Subscription ناموفق بود.');
+
+        } finally {
+
+          saveBtn.disabled = false;
+          saveBtn.textContent = '💾 ذخیره Subscription';
+
+        }
+
+      });
+
+      setTimeout(() => {
+        urlInput?.focus();
+      }, 50);
+
+    },
+    {
+      wide: true
+    }
+  );
+
+  return modal;
+}
+
+
+function openVLESSSubscriptionSettingsModal(sub) {
+
+  const body = `
+    <div dir="rtl">
+
+      <div class="form-group">
+        <label>نام Subscription</label>
+        <input
+          id="vless-sub-name"
+          class="field input"
+          value="${escapeHtml(sub?.name || '')}"
+        >
+      </div>
+
+      <div class="form-group">
+        <label>Subscription URL</label>
+        <input
+          id="vless-sub-url"
+          class="field input"
+          value="${escapeHtml(sub?.url || '')}"
+          dir="ltr"
+        >
+      </div>
+
+      <div
+        style="
+          display:grid;
+          grid-template-columns:repeat(2,minmax(0,1fr));
+          gap:12px;
+        "
+      >
+
+        <div class="form-group">
+          <label>Priority</label>
+          <input
+            id="vless-sub-priority"
+            class="field input"
+            type="number"
+            min="0"
+            value="${escapeHtml(sub?.priority ?? 100)}"
+          >
+        </div>
+
+        <div class="form-group">
+          <label>Sync Interval (دقیقه)</label>
+          <input
+            id="vless-sub-interval"
+            class="field input"
+            type="number"
+            min="5"
+            value="${escapeHtml(sub?.sync_interval_minutes ?? 60)}"
+          >
+        </div>
+
+      </div>
+
+      <div style="display:flex;gap:20px;margin-top:10px;">
+
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input id="vless-sub-enabled" type="checkbox"
+            ${sub?.enabled !== false ? 'checked' : ''}>
+          فعال
+        </label>
+
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input id="vless-sub-autosync" type="checkbox"
+            ${sub?.auto_sync !== false ? 'checked' : ''}>
+          Auto Sync
+        </label>
+
+      </div>
+
+      <div class="modal-actions">
+
+        <button
+          id="vless-sub-cancel-btn"
+          type="button"
+          class="btn"
+        >
+          انصراف
+        </button>
+
+        <button
+          id="vless-sub-save-btn"
+          type="button"
+          class="btn btn-primary"
+        >
+          💾 ذخیره تغییرات
+        </button>
+
+      </div>
+
+    </div>
+  `;
+
+  openModal(
+    '✏️ ویرایش Subscription',
+    body,
+    (modalBody, closeModal) => {
+
+      modalBody.querySelector('#vless-sub-cancel-btn')
+        ?.addEventListener('click', closeModal);
+
+      modalBody.querySelector('#vless-sub-save-btn')
+        ?.addEventListener('click', async () => {
+
+          const payload = {
+            name: modalBody.querySelector('#vless-sub-name')?.value.trim(),
+            url: modalBody.querySelector('#vless-sub-url')?.value.trim(),
+            priority: Number(
+              modalBody.querySelector('#vless-sub-priority')?.value || 100
+            ),
+            sync_interval_minutes: Math.max(
+              5,
+              Number(
+                modalBody.querySelector('#vless-sub-interval')?.value || 60
+              )
+            ),
+            enabled:
+              !!modalBody.querySelector('#vless-sub-enabled')?.checked,
+            auto_sync:
+              !!modalBody.querySelector('#vless-sub-autosync')?.checked
+          };
+
+          try {
+
+            await api('/vless/subscriptions/' + sub.id, {
+              method: 'PUT',
+              body: payload
+            });
+
+            closeModal();
+            await loadVLESSPage();
+
+          } catch (error) {
+
+            console.error(error);
+            alert(error?.message || 'ذخیره تغییرات ناموفق بود.');
+
+          }
+
+        });
+
+    },
+    {
+      wide: true
+    }
+  );
+}
+
+
+async function saveVLESSSubscription(id = null, closeModal = null) {
+
+  const name = document.getElementById('vless-sub-name')?.value.trim();
+  const url = document.getElementById('vless-sub-url')?.value.trim();
+  const priority = Number(document.getElementById('vless-sub-priority')?.value || 100);
+  const syncInterval = Number(document.getElementById('vless-sub-interval')?.value || 60);
+  const enabled = !!document.getElementById('vless-sub-enabled')?.checked;
+  const autoSync = !!document.getElementById('vless-sub-autosync')?.checked;
+
+  if (!name) {
+    alert('نام Subscription را وارد کنید.');
+    return;
+  }
+
+  if (!url) {
+    alert('Subscription URL را وارد کنید.');
+    return;
+  }
+
+  const btn = document.getElementById('vless-sub-save-btn');
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ در حال ذخیره...';
+  }
+
+  try {
+
+    const payload = {
+      name,
+      url,
+      priority,
+      sync_interval_minutes: Math.max(5, syncInterval),
+      enabled,
+      auto_sync: autoSync
+    };
+
+    if (id) {
+
+      await api('/vless/subscriptions/' + id, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+    } else {
+
+      await api('/vless/subscriptions', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+    }
+
+    if (typeof closeModal === 'function') {
+      closeModal();
+    }
+
+    await loadVLESSPage();
+
+  } catch (error) {
+
+    console.error(error);
+
+    alert(
+      error?.message ||
+      'ذخیره Subscription ناموفق بود.'
+    );
+
+  } finally {
+
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '💾 ذخیره';
+    }
+
+  }
+}
+
+
+async function toggleVLESSSubscription(id, enable) {
+
+  try {
+
+    await api(
+      '/vless/subscriptions/' +
+      id +
+      (enable ? '/enable' : '/disable'),
+      {
+        method: 'POST'
+      }
+    );
+
+    await loadVLESSPage();
+
+  } catch (error) {
+
+    console.error(error);
+    alert('تغییر وضعیت Subscription انجام نشد.');
+
+  }
+}
+
+
+async function syncVLESSSubscription(id) {
+
+  try {
+
+    const result = await api(
+      '/vless/subscriptions/' + id + '/sync',
+      {
+        method: 'POST'
+      }
+    );
+
+    alert(
+      `✅ Sync انجام شد.\nNode دریافت‌شده: ${result.nodes_received ?? '-'}`
+    );
+
+    await loadVLESSPage();
+
+  } catch (error) {
+
+    console.error(error);
+    alert(
+      error?.message ||
+      'Sync Subscription ناموفق بود.'
+    );
+
+  }
+}
+
+
+async function syncAllVLESSSubscriptions() {
+
+  const btn = document.getElementById('vless-sync-all-btn');
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ در حال Sync...';
+  }
+
+  try {
+
+    const result = await api(
+      '/vless/sync-all',
+      {
+        method: 'POST'
+      }
+    );
+
+    const results = result.results || [];
+
+    const ok = results.filter(x => x.ok).length;
+    const failed = results.length - ok;
+
+    alert(
+      `✅ Sync همه انجام شد.\nموفق: ${ok}\nناموفق: ${failed}`
+    );
+
+    await loadVLESSPage();
+
+  } catch (error) {
+
+    console.error(error);
+    alert(
+      error?.message ||
+      'Sync همه Subscriptionها ناموفق بود.'
+    );
+
+  } finally {
+
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🔄 Sync همه';
+    }
+
+  }
+}
+
+
+async function deleteVLESSSubscription(id) {
+
+  if (!confirm('آیا از حذف این Subscription مطمئن هستید؟')) {
+    return;
+  }
+
+  try {
+
+    await api(
+      '/vless/subscriptions/' + id,
+      {
+        method: 'DELETE'
+      }
+    );
+
+    await loadVLESSPage();
+
+    document.getElementById('vless-nodes-container').innerHTML = '';
+
+  } catch (error) {
+
+    console.error(error);
+    alert(
+      error?.message ||
+      'حذف Subscription ناموفق بود.'
+    );
+
+  }
+}
+
+
+async function toggleVLESSNode(id, enable) {
+
+  try {
+
+    await api(
+      '/vless/nodes/' +
+      id +
+      (enable ? '/enable' : '/disable'),
+      {
+        method: 'POST'
+      }
+    );
+
+    const visibleSub = document.getElementById('vless-nodes-container');
+
+    await loadVLESSPage();
+
+    /*
+     * Node view is deliberately not auto-refreshed here because the
+     * container may represent a different subscription.
+     */
+
+  } catch (error) {
+
+    console.error(error);
+    alert('تغییر وضعیت Node انجام نشد.');
+
+  }
+}
+
+
+let proxyLoading = false;
+
+async function loadProxyPage(page = 1) {
+  const searchEl = document.getElementById('proxy-search');
+  const statusEl = document.getElementById('proxy-status');
+  const protocolEl = document.getElementById('proxy-protocol');
+
+  if (!document.getElementById('proxy-table-body')) return;
+  if (proxyLoading) return;
+
+  const search = searchEl ? searchEl.value.trim() : '';
+  const status = statusEl ? statusEl.value : '';
+  const protocol = protocolEl ? protocolEl.value : '';
+  const refreshBtn = document.getElementById('proxy-refresh-btn');
+
+  proxyLoading = true;
+
+  if (refreshBtn) {
+    refreshBtn.disabled = true;
+    refreshBtn.innerHTML = '⏳ در حال بروزرسانی...';
+  }
+
+  try {
+    const [stats, result] = await Promise.all([
+      api('/proxies/stats'),
+      api('/proxies?' + new URLSearchParams({
+        page: String(page),
+        per_page: '50',
+        sort: 'score',
+        order: 'desc',
+        ...(search ? { search } : {}),
+        ...(status ? { status } : {}),
+        ...(protocol ? { protocol } : {})
+      }).toString())
+    ]);
+
+    setText('proxy-total', stats.total);
+    setText('proxy-healthy', stats.healthy);
+    setText('proxy-slow', stats.slow);
+    setText('proxy-dead', stats.dead);
+    setText('proxy-tgfailed', stats.telegram_failed);
+
+    const latencyEl = document.getElementById('proxy-latency');
+    const latencyUnitEl = latencyEl?.parentElement?.querySelector('.proxy-stat-unit');
+
+    if (latencyEl) {
+      latencyEl.textContent =
+        stats.avg_latency_ms != null
+          ? Math.round(stats.avg_latency_ms)
+          : '-';
+    }
+
+    if (latencyUnitEl) {
+      latencyUnitEl.textContent =
+        stats.avg_latency_ms != null ? 'ms' : '';
+    }
+
+    renderProxyRows(result.items || []);
+    renderProxyPagination(result, page);
+
+  } catch (error) {
+    console.error(error);
+
+    const body = document.getElementById('proxy-table-body');
+
+    if (body) {
+      body.innerHTML = `
+        <tr>
+          <td colspan="10">
+            <div class="proxy-empty">
+              خطا در دریافت اطلاعات پروکسی‌ها.
+              <br>
+              <button class="btn btn-sm" style="margin-top:10px" onclick="loadProxyPage(1)">
+                🔄 تلاش مجدد
+              </button>
+          </td>
+        </tr>
+      `;
+    }
+  } finally {
+    proxyLoading = false;
+
+    if (refreshBtn) {
+      refreshBtn.disabled = false;
+      refreshBtn.innerHTML = '🔄 بروزرسانی';
+    }
+  }
+}
+
+
+function renderProxyRows(items) {
+  const body = document.getElementById('proxy-table-body');
+  if (!body) return;
+
+  if (!items.length) {
+    body.innerHTML = `
+      <tr>
+        <td colspan="10">
+          <div class="proxy-empty">
+            پروکسی‌ای با این مشخصات پیدا نشد.
+          </div>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  body.innerHTML = items.map(proxy => {
+
+    let statusClass = 'proxy-status-unknown';
+    let statusText = proxy.status || 'Unknown';
+    let statusIcon = '⚪';
+
+    if (proxy.status === 'healthy') {
+      statusClass = 'proxy-status-healthy';
+      statusText = 'Healthy';
+      statusIcon = '🟢';
+    } else if (proxy.status === 'slow') {
+      statusClass = 'proxy-status-slow';
+      statusText = 'Slow';
+      statusIcon = '🟡';
+    } else if (proxy.status === 'dead') {
+      statusClass = 'proxy-status-dead';
+      statusText = 'Dead';
+      statusIcon = '🔴';
+    } else if (proxy.status === 'telegram_failed') {
+      statusClass = 'proxy-status-telegram';
+      statusText = 'Telegram Failed';
+      statusIcon = '✈️';
+    }
+
+    return `
+      <tr>
+
+        <td>${escapeHtml(proxy.id)}</td>
+
+        <td>
+          <div class="proxy-value">
+            <code title="${escapeHtml(proxy.proxy || '')}">
+              ${escapeHtml(proxy.proxy || '')}
+            </code>
+          </div>
+        </td>
+
+        <td>
+          <span class="badge">${escapeHtml(proxy.protocol || '-')}</span>
+        </td>
+
+        <td>${escapeHtml(proxy.source || '-')}</td>
+
+        <td>
+          <span class="proxy-status-badge ${statusClass}">
+            <span class="proxy-status-dot"></span>
+            ${statusIcon} ${escapeHtml(statusText)}
+          </span>
+        </td>
+
+        <td>
+          <span class="proxy-latency">
+            ${proxy.latency_ms != null ? escapeHtml(proxy.latency_ms) + ' ms' : '-'}
+          </span>
+        </td>
+
+        <td>
+          <span class="proxy-latency">
+            ${proxy.telegram_latency_ms != null
+              ? escapeHtml(proxy.telegram_latency_ms) + ' ms'
+              : '-'}
+          </span>
+        </td>
+
+        <td>
+          <span class="proxy-score">
+            ${proxy.score != null ? escapeHtml(proxy.score) : '-'}
+          </span>
+        </td>
+
+        <td>
+          ${proxy.enabled
+            ? '<span class="badge badge-success">فعال</span>'
+            : '<span class="badge">غیرفعال</span>'}
+        </td>
+
+        <td>
+          <div class="proxy-actions">
+
+            <button
+              class="btn btn-sm proxy-action-btn"
+              onclick="toggleProxy(${proxy.id}, ${proxy.enabled ? 'false' : 'true'})"
+            >
+              ${proxy.enabled ? 'غیرفعال' : 'فعال'}
+            </button>
+
+            <button
+              class="btn btn-sm btn-danger proxy-action-btn"
+              onclick="deleteProxy(${proxy.id})"
+            >
+              حذف
+            </button>
+
+          </div>
+        </td>
+
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderProxyPagination(result, currentPage) {
+  const el = document.getElementById('proxy-pagination');
+  if (!el) return;
+
+  const total = Number(result.total || 0);
+  const perPage = Number(result.per_page || 50);
+  const pages = Math.max(1, Math.ceil(total / perPage));
+
+  if (pages <= 1) {
+    el.innerHTML = '';
+    return;
+  }
+
+  let html = `
+    <div style="display:flex;gap:6px;justify-content:center;align-items:center;">
+  `;
+
+  if (currentPage > 1) {
+    html += `
+      <button
+        class="btn btn-sm btn-secondary"
+        onclick="loadProxyPage(${currentPage - 1})"
+      >
+        قبلی
+      </button>
+    `;
+  }
+
+  html += `
+    <span>
+      صفحه ${currentPage} از ${pages}
+    </span>
+  `;
+
+  if (currentPage < pages) {
+    html += `
+      <button
+        class="btn btn-sm btn-secondary"
+        onclick="loadProxyPage(${currentPage + 1})"
+      >
+        بعدی
+      </button>
+    `;
+  }
+
+  html += '</div>';
+
+  el.innerHTML = html;
+}
+
+
+async function toggleProxy(id, enable) {
+  try {
+    await api(
+      '/proxies/' + id + (enable ? '/enable' : '/disable'),
+      {
+        method: 'POST'
+      }
+    );
+
+    await loadProxyPage();
+
+  } catch (error) {
+    console.error(error);
+    alert('تغییر وضعیت پروکسی انجام نشد.');
+  }
+}
+
+
+async function deleteProxy(id) {
+  if (!confirm('آیا از حذف این پروکسی مطمئن هستید؟')) {
+    return;
+  }
+
+  try {
+    await api('/proxies/' + id, {
+      method: 'DELETE'
+    });
+
+    await loadProxyPage();
+
+  } catch (error) {
+    console.error(error);
+    alert('حذف پروکسی انجام نشد.');
+  }
+}
+
+
+function openAddProxyModal() {
+  alert('فرم افزودن پروکسی در مرحله بعد اضافه می‌شود.');
+}
+
+
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}

@@ -42,7 +42,7 @@ MAX_TEST_PER_USER = 1
 
 # آدرس HTTPS مینی‌اپ (فروشگاه وب داخل تلگرام)؛ خالی یعنی دکمه‌ی فروشگاه وب نمایش داده نمی‌شود
 MINIAPP_URL = os.getenv("MINIAPP_URL", "").rstrip("/")
-
+TELEGRAM_PROXY = "http://127.0.0.1:18080"
 # کلید امضای نشست (session) پنل مدیریت وب مستقل. اگر ست نشود، هر ری‌استارت
 # پروسه همه‌ی نشست‌ها را باطل می‌کند (لاگین مجدد لازم می‌شود) اما خطایی نمی‌دهد.
 ADMIN_PANEL_SECRET = os.getenv("ADMIN_PANEL_SECRET", "")

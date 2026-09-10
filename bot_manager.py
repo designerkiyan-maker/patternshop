@@ -14,6 +14,7 @@ import time
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from core.telegram_proxy import create_telegram_session
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from fsm_storage import SQLiteStorage
@@ -114,7 +115,13 @@ class BotManager:
         db = Database(db_path)
         db.init_db(owner_id=owner_id)
 
-        bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        session = create_telegram_session()
+
+        bot = Bot(
+            token=token,
+            session=session,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        )
         # FSM روی فایل SQLite ذخیره می‌شود تا state های در حال انتظار (از جمله
         # «منتظر رسید») بعد از ری‌استارت هم بمانند.
         fsm_db_path = f"{db_path}.fsm.sqlite3"

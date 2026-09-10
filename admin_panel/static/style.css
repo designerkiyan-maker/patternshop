@@ -1985,3 +1985,346 @@ html[data-theme="streetops"] .so-mission-val{ color:var(--primary); font-size:12
 @media (max-width:960px){
   html[data-theme="streetops"] .so-stat-grid, html[data-theme="streetops"] .so-cols{ grid-template-columns:1fr; }
 }
+
+/* =========================================================
+   PROXY MANAGEMENT UI
+   ========================================================= */
+
+.proxy-page {
+  width: 100%;
+}
+
+.proxy-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.proxy-page-title h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.proxy-page-subtitle {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.proxy-page-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ---------- stats ---------- */
+
+.proxy-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.proxy-stat-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  background: var(--card);
+  box-shadow: var(--shadow-sm, 0 4px 14px rgba(0,0,0,.05));
+}
+
+.proxy-stat-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.proxy-stat-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-soft, rgba(0,0,0,.04));
+  font-size: 18px;
+  flex: 0 0 auto;
+}
+
+.proxy-stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.proxy-stat-value {
+  font-size: 26px;
+  line-height: 1.1;
+  font-weight: 900;
+  letter-spacing: -.3px;
+}
+
+.proxy-stat-unit {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-inline-start: 4px;
+  font-weight: 700;
+}
+
+/* ---------- toolbar ---------- */
+
+.proxy-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.proxy-toolbar-left,
+.proxy-toolbar-right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.proxy-search-input {
+  min-width: 260px;
+}
+
+.proxy-filter-select {
+  min-width: 150px;
+}
+
+/* ---------- table ---------- */
+
+.proxy-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 14px;
+}
+
+.proxy-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 1050px;
+}
+
+.proxy-table th {
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 800;
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft, rgba(0,0,0,.02));
+}
+
+.proxy-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  font-size: 13px;
+}
+
+.proxy-table tbody tr:hover td {
+  background: var(--bg-soft, rgba(0,0,0,.025));
+}
+
+.proxy-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 300px;
+}
+
+.proxy-value code {
+  display: block;
+  direction: ltr;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.proxy-score {
+  font-weight: 900;
+}
+
+.proxy-latency {
+  direction: ltr;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- status ---------- */
+
+.proxy-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.proxy-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.proxy-status-healthy {
+  color: #16803c;
+  background: rgba(22,128,60,.10);
+}
+
+.proxy-status-slow {
+  color: #a66b00;
+  background: rgba(166,107,0,.11);
+}
+
+.proxy-status-dead {
+  color: #c93535;
+  background: rgba(201,53,53,.10);
+}
+
+.proxy-status-telegram {
+  color: #b45500;
+  background: rgba(180,85,0,.10);
+}
+
+.proxy-status-unknown {
+  color: var(--text-muted);
+  background: var(--bg-soft, rgba(0,0,0,.05));
+}
+
+/* ---------- actions ---------- */
+
+.proxy-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.proxy-action-btn {
+  min-height: 34px;
+  white-space: nowrap;
+}
+
+/* ---------- pagination ---------- */
+
+.proxy-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding-top: 16px;
+  flex-wrap: wrap;
+}
+
+.proxy-pagination-info {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+/* ---------- empty / loading ---------- */
+
+.proxy-loading,
+.proxy-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 1200px) {
+  .proxy-stats-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .proxy-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+  }
+
+  .proxy-stat-card {
+    padding: 13px;
+    border-radius: 14px;
+  }
+
+  .proxy-stat-value {
+    font-size: 22px;
+  }
+
+  .proxy-page-header {
+    flex-direction: column;
+  }
+
+  .proxy-page-actions {
+    width: 100%;
+  }
+
+  .proxy-page-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  .proxy-toolbar {
+    align-items: stretch;
+  }
+
+  .proxy-toolbar-left,
+  .proxy-toolbar-right {
+    width: 100%;
+  }
+
+  .proxy-search-input,
+  .proxy-filter-select {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .proxy-stats-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .proxy-stat-label {
+    font-size: 11px;
+  }
+
+  .proxy-stat-value {
+    font-size: 20px;
+  }
+
+  .proxy-stat-icon {
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+  }
+}
+

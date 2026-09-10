@@ -50,7 +50,7 @@ def create_session_token(secret_key: str, admin_id: int, username: str, role: st
         "exp": int(time.time()) + hours * 3600,
     }
     body = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    sig = hmac.new(secret_key.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
+    sig = hmac.HMAC(secret_key.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
     return f"{body}.{sig}"
 
 
@@ -59,7 +59,7 @@ def verify_session_token(secret_key: str, token: str):
     if not token or "." not in token:
         return None
     body, _, sig = token.partition(".")
-    expected_sig = hmac.new(secret_key.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
+    expected_sig = hmac.HMAC(secret_key.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected_sig, sig):
         return None
     try:

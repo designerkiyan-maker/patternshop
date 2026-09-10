@@ -8,14 +8,14 @@
 تحویل داده می‌شوند (ماژول file_delivery).
 """
 
-import random
+import secrets
 import asyncio
 import logging
 import html
 
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, StateFilter
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest, TelegramNetworkError
 
@@ -254,6 +254,15 @@ def create_user_router(db) -> Router:
     # خرید الگو
     # -----------------------------------------------------------------------
 
+
+    @router.message(F.text == "🛒 سبد خرید")
+    async def show_cart_from_main_menu(message: Message):
+        summary = (await asyncio.to_thread(cart_svc.cart_summary, db, message.from_user.id))
+        await message.answer(
+            await _cart_menu_text(summary),
+            reply_markup=kb.cart_menu_kb(summary)
+        )
+
     @router.message(F.text.func(lambda t: t == db.get_setting("btn_buy")))
     async def show_categories(message: Message, state: FSMContext):
         await state.clear()
@@ -285,10 +294,18 @@ def create_user_router(db) -> Router:
 
     @router.callback_query(F.data.startswith("cat:"))
     async def cb_category(call: CallbackQuery):
-        cat_id = int(call.data.split(":")[1])
+        try:
+            parts = call.data.split(":", 1)
+            if len(parts) != 2 or not parts[1].isdigit():
+                await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+                return
+            cat_id = int(parts[1])
+        except (IndexError, ValueError):
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
         products = (await asyncio.to_thread(db.get_products, cat_id, active_only=True))
         if not products:
-            await call.answer("محصولی در این دسته‌بندی موجود نیست.", show_alert=True)
+            await call.answer("محصولی در این دستهبندی موجود نیست.", show_alert=True)
             return
         await call.message.edit_text("یک محصول را انتخاب کنید:", reply_markup=kb.products_kb(db, cat_id, products))
         await call.answer()
@@ -311,7 +328,14 @@ def create_user_router(db) -> Router:
 
     @router.callback_query(F.data.startswith("prod:"))
     async def cb_product(call: CallbackQuery):
-        product_id = int(call.data.split(":")[1])
+        try:
+            parts = call.data.split(":", 1)
+            if len(parts) != 2 or not parts[1].isdigit():
+                raise ValueError
+            product_id = int(parts[1])
+        except (ValueError, IndexError):
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
         product = (await asyncio.to_thread(db.get_product, product_id))
         if not product:
             await call.answer("محصول یافت نشد.", show_alert=True)
@@ -332,8 +356,15 @@ def create_user_router(db) -> Router:
 
     @router.callback_query(F.data.startswith("enter_code:"))
     async def cb_enter_code(call: CallbackQuery, state: FSMContext):
-        _, product_id, _qty = call.data.split(":")
-        await state.update_data(discount_product_id=int(product_id))
+        try:
+            parts = call.data.split(":", 2)
+            if len(parts) != 3 or not parts[1].isdigit():
+                raise ValueError
+            product_id = int(parts[1])
+        except (ValueError, IndexError):
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
+        await state.update_data(discount_product_id=product_id)
         await state.set_state(DiscountEntry.waiting_code)
         await call.message.edit_text("🎟 کد تخفیف را ارسال کنید:", reply_markup=kb.cancel_kb())
         await call.answer()
@@ -478,6 +509,32 @@ def create_user_router(db) -> Router:
                 address_id=address_id,
             ))
         except ShopError as e:
+            # محصول دیجیتال قبلاً توسط کاربر خریداری شده است
+            if e.code == "already_purchased":
+                previous_order_id = e.data.get("previous_order_id")
+
+                if previous_order_id:
+                    return await call.message.edit_text(
+                        "⚠️ این محصول را قبلاً سفارش داده‌اید.\n\n"
+                        "برای دریافت محصولی که قبلاً خریداری کرده‌اید، "
+                        "روی دکمه زیر بزنید:",
+                        reply_markup=InlineKeyboardMarkup(
+                            inline_keyboard=[
+                                [
+                                    InlineKeyboardButton(
+                                        text="📥 دریافت محصول",
+                                        callback_data=f"mo_resend:{previous_order_id}",
+                                    )
+                                ]
+                            ]
+                        ),
+                    )
+
+                return await call.answer(
+                    "⚠️ این محصول را قبلاً سفارش داده‌اید.",
+                    show_alert=True,
+                )
+
             if e.code == "shipping_required":
                 methods = (await asyncio.to_thread(db.list_shipping_methods, True))
                 if not methods:
@@ -583,8 +640,14 @@ def create_user_router(db) -> Router:
 
     @router.callback_query(F.data.startswith("buy_start:"))
     async def cb_buy_start(call: CallbackQuery, state: FSMContext, bot: Bot):
-        _, product_id, _qty = call.data.split(":")
-        product_id = int(product_id)
+        try:
+            parts = call.data.split(":", 2)
+            if len(parts) != 3 or not parts[1].isdigit():
+                raise ValueError
+            product_id = int(parts[1])
+        except (ValueError, IndexError):
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
         product = (await asyncio.to_thread(db.get_product, product_id))
         if not product:
             await call.answer("این الگو در حال حاضر موجود نیست.", show_alert=True)
@@ -608,8 +671,16 @@ def create_user_router(db) -> Router:
 
     @router.callback_query(F.data.startswith("cart_dec:") | F.data.startswith("cart_inc:"))
     async def cb_cart_qty(call: CallbackQuery):
-        op, raw = call.data.split(":")
-        item_id = int(raw)
+        try:
+            parts = call.data.split(":", 1)
+            if len(parts) != 2 or not parts[1].isdigit():
+                await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+                return
+            op = parts[0]
+            item_id = int(parts[1])
+        except (IndexError, ValueError):
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
         try:
             target = None
             for it in (await asyncio.to_thread(cart_svc.cart_summary, db, call.from_user.id))["items"]:
@@ -627,7 +698,15 @@ def create_user_router(db) -> Router:
 
     @router.callback_query(F.data.startswith("cart_del:"))
     async def cb_cart_del(call: CallbackQuery):
-        item_id = int(call.data.split(":")[1])
+        try:
+            parts = call.data.split(":", 1)
+            if len(parts) != 2 or not parts[1].isdigit():
+                await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+                return
+            item_id = int(parts[1])
+        except (IndexError, ValueError):
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
         (await asyncio.to_thread(cart_svc.remove_from_cart, db, call.from_user.id, item_id))
         await _show_cart_menu(call)
 
@@ -642,12 +721,28 @@ def create_user_router(db) -> Router:
 
     @router.callback_query(F.data.startswith("cart_ship:"))
     async def cb_cart_ship(call: CallbackQuery, state: FSMContext, bot: Bot):
-        await state.update_data(cart_ship_id=int(call.data.split(":")[1]))
+        try:
+            parts = call.data.split(":", 1)
+            if len(parts) != 2 or not parts[1].isdigit():
+                raise ValueError
+            ship_id = int(parts[1])
+        except (ValueError, IndexError):
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
+        await state.update_data(cart_ship_id=ship_id)
         await _run_checkout(call, state, bot)
 
     @router.callback_query(F.data.startswith("cart_addr:"))
     async def cb_cart_addr(call: CallbackQuery, state: FSMContext, bot: Bot):
-        await state.update_data(cart_address_id=int(call.data.split(":")[1]))
+        try:
+            parts = call.data.split(":", 1)
+            if len(parts) != 2 or not parts[1].isdigit():
+                raise ValueError
+            addr_id = int(parts[1])
+        except (ValueError, IndexError):
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
+        await state.update_data(cart_address_id=addr_id)
         await _run_checkout(call, state, bot)
 
     @router.callback_query(F.data == "cart_addr_new")
@@ -1243,10 +1338,10 @@ def create_user_router(db) -> Router:
         (await asyncio.to_thread(db.record_wheel_spin, message.from_user.id))
 
         settings = (await asyncio.to_thread(db.get_wheel_settings))
-        won = random.randint(1, 100) <= settings["win_percent"]
+        won = secrets.randbelow(100) < settings["win_percent"]
 
         if won and settings["prizes"]:
-            percent = random.choice(settings["prizes"])
+            percent = secrets.choice(settings["prizes"])
             code, expires_at = (await asyncio.to_thread(db.generate_wheel_prize_code, message.from_user.id, percent))
             await message.answer(
                 f"🎉 تبریک! برنده شدی!\n\n"

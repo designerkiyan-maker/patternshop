@@ -1,0 +1,199 @@
+
+import asyncio
+import json
+import logging
+import time
+from pathlib import Path
+from typing import Optional
+
+import aiohttp
+
+
+logger = logging.getLogger("telegram_proxy")
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+PROXY_FILE = BASE_DIR / "config" / "proxies.json"
+
+TELEGRAM_TEST_URL = "https://api.telegram.org/bot{token}/getMe"
+
+PROXY_TIMEOUT = aiohttp.ClientTimeout(
+    total=15,
+    connect=8,
+    sock_connect=8,
+    sock_read=10,
+)
+
+# مدت زمانی که Proxy خراب در لیست موقتاً کنار گذاشته می‌شود
+FAILED_PROXY_COOLDOWN = 300
+
+
+class TelegramProxyManager:
+
+    def __init__(self):
+        self.proxies: list[str] = []
+        self.failed_until: dict[str, float] = {}
+        self.current_proxy: Optional[str] = None
+
+        self.load_proxies()
+
+    def load_proxies(self):
+        if not PROXY_FILE.exists():
+            raise FileNotFoundError(
+                f"Proxy file not found: {PROXY_FILE}"
+            )
+
+        with open(PROXY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        proxies = data.get("proxies", [])
+
+        if not isinstance(proxies, list):
+            raise ValueError("'proxies' must be a list")
+
+        self.proxies = [
+            str(proxy).strip()
+            for proxy in proxies
+            if str(proxy).strip()
+        ]
+
+        if not self.proxies:
+            raise RuntimeError("No proxies configured")
+
+        logger.info(
+            "Loaded %d Telegram proxies",
+            len(self.proxies),
+        )
+
+    def available_proxies(self):
+        now = time.time()
+
+        return [
+            proxy
+            for proxy in self.proxies
+            if self.failed_until.get(proxy, 0) <= now
+        ]
+
+    def mark_failed(self, proxy: str):
+        self.failed_until[proxy] = (
+            time.time() + FAILED_PROXY_COOLDOWN
+        )
+
+        if self.current_proxy == proxy:
+            self.current_proxy = None
+
+        logger.warning(
+            "Telegram proxy failed: %s",
+            proxy,
+        )
+
+    def mark_success(self, proxy: str):
+        self.current_proxy = proxy
+
+        logger.info(
+            "Telegram proxy selected: %s",
+            proxy,
+        )
+
+    async def test_proxy(
+        self,
+        proxy: str,
+        token: str,
+    ) -> bool:
+
+        url = TELEGRAM_TEST_URL.format(token=token)
+
+        try:
+            async with aiohttp.ClientSession(
+                timeout=PROXY_TIMEOUT,
+                proxy=proxy,
+            ) as session:
+
+                async with session.get(url) as response:
+
+                    if response.status != 200:
+                        logger.warning(
+                            "Proxy %s returned HTTP %s",
+                            proxy,
+                            response.status,
+                        )
+                        return False
+
+                    data = await response.json()
+
+                    if data.get("ok"):
+                        return True
+
+                    return False
+
+        except Exception as exc:
+            logger.warning(
+                "Proxy %s failed: %s",
+                proxy,
+                type(exc).__name__,
+            )
+            return False
+
+    async def get_working_proxy(
+        self,
+        token: str,
+    ) -> Optional[str]:
+
+        candidates = self.available_proxies()
+
+        if not candidates:
+            logger.error(
+                "No Telegram proxies currently available"
+            )
+            return None
+
+        # اگر Proxy فعلی هنوز در دسترس است،
+        # اول همان را امتحان می‌کنیم.
+        if self.current_proxy in candidates:
+
+            if await self.test_proxy(
+                self.current_proxy,
+                token,
+            ):
+                return self.current_proxy
+
+            self.mark_failed(self.current_proxy)
+
+        # سپس Proxyهای بعدی را به ترتیب بررسی می‌کنیم.
+        for proxy in candidates:
+
+            if proxy == self.current_proxy:
+                continue
+
+            if await self.test_proxy(proxy, token):
+
+                self.mark_success(proxy)
+
+                return proxy
+
+            self.mark_failed(proxy)
+
+        logger.error(
+            "All Telegram proxies failed"
+        )
+
+        return None
+
+
+_manager = TelegramProxyManager()
+
+
+async def get_telegram_proxy(token: str) -> Optional[str]:
+    """
+    اولین Proxy سالم Telegram را برمی‌گرداند.
+    """
+
+    return await _manager.get_working_proxy(token)
+
+
+def get_current_proxy() -> Optional[str]:
+    """
+    Proxy فعلی انتخاب‌شده را برمی‌گرداند.
+    """
+
+    return _manager.current_proxy

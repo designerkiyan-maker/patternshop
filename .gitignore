@@ -17,3 +17,9 @@ __pycache__/
 
 # tooling
 .mimosa/
+
+# backups and pre-fix copies
+*.backup
+*.before-*
+--proxy
+SELECT\ *

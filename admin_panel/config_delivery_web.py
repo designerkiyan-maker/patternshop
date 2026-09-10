@@ -10,6 +10,8 @@ import logging
 
 import aiohttp
 
+from config import TELEGRAM_PROXY
+
 from file_delivery import build_delivery_caption, build_summary_text
 from admin_panel.telegram_notify import send_message as tg_send
 
@@ -29,7 +31,7 @@ async def send_document_by_file_id(bot_token: str, chat_id: int, file_id: str, c
         if caption:
             form.add_field("caption", caption)
         form.add_field("document", file_id)
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(proxy=TELEGRAM_PROXY) as session:
             async with session.post(url, data=form, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 return resp.status == 200
     except Exception:

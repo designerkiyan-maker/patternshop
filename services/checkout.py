@@ -300,10 +300,44 @@ def checkout_cart(
             ).fetchall()
             return _build_from_orders(db, od, its, conn=conn)
 
-        # --- ادعای سبد: خواندن و حذف هم‌زمان --------------------------------------
+        # --- ادعای سبد: خواندن هم‌زمان --------------------------------------------
+        # ابتدا سبد را می‌خوانیم؛ برای محصول دیجیتال باید قبل از هر عملیات
+        # مالی یا حذف سبد، مالکیت قبلی بررسی شود.
         cart = _load_cart(conn, tg_id)
         if not cart:
             raise EmptyCartError("سبد خرید خالی است.")
+
+        # --- جلوگیری قطعی از خرید تکراری محصولات دیجیتال --------------------------
+        # محصول دیجیتال فقط یک بار برای هر کاربر قابل خرید است.
+        # محصول فیزیکی محدودیتی برای خرید مجدد ندارد.
+        #
+        # این بررسی عمداً قبل از _claim_cart و قبل از هر UPDATE مالی انجام می‌شود.
+        for r in cart:
+            if r["product_type"] != "digital":
+                continue
+
+            previous_paid_order = conn.execute(
+                "SELECT o.id "
+                "FROM orders o "
+                "JOIN order_items oi ON oi.order_id = o.id "
+                "WHERE o.user_id = ? "
+                "AND oi.product_id = ? "
+                "AND oi.product_type = 'digital' "
+                "AND o.payment_status = 'paid' "
+                "ORDER BY o.id DESC "
+                "LIMIT 1",
+                (tg_id, r["product_id"]),
+            ).fetchone()
+
+            if previous_paid_order:
+                raise CheckoutError(
+                    "این محصول را قبلاً سفارش داده‌اید.",
+                    code="already_purchased",
+                    previous_order_id=previous_paid_order["id"],
+                    product_id=r["product_id"],
+                )
+
+        # فقط بعد از عبور از بررسی خرید تکراری، سبد ادعا/حذف می‌شود.
         _claim_cart(conn, tg_id)
 
         # --- اعتبارسنجی اقلام و محاسبه‌ی کل ---------------------------------------

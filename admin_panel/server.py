@@ -15,18 +15,20 @@ import logging
 import os
 import time
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import aiohttp
+from collections import defaultdict
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET, VAPID_PUBLIC_KEY
+from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET, VAPID_PUBLIC_KEY, TELEGRAM_PROXY
 from database import Database, WEB_ADMIN_PERMISSIONS, MENU_BUTTON_META
+from admin_panel.vless_manager import VLESSManager
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
 from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document, fetch_telegram_file
 from admin_panel.config_delivery_web import deliver_pattern_to_user_web
@@ -48,6 +50,69 @@ NOTIFY_POLL_SECONDS = 15
 app = FastAPI(title="پنل مدیریت فروشگاه الگوی خیاطی")
 db = Database(DB_PATH)
 db.init_db(owner_id=OWNER_ID)
+
+vless_manager = VLESSManager()
+
+
+# ---------------------------------------------------------------------------
+# ساده‌ترین Rate Limiter مبتنی بر IP — بدون وابستگی خارجی.
+# هر آدرس IP حداکثر ۱۰ تلاش ناموفق در ۱۵ دقیقه → قفل موقت.
+# ---------------------------------------------------------------------------
+_login_failures: dict[str, list[float]] = defaultdict(list)
+_LOGIN_MAX_ATTEMPTS = 10
+_LOGIN_WINDOW_SECONDS = 15 * 60
+_LOGIN_LOCKOUT_SECONDS = 5 * 60
+
+
+def _check_login_rate_limit(client_ip: str) -> None:
+    now = time.time()
+    failures = _login_failures[client_ip]
+    # پاکسازی قدیمی‌ها
+    _login_failures[client_ip] = [t for t in failures if now - t < _LOGIN_WINDOW_SECONDS]
+    failures = _login_failures[client_ip]
+    if len(failures) >= _LOGIN_MAX_ATTEMPTS:
+        oldest = min(failures)
+        locked_until = oldest + _LOGIN_WINDOW_SECONDS + _LOGIN_LOCKOUT_SECONDS
+        if now < locked_until:
+            raise HTTPException(
+                status_code=429,
+                detail=f"تعداد تلاش‌های ناموفق زیاد بوده. {int((locked_until - now) / 60)} دقیقه دیگر دوباره تلاش کنید.",
+            )
+
+
+def _record_login_failure(client_ip: str) -> None:
+    _login_failures[client_ip].append(time.time())
+
+
+def _clear_login_state(client_ip: str) -> None:
+    _login_failures.pop(client_ip, None)
+
+
+# ---------------------------------------------------------------------------
+# Security headers middleware — applied to every response.
+# ---------------------------------------------------------------------------
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # CSP: فقط منابع خود سرور + تلگرام (برای فایل‌های الگو)
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' https://telegram.org; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https://telegram.org; "
+            "connect-src 'self'"
+        )
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 def _bot_token() -> str:
@@ -195,14 +260,21 @@ def require_owner(admin=Depends(get_current_admin)):
 
 
 @app.post("/api/login")
-def api_login(body: LoginBody, response: Response):
+def api_login(body: LoginBody, response: Response, request: Request):
+    # Rate limiting: جلوگیری از brute-force با شمارش تلاش‌های ناموفق IP-based
+    client_ip = request.client.host if request.client else "unknown"
+    _check_login_rate_limit(client_ip)
+
     admin = db.get_web_admin_by_username(body.username)
     if not admin or not admin["is_active"] or not verify_password(body.password, admin["password_hash"]):
+        _record_login_failure(client_ip)
         raise HTTPException(401, "یوزرنیم یا پسورد اشتباه است.")
+    # ورود موفق → پاکسازی وضعیت خطاها
+    _clear_login_state(client_ip)
     token = create_session_token(ADMIN_PANEL_SECRET, admin["id"], admin["username"], admin["role"])
     db.touch_web_admin_login(admin["id"])
     response.set_cookie(
-        COOKIE_NAME, token, httponly=True, samesite="lax", max_age=12 * 3600, path="/",
+        COOKIE_NAME, token, httponly=True, samesite="lax", max_age=12 * 3600, path="/", secure=True,
     )
     return {"id": admin["id"], "username": admin["username"], "role": admin["role"], "tenant": ""}
 
@@ -333,7 +405,7 @@ async def _store_media_via_bot(method: str, field: str, content: bytes, filename
         if caption:
             form.add_field("caption", caption)
         form.add_field(field, content, filename=filename, content_type=content_type)
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(proxy=TELEGRAM_PROXY) as session:
             async with session.post(url, data=form, timeout=aiohttp.ClientTimeout(total=90)) as resp:
                 data = await resp.json()
         if not data.get("ok"):
@@ -556,7 +628,7 @@ def api_orders(status: str = "pending", admin=Depends(get_current_admin)):
 
 
 @app.get("/api/orders/{order_id}/receipt")
-async def api_order_receipt(order_id: int, admin=Depends(get_current_admin)):
+async def api_order_receipt(order_id: int, admin=Depends(require_permission("orders"))):
     order = (await asyncio.to_thread(db.get_order, order_id))
     if not order or not order["receipt_file_id"]:
         raise HTTPException(404, "رسیدی برای این سفارش ثبت نشده است.")
@@ -664,7 +736,7 @@ def api_topups(status: str = "pending", admin=Depends(get_current_admin)):
 
 
 @app.get("/api/topups/{topup_id}/receipt")
-async def api_topup_receipt(topup_id: int, admin=Depends(get_current_admin)):
+async def api_topup_receipt(topup_id: int, admin=Depends(require_permission("orders"))):
     topup = (await asyncio.to_thread(db.get_topup, topup_id))
     if not topup or not topup["receipt_file_id"]:
         raise HTTPException(404, "رسیدی برای این شارژ ثبت نشده است.")
@@ -709,7 +781,7 @@ def api_users(q: str = "", status: str = "all", page: int = 1, admin=Depends(get
 
 
 @app.get("/api/users/{tg_id}")
-def api_user_detail(tg_id: int, admin=Depends(get_current_admin)):
+def api_user_detail(tg_id: int, admin=Depends(require_permission("users"))):
     user = db.get_user(tg_id)
     if not user:
         raise HTTPException(404, "کاربر یافت نشد.")
@@ -1230,6 +1302,79 @@ async def api_support_send(user_id: int, body: SupportReplyBody, admin=Depends(g
     await notify_user(user_id, f"💬 پشتیبانی:\n\n{text}")
     (await asyncio.to_thread(db.log_admin_action, admin["id"], "support_reply", f"پاسخ چت زنده به کاربر {user_id} (پنل وب - {admin['username']})", "user", user_id))
     return {"ok": True, "id": msg_id}
+
+
+
+# --------------------------------------------------------------- carts --
+
+
+@app.get("/api/carts")
+def api_carts(admin=Depends(require_permission("orders"))):
+    """لیست کاربرانی که در سبدشان کالا دارند."""
+    with db._get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                ci.user_id,
+                COUNT(*) AS item_count,
+                COALESCE(SUM(ci.quantity), 0) AS total_qty,
+                COALESCE(SUM(
+                    COALESCE(v.price, p.price) * ci.quantity
+                ), 0) AS subtotal,
+                MAX(ci.id) AS last_item_id
+            FROM cart_items ci
+            JOIN products p ON p.id = ci.product_id
+            LEFT JOIN product_variants v ON v.id = ci.variant_id
+            GROUP BY ci.user_id
+            ORDER BY last_item_id DESC
+            """
+        ).fetchall()
+
+        out = []
+        for r in rows:
+            user = conn.execute(
+                "SELECT * FROM users WHERE telegram_id=? OR id=? LIMIT 1",
+                (r["user_id"], r["user_id"]),
+            ).fetchone()
+
+            out.append({
+                "user_id": r["user_id"],
+                "item_count": int(r["item_count"] or 0),
+                "total_qty": int(r["total_qty"] or 0),
+                "subtotal": int(r["subtotal"] or 0),
+                "first_name": (user["first_name"] if user else "") or "",
+                "username": (user["username"] if user else "") or "",
+            })
+
+        return out
+
+
+@app.get("/api/carts/{user_id}")
+def api_cart_detail(user_id: int, admin=Depends(require_permission("orders"))):
+    items = db.get_cart_items(user_id)
+    summary = __import__("services.cart", fromlist=["cart_summary"]).cart_summary(db, user_id)
+
+    return {
+        "user_id": user_id,
+        "items": [dict(x) for x in items],
+        "subtotal": int(summary["subtotal"]),
+        "total_qty": int(summary["total_qty"]),
+        "wallet_credit": int(summary["wallet_credit"]),
+    }
+
+
+@app.delete("/api/carts/{user_id}/{item_id}")
+def api_cart_delete_item(user_id: int, item_id: int, admin=Depends(require_permission("orders"))):
+    ok = db.remove_cart_item(user_id, item_id)
+    if not ok:
+        raise HTTPException(404, "قلم سبد پیدا نشد.")
+    return {"ok": True}
+
+
+@app.delete("/api/carts/{user_id}")
+def api_cart_clear_user(user_id: int, admin=Depends(require_permission("orders"))):
+    db.clear_cart(user_id)
+    return {"ok": True}
 
 
 # --------------------------------------------------------------- settings --
@@ -1936,4 +2081,339 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8002)
     args = parser.parse_args()
     uvicorn.run(app, host=args.host, port=args.port)
+
+
+# =========================================================
+# VLESS / SUBSCRIPTION MANAGEMENT API
+# =========================================================
+
+@app.post("/api/vless/import/preview")
+async def api_vless_import_preview(
+    payload: dict,
+    admin=Depends(get_current_admin),
+):
+    url = str(payload.get("url", "")).strip()
+
+    if not url:
+        raise HTTPException(
+            status_code=400,
+            detail="Subscription URL الزامی است.",
+        )
+
+    try:
+        from core.vless_client.subscription import load_subscription
+
+        nodes = load_subscription(url)
+
+        if not nodes:
+            raise ValueError(
+                "هیچ VLESS Nodeای از این Subscription دریافت نشد."
+            )
+
+        names = [
+            str(node.get("name") or "").strip()
+            for node in nodes
+            if str(node.get("name") or "").strip()
+        ]
+
+        suggested_name = names[0] if names else "VLESS Subscription"
+
+        return {
+            "valid": True,
+            "protocol": "VLESS",
+            "node_count": len(nodes),
+            "suggested_name": suggested_name,
+            "nodes": [
+                {
+                    "name": node.get("name"),
+                    "host": node.get("host"),
+                    "port": node.get("port"),
+                    "network": node.get("network"),
+                    "security": node.get("security"),
+                }
+                for node in nodes[:10]
+            ],
+        }
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Subscription نامعتبر است: {exc}",
+        )
+
+
+class VLESSSubscriptionCreateRequest(BaseModel):
+    name: str
+    url: str
+    enabled: bool = True
+    auto_sync: bool = True
+    sync_interval_minutes: int = 60
+    priority: int = 100
+
+
+class VLESSSubscriptionUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    url: Optional[str] = None
+    enabled: Optional[bool] = None
+    auto_sync: Optional[bool] = None
+    sync_interval_minutes: Optional[int] = None
+    priority: Optional[int] = None
+
+
+@app.get("/api/vless/stats")
+async def api_vless_stats(
+    admin=Depends(get_current_admin),
+):
+    return vless_manager.stats()
+
+
+@app.get("/api/vless/subscriptions")
+async def api_vless_subscriptions(
+    admin=Depends(get_current_admin),
+):
+    return {
+        "items": vless_manager.list_subscriptions()
+    }
+
+
+@app.get("/api/vless/subscriptions/{subscription_id}")
+async def api_vless_subscription(
+    subscription_id: int,
+    admin=Depends(get_current_admin),
+):
+    result = vless_manager.get_subscription(subscription_id)
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Subscription پیدا نشد.",
+        )
+
+    return result
+
+
+@app.post("/api/vless/subscriptions")
+async def api_add_vless_subscription(
+    payload: VLESSSubscriptionCreateRequest,
+    admin=Depends(get_current_admin),
+):
+    try:
+        return vless_manager.add_subscription(
+            name=payload.name,
+            url=payload.url,
+            enabled=payload.enabled,
+            auto_sync=payload.auto_sync,
+            sync_interval_minutes=payload.sync_interval_minutes,
+            priority=payload.priority,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        )
+
+
+@app.put("/api/vless/subscriptions/{subscription_id}")
+async def api_update_vless_subscription(
+    subscription_id: int,
+    payload: VLESSSubscriptionUpdateRequest,
+    admin=Depends(get_current_admin),
+):
+    try:
+        result = vless_manager.update_subscription(
+            subscription_id=subscription_id,
+            name=payload.name,
+            url=payload.url,
+            enabled=payload.enabled,
+            auto_sync=payload.auto_sync,
+            sync_interval_minutes=payload.sync_interval_minutes,
+            priority=payload.priority,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        )
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Subscription پیدا نشد.",
+        )
+
+    return result
+
+
+@app.delete("/api/vless/subscriptions/{subscription_id}")
+async def api_delete_vless_subscription(
+    subscription_id: int,
+    admin=Depends(get_current_admin),
+):
+    if not vless_manager.delete_subscription(subscription_id):
+        raise HTTPException(
+            status_code=404,
+            detail="Subscription پیدا نشد.",
+        )
+
+    return {
+        "ok": True,
+        "message": "Subscription حذف شد.",
+    }
+
+
+@app.post("/api/vless/subscriptions/{subscription_id}/enable")
+async def api_enable_vless_subscription(
+    subscription_id: int,
+    admin=Depends(get_current_admin),
+):
+    result = vless_manager.set_subscription_enabled(
+        subscription_id,
+        True,
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Subscription پیدا نشد.",
+        )
+
+    return result
+
+
+@app.post("/api/vless/subscriptions/{subscription_id}/disable")
+async def api_disable_vless_subscription(
+    subscription_id: int,
+    admin=Depends(get_current_admin),
+):
+    result = vless_manager.set_subscription_enabled(
+        subscription_id,
+        False,
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Subscription پیدا نشد.",
+        )
+
+    return result
+
+
+@app.post("/api/vless/subscriptions/{subscription_id}/sync")
+async def api_sync_vless_subscription(
+    subscription_id: int,
+    admin=Depends(get_current_admin),
+):
+    try:
+        return vless_manager.sync_subscription(
+            subscription_id
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        )
+
+
+@app.post("/api/vless/sync-all")
+async def api_sync_all_vless(
+    admin=Depends(get_current_admin),
+):
+    return {
+        "ok": True,
+        "results": vless_manager.sync_all(),
+    }
+
+
+@app.get("/api/vless/nodes")
+async def api_vless_nodes(
+    subscription_id: Optional[int] = None,
+    enabled: Optional[int] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    admin=Depends(get_current_admin),
+):
+    return {
+        "items": vless_manager.list_nodes(
+            subscription_id=subscription_id,
+            enabled=enabled,
+            status=status,
+            search=search,
+        )
+    }
+
+
+@app.get("/api/vless/nodes/{node_id}")
+async def api_vless_node(
+    node_id: int,
+    admin=Depends(get_current_admin),
+):
+    result = vless_manager.get_node(node_id)
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="VLESS Node پیدا نشد.",
+        )
+
+    return result
+
+
+@app.post("/api/vless/nodes/{node_id}/enable")
+async def api_enable_vless_node(
+    node_id: int,
+    admin=Depends(get_current_admin),
+):
+    result = vless_manager.set_node_enabled(
+        node_id,
+        True,
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="VLESS Node پیدا نشد.",
+        )
+
+    return result
+
+
+@app.post("/api/vless/nodes/{node_id}/disable")
+async def api_disable_vless_node(
+    node_id: int,
+    admin=Depends(get_current_admin),
+):
+    result = vless_manager.set_node_enabled(
+        node_id,
+        False,
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="VLESS Node پیدا نشد.",
+        )
+
+    return result
+
+
+# =========================================================
+# PROXY MANAGEMENT API
+# =========================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
