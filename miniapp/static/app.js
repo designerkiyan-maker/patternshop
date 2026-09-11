@@ -240,23 +240,18 @@ function revokePreviewCache() {
 }
 
 function loadProductPreview(img, productId) {
-  const cached = previewCache.get(productId);
-  if (cached) { img.src = cached; return; }
-  fetchBlob(`/api/products/${productId}/preview`)
-    .then((blob) => {
-      const url = URL.createObjectURL(blob);
-      previewCache.set(productId, url);
-      if (img.isConnected) img.src = url;
-    })
-    .catch(() => {
-      if (img.isConnected) {
-        // اگر پیش‌نمایش در دسترس نبود، جای‌نگهدار را نشان بده
-        const ph = document.createElement("div");
-        ph.className = "product-thumb-ph";
-        ph.textContent = "🧵";
-        img.replaceWith(ph);
-      }
-    });
+  // src مستقیم: endpoint پیش‌نمایش عمومی است و هدر احراز هویت لازم ندارد.
+  // روش قبلی (fetch + blob با هدر X-Init-Data) در بعضی وب‌ویوها بی‌خطای
+  // واضح شکست می‌خورد و همه‌جا جای‌نگهدار 🧵 می‌ماند؛ <img> معمولی این
+  // مشکل را ندارد و کش مرورگر (max-age=3600 سمت endpoint) هم کار می‌کند.
+  img.onerror = () => {
+    img.onerror = null;
+    const ph = document.createElement("div");
+    ph.className = "product-thumb-ph";
+    ph.textContent = "🧵";
+    img.replaceWith(ph);
+  };
+  img.src = `/api/products/${productId}/preview`;
 }
 
 async function downloadBlobAsFile(path, filename) {
@@ -1051,6 +1046,16 @@ async function renderStore() {
       </div>
 
       ${
+        !selectedCategory
+          ? `
+            <div class="search-bar" id="store-search-bar">
+              <input type="text" id="store-search-input" placeholder="جستجوی الگو..." class="search-input" />
+            </div>
+          `
+          : ""
+      }
+
+      ${
         selectedCategory
           ? `
             <div
@@ -1110,10 +1115,6 @@ async function renderStore() {
       ${
         products.length
           ? `
-            <div class="search-bar" id="store-search-bar">
-              <input type="text" id="store-search-input" placeholder="جستجوی الگو..." class="search-input" />
-              <button class="btn outline small" id="store-search-clear" style="display:none">پاک کردن</button>
-            </div>
             <div class="pattern-grid">
               ${products.map(productCardHtml).join("")}
             </div>
