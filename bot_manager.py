@@ -94,12 +94,17 @@ class BotManager:
 
     async def _sync_menu_button(self, bot: Bot) -> None:
         """دکمه‌ی منو (کنار باکس پیام) را روی Mini App فروشگاه ست می‌کند.
-        اگر MINIAPP_URL تنظیم نشده باشد، دکمه‌ی پیش‌فرض برمی‌گردد."""
+        اگر MINIAPP_URL تنظیم نشده باشد، دکمه‌ی پیش‌فرض برمی‌گردد.
+
+        cache-buster: به URL یک ?v=<زمان بوت> اضافه می‌شود تا وب‌ویو تلگرام
+        بعد از هر ری‌استارت بات، صفحه را از کش قدیمی‌اش نیاورد و همیشه
+        آخرین نسخه‌ی فرانت (app.js/style.css با ?v جدید) را لود کند."""
         miniapp_url = os.getenv("MINIAPP_URL", "").rstrip("/")
         try:
             if miniapp_url:
+                busted_url = f"{miniapp_url}?v={int(time.time())}"
                 await bot.set_chat_menu_button(
-                    menu_button=MenuButtonWebApp(text="فروشگاه", web_app=WebAppInfo(url=miniapp_url))
+                    menu_button=MenuButtonWebApp(text="فروشگاه", web_app=WebAppInfo(url=busted_url))
                 )
             else:
                 await bot.set_chat_menu_button(menu_button=MenuButtonDefault())
