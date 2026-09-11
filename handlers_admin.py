@@ -2358,6 +2358,17 @@ def create_admin_router(db) -> Router:
             return await deny_support(call)
         await state.set_state(AdminBroadcast.waiting_message)
         await replace_admin_view(call,
+
+    # -------------------------------------------------------------------
+    # پیام همگانی
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_broadcast")
+    async def cb_admin_broadcast(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        await state.set_state(AdminBroadcast.waiting_message)
+        await replace_admin_view(call,
             "متن پیام همگانی را ارسال کنید (برای همه کاربران ارسال میشود):",
             reply_markup=kb.admin_back_kb(),
         )
@@ -2390,18 +2401,14 @@ def create_admin_router(db) -> Router:
                 logger.warning("broadcast loop err uid=%s err=%s", uid, e)
         await state.clear()
         note_parts = [f"ارسال به {len(user_ids)} کاربر | موفق: {success}"]
-        if failed > 0: note_parts.append(f"خطا: {failed}")
-        if skipped > 0: note_parts.append(f"نادیده (بلاک/حریم خصوصی): {skipped}")
+        if failed > 0: note_parts.append(f"خطa: {failed}")
+        if skipped > 0: note_parts.append(f"ناديده (بلاك/حریم خصوصي): {skipped}")
         (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "broadcast", " | ".join(note_parts)))
-        resp = f"📢 پیام همگانی ارسال شد.
-✅ موفق: {success}"
-        if failed > 0: resp += f"
-❌ خطا: {failed}"
-        if skipped > 0: resp += f"
-⏭ نادیده: {skipped} (کاربر بات را استارت نکرده یا حریم خصوصی بسته)"
-        await message.answer(resp, reply_markup=kb.admin_category_kb(db, "marketing"))
+        resp_lines = ["📢 پیام همگانی ارسال شد.", f"✅ موفق: {success}"]
+        if failed > 0: resp_lines.append(f"❌ خطا: {failed}")
+        if skipped > 0: resp_lines.append(f"⏭ نادیده: {skipped} (کاربر بات را استارت نکرده یا حریم خصوصی بسته)")
+        await message.answer(chr(10).join(resp_lines), reply_markup=kb.admin_category_kb(db, "marketing"))
 
-    @router.callback_query(F.data.startswith("reply_user:"))
     async def cb_reply_user(call: CallbackQuery, state: FSMContext):
         user_id = callback_id(call.data, "reply_user")
         if user_id is None:
