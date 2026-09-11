@@ -164,7 +164,7 @@ def create_admin_router(db) -> Router:
 
     @router.message(F.text.func(lambda t: t == db.get_setting("btn_admin_panel")))
     async def open_admin_panel(message: Message, state: FSMContext):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        if not admin_only(message.from_user.id):
             return
         await state.clear()
         await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db))
@@ -252,7 +252,7 @@ def create_admin_router(db) -> Router:
 
     @router.message(AdminAddCategory.waiting_name)
     async def process_add_category(message: Message, state: FSMContext):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        if not admin_only(message.from_user.id):
             return
         name = (message.text or "").strip()
         if not name:
@@ -382,7 +382,7 @@ def create_admin_router(db) -> Router:
 
     @router.message(AdminAddProduct.waiting_preview, F.photo)
     async def process_product_preview_photo(message: Message, state: FSMContext):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        if not admin_only(message.from_user.id):
             return
         await state.update_data(preview_file_id=message.photo[-1].file_id)
         await state.set_state(AdminAddProduct.waiting_files)
@@ -396,7 +396,7 @@ def create_admin_router(db) -> Router:
 
     @router.message(AdminAddProduct.waiting_preview, Command("skip"))
     async def process_product_preview_skip(message: Message, state: FSMContext):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        if not admin_only(message.from_user.id):
             return
         await state.update_data(preview_file_id="")
         await state.set_state(AdminAddProduct.waiting_files)
@@ -410,13 +410,13 @@ def create_admin_router(db) -> Router:
 
     @router.message(AdminAddProduct.waiting_preview)
     async def process_product_preview_wrong_type(message: Message):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        if not admin_only(message.from_user.id):
             return
         await message.answer("لطفاً یک عکس بفرست، یا برای رد شدن /skip را بزن.")
 
     @router.message(AdminAddProduct.waiting_files, F.document)
     async def process_new_product_files_upload(message: Message, state: FSMContext):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        if not admin_only(message.from_user.id):
             return
         data = await state.get_data()
         files = list(data.get("files") or [])
@@ -426,7 +426,7 @@ def create_admin_router(db) -> Router:
 
     @router.message(AdminAddProduct.waiting_files)
     async def process_new_product_files_wrong_type(message: Message):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        if not admin_only(message.from_user.id):
             return
         await message.answer("لطفاً فایل الگو را به‌صورت Document بفرست (نه متن یا عکس).")
 
@@ -542,7 +542,7 @@ def create_admin_router(db) -> Router:
 
     @router.message(AdminProductFiles.waiting_files, F.document)
     async def process_product_files_upload(message: Message, state: FSMContext):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        if not admin_only(message.from_user.id):
             return
         data = await state.get_data()
         files = list(data.get("files") or [])
@@ -552,7 +552,7 @@ def create_admin_router(db) -> Router:
 
     @router.message(AdminProductFiles.waiting_files)
     async def process_product_files_wrong_type(message: Message):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        if not admin_only(message.from_user.id):
             return
         await message.answer("لطفاً فایل الگو را به‌صورت Document بفرست (نه متن یا عکس).")
 
@@ -605,7 +605,7 @@ def create_admin_router(db) -> Router:
 
     @router.message(AdminProductPreview.waiting_photo, F.photo)
     async def process_preview_photo(message: Message, state: FSMContext):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        if not admin_only(message.from_user.id):
             return
         data = await state.get_data()
         product_id = data.get("preview_product_id")
@@ -626,7 +626,7 @@ def create_admin_router(db) -> Router:
 
     @router.message(AdminProductPreview.waiting_photo)
     async def process_preview_wrong_type(message: Message):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        if not admin_only(message.from_user.id):
             return
         await message.answer("لطفاً عکس پیش‌نمایش را به‌صورت Photo بفرست (نه فایل یا متن).")
 
@@ -660,7 +660,7 @@ def create_admin_router(db) -> Router:
 
     @router.message(AdminSampleFiles.waiting_files, F.document)
     async def process_sample_files_upload(message: Message, state: FSMContext):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        if not admin_only(message.from_user.id):
             return
         data = await state.get_data()
         files = list(data.get("sample_files") or [])
@@ -670,7 +670,7 @@ def create_admin_router(db) -> Router:
 
     @router.message(AdminSampleFiles.waiting_files)
     async def process_sample_files_wrong_type(message: Message):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        if not admin_only(message.from_user.id):
             return
         await message.answer("لطفاً فایل نمونه را به‌صورت Document بفرست (نه متن یا عکس).")
 
@@ -2345,10 +2345,6 @@ def create_admin_router(db) -> Router:
             await message.answer("⚠️ حذف ادمین ناموفق بود. دوباره تلاش کنید.")
 
     # -------------------------------------------------------------------
-    # -------------------------------------------------------------------
-
-
-    # -------------------------------------------------------------------
     # پیام همگانی
     # -------------------------------------------------------------------
 
@@ -2357,57 +2353,28 @@ def create_admin_router(db) -> Router:
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
         await state.set_state(AdminBroadcast.waiting_message)
-        await replace_admin_view(call,
-
-    # -------------------------------------------------------------------
-    # پیام همگانی
-    # -------------------------------------------------------------------
-
-    @router.callback_query(F.data == "adm_broadcast")
-    async def cb_admin_broadcast(call: CallbackQuery, state: FSMContext):
-        if not full_admin_only(call.from_user.id):
-            return await deny_support(call)
-        await state.set_state(AdminBroadcast.waiting_message)
-        await replace_admin_view(call,
-            "متن پیام همگانی را ارسال کنید (برای همه کاربران ارسال میشود):",
-            reply_markup=kb.admin_back_kb(),
-        )
+        await replace_admin_view(call, "متن پیام همگانی را ارسال کنید (برای همه کاربران ارسال می‌شود):", reply_markup=kb.admin_back_kb())
         await call.answer()
 
     @router.message(AdminBroadcast.waiting_message)
     async def process_broadcast(message: Message, state: FSMContext, bot: Bot):
         user_ids = (await asyncio.to_thread(db.get_all_user_ids))
-        success, failed, skipped = 0, 0, 0
+        success, failed = 0, 0
         for uid in user_ids:
             try:
-                text = (message.text or "").strip()
-                if not text:
-                    failed += 1
-                    continue
-                try:
-                    await message.copy_to(uid)
-                    success += 1
-                except Exception as e:
-                    err = str(e).lower()
-                    if "bot was blocked" in err or "forbidden" in err:
-                        skipped += 1
-                    elif "privacy" in err or "restricted" in err:
-                        skipped += 1
-                    else:
-                        failed += 1
-                        logger.warning("broadcast fail uid=%s err=%s", uid, err[:80])
-            except Exception as e:
+                await message.copy_to(uid)
+                success += 1
+            except Exception:
                 failed += 1
-                logger.warning("broadcast loop err uid=%s err=%s", uid, e)
         await state.clear()
-        note_parts = [f"ارسال به {len(user_ids)} کاربر | موفق: {success}"]
-        if failed > 0: note_parts.append(f"خطa: {failed}")
-        if skipped > 0: note_parts.append(f"ناديده (بلاك/حریم خصوصي): {skipped}")
-        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "broadcast", " | ".join(note_parts)))
-        resp_lines = ["📢 پیام همگانی ارسال شد.", f"✅ موفق: {success}"]
-        if failed > 0: resp_lines.append(f"❌ خطا: {failed}")
-        if skipped > 0: resp_lines.append(f"⏭ نادیده: {skipped} (کاربر بات را استارت نکرده یا حریم خصوصی بسته)")
-        await message.answer(chr(10).join(resp_lines), reply_markup=kb.admin_category_kb(db, "marketing"))
+        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "broadcast", f"ارسال به {len(user_ids)} کاربر | موفق: {success} | ناموفق: {failed}"))
+        await message.answer(
+            f"📢 پیام همگانی ارسال شد.\n✅ موفق: {success}\n❌ ناموفق: {failed}", reply_markup=kb.admin_category_kb(db, "marketing")
+        )
+
+    # -------------------------------------------------------------------
+    # پاسخ به پیام پشتیبانی کاربر
+    # -------------------------------------------------------------------
 
     @router.callback_query(F.data.startswith("reply_user:"))
     async def cb_reply_user(call: CallbackQuery, state: FSMContext):
@@ -2649,7 +2616,7 @@ def create_admin_router(db) -> Router:
 
     @router.message(Command("admin"))
     async def cmd_admin(message: Message, state: FSMContext):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        if not admin_only(message.from_user.id):
             return
         await state.clear()
         await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db))
@@ -2658,7 +2625,6 @@ def create_admin_router(db) -> Router:
     # -------------------------------------------------------------------
     # لغو هر حالت FSM در حال اجرا
     # -------------------------------------------------------------------
-
 
     @router.message(Command("cancel"))
     async def cmd_cancel(message: Message, state: FSMContext):
@@ -2678,5 +2644,4 @@ def create_admin_router(db) -> Router:
             logger.info("cmd_cancel no active state: user=%s", uid)
             await message.answer("❌ عملیاتی در حال اجرا نبود.")
         await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db))
-
     return router
