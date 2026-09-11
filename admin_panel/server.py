@@ -392,13 +392,14 @@ async def notify_user(chat_id: int, text: str):
 
 
 async def _store_media_via_bot(method: str, field: str, content: bytes, filename: str,
-                               caption: str = "", content_type: str = "application/octet-stream") -> Optional[str]:
+                               caption: str = "", content_type: str = "application/octet-stream") -> tuple:
     """فایل آپلودی ادمین (عکس پیش‌نمایش یا PDF الگو) را برای چت مالک می‌فرستد تا
     تلگرام یک file_id پایدار به آن بدهد (همان مکانیزمی که بات با دریافت مستقیم
-    پیام ادمین انجام می‌دهد) و file_id را از پاسخ Bot API استخراج می‌کند؛
-    در صورت هر خطایی None برمی‌گرداند."""
+    پیام ادمین انجام می‌دهد) و file_id را از پاسخ Bot API استخراج می‌کند.
+    خروجی: (file_id یا None، علت خطا یا None) — علت خطا در پاسخ HTTP برمی‌گردد
+    تا از مرورگر مشخص شود مشکل پروکسی است، تلگرام است یا تنظیمات."""
     if not _bot_token():
-        return None
+        return None, "توکن بات تنظیم نشده است (BOT_TOKEN در .env)."
     url = f"https://api.telegram.org/bot{_bot_token()}/{method}"
     try:
         form = aiohttp.FormData()
@@ -410,17 +411,26 @@ async def _store_media_via_bot(method: str, field: str, content: bytes, filename
             async with session.post(url, data=form, timeout=aiohttp.ClientTimeout(total=90)) as resp:
                 data = await resp.json()
         if not data.get("ok"):
+            reason = f"تلگرام خطا داد: {data.get('error_code')} - {data.get('description')}"
             logger.warning("آپلود %s برای گرفتن file_id ناموفق بود: %s", method, data)
-            return None
+            return None, reason
         result = data.get("result") or {}
         if field == "photo":
             sizes = result.get("photo") or []
             # تلگرام چند سایز از هر عکس می‌دهد؛ آخرین مورد بزرگ‌ترین/باکیفیت‌ترین است
-            return sizes[-1]["file_id"] if sizes else None
-        return (result.get("document") or {}).get("file_id")
-    except Exception:
+            return (sizes[-1]["file_id"] if sizes else None), (None if sizes else "تلگرام عکسی برنگرداند.")
+        return (result.get("document") or {}).get("file_id"), None
+    except aiohttp.ClientConnectorError:
+        reason = f"اتصال به پروکسی Xray روی {TELEGRAM_PROXY} برقرار نشد (سرویس Xray روی سرور پایین است؟)"
+        logger.error(reason)
+        return None, reason
+    except asyncio.TimeoutError:
+        reason = "اتصال به تلگرام از طریق پروکسی تایم‌اوت شد."
+        logger.error(reason)
+        return None, reason
+    except Exception as exc:
         logger.exception("آپلود فایل به تلگرام برای گرفتن file_id ناموفق بود.")
-        return None
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 # --------------------------------------------------------------- dashboard --
@@ -440,7 +450,15 @@ def api_system_stats(admin=Depends(get_current_admin)):
     try:
         import psutil
     except ImportError:
-        raise HTTPException(500, "psutil نصب نیست. دستور: pip install psutil")
+        # به جای 500 (که کل کارت داشبورد را می‌شکند)، آمار صفر با پرچم available
+        # برمی‌گردانیم تا باقی داشبورد سالم بماند؛ با نصب psutil پر می‌شود.
+        return {
+            "available": False,
+            "error": "psutil نصب نیست؛ روی سرور بزنید: pip install psutil",
+            "cpu": {"percent": 0, "cores": 0, "load1": None, "load5": None, "load15": None},
+            "ram": {"percent": 0, "used_gb": 0, "total_gb": 0},
+            "disk": {"percent": 0, "used_gb": 0, "total_gb": 0},
+        }
 
     cpu_percent = psutil.cpu_percent(interval=0.3)
     cpu_count = psutil.cpu_count(logical=True) or 1
@@ -983,12 +1001,12 @@ async def api_add_product_file(product_id: int, file: UploadFile = File(...), ad
         raise HTTPException(400, "حجم فایل نباید بیشتر از ۵۰ مگابایت باشد (محدودیت تلگرام).")
 
     caption = f"📁 فایل الگوی «{product['name']}» (ذخیره خودکار پنل وب)"
-    file_id = await _store_media_via_bot(
+    file_id, upload_err = await _store_media_via_bot(
         "sendDocument", "document", content,
         filename=file.filename or "pattern.pdf", caption=caption,
     )
     if not file_id:
-        raise HTTPException(502, "ارسال فایل به تلگرام ناموفق بود؛ دوباره تلاش کنید.")
+        raise HTTPException(502, f"ارسال فایل به تلگرام ناموفق بود: {upload_err or 'دلیل نامشخص'}")
 
     added, duplicates = db.add_product_files(product_id, [file_id])
     db.log_admin_action(
@@ -1024,12 +1042,12 @@ async def api_add_sample_file(file: UploadFile = File(...), admin=Depends(requir
     if len(content) > 50 * 1024 * 1024:
         raise HTTPException(400, "حجم فایل نباید بیشتر از ۵۰ مگابایت باشد (محدودیت تلگرام).")
 
-    file_id = await _store_media_via_bot(
+    file_id, upload_err = await _store_media_via_bot(
         "sendDocument", "document", content,
         filename=file.filename or "sample.pdf", caption="🧪 فایل الگوی نمونه (ذخیره خودکار پنل وب)",
     )
     if not file_id:
-        raise HTTPException(502, "ارسال فایل به تلگرام ناموفق بود؛ دوباره تلاش کنید.")
+        raise HTTPException(502, f"ارسال فایل به تلگرام ناموفق بود: {upload_err or 'دلیل نامشخص'}")
 
     added, duplicates = db.add_sample_files([file_id])
     db.log_admin_action(admin["id"], "sample_file_add", f"الگوی نمونه (پنل وب - {admin['username']})")
@@ -1062,13 +1080,13 @@ async def api_upload_product_preview(product_id: int, photo: UploadFile = File(.
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(400, "حجم تصویر نباید بیشتر از ۱۰ مگابایت باشد.")
 
-    file_id = await _store_media_via_bot(
+    file_id, upload_err = await _store_media_via_bot(
         "sendPhoto", "photo", content,
         filename=photo.filename or "preview.jpg", content_type=photo.content_type,
         caption=f"🖼 پیش‌نمایش الگوی «{product['name']}» (ذخیره خودکار پنل وب)",
     )
     if not file_id:
-        raise HTTPException(502, "ارسال تصویر به تلگرام ناموفق بود؛ دوباره تلاش کنید.")
+        raise HTTPException(502, f"ارسال تصویر به تلگرام ناموفق بود: {upload_err or 'دلیل نامشخص'}")
 
     db.edit_product(product_id, preview_file_id=file_id)
     db.log_admin_action(
