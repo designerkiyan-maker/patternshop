@@ -34,8 +34,6 @@ if not OWNER_ID_RAW or not OWNER_ID_RAW.strip().lstrip("-").isdigit():
 
 OWNER_ID = int(OWNER_ID_RAW)
 
-
-# مسیر فایل دیتابیس بات
 DB_PATH = os.path.join(BASE_DIR, "bot_database.db")
 
 # حداکثر تعداد الگوی نمونه‌ی رایگان مجاز برای هر کاربر

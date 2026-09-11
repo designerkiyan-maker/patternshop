@@ -747,7 +747,10 @@ def files_upload_done_kb() -> InlineKeyboardMarkup:
     """دکمه‌ی پایان آپلود چندتایی فایل در FSM (هم برای ساخت محصول جدید و هم
     برای «مدیریت فایل‌های الگو»)، چون کاربر ممکن است چند فایل پشت‌سرهم بفرستد."""
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="✅ تمام شد", callback_data="adm_files_done")]]
+        inline_keyboard=[
+                [InlineKeyboardButton(text="✅ تمام شد", callback_data="adm_files_done"),
+                 InlineKeyboardButton(text="❌ لغو", callback_data="adm_cancel_files")],
+            ]
     )
 
 

@@ -695,6 +695,30 @@ def create_admin_router(db) -> Router:
         await replace_admin_view(call, text, reply_markup=kb.sample_menu_kb(db))
         await call.answer("ذخیره شد.")
 
+    @router.callback_query(F.data == "adm_cancel_files")
+    async def cb_admin_cancel_files(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        current = await state.get_state()
+        await state.clear()
+        if current in (AdminAddProduct.waiting_preview, AdminAddProduct.waiting_files):
+            await replace_admin_view(call,
+                "❌ ساخت محصول لغو شد.",
+                reply_markup=kb.admin_category_kb(db, "products"),
+            )
+        elif current == AdminProductFiles.waiting_files:
+            product_id = (await state.get_data()).get("files_product_id")
+            if product_id:
+                markup = kb.product_files_kb(db, int(product_id))
+            else:
+                markup = kb.admin_category_kb(db, "products")
+            await replace_admin_view(call, "❌ آپلود فایل لغو شد.", reply_markup=markup)
+        elif current == AdminSampleFiles.waiting_files:
+            await replace_admin_view(call, "❌ آپلود فایل نمونه لغو شد.", reply_markup=kb.sample_menu_kb(db))
+        else:
+            await replace_admin_view(call, "❌ عملیات لغو شد.", reply_markup=kb.admin_panel_kb(db))
+        await call.answer()
+
     @router.callback_query(F.data.startswith("adm_sample_del:"))
     async def cb_admin_sample_del(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
