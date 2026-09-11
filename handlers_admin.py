@@ -2621,4 +2621,21 @@ def create_admin_router(db) -> Router:
         await state.clear()
         await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db))
 
+
+    # -------------------------------------------------------------------
+    # لغو هر حالت FSM در حال اجرا
+    # -------------------------------------------------------------------
+
+    @router.message(Command("cancel"))
+    async def cmd_cancel(message: Message, state: FSMContext):
+        if not admin_only(message.from_user.id):
+            return
+        current = await state.get_state()
+        await state.clear()
+        if current:
+            await message.answer("❌ عملیات نیمهکاره لغو شد.")
+        else:
+            await message.answer("❌ عملیاتی در حال اجرا نبود.")
+        await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db))
+
     return router
