@@ -575,6 +575,46 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_ledger_user ON loyalty_ledger(user_id, id DESC);
                 CREATE INDEX IF NOT EXISTS idx_ledger_created ON loyalty_ledger(created_at);
                 CREATE INDEX IF NOT EXISTS idx_ledger_ref ON loyalty_ledger(reference_type, reference_id);
+
+                -- ===================== قابلیتهای جدید =====================
+                CREATE TABLE IF NOT EXISTS wishlist (
+                    user_id INTEGER NOT NULL,
+                    product_id INTEGER NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(user_id, product_id),
+                    FOREIGN KEY(user_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+                    FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_wishlist_user ON wishlist(user_id);
+                CREATE INDEX IF NOT EXISTS idx_wishlist_product ON wishlist(product_id);
+
+                CREATE TABLE IF NOT EXISTS product_questions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    product_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    question TEXT NOT NULL,
+                    answer TEXT DEFAULT "",
+                    is_answered INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    answered_at TEXT,
+                    FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE,
+                    FOREIGN KEY(user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_qa_product ON product_questions(product_id);
+                CREATE INDEX IF NOT EXISTS idx_qa_user ON product_questions(user_id);
+
+                CREATE TABLE IF NOT EXISTS out_of_stock_notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    product_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    notified_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    is_sent INTEGER DEFAULT 0,
+                    FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE,
+                    FOREIGN KEY(user_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+                    UNIQUE(product_id, user_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_oos_product ON out_of_stock_notifications(product_id);
+                CREATE INDEX IF NOT EXISTS idx_oos_user ON out_of_stock_notifications(user_id);
                 """
             )
 
@@ -1623,6 +1663,146 @@ class Database:
     def get_product(self, product_id: int):
         with self._get_conn() as conn:
             return conn.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
+
+    def search_products(self, query: str):
+        """جستجوی حساس به حرف و کلمه در نام و توضیحات محصولات."""
+        with self._get_conn() as conn:
+            like_pattern = f"%{query}%"
+            rows = conn.execute(
+                "SELECT p.*, c.name as category_name FROM products p "
+                "JOIN categories c ON p.category_id=c.id "
+                "WHERE (p.name LIKE ? OR p.description LIKE ?) "
+                "AND p.is_active=1 ORDER BY p.name",
+                (like_pattern, like_pattern),
+            ).fetchall()
+            return rows
+
+    def get_product_with_status(self, product_id: int, user_tg_id: int = None):
+        """بازگرداندن محصول همراه وضعیت خرید و علاقه‌مندی کاربر."""
+        with self._get_conn() as conn:
+            p = conn.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
+            if not p:
+                return None
+            result = dict(p)
+            result["has_purchased"] = False
+            result["is_wishlisted"] = False
+            result["question_count"] = 0
+            if user_tg_id:
+                result["has_purchased"] = bool(
+                    conn.execute(
+                        "SELECT 1 FROM orders WHERE user_id=? AND product_id=? AND status=approved LIMIT 1",
+                        (user_tg_id, product_id),
+                    ).fetchone()
+                )
+                result["is_wishlisted"] = bool(
+                    conn.execute(
+                        "SELECT 1 FROM wishlist WHERE user_id=? AND product_id=?",
+                        (user_tg_id, product_id),
+                    ).fetchone()
+                )
+                result["question_count"] = conn.execute(
+                    "SELECT COUNT(*) c FROM product_questions WHERE product_id=?",
+                    (product_id,),
+                ).fetchone()["c"]
+            return result
+
+    def get_user_wishlist(self, user_tg_id: int):
+        """لیست محصولات مورد علاقه کاربر."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT w.product_id, p.name, p.price, p.preview_file_id "
+                "FROM wishlist w JOIN products p ON w.product_id=p.id "
+                "WHERE w.user_id=? ORDER BY w.created_at DESC",
+                (user_tg_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def toggle_wishlist(self, user_tg_id: int, product_id: int) -> bool:
+        """افزودن یا حذف از لیست پسندیده. True اگر اضافه شد، False اگر حذف شد."""
+        with self._get_conn() as conn:
+            existing = conn.execute(
+                "SELECT id FROM wishlist WHERE user_id=? AND product_id=?",
+                (user_tg_id, product_id),
+            ).fetchone()
+            if existing:
+                conn.execute("DELETE FROM wishlist WHERE user_id=? AND product_id=?", (user_tg_id, product_id))
+                return False
+            else:
+                conn.execute(
+                    "INSERT INTO wishlist (user_id, product_id) VALUES (?, ?)",
+                    (user_tg_id, product_id),
+                )
+                return True
+
+    def add_product_question(self, product_id: int, user_tg_id: int, question: str) -> int:
+        """افزودن سوال جدید درباره محصول."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO product_questions (product_id, user_id, question) VALUES (?, ?, ?)",
+                (product_id, user_tg_id, question),
+            )
+            return cur.lastrowid
+
+    def get_product_questions(self, product_id: int):
+        """دریافت سوالات一个产品."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT pq.*, u.telegram_id, u.first_name, u.last_name "
+                "FROM product_questions pq "
+                "JOIN users u ON pq.user_id=u.telegram_id "
+                "WHERE pq.product_id=? ORDER BY pq.created_at ASC",
+                (product_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def answer_question(self, question_id: int, answer: str, admin_id: int) -> bool:
+        """پاسخ ادمین به سوال."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE product_questions SET answer=?, is_answered=1, answered_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND is_answered=0",
+                (answer, question_id),
+            )
+            if cur.rowcount > 0:
+                row = conn.execute("SELECT user_id FROM product_questions WHERE id=?", (question_id,)).fetchone()
+                if row:
+                    conn.execute(
+                        "INSERT INTO admin_logs (admin_id, action, details) VALUES (?, ?, ?)",
+                        (admin_id, "qa_answer", f"پاسخ به سوال #{question_id} محصول {row[user_id]}"),
+                    )
+                return True
+            return False
+
+    def subscribe_out_of_stock(self, user_tg_id: int, product_id: int) -> bool:
+        """اشتراک در اطلاع ناموجودی محصول فیزیکی."""
+        try:
+            with self._get_conn() as conn:
+                conn.execute(
+                    "INSERT INTO out_of_stock_notifications (user_id, product_id) VALUES (?, ?)",
+                    (user_tg_id, product_id),
+                )
+                return True
+        except Exception:
+            return False
+
+    def unsubscribe_out_of_stock(self, user_tg_id: int, product_id: int) -> bool:
+        """لغو اشتراک اطلاع ناموجودی."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM out_of_stock_notifications WHERE user_id=? AND product_id=?",
+                (user_tg_id, product_id),
+            )
+            return cur.rowcount > 0
+
+    def get_oos_subscribers(self, product_id: int):
+        """دریافت لیست کاربران مشترک اطلاع ناموجودی یک محصول."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT user_id FROM out_of_stock_notifications WHERE product_id=?",
+                (product_id,),
+            ).fetchall()
+            return [r["user_id"] for r in rows]
+
 
     def toggle_product(self, product_id: int):
         with self._get_conn() as conn:

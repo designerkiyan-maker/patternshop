@@ -371,25 +371,86 @@ def _product_public(db: Database, p) -> dict:
         "price": p["price"],
         "description": p["description"],
         "available": db.has_product_files(p["id"]),
+        "has_purchased": False,
+        "is_wishlisted": False,
         "has_preview": bool((p["preview_file_id"] or "").strip()),
         "category_id": p["category_id"],
     }
 
-
+# ---------------------------------------------------------------------------
+# جستجو / علاقه‌مندی / سوال / اطلاع ناموجودی
+@app.get("/api/products/{product_id}")
 @app.get("/api/catalog")
 def api_catalog(auth=Depends(get_verified_user)):
     tg_id, db = auth
     categories = db.get_categories(active_only=True)
     result = []
-    for c in categories:
-        products = db.get_products(c["id"], active_only=True)
-        result.append({
-            "id": c["id"],
-            "name": c["name"],
-            "products": [_product_public(db, p) for p in products],
-        })
+    for cat in categories:
+        products = db.get_products(cat["id"], active_only=True)
+        prods = []
+        for p in products:
+            pd = _product_public(db, p)
+            conn = db._get_conn()
+            pd["has_purchased"] = bool(
+                conn.execute(
+                    "SELECT 1 FROM orders WHERE user_id=? AND product_id=? AND status=approved LIMIT 1",
+                    (tg_id, p["id"]),
+                ).fetchone()
+            )
+            pd["is_wishlisted"] = bool(
+                conn.execute(
+                    "SELECT 1 FROM wishlist WHERE user_id=? AND product_id=?",
+                    (tg_id, p["id"]),
+                ).fetchone()
+            )
+            pd["question_count"] = conn.execute(
+                "SELECT COUNT(*) c FROM product_questions WHERE product_id=?",
+                (p["id"],),
+            ).fetchone()["c"]
+            prods.append(pd)
+        result.append({"id": cat["id"], "name": cat["name"], "products": prods})
     return result
 
+@app.get("/api/search")
+def api_search(q: str = "", auth=Depends(get_verified_user)):
+    _, db = auth
+    results = db.search_products(q)
+    return {"products": [_product_public(db, p) for p in results], "total": len(results)}
+
+@app.post("/api/wishlist/{product_id}")
+def api_wishlist_toggle(product_id: int, auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    added = db.toggle_wishlist(tg_id, product_id)
+    return {"status": "added" if added else "removed", "product_id": product_id}
+
+@app.get("/api/wishlist")
+def api_wishlist_list(auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    return {"items": db.get_user_wishlist(tg_id)}
+
+@app.post("/api/products/{product_id}/question")
+def api_question_add(product_id: int, body: dict, auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    question = (body.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="سوال نمی‌تواند خالی باشد.")
+    qid = db.add_product_question(product_id, tg_id, question)
+    return {"status": "sent", "question_id": qid}
+
+@app.get("/api/products/{product_id}/questions")
+def api_questions_list(product_id: int, auth=Depends(get_verified_user)):
+    _, db = auth
+    return {"questions": db.get_product_questions(product_id)}
+
+@app.post("/api/products/{product_id}/oos-subscribe")
+def api_oos_subscribe(product_id: int, auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    return {"subscribed": db.subscribe_out_of_stock(tg_id, product_id)}
+
+@app.delete("/api/products/{product_id}/oos-subscribe")
+def api_oos_unsubscribe(product_id: int, auth=Depends(get_verified_user)):
+    tg_id, db = auth
+    return {"unsubscribed": db.unsubscribe_out_of_stock(tg_id, product_id)}
 
 @app.get("/api/products/{product_id}")
 def api_product_detail(product_id: int, auth=Depends(get_verified_user)):
