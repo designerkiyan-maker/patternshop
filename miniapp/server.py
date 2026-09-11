@@ -126,22 +126,32 @@ async def _tg_get_file_path(bot_token: str, file_id: str) -> Optional[str]:
 
 
 async def _tg_download_file(bot_token: str, file_id: str) -> Optional[bytes]:
-    """محتوای واقعی یک فایل تلگرامی را دانلود می‌کند (پروکسی getFile + file/bot<token>/<path>)."""
-    file_path = await _tg_get_file_path(bot_token, file_id)
-    if not file_path:
-        return None
-    try:
-        async with telegram_session() as session:
-            async with session.get(
-                f"https://api.telegram.org/file/bot{bot_token}/{file_path}",
-                timeout=aiohttp.ClientTimeout(total=30),
-            ) as resp:
-                if resp.status != 200:
-                    return None
-                return await resp.read()
-    except Exception:
+    """محتوای واقعی یک فایل تلگرامی را دانلود می‌کند (پروکسی getFile + file/bot<token>/<path>).
+    یک بار retry دارد چون getFile/دانلود از طریق پروکسی گاهی به‌صورت متناوب شکست
+    می‌خورد (مثل 502 پراکنده‌ی پیش‌نمایش) و در تلاش دوم معمولاً سالم می‌آید."""
+    last_error: Optional[Exception] = None
+    for attempt in (1, 2):
+        try:
+            file_path = await _tg_get_file_path(bot_token, file_id)
+            if not file_path:
+                continue
+            async with telegram_session() as session:
+                async with session.get(
+                    f"https://api.telegram.org/file/bot{bot_token}/{file_path}",
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+        except Exception as exc:
+            last_error = exc
+            logging.getLogger("miniapp.telegram").warning(
+                "دانلود فایل از تلگرام در تلاش %d ناموفق بود: %s", attempt, exc,
+            )
+        if attempt == 1:
+            await asyncio.sleep(1)
+    if last_error:
         logging.getLogger("miniapp.telegram").exception("دانلود فایل از تلگرام ناموفق بود.")
-        return None
+    return None
 
 
 async def send_receipt_media_to_admins(db: Database, bot_token: str, caption: str, reply_markup: str,
