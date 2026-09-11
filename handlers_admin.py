@@ -2626,15 +2626,23 @@ def create_admin_router(db) -> Router:
     # لغو هر حالت FSM در حال اجرا
     # -------------------------------------------------------------------
 
+
     @router.message(Command("cancel"))
     async def cmd_cancel(message: Message, state: FSMContext):
-        if not (admin_only(message.from_user.id) or message.from_user.id == config.OWNER_ID):
+        """لغو هر حالت FSM در حال اجرا — برای مالک یا ادمین."""
+        uid = message.from_user.id
+        is_owner = uid == config.OWNER_ID
+        is_adm = admin_only(uid)
+        if not (is_owner or is_adm):
+            logger.warning("cmd_cancel blocked: user=%s owner=%s is_admin=%s", uid, config.OWNER_ID, is_adm)
             return
         current = await state.get_state()
         await state.clear()
         if current:
+            logger.info("cmd_cancel succeeded: was in state=%s user=%s", current, uid)
             await message.answer("❌ عملیات نیمهکاره لغو شد.")
         else:
+            logger.info("cmd_cancel no active state: user=%s", uid)
             await message.answer("❌ عملیاتی در حال اجرا نبود.")
         await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db))
 
