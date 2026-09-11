@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1120" font-family="Vazirmatn, IRANSans, Tahoma, Arial, sans-serif">
+<defs>
+  <linearGradient id="gBlue" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#e3f2fd"/><stop offset="100%" style="stop-color:#bbdefb"/></linearGradient>
+  <linearGradient id="gOrange" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#fff3e0"/><stop offset="100%" style="stop-color:#ffe0b2"/></linearGradient>
+  <linearGradient id="gPurple" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#f3e5f5"/><stop offset="100%" style="stop-color:#e1bee7"/></linearGradient>
+  <linearGradient id="gGreen" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#e8f5e9"/><stop offset="100%" style="stop-color:#c8e6c9"/></linearGradient>
+  <linearGradient id="gRed" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#fce4ec"/><stop offset="100%" style="stop-color:#f8bbd9"/></linearGradient>
+  <linearGradient id="gYellow" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#fffde7"/><stop offset="100%" style="stop-color:#fff9c4"/></linearGradient>
+  <filter id="sh"><feDropShadow dx="2" dy="2" stdDeviation="2" flood-opacity="0.12"/></filter>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#555"/></marker>
+</defs>
+<rect width="1400" height="1120" fill="#fafafa"/>
+<text x="700" y="42" text-anchor="middle" font-size="26" font-weight="bold" fill="#1a237e">PatternShop - Architecture Diagram</text>
+<text x="700" y="66" text-anchor="middle" font-size="13" fill="#666">AIoT PatternShop - Python aiogram FastAPI SQLite</text>
+
+<!-- Users -->
+<rect x="50" y="95" width="1300" height="115" rx="14" fill="#f5f5f5" stroke="#ccc" filter="url(#sh)"/>
+<text x="700" y="120" text-anchor="middle" font-size="17" font-weight="bold" fill="#333">Telegram + Web User Layer</text>
+<rect x="120" y="135" width="260" height="60" rx="10" fill="#fff" stroke="#aaa" filter="url(#sh)"/>
+<text x="250" y="158" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Normal User</text>
+<text x="250" y="178" text-anchor="middle" font-size="11" fill="#666">Catalog | Cart | Orders | Wallet</text>
+<rect x="440" y="135" width="260" height="60" rx="10" fill="#fff" stroke="#aaa" filter="url(#sh)"/>
+<text x="570" y="158" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Admin / Owner</text>
+<text x="570" y="178" text-anchor="middle" font-size="11" fill="#666">Approve orders | Catalog | Tickets | Broadcast</text>
+<rect x="760" y="135" width="260" height="60" rx="10" fill="#fff" stroke="#aaa" filter="url(#sh)"/>
+<text x="890" y="158" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Web Browser</text>
+<text x="890" y="178" text-anchor="middle" font-size="11" fill="#666">Admin Panel + Mini App Store</text>
+
+<!-- Bot -->
+<rect x="50" y="260" width="600" height="210" rx="16" fill="url(#gBlue)" stroke="#1976d2" stroke-width="2" filter="url(#sh)"/>
+<text x="350" y="290" text-anchor="middle" font-size="18" font-weight="bold" fill="#0d47a1">Bot (aiogram 3.x)</text>
+<text x="350" y="310" text-anchor="middle" font-size="12" fill="#1565c0">polling - persistent FSM on SQLite - 3 outer middlewares</text>
+<rect x="80" y="330" width="175" height="52" rx="8" fill="#fff" stroke="#1976d2" filter="url(#sh)"/>
+<text x="167" y="352" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">User Router</text>
+<text x="167" y="370" text-anchor="middle" font-size="10" fill="#666">handlers_user.py 1627 lines</text>
+<rect x="280" y="330" width="175" height="52" rx="8" fill="#fff" stroke="#1976d2" filter="url(#sh)"/>
+<text x="367" y="352" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">Admin Router</text>
+<text x="367" y="370" text-anchor="middle" font-size="10" fill="#666">handlers_admin.py 2600 lines</text>
+<rect x="80" y="395" width="175" height="52" rx="8" fill="#fff" stroke="#1976d2" filter="url(#sh)"/>
+<text x="167" y="417" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">Keyboard Builder</text>
+<text x="167" y="435" text-anchor="middle" font-size="10" fill="#666">keyboards.py button factory</text>
+<rect x="280" y="395" width="200" height="52" rx="8" fill="#fff" stroke="#1976d2" filter="url(#sh)"/>
+<text x="380" y="417" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">SQLite FSM Storage</text>
+<text x="380" y="435" text-anchor="middle" font-size="10" fill="#666">fsm.sqlite3 survives restart</text>
+<rect x="500" y="330" width="130" height="117" rx="8" fill="#e3f2fd" stroke="#64b5f6" stroke-dasharray="4,2"/>
+<text x="565" y="355" text-anchor="middle" font-size="12" font-weight="bold" fill="#1565c0">Middlewares</text>
+<text x="565" y="375" text-anchor="middle" font-size="10" fill="#555">BlockedUser</text>
+<text x="565" y="391" text-anchor="middle" font-size="10" fill="#555">AdminPresence</text>
+<text x="565" y="407" text-anchor="middle" font-size="10" fill="#555">ForceJoin</text>
+<text x="565" y="423" text-anchor="middle" font-size="10" fill="#555">ErrorHandler</text>
+<text x="565" y="439" text-anchor="middle" font-size="10" fill="#555">GlobalError</text>
+
+<!-- Services -->
+<rect x="50" y="520" width="1300" height="125" rx="16" fill="url(#gGreen)" stroke="#388e3c" stroke-width="2" filter="url(#sh)"/>
+<text x="700" y="548" text-anchor="middle" font-size="17" font-weight="bold" fill="#1b5e20">Services Layer (Business Logic)</text>
+<rect x="75" y="562" width="105" height="65" rx="8" fill="#fff" stroke="#4caf50" stroke-width="1.2" filter="url(#sh)"/>
+<text x="127" y="586" text-anchor="middle" font-size="12" font-weight="bold" fill="#4caf50">Catalog</text>
+<text x="127" y="604" text-anchor="middle" font-size="9" fill="#888">services/catalog.py</text>
+<rect x="200" y="562" width="105" height="65" rx="8" fill="#fff" stroke="#2e7d32" stroke-width="1.2" filter="url(#sh)"/>
+<text x="252" y="586" text-anchor="middle" font-size="12" font-weight="bold" fill="#2e7d32">Cart</text>
+<text x="252" y="604" text-anchor="middle" font-size="9" fill="#888">services/cart.py</text>
+<rect x="325" y="562" width="105" height="65" rx="8" fill="#fff" stroke="#66bb6a" stroke-width="1.2" filter="url(#sh)"/>
+<text x="377" y="586" text-anchor="middle" font-size="12" font-weight="bold" fill="#66bb6a">Orders</text>
+<text x="377" y="604" text-anchor="middle" font-size="9" fill="#888">services/orders.py</text>
+<rect x="450" y="562" width="105" height="65" rx="8" fill="#fff" stroke="#1b5e20" stroke-width="1.2" filter="url(#sh)"/>
+<text x="502" y="586" text-anchor="middle" font-size="12" font-weight="bold" fill="#1b5e20">Checkout</text>
+<text x="502" y="604" text-anchor="middle" font-size="9" fill="#888">services/checkout.py</text>
+<rect x="575" y="562" width="105" height="65" rx="8" fill="#fff" stroke="#43a047" stroke-width="1.2" filter="url(#sh)"/>
+<text x="627" y="586" text-anchor="middle" font-size="12" font-weight="bold" fill="#43a047">Inventory</text>
+<text x="627" y="604" text-anchor="middle" font-size="9" fill="#888">services/inventory.py</text>
+<rect x="700" y="562" width="105" height="65" rx="8" fill="#fff" stroke="#388e3c" stroke-width="1.2" filter="url(#sh)"/>
+<text x="752" y="586" text-anchor="middle" font-size="12" font-weight="bold" fill="#388e3c">Shipping</text>
+<text x="752" y="604" text-anchor="middle" font-size="9" fill="#888">services/shipping.py</text>
+<rect x="825" y="562" width="105" height="65" rx="8" fill="#fff" stroke="#81c784" stroke-width="1.2" filter="url(#sh)"/>
+<text x="877" y="586" text-anchor="middle" font-size="12" font-weight="bold" fill="#81c784">Payments</text>
+<text x="877" y="604" text-anchor="middle" font-size="9" f
+<rect x="950" y="562" width="105" height="65" rx="8" fill="#fff" stroke="#2e7d32" stroke-width="1.2" filter="url(#sh)"/>
+<text x="1002" y="586" text-anchor="middle" font-size="12" font-weight="bold" fill="#2e7d32">Loyalty</text>
+<text x="1002" y="604" text-anchor="middle" font-size="9" fill="#888">loyalty.py</text>
+<rect x="1075" y="562" width="105" height="65" rx="8" fill="#fff" stroke="#4caf50" stroke-width="1.2" filter="url(#sh)"/>
+<text x="1127" y="586" text-anchor="middle" font-size="12" font-weight="bold" fill="#4caf50">Permissions</text>
+<text x="1127" y="604" text-anchor="middle" font-size="9" fill="#888">services/permissions.py</text>
+<rect x="1200" y="562" width="105" height="65" rx="8" fill="#fff" stroke="#66bb6a" stroke-width="1.2" filter="url(#sh)"/>
+<text x="1252" y="586" text-anchor="middle" font-size="12" font-weight="bold" fill="#66bb6a">Settings</text>
+<text x="1252" y="604" text-anchor="middle" font-size="9" fill="#888">services/settings.py</text>
+
+<!-- Admin Panel -->
+<rect x="50" y="690" width="600" height="175" rx="16" fill="url(#gPurple)" stroke="#7b1fa2" stroke-width="2" filter="url(#sh)"/>
+<text x="350" y="718" text-anchor="middle" font-size="18" font-weight="bold" fill="#4a148c">Admin Panel (:8002)</text>
+<rect x="80" y="738" width="215" height="45" rx="6" fill="#fff" stroke="#ce93d8" filter="url(#sh)"/>
+<text x="187" y="756" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">REST API + Session Auth</text>
+<text x="187" y="773" text-anchor="middle" font-size="9" fill="#666">FastAPI cookie-based</text>
+<rect x="315" y="738" width="215" height="45" rx="6" fill="#fff" stroke="#ce93d8" filter="url(#sh)"/>
+<text x="422" y="756" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Rate Limiter (IP)</text>
+<text x="422" y="773" text-anchor="middle" font-size="9" fill="#666">10 fails -> 5min lockout</text>
+<rect x="80" y="803" width="215" height="45" rx="6" fill="#fff" stroke="#ce93d8" filter="url(#sh)"/>
+<text x="187" y="821" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Web Push (VAPID)</text>
+<text x="187" y="838" text-anchor="middle" font-size="9" fill="#666">pywebpush notifications</text>
+<rect x="315" y="803" width="215" height="45" rx="6" fill="#fff" stroke="#ce93d8" filter="url(#sh)"/>
+<text x="422" y="821" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">VLESS Manager</text>
+<text x="422" y="838" text-anchor="middle" font-size="9" fill="#666">xray subscription mgmt</text>
+<rect x="80" y="868" width="215" height="45" rx="6" fill="#fff" stroke="#ce93d8" filter="url(#sh)"/>
+<text x="187" y="886" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Static Files</text>
+<text x="187" y="903" text-anchor="middle" font-size="9" fill="#666">HTML/CSS/JS admin panel</text>
+<rect x="315" y="868" width="215" height="45" rx="6" fill="#fff" stroke="#ce93d8" filter="url(#sh)"/>
+<text x="422" y="886" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Telegram Notify</text>
+<text x="422" y="903" text-anchor="middle" font-size="9" fill="#666">send notifications</text>
+
+<!-- Mini App -->
+<rect x="750" y="690" width="600" height="175" rx="16" fill="url(#gOrange)" stroke="#e65100" stroke-width="2" filter="url(#sh)"/>
+<text x="1050" y="718" text-anchor="middle" font-size="18" font-weight="bold" fill="#bf360c">Mini App (:8001)</text>
+<rect x="780" y="738" width="215" height="45" rx="6" fill="#fff" stroke="#ffb74d" filter="url(#sh)"/>
+<text x="887" y="756" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Init Data Auth</text>
+<text x="887" y="773" text-anchor="middle" font-size="9" fill="#666">verify telegram payload</text>
+<rect x="1015" y="738" width="215" height="45" rx="6" fill="#fff" stroke="#ffb74d" filter="url(#sh)"/>
+<text x="1122" y="756" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Catalog API</text>
+<text x="1122" y="773" text-anchor="middle" font-size="9" fill="#666">products and categories</text>
+<rect x="780" y="803" width="215" height="45" rx="6" fill="#fff" stroke="#ffb74d" filter="url(#sh)"/>
+<text x="887" y="821" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Cart and Checkout</text>
+<text x="887" y="838" text-anchor="middle" font-size="9" fill="#666">cart + price calculation</text>
+<rect x="1015" y="803" width="215" height="45" rx="6" fill="#fff" stroke="#ffb74d" filter="url(#sh)"/>
+<text x="1122" y="821" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Order History</text>
+<text x="1122" y="838" text-anchor="middle" font-size="9" fill="#666">orders + delivery status</text>
+<rect x="780" y="868" width="215" height="45" rx="6" fill="#fff" stroke="#ffb74d" filter="url(#sh)"/>
+<text x="887" y="886" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Frontend SPA</text>
+<text x="887" y="903" text-anchor="middle" font-size="9" fill="#666">Vanilla JS RTL SafeArea</text>
+<rect x="1015" y="868" width="215" height="45" rx="6" fill="#fff" stroke="#ffb74d" filter="url(#sh)"/>
+<text x="1122" y="886" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">CORS + Security</text>
+<text x="1122" y="903" text-anchor="middle" font-size="9" fill="#666">origin allowlist + headers</text>
+
+<!-- Core Modules -->
+<rect x="50" y="915" width="1300" height="80" rx="16" fill="url(#gYellow)" stroke="#f9a825" stroke-width="1.5" filter="url(#sh)"/>
+<text x="700" y="942" text-anchor="middle" font-size="16" font-weight="bold" fill="#f57f17">Core Modules</text>
+<rect x="80" y="955" width="210" height="45" rx="6" fill="#fff" stroke="#ffd54f" filter="url(#sh)"/>
+<text x="185" y="975" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Telegram Proxy</text>
+<text x="185" y="992" text-anchor="middle" font-size="9" fill="#888">core/telegram_proxy.py</text>
+<rect x="340" y="955" width="210" height="45" rx="6" fill="#fff" stroke="#ffd54f" filter="url(#sh)"/>
+<text x="445" y="975" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Backup Loop</text>
+<text x="445" y="992" text-anchor="middle" font-size="9" fill="#888">backup.py daily 24h</text>
+<rect x="600" y="955" width="210" height="45" rx="6" fill="#fff" stroke="#ffd54f" filter="url(#sh)"/>
+<text x="705" y="975" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">File Delivery</text>
+<text x="705" y="992" text-anchor="middle" font-size="9" fill="#888">file_delivery.py PDF send</text>
+<rect x="860" y="955" width="210" height="45" rx="6" fill="#fff" stroke="#ffd54f" filter="url(#sh)"/>
+<text x="965" y="975" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Jalali Date</text>
+<text x="965" y="992" text-anchor="middle" font-size="9" fill="#888">jalali.py Persian calendar</text>
+<rect x="1120" y="955" width="210" height="45" rx="6" fill="#fff" stroke="#ffd54f" filter="url(#sh)"/>
+<text x="1225" y="975" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">States FSM</text>
+<text x="1225" y="992" text-anchor="middle" font-size="9" fill="#888">states.py purchase flow</text>
+
+<!-- Database -->
+<rect x="475" y="1040" width="450" height="65" rx="14" fill="url(#gRed)" stroke="#c62828" stroke-width="2" filter="url(#sh)"/>
+<text x="700" y="1068" text-anchor="middle" font-size="16" font-weight="bold" fill="#b71c1c">SQLite - bot_database.db</text>
+<text x="700" y="1088" text-anchor="middle" font-size="10" fill="#e53935">products orders users wallet loyalty_ledger inventory variants discounts tickets admins settings</text>
+
+<!-- External -->
+<rect x="1180" y="1040" width="170" height="65" rx="12" fill="#f5f5f5" stroke="#999"/>
+<text x="1265" y="1068" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">External</text>
+<text x="1265" y="1085" text-anchor="middle" font-size="10" fill="#666">Telegram Bot API</text>
+<text x="1265" y="1098" text-anchor="middle" font-size="10" fill="#666">Bank Card (Card-to-Card)</text>
+
+<!-- Arrows -->
+<line x1="250" y1="210" x2="250" y2="260" stroke="#555" stroke-width="1.8" marker-end="url(#ar)"/>
+<line x1="650" y1="210" x2="650" y2="260" stroke="#555" stroke-width="1.8" marker-end="url(#ar)"/>
+<line x1="1050" y1="210" x2="1050" y2="260" stroke="#555" stroke-width="1.8" marker-end="url(#ar)"/>
+<line x1="350" y1="470" x2="350" y2="520" stroke="#388e3c" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="700" y1="470" x2="700" y2="520" stroke="#388e3c" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="350" y1="645" x2="350" y2="690" stroke="#7b1fa2" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="1050" y1="645" x2="1050" y2="690" stroke="#e65100" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="700" y1="645" x2="700" y2="690" stroke="#c62828" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="350" y1="865" x2="350" y2="1040" stroke="#c62828" stroke-width="1.2" stroke-dasharray="5,3" marker-end="url(#ar)"/>
+<line x1="1050" y1="865" x2="1050" y2="1040" stroke="#c62828" stroke-width="1.2" stroke-dasharray="5,3" marker-end="url(#ar)"/>
+<line x1="700" y1="915" x2="700" y2="1040" stroke="#f9a825" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="900" y1="350" x2="1150" y2="1070" stroke="#888" stroke-width="1.2" stroke-dasharray="6,3" marker-end="url(#ar)"/>
+<line x1="540" y1="955" x2="650" y2="470" stroke="#f9a825" stroke-width="1.2" stroke-dasharray="4,4" marker-end="url(#ar)"/>
+
+<!-- Legend -->
+<rect x="50" y="1118" width="14" height="14" rx="3" fill="#e3f2fd" stroke="#1976d2"/>
+<text x="70" y="1129" font-size="11" fill="#333">Bot</text>
+<rect x="170" y="1118" width="14" height="14" rx="3" fill="#e8f5e9" stroke="#388e3c"/>
+<text x="190" y="1129" font-size="11" fill="#333">Services</text>
+<rect x="290" y="1118" width="14" height="14" rx="3" fill="#f3e5f5" stroke="#7b1fa2"/>
+<text x="310" y="1129" font-size="11" fill="#333">Admin</text>
+<rect x="410" y="1118" width="14" height="14" rx="3" fill="#fff3e0" stroke="#e65100"/>
+<text x="430" y="1129" font-size="11" fill="#333">MiniApp</text>
+<rect x="530" y="1118" width="14" height="14" rx="3" fill="#fce4ec" stroke="#c62828"/>
+<text x="550" y="1129" font-size="11" fill="#333">Database</text>
+<rect x="650" y="1118" width="14" height="14" rx="3" fill="#fff9c4" stroke="#f9a825"/>
+<text x="670" y="1129" font-size="11" fill="#333">Core</text>
+</svg>

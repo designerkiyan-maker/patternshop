@@ -190,7 +190,16 @@ def get_verified_user(x_init_data: str = Header(...)):
     کاربری در دیتابیس ثبت می‌شد ولی چون ردیفی در users نداشت، سمت ادمین با
     خطای «کاربر یافت نشد» مواجه می‌شد."""
     result = validate_init_data(x_init_data, BOT_TOKEN)
-    if not result or "user" not in result:
+    if not result:
+        logger.warning(
+            "initData validate failed: token=%s...%s data_len=%d",
+            BOT_TOKEN[:6] if BOT_TOKEN else "NONE",
+            BOT_TOKEN[-4:] if BOT_TOKEN and len(BOT_TOKEN) > 4 else "NONE",
+            len(x_init_data),
+        )
+        raise HTTPException(status_code=401, detail="initData نامعتبر است.")
+    if "user" not in result:
+        logger.warning("initData valid but no user field: keys=%s", list(result.keys()) if result else "None")
         raise HTTPException(status_code=401, detail="initData نامعتبر است.")
     tg_user = result["user"]
     try:

@@ -9,9 +9,13 @@
 """
 
 import os
+
+# مسیر مطلق پوشهی پروژه — قبل از load_dotenv محاسبه میشود تا
+# .env همیشه از کنار همین فایل خوانده شود، فارغ از cwd سرویس/پروسه.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID_RAW = os.getenv("OWNER_ID")
@@ -30,9 +34,6 @@ if not OWNER_ID_RAW or not OWNER_ID_RAW.strip().lstrip("-").isdigit():
 
 OWNER_ID = int(OWNER_ID_RAW)
 
-# پوشه‌ی ریشه‌ی پروژه (مطلق) - برای اینکه مسیر دیتابیس به cwd پروسه‌ای که
-# main.py با آن اجرا می‌شود وابسته نباشد
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # مسیر فایل دیتابیس بات
 DB_PATH = os.path.join(BASE_DIR, "bot_database.db")
