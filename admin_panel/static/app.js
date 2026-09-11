@@ -278,6 +278,23 @@ const apiPost = (p, body) => api(p, { method: 'POST', body: body || {} });
 const apiPut = (p, body) => api(p, { method: 'PUT', body: body || {} });
 const apiDelete = p => api(p, { method: 'DELETE' });
 
+/* ============================================================ uploads config ===
+   پسوندهای مجاز آپلود از هسته (config.py) با API خوانده می‌شود تا تنها منبع
+   حقیقت هسته باشد؛ این لیست ثابت فقط fallback وقتی API در دسترس نیست است. */
+const UPLOAD_CFG_FALLBACK = {
+  allowed_extensions: ['ai','eps','svg','pdf','cdr','dxf','dwg','wmf','emf','astm','aama','rul','pds','mdl','pat','psd','tif','tiff','png','jpg','jpeg','webp','zprj','zpac','avatar','gmod','plt','zip','rar','7z','dsn','iba'],
+  max_file_mb: 50,
+  max_preview_mb: 10,
+};
+let _uploadCfgPromise = null;
+function uploadConfig() {
+  if (!_uploadCfgPromise) {
+    _uploadCfgPromise = apiGet('/uploads/config').catch(() => UPLOAD_CFG_FALLBACK);
+  }
+  return _uploadCfgPromise;
+}
+const acceptFromUploadCfg = (cfg) => (cfg.allowed_extensions || []).map(e => '.' + e).join(',');
+
 /* ============================================================ toast === */
 function toast(msg, isError = false) {
   const root = $('#toast-root');
@@ -2187,6 +2204,7 @@ async function showProductFiles(p) {
   try { res = await apiGet(`/products/${p.id}/files`); }
   catch (e) { handleErr(e); return; }
   const files = res.items || [];
+  const upCfg = await uploadConfig();
   const rowHtml = f => `
     <div class="file-row">
       <span class="file-row-icon">${svg('catalog')}</span>
@@ -2200,7 +2218,7 @@ async function showProductFiles(p) {
   openModal(`فایل‌های «${esc(p.name)}»`, `
     <div class="card-sub" style="margin-bottom:10px">${fmt(res.count ?? files.length)} فایل ثبت شده — بعد از تایید سفارش، همه‌ی این فایل‌ها برای خریدار ارسال می‌شوند (فروش نامحدود).</div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-      <input type="file" id="pf-file" hidden multiple accept=".ai,.eps,.svg,.pdf,.cdr,.dxf,.dwg,.wmf,.emf,.astm,.aama,.rul,.pds,.mdl,.pat,.psd,.tif,.tiff,.png,.jpg,.jpeg,.webp,.zprj,.zpac,.avatar,.gmod,.plt,.zip,.rar,.7z,.dsn,.iba">
+      <input type="file" id="pf-file" hidden multiple accept="${acceptFromUploadCfg(upCfg)}">
       <button type="button" class="btn btn-primary btn-sm" id="pf-pick">➕ آپلود فایل</button>
       <span class="card-sub" id="pf-progress"></span>
     </div>
@@ -3271,7 +3289,7 @@ async function renderSalesSettings() {
       <h3>🧪 الگوهای نمونه رایگان</h3>
       <div class="card-sub" style="margin-bottom:8px">این فایل‌ها با دکمه‌ی «الگوی نمونه رایگان» ربات برای کاربران ارسال می‌شوند (PDF و سایر اسناد، حداکثر ۵۰ مگابایت).</div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
-        <input type="file" id="sample-file" hidden multiple accept=".ai,.eps,.svg,.pdf,.cdr,.dxf,.dwg,.wmf,.emf,.astm,.aama,.rul,.pds,.mdl,.pat,.psd,.tif,.tiff,.png,.jpg,.jpeg,.webp,.zprj,.zpac,.avatar,.gmod,.plt,.zip,.rar,.7z,.dsn,.iba">
+        <input type="file" id="sample-file" hidden multiple accept="${acceptFromUploadCfg(await uploadConfig())}">
         <button type="button" class="btn btn-primary btn-sm" id="sample-upload">➕ آپلود الگوی نمونه</button>
         <span class="card-sub" id="sample-progress"></span>
       </div>

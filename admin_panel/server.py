@@ -979,6 +979,17 @@ def api_delete_product(product_id: int, admin=Depends(require_permission("catalo
 # ----------------------------------------------------- بانک فایل‌های الگو --
 
 
+@app.get("/api/uploads/config")
+def api_uploads_config(admin=Depends(get_current_admin)):
+    """تنظیمات آپلود فایل — مستقیم از هسته (config.py). فرانت پنل با همین
+    لیست accept اینپوت‌های فایل را می‌سازد تا تنها منبع حقیقت هسته باشد."""
+    return {
+        "allowed_extensions": [e.lstrip(".") for e in ALLOWED_PRODUCT_FILE_EXTENSIONS],
+        "max_file_mb": 50,
+        "max_preview_mb": 10,
+    }
+
+
 @app.get("/api/products/{product_id}/files")
 def api_product_files(product_id: int, admin=Depends(require_permission("catalog"))):
     """لیست فایل‌های الگوی یک محصول (id رکورد، file_id تلگرام، تاریخ)."""

@@ -318,7 +318,11 @@ def serve_index():
     html = html.replace("{{HEADER_LOGO_CLASS}}", "")
     html = html.replace("{{HEADER_LOGO_HTML}}", "")
 
-    return HTMLResponse(html)
+    # no-cache: وب‌ویو تلگرام با هر باز شدن مینی‌اپ، index.html را دوباره
+    # می‌گیرد؛ ?v= که داخل آن از mtime فایل‌ها ساخته می‌شود کش app.js/style.css
+    # را می‌شکند و کاربر همیشه آخرین کد فرانت را اجرا می‌کند (بدون این هدر،
+    # وب‌ویو HTML قدیمی کش‌شده را نگه می‌دارد و تغییرات فرانت دیده نمی‌شود).
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 # ---------------------------------------------------------------------------
