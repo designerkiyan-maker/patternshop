@@ -37,6 +37,7 @@ logger = logging.getLogger("miniapp")
 from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, TELEGRAM_PROXY, MINIAPP_URL
 from database import Database
 from miniapp.auth import validate_init_data
+from core.telegram_proxy import ProxiedClientSession
 import loyalty
 from services import cart as cart_svc
 from services import checkout as checkout_svc
@@ -46,7 +47,9 @@ from services.errors import (
 )
 
 def telegram_session():
-    return aiohttp.ClientSession(proxy=TELEGRAM_PROXY)
+    # نکته: ClientSession(proxy=...) در aiohttp 3.9 پشتیبانی نمی‌شود و با
+    # TypeError می‌شکند؛ کلاس پایین پروکسی را به‌صورت per-request تزریق می‌کند.
+    return ProxiedClientSession()
 
 app = FastAPI(title="Pattern Shop Mini App API")
 # Originها بهصورت صریح لیست میشوند؛ wildcard ممنوع. از MINIAPP_URL env استفاده

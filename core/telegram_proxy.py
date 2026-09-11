@@ -11,6 +11,8 @@ import asyncio
 import logging
 from typing import Optional
 
+import aiohttp
+
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.session.base import BaseSession
 from aiogram.client.telegram import TelegramAPIServer
@@ -20,6 +22,21 @@ from aiogram.methods.base import TelegramMethod, TelegramType
 logger = logging.getLogger("telegram_proxy")
 
 XRAY_HTTP_PROXY = "http://127.0.0.1:18080"
+
+
+class ProxiedClientSession(aiohttp.ClientSession):
+    """aiohttp.ClientSession با پروکسی پیش‌فرض Xray — سازگار با همه‌ی نسخه‌های aiohttp.
+
+    پارامتر proxy سازنده‌ی ClientSession در aiohttp 3.9 (نسخه‌ای که aiogram پین
+    کرده) وجود ندارد و از 3.10 اضافه شده؛ پس ClientSession(proxy=...) با
+    TypeError می‌شکند و تماس‌های HTTP سرویس‌های FastAPI (پنل/مینی‌اپ) با
+    api.telegram.org بی‌صدا شکست می‌خورند (خطای 502 آپلود/پیش‌نمایش). برای
+    همین پروکسی به‌صورت per-request داخل _request تزریق می‌شود؛ مقدار
+    per-request در صورت پاس‌دادن صریح، بر این پیش‌فرض مقدم است."""
+
+    def _request(self, method, str_or_url, **kwargs):
+        kwargs.setdefault("proxy", XRAY_HTTP_PROXY)
+        return super()._request(method, str_or_url, **kwargs)
 
 
 class TelegramProxyManager:

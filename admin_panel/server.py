@@ -33,6 +33,7 @@ from admin_panel.security import hash_password, verify_password, create_session_
 from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document, fetch_telegram_file
 from admin_panel.config_delivery_web import deliver_pattern_to_user_web
 from admin_panel.webpush import PUSH_ENABLED, send_push
+from core.telegram_proxy import ProxiedClientSession
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 import loyalty
 from services import orders as orders_svc
@@ -405,7 +406,7 @@ async def _store_media_via_bot(method: str, field: str, content: bytes, filename
         if caption:
             form.add_field("caption", caption)
         form.add_field(field, content, filename=filename, content_type=content_type)
-        async with aiohttp.ClientSession(proxy=TELEGRAM_PROXY) as session:
+        async with ProxiedClientSession() as session:
             async with session.post(url, data=form, timeout=aiohttp.ClientTimeout(total=90)) as resp:
                 data = await resp.json()
         if not data.get("ok"):
