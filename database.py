@@ -615,6 +615,21 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_oos_product ON out_of_stock_notifications(product_id);
                 CREATE INDEX IF NOT EXISTS idx_oos_user ON out_of_stock_notifications(user_id);
+
+                -- امتیازدهی ستاره‌ای محصولات (۱ تا ۵) — هر کاربر یک امتیاز برای هر محصول
+                CREATE TABLE IF NOT EXISTS product_ratings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    product_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT,
+                    FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE,
+                    FOREIGN KEY(user_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+                    UNIQUE(product_id, user_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_ratings_product ON product_ratings(product_id);
+                CREATE INDEX IF NOT EXISTS idx_ratings_user ON product_ratings(user_id);
                 """
             )
 
@@ -1745,7 +1760,7 @@ class Database:
         """دریافت سوالات یک محصول."""
         with self._get_conn() as conn:
             rows = conn.execute(
-                "SELECT pq.*, u.telegram_id, u.first_name, u.last_name "
+                "SELECT pq.*, u.telegram_id, u.first_name "
                 "FROM product_questions pq "
                 "JOIN users u ON pq.user_id=u.telegram_id "
                 "WHERE pq.product_id=? ORDER BY pq.created_at ASC",
@@ -1800,6 +1815,44 @@ class Database:
                 (product_id,),
             ).fetchall()
             return [r["user_id"] for r in rows]
+
+    # ------------------------------------------------------------ ratings --
+
+    def rate_product(self, user_tg_id: int, product_id: int, rating: int) -> dict:
+        """ثبت/به‌روزرسانی امتیاز ۱ تا ۵ کاربر برای محصول. میانگین تازه را برمی‌گرداند."""
+        rating = max(1, min(5, int(rating)))
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO product_ratings (product_id, user_id, rating) VALUES (?, ?, ?) "
+                "ON CONFLICT(product_id, user_id) DO UPDATE SET rating=excluded.rating, "
+                "updated_at=CURRENT_TIMESTAMP",
+                (product_id, user_tg_id, rating),
+            )
+            row = conn.execute(
+                "SELECT COALESCE(AVG(rating), 0) avg_rating, COUNT(*) cnt "
+                "FROM product_ratings WHERE product_id=?",
+                (product_id,),
+            ).fetchone()
+            return {"avg": round(row["avg_rating"], 1), "count": row["cnt"], "my_rating": rating}
+
+    def get_product_rating(self, product_id: int) -> dict:
+        """میانگین و تعداد امتیازهای یک محصول."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(AVG(rating), 0) avg_rating, COUNT(*) cnt "
+                "FROM product_ratings WHERE product_id=?",
+                (product_id,),
+            ).fetchone()
+            return {"avg": round(row["avg_rating"], 1), "count": row["cnt"]}
+
+    def get_user_rating(self, user_tg_id: int, product_id: int):
+        """امتیاز خود کاربر به این محصول (یا None)."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT rating FROM product_ratings WHERE product_id=? AND user_id=?",
+                (product_id, user_tg_id),
+            ).fetchone()
+            return row["rating"] if row else None
 
 
     def toggle_product(self, product_id: int):

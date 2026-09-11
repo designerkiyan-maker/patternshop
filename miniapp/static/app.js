@@ -1200,10 +1200,15 @@ async function openProductDetail(productId) {
       <button class="btn outline small" id="back-to-store-btn"
         style="width:auto;margin-bottom:12px">→ بازگشت به فروشگاه</button>
 
-      <div class="card">
-        ${p.has_preview
-          ? `<img class="product-thumb pattern-hero" alt="" />`
-          : `<div class="product-thumb-ph">🧵</div>`}
+      <div class="card" style="position:relative">
+        <div class="detail-hero">
+          ${p.has_preview
+            ? `<img class="product-thumb pattern-hero" alt="" />`
+            : `<div class="product-thumb-ph">🧵</div>`}
+          <button class="wishlist-btn" id="detail-heart-btn" title="افزودن به پسندیده‌ها">
+            ${p.is_wishlisted ? "❤️" : "💓"}
+          </button>
+        </div>
 
         <h3 style="margin-top:12px">
           <span class="ic">🧵</span>${escHtml(p.name)}
@@ -1213,7 +1218,15 @@ async function openProductDetail(productId) {
           <span class="badge ${available ? "approved" : "rejected"}">
             ${available ? "✅ موجود" : "⛔️ ناموجود"}
           </span>
+          ${p.has_purchased ? `<span class="badge approved">✅ خریداری شده</span>` : ""}
           <span class="price" style="margin:0">${fmt(p.price)} تومان</span>
+        </div>
+
+        <div class="rating-row">
+          <span class="rating-avg" id="rating-avg-label">★ ${p.rating_avg ?? 0} از ۵ (${p.rating_count ?? 0} نظر)</span>
+          <div class="star-row" id="my-star-row" title="امتیاز شما">
+            ${[1, 2, 3, 4, 5].map((s) => `<span class="star ${s <= (p.my_rating || 0) ? "on" : ""}" data-star="${s}">★</span>`).join("")}
+          </div>
         </div>
 
         ${p.description
@@ -1240,6 +1253,48 @@ async function openProductDetail(productId) {
 
     const backBtn = document.getElementById("back-to-store-btn");
     if (backBtn) backBtn.onclick = renderStore;
+
+    // قلب علاقه‌مندی در صفحه‌ی جزئیات
+    const detailHeart = document.getElementById("detail-heart-btn");
+    if (detailHeart) {
+      detailHeart.onclick = async () => {
+        detailHeart.disabled = true;
+        try {
+          const r = await api(`/api/wishlist/${p.id}`, { method: "POST" });
+          p.is_wishlisted = r.status === "added";
+          detailHeart.textContent = p.is_wishlisted ? "❤️" : "💓";
+          tg.HapticFeedback?.selectionChanged();
+          notify(p.is_wishlisted ? "❤️ به پسندیده‌ها اضافه شد." : "از پسندیده‌ها حذف شد.");
+        } catch (e) {
+          notify("خطا: " + e.message);
+        }
+        detailHeart.disabled = false;
+      };
+    }
+
+    // امتیازدهی ستاره‌ای — کلیک روی هر ستاره = ثبت همان امتیاز
+    const starRow = document.getElementById("my-star-row");
+    if (starRow) {
+      starRow.querySelectorAll(".star").forEach((starEl) => {
+        starEl.onclick = async () => {
+          const val = Number(starEl.dataset.star);
+          try {
+            const r = await api(`/api/products/${p.id}/rate`, {
+              method: "POST",
+              body: JSON.stringify({ rating: val }),
+            });
+            p.my_rating = val;
+            starRow.querySelectorAll(".star").forEach((s2) => s2.classList.toggle("on", Number(s2.dataset.star) <= val));
+            const avgLabel = document.getElementById("rating-avg-label");
+            if (avgLabel) avgLabel.textContent = `★ ${r.avg} از ۵ (${r.count} نظر)`;
+            tg.HapticFeedback?.notificationOccurred("success");
+            notify("⭐ امتیاز شما ثبت شد. ممنون!");
+          } catch (e) {
+            notify("خطا: " + e.message);
+          }
+        };
+      });
+    }
 
     const img = content.querySelector("img.product-thumb");
     if (img) loadProductPreview(img, p.id);

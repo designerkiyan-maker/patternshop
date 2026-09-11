@@ -1331,3 +1331,58 @@ html[data-theme="clean-light"] .qa-textarea {
   border-color: rgba(0,0,0,0.1);
   color: #1a1a2e;
 }
+
+/* ===================================================================
+   Product detail: hero heart + star rating
+=================================================================== */
+.detail-hero {
+  position: relative;
+}
+.detail-hero .wishlist-btn {
+  top: 10px;
+  left: 10px;
+  width: 34px;
+  height: 34px;
+  font-size: 16px;
+}
+.rating-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.rating-avg {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.star-row {
+  display: flex;
+  gap: 4px;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  direction: ltr;
+  user-select: none;
+}
+.star-row .star {
+  color: rgba(255, 255, 255, 0.22);
+  transition: transform 0.12s, color 0.12s;
+}
+.star-row .star.on {
+  color: #ffc94d;
+}
+.star-row .star:active {
+  transform: scale(1.2);
+}
+html[data-theme="clean-light"] .star-row .star {
+  color: rgba(0, 0, 0, 0.16);
+}
+html[data-theme="clean-light"] .star-row .star.on {
+  color: #f5a623;
+}
+html[data-theme="clean-light"] .rating-avg {
+  color: #6b7a6e;
+}

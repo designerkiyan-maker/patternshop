@@ -492,7 +492,28 @@ def api_product_detail(product_id: int, auth=Depends(get_verified_user)):
         pd["has_purchased"] = bool(status["has_purchased"])
         pd["is_wishlisted"] = bool(status["is_wishlisted"])
         pd["question_count"] = status["question_count"]
+    # امتیاز ستاره‌ای: میانگین کل + امتیاز خود کاربر
+    rating = db.get_product_rating(product_id)
+    pd["rating_avg"] = rating["avg"]
+    pd["rating_count"] = rating["count"]
+    pd["my_rating"] = db.get_user_rating(tg_id, product_id)
     return pd
+
+
+class RatingBody(BaseModel):
+    rating: int
+
+
+@app.post("/api/products/{product_id}/rate")
+def api_rate_product(product_id: int, body: RatingBody, auth=Depends(get_verified_user)):
+    """ثبت/به‌روزرسانی امتیاز ۱ تا ۵ کاربر برای محصول (هر کاربر یک امتیاز)."""
+    tg_id, db = auth
+    if not 1 <= body.rating <= 5:
+        raise HTTPException(status_code=400, detail="امتیاز باید بین ۱ تا ۵ ستاره باشد.")
+    p = db.get_product(product_id)
+    if not p or not p["is_active"]:
+        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
+    return db.rate_product(tg_id, product_id, body.rating)
 
 
 @app.get("/api/products/{product_id}/preview")
