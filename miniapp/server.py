@@ -416,7 +416,7 @@ async def api_product_preview(product_id: int):
     return Response(
         content=data,
         media_type="image/jpeg",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={"Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*"},
     )
 
 
