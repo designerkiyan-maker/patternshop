@@ -148,7 +148,7 @@ EOF
     [ -n "$PANEL_DOMAIN" ] || { echo "دامنه را بده: --panel panel.example.com"; exit 1; }
     echo "==> نصب پنل مدیریت وب روی $PANEL_DOMAIN ..."
     apt_get install nginx certbot python3-certbot-nginx
-    cat > /etc/systemd/system/patternshop-panel.service <<EOF
+    cat > /etc/systemd/system/patternshop-admin.service <<EOF
 [Unit]
 Description=Pattern Shop - Web Admin Panel (FastAPI)
 After=network-online.target
@@ -157,7 +157,7 @@ Wants=network-online.target
 [Service]
 WorkingDirectory=$REPO_DIR
 EnvironmentFile=$INSTALL_DIR/.env
-ExecStart=$VENV/bin/uvicorn admin_panel.server:app --host 127.0.0.1 --port 8012
+ExecStart=$VENV/bin/uvicorn admin_panel.server:app --host 127.0.0.1 --port 8002
 Restart=always
 RestartSec=5
 
@@ -165,7 +165,7 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
-    systemctl enable --now patternshop-panel
+    systemctl enable --now patternshop-admin
     cat > /etc/nginx/sites-available/patternshop-panel <<EOF
 server {
     listen 80;
