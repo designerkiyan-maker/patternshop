@@ -2409,6 +2409,7 @@ def create_admin_router(db) -> Router:
         if skipped > 0: resp_lines.append(f"⏭ نادیده: {skipped} (کاربر بات را استارت نکرده یا حریم خصوصی بسته)")
         await message.answer(chr(10).join(resp_lines), reply_markup=kb.admin_category_kb(db, "marketing"))
 
+    @router.callback_query(F.data.startswith("reply_user:"))
     async def cb_reply_user(call: CallbackQuery, state: FSMContext):
         user_id = callback_id(call.data, "reply_user")
         if user_id is None:
