@@ -943,16 +943,22 @@ function enterStoreTab() {
 
 function productCardHtml(p) {
   const available = p.available !== false;
+  const purchased = p.has_purchased === true;
+  const wishlisted = p.is_wishlisted === true;
   return `
     <div class="pattern-card ${available ? "" : "disabled"}" data-product-id="${p.id}">
       ${p.has_preview
         ? `<img class="product-thumb" alt="" loading="lazy" />`
-        : `<div class="product-thumb-ph">🧵</div>`}
+        : `<div class="product-thumb-ph">GTHREAD</div>`}
+      <button class="wishlist-btn" data-product-id="${p.id}" title="افزودن به پسندیده‌ها">
+        ${wishlisted ? "❤️" : "💓"}
+      </button>
       <div class="pattern-card-body">
         <div class="product-name">${escHtml(p.name)}</div>
         <div class="price">${fmt(p.price)} <span style="font-family:var(--font-body);font-size:10.5px">تومان</span></div>
         <div class="pattern-badge-row">
           <span class="badge ${available ? "approved" : "rejected"}">${available ? "✅ موجود" : "⛔️ ناموجود"}</span>
+          ${purchased ? "<span class=\"badge approved\">✅ خریداری شده</span>" : ""}
         </div>
       </div>
     </div>
@@ -1069,6 +1075,10 @@ async function renderStore() {
       ${
         products.length
           ? `
+            <div class="search-bar" id="store-search-bar">
+              <input type="text" id="store-search-input" placeholder="جستجوی الگو..." class="search-input" />
+              <button class="btn outline small" id="store-search-clear" style="display:none">پاک کردن</button>
+            </div>
             <div class="pattern-grid">
               ${products.map(productCardHtml).join("")}
             </div>
@@ -1120,6 +1130,41 @@ async function renderStore() {
           openProductDetail(productId);
         };
       });
+
+    // Search input wiring
+    const searchInputEl = document.getElementById("store-search-input");
+    const searchClearEl = document.getElementById("store-search-clear");
+    let searchTimer = null;
+    if (searchInputEl && !selectedCategory) {
+      searchInputEl.addEventListener("input", () => {
+        clearTimeout(searchTimer);
+        const q = searchInputEl.value.trim();
+        if (searchClearEl) searchClearEl.style.display = q ? "" : "none";
+        searchTimer = setTimeout(async () => {
+          if (!q) { renderStore(); return; }
+          try {
+            const results = await api(`/api/search?q=${encodeURIComponent(q)}`);
+            const prods = Array.isArray(results.products) ? results.products : [];
+            catalogProductsById = {};
+            prods.forEach(pr => { catalogProductsById[pr.id] = pr; });
+            const grid = document.querySelector(".pattern-grid");
+            if (grid) {
+              grid.innerHTML = prods.length ? prods.map(productCardHtml).join("")
+                : `<div class="state-msg"><span class="ic">◌</span>نتیجه‌ای یافت نشد.</div>`;
+              grid.querySelectorAll(".pattern-card[data-product-id]").forEach(el2 => {
+                const pid2 = Number(el2.dataset.productId);
+                const img2 = el2.querySelector("img.product-thumb");
+                if (img2) loadProductPreview(img2, pid2);
+                el2.onclick = (e) => { if (e.target.closest(".wishlist-btn")) return; if (el2.classList.contains("disabled")) return; openProductDetail(pid2); };
+              });
+            }
+          } catch(e) { console.error("[SEARCH ERROR]", e); }
+        }, 350);
+      });
+      if (searchClearEl) {
+        searchClearEl.onclick = () => { searchInputEl.value = ""; searchClearEl.style.display = "none"; renderStore(); };
+      }
+    }
 
   } catch (e) {
     console.error("[CATALOG ERROR]", e);
@@ -1241,6 +1286,95 @@ async function openProductDetail(productId) {
       };
     }
 
+
+    // OOS notification button
+    if (!available && p.type !== 'downloadable') {
+      const oosBtn = document.createElement('button');
+      oosBtn.className = 'btn outline';
+      oosBtn.style.marginTop = '8px';
+      oosBtn.id = 'oos-subscribe-btn';
+      oosBtn.textContent = 'ud83dudd14 اطلاع از موجودي';
+      content.querySelector('.card').appendChild(oosBtn);
+      oosBtn.onclick = async () => {
+        oosBtn.disabled = true;
+        oosBtn.textContent = 'در حال ثبت...';
+        try {
+          await api(`/api/products/${p.id}/oos-subscribe`, { method: 'POST' });
+          tg.HapticFeedback?.notificationOccurred('success');
+          notify('✅ در صورت موجود شدن， شما را اطلاع میu200cدهیم.');
+          oosBtn.textContent = '✅ ثبت شد';
+          oosBtn.disabled = true;
+        } catch (e) {
+          notify('خطa: ' + e.message);
+          oosBtn.disabled = false;
+          oosBtn.textContent = 'ud83dudd14 اطلاع از موجودي';
+        }
+      };
+    }
+
+    // Q&A section
+    const qaSection = document.createElement('div');
+    qaSection.className = 'qa-section';
+    qaSection.id = 'qa-section';
+    qaSection.innerHTML = '<div class="state-msg"><span class="ic">◌</span>در حال بارگذاري...</div>';
+    content.querySelector('.card').appendChild(qaSection);
+
+    async function loadQuestions() {
+      try {
+        const data = await api(`/api/products/${p.id}/questions`);
+        const questions = Array.isArray(data.questions) ? data.questions : [];
+        let html = '<div class="qa-header">سوالات کاربران (' + questions.length + ')</div>';
+        html += '<div class="qa-list">';
+        if (questions.length === 0) {
+          html += '<div class="state-msg" style="margin:8px 0"><span class="ic">💬</span>هنوز سوالی پرسیده نشده است.</div>';
+        } else {
+          questions.forEach(q => {
+            const answered = q.is_answered === 1;
+            html += `<div class="qa-item ${answered ? 'answered' : 'pending'}">` +
+              `<div class="qa-question">❓ ${escHtml(q.question)}</div>` +
+              (answered ? `<div class="qa-answer">✅ ${escHtml(q.answer)}</div>` : '') +
+              `<div class="qa-meta">${q.username || 'کاربر'} - ${toJalaliStr(q.created_at).split(' ')[0]}</div>` +
+              `</div>`;
+          });
+        }
+        html += '</div>';
+        html += `<div class="qa-form">` +
+          `<div class="qa-header">ارسال سوال</div>` +
+          `<textarea id="qa-input" class="qa-textarea" placeholder="سوال خود را بنویسید..." rows="3"></textarea>` +
+          `<button class="btn" id="qa-submit-btn" style="margin-top:8px">ارسال سوال</button>` +
+          `</div>`;
+        qaSection.innerHTML = html;
+        const submitBtn = document.getElementById('qa-submit-btn');
+        if (submitBtn) {
+          submitBtn.onclick = async () => {
+            const input = document.getElementById('qa-input');
+            const question = (input?.value || '').trim();
+            if (!question) { notify('لطفا سوال خود را بنویسید.'); return; }
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'در حال ارسال...';
+            try {
+              await api(`/api/products/${p.id}/question`, {
+                method: 'POST',
+                body: JSON.stringify({ question }),
+              });
+              tg.HapticFeedback?.notificationOccurred('success');
+              notify('✅ سوال شما ثبت شد.');
+              input.value = '';
+              submitBtn.textContent = '✅ ارسال شد';
+              setTimeout(() => { submitBtn.disabled = false; submitBtn.textContent = 'ارسال سوال'; }, 2000);
+              loadQuestions();
+            } catch (e) {
+              notify('خطa: ' + e.message);
+              submitBtn.disabled = false;
+              submitBtn.textContent = 'ارسال سوال';
+            }
+          };
+        }
+      } catch (e) {
+        qaSection.innerHTML = '<div class="state-msg"><span class="ic">⚠️</span>خطa in loading</div>';
+      }
+    }
+    loadQuestions();
   } catch (e) {
     content.innerHTML = errorState(e.message);
   }
@@ -1844,9 +1978,47 @@ function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder) {
 // ---------------------------------------------------------------------------
 // ناوبری تب‌ها
 // ---------------------------------------------------------------------------
+
+async function renderWishlist() {
+  content.innerHTML = skeleton(3);
+  try {
+    const data = await api("/api/wishlist");
+    const items = Array.isArray(data.items) ? data.items : [];
+
+    if (items.length === 0) {
+      content.innerHTML = `
+        <div class="state-msg" style="padding:40px 16px">
+          <span class="ic">♡</span>
+          لیست پسندیده‌های شما خالی است.
+          <br/><span class="hint-text" style="margin-top:8px;display:block">الگوهایی که دوست دارید را با دکمه قلب اضافه کنید.</span>
+        </div>
+      `;
+      return;
+    }
+
+    content.innerHTML = `
+      <div class="eyebrow">پسندیده‌های من (${items.length})</div>
+      <div class="pattern-grid">
+        ${items.map(item => productCardHtml({ ...item, has_purchased: false, is_wishlisted: true })).join('')}
+      </div>
+    `;
+
+    content.querySelectorAll(".pattern-card[data-product-id]").forEach(el => {
+      const pid = Number(el.dataset.productId);
+      const img = el.querySelector("img.product-thumb");
+      if (img) loadProductPreview(img, pid);
+      el.onclick = (e) => { if (e.target.closest(".wishlist-btn")) return; if (el.classList.contains("disabled")) return; openProductDetail(pid); };
+    });
+
+  } catch (e) {
+    console.error("[WISHLIST ERROR]", e);
+    content.innerHTML = errorState(e.message);
+  }
+}
 const tabs = {
   home: renderHome,
   store: enterStoreTab,
+  wishlist: renderWishlist,
   cart: renderCart,
   services: renderOrders, // سازگار با برچسب قدیمی نوار پایین
   orders: renderOrders,
