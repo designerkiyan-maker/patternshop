@@ -1707,15 +1707,13 @@ class Database:
             return result
 
     def get_user_wishlist(self, user_tg_id: int):
-        """لیست محصولات مورد علاقه کاربر."""
+        """شناسه‌ی محصولات موجود در لیست پسندیده کاربر (به ترتیب جدید به قدیم)."""
         with self._get_conn() as conn:
             rows = conn.execute(
-                "SELECT w.product_id, p.name, p.price, p.preview_file_id "
-                "FROM wishlist w JOIN products p ON w.product_id=p.id "
-                "WHERE w.user_id=? ORDER BY w.created_at DESC",
+                "SELECT product_id FROM wishlist WHERE user_id=? ORDER BY created_at DESC",
                 (user_tg_id,),
             ).fetchall()
-            return [dict(r) for r in rows]
+            return [r["product_id"] for r in rows]
 
     def toggle_wishlist(self, user_tg_id: int, product_id: int) -> bool:
         """افزودن یا حذف از لیست پسندیده. True اگر اضافه شد، False اگر حذف شد."""
@@ -1744,7 +1742,7 @@ class Database:
             return cur.lastrowid
 
     def get_product_questions(self, product_id: int):
-        """دریافت سوالات一个产品."""
+        """دریافت سوالات یک محصول."""
         with self._get_conn() as conn:
             rows = conn.execute(
                 "SELECT pq.*, u.telegram_id, u.first_name, u.last_name "
@@ -1768,7 +1766,7 @@ class Database:
                 if row:
                     conn.execute(
                         "INSERT INTO admin_logs (admin_id, action, details) VALUES (?, ?, ?)",
-                        (admin_id, "qa_answer", f"پاسخ به سوال #{question_id} محصول {row[user_id]}"),
+                        (admin_id, "qa_answer", f"پاسخ به سوال #{question_id} محصول {row['user_id']}"),
                     )
                 return True
             return False

@@ -949,7 +949,7 @@ function productCardHtml(p) {
     <div class="pattern-card ${available ? "" : "disabled"}" data-product-id="${p.id}">
       ${p.has_preview
         ? `<img class="product-thumb" alt="" loading="lazy" />`
-        : `<div class="product-thumb-ph">GTHREAD</div>`}
+        : `<div class="product-thumb-ph">🧵</div>`}
       <button class="wishlist-btn" data-product-id="${p.id}" title="افزودن به پسندیده‌ها">
         ${wishlisted ? "❤️" : "💓"}
       </button>
@@ -963,6 +963,41 @@ function productCardHtml(p) {
       </div>
     </div>
   `;
+}
+
+// اتصال کارت‌های محصول (کلیک روی کارت = جزئیات، کلیک روی قلب = تغییر پسندیده).
+// در سه جا استفاده می‌شود: فروشگاه، نتایج جستجو و صفحه‌ی پسندیده‌ها.
+function wireProductCards(root) {
+  root.querySelectorAll(".pattern-card[data-product-id]").forEach((el) => {
+    const productId = Number(el.dataset.productId);
+
+    const img = el.querySelector("img.product-thumb");
+    if (img) loadProductPreview(img, productId);
+
+    el.onclick = (e) => {
+      if (e.target.closest(".wishlist-btn")) return;
+      if (el.classList.contains("disabled")) return;
+      openProductDetail(productId);
+    };
+
+    const heartBtn = el.querySelector(".wishlist-btn");
+    if (heartBtn) {
+      heartBtn.onclick = async (e) => {
+        e.stopPropagation();
+        heartBtn.disabled = true;
+        try {
+          const r = await api(`/api/wishlist/${productId}`, { method: "POST" });
+          heartBtn.textContent = r.status === "added" ? "❤️" : "💓";
+          el.dataset.wishlisted = r.status === "added" ? "1" : "0";
+          tg.HapticFeedback?.selectionChanged();
+          notify(r.status === "added" ? "❤️ به پسندیده‌ها اضافه شد." : "از پسندیده‌ها حذف شد.");
+        } catch (err) {
+          notify("خطا: " + err.message);
+        }
+        heartBtn.disabled = false;
+      };
+    }
+  });
 }
 
 async function renderStore() {
@@ -1114,22 +1149,7 @@ async function renderStore() {
       }
     }
 
-    content
-      .querySelectorAll(".pattern-card[data-product-id]")
-      .forEach((el) => {
-        const productId = Number(el.dataset.productId);
-
-        const img = el.querySelector("img.product-thumb");
-
-        if (img) {
-          loadProductPreview(img, productId);
-        }
-
-        el.onclick = () => {
-          if (el.classList.contains("disabled")) return;
-          openProductDetail(productId);
-        };
-      });
+    wireProductCards(content);
 
     // Search input wiring
     const searchInputEl = document.getElementById("store-search-input");
@@ -1151,12 +1171,7 @@ async function renderStore() {
             if (grid) {
               grid.innerHTML = prods.length ? prods.map(productCardHtml).join("")
                 : `<div class="state-msg"><span class="ic">◌</span>نتیجه‌ای یافت نشد.</div>`;
-              grid.querySelectorAll(".pattern-card[data-product-id]").forEach(el2 => {
-                const pid2 = Number(el2.dataset.productId);
-                const img2 = el2.querySelector("img.product-thumb");
-                if (img2) loadProductPreview(img2, pid2);
-                el2.onclick = (e) => { if (e.target.closest(".wishlist-btn")) return; if (el2.classList.contains("disabled")) return; openProductDetail(pid2); };
-              });
+              wireProductCards(grid);
             }
           } catch(e) { console.error("[SEARCH ERROR]", e); }
         }, 350);
@@ -1288,12 +1303,12 @@ async function openProductDetail(productId) {
 
 
     // OOS notification button
-    if (!available && p.type !== 'downloadable') {
+    if (!available) {
       const oosBtn = document.createElement('button');
       oosBtn.className = 'btn outline';
       oosBtn.style.marginTop = '8px';
       oosBtn.id = 'oos-subscribe-btn';
-      oosBtn.textContent = 'ud83dudd14 اطلاع از موجودي';
+      oosBtn.textContent = '🔔 اطلاع از موجودی';
       content.querySelector('.card').appendChild(oosBtn);
       oosBtn.onclick = async () => {
         oosBtn.disabled = true;
@@ -1301,13 +1316,13 @@ async function openProductDetail(productId) {
         try {
           await api(`/api/products/${p.id}/oos-subscribe`, { method: 'POST' });
           tg.HapticFeedback?.notificationOccurred('success');
-          notify('✅ در صورت موجود شدن， شما را اطلاع میu200cدهیم.');
+          notify('✅ در صورت موجود شدن، شما را اطلاع می‌دهیم.');
           oosBtn.textContent = '✅ ثبت شد';
           oosBtn.disabled = true;
         } catch (e) {
-          notify('خطa: ' + e.message);
+          notify('خطا: ' + e.message);
           oosBtn.disabled = false;
-          oosBtn.textContent = 'ud83dudd14 اطلاع از موجودي';
+          oosBtn.textContent = '🔔 اطلاع از موجودی';
         }
       };
     }
@@ -1316,7 +1331,7 @@ async function openProductDetail(productId) {
     const qaSection = document.createElement('div');
     qaSection.className = 'qa-section';
     qaSection.id = 'qa-section';
-    qaSection.innerHTML = '<div class="state-msg"><span class="ic">◌</span>در حال بارگذاري...</div>';
+    qaSection.innerHTML = '<div class="state-msg"><span class="ic">◌</span>در حال بارگذاری...</div>';
     content.querySelector('.card').appendChild(qaSection);
 
     async function loadQuestions() {
@@ -1333,7 +1348,7 @@ async function openProductDetail(productId) {
             html += `<div class="qa-item ${answered ? 'answered' : 'pending'}">` +
               `<div class="qa-question">❓ ${escHtml(q.question)}</div>` +
               (answered ? `<div class="qa-answer">✅ ${escHtml(q.answer)}</div>` : '') +
-              `<div class="qa-meta">${q.username || 'کاربر'} - ${toJalaliStr(q.created_at).split(' ')[0]}</div>` +
+              `<div class="qa-meta">${q.first_name || 'کاربر'} - ${toJalaliStr(q.created_at).split(' ')[0]}</div>` +
               `</div>`;
           });
         }
@@ -1364,14 +1379,14 @@ async function openProductDetail(productId) {
               setTimeout(() => { submitBtn.disabled = false; submitBtn.textContent = 'ارسال سوال'; }, 2000);
               loadQuestions();
             } catch (e) {
-              notify('خطa: ' + e.message);
+              notify('خطا: ' + e.message);
               submitBtn.disabled = false;
               submitBtn.textContent = 'ارسال سوال';
             }
           };
         }
       } catch (e) {
-        qaSection.innerHTML = '<div class="state-msg"><span class="ic">⚠️</span>خطa in loading</div>';
+        qaSection.innerHTML = '<div class="state-msg"><span class="ic">⚠️</span>خطا در بارگذاری سوالات</div>';
       }
     }
     loadQuestions();
@@ -2003,12 +2018,7 @@ async function renderWishlist() {
       </div>
     `;
 
-    content.querySelectorAll(".pattern-card[data-product-id]").forEach(el => {
-      const pid = Number(el.dataset.productId);
-      const img = el.querySelector("img.product-thumb");
-      if (img) loadProductPreview(img, pid);
-      el.onclick = (e) => { if (e.target.closest(".wishlist-btn")) return; if (el.classList.contains("disabled")) return; openProductDetail(pid); };
-    });
+    wireProductCards(content);
 
   } catch (e) {
     console.error("[WISHLIST ERROR]", e);

@@ -379,7 +379,6 @@ def _product_public(db: Database, p) -> dict:
 
 # ---------------------------------------------------------------------------
 # جستجو / علاقه‌مندی / سوال / اطلاع ناموجودی
-@app.get("/api/products/{product_id}")
 @app.get("/api/catalog")
 def api_catalog(auth=Depends(get_verified_user)):
     tg_id, db = auth
@@ -390,23 +389,25 @@ def api_catalog(auth=Depends(get_verified_user)):
         prods = []
         for p in products:
             pd = _product_public(db, p)
-            conn = db._get_conn()
-            pd["has_purchased"] = bool(
-                conn.execute(
-                    "SELECT 1 FROM orders WHERE user_id=? AND product_id=? AND status='approved' LIMIT 1",
-                    (tg_id, p["id"]),
-                ).fetchone()
-            )
-            pd["is_wishlisted"] = bool(
-                conn.execute(
-                    "SELECT 1 FROM wishlist WHERE user_id=? AND product_id=?",
-                    (tg_id, p["id"]),
-                ).fetchone()
-            )
-            pd["question_count"] = conn.execute(
-                "SELECT COUNT(*) c FROM product_questions WHERE product_id=?",
-                (p["id"],),
-            ).fetchone()["c"]
+            # نکته: _get_conn یک contextmanager است و باید با with باز شود؛
+            # همچنین داخل بلوک آن متد دیگری از db صدا زده نمی‌شود (بدون تو در تو).
+            with db._get_conn() as conn:
+                pd["has_purchased"] = bool(
+                    conn.execute(
+                        "SELECT 1 FROM orders WHERE user_id=? AND product_id=? AND status='approved' LIMIT 1",
+                        (tg_id, p["id"]),
+                    ).fetchone()
+                )
+                pd["is_wishlisted"] = bool(
+                    conn.execute(
+                        "SELECT 1 FROM wishlist WHERE user_id=? AND product_id=?",
+                        (tg_id, p["id"]),
+                    ).fetchone()
+                )
+                pd["question_count"] = conn.execute(
+                    "SELECT COUNT(*) c FROM product_questions WHERE product_id=?",
+                    (p["id"],),
+                ).fetchone()["c"]
             prods.append(pd)
         result.append({"id": cat["id"], "name": cat["name"], "products": prods})
     return result
@@ -426,7 +427,16 @@ def api_wishlist_toggle(product_id: int, auth=Depends(get_verified_user)):
 @app.get("/api/wishlist")
 def api_wishlist_list(auth=Depends(get_verified_user)):
     tg_id, db = auth
-    return {"items": db.get_user_wishlist(tg_id)}
+    # خروجی باید همان شکل عمومی کارت محصول باشد تا productCardHtml در فرانت
+    # بدون تبدیل اضافه بتواند رندر کند (id/name/price/has_preview/available).
+    items = []
+    for product_id in db.get_user_wishlist(tg_id):
+        p = db.get_product(product_id)
+        if p and p["is_active"]:
+            pd = _product_public(db, p)
+            pd["is_wishlisted"] = True
+            items.append(pd)
+    return {"items": items}
 
 @app.post("/api/products/{product_id}/question")
 def api_question_add(product_id: int, body: dict, auth=Depends(get_verified_user)):
@@ -458,7 +468,14 @@ def api_product_detail(product_id: int, auth=Depends(get_verified_user)):
     p = db.get_product(product_id)
     if not p or not p["is_active"]:
         raise HTTPException(status_code=404, detail="محصول یافت نشد.")
-    return _product_public(db, p)
+    pd = _product_public(db, p)
+    # وضعیت خرید/علاقه‌مندی/سوالات برای همین کاربر روی جزئیات هم برمی‌گردد.
+    status = db.get_product_with_status(product_id, tg_id)
+    if status:
+        pd["has_purchased"] = bool(status["has_purchased"])
+        pd["is_wishlisted"] = bool(status["is_wishlisted"])
+        pd["question_count"] = status["question_count"]
+    return pd
 
 
 @app.get("/api/products/{product_id}/preview")
