@@ -418,6 +418,11 @@ def create_admin_router(db) -> Router:
     async def process_new_product_files_upload(message: Message, state: FSMContext):
         if not admin_only(message.from_user.id):
             return
+        fname = message.document.file_name or ""
+        if not config.is_allowed_product_filename(fname):
+            allowed = "، ".join(e.upper().lstrip(".") for e in config.ALLOWED_PRODUCT_FILE_EXTENSIONS)
+            await message.answer(f"⛔️ پسوند «{fname.rsplit('.', 1)[-1]}» مجاز نیست.\nفرمت‌های مجاز:\n{allowed}")
+            return
         data = await state.get_data()
         files = list(data.get("files") or [])
         files.append(message.document.file_id)
@@ -544,6 +549,11 @@ def create_admin_router(db) -> Router:
     async def process_product_files_upload(message: Message, state: FSMContext):
         if not admin_only(message.from_user.id):
             return
+        fname = message.document.file_name or ""
+        if not config.is_allowed_product_filename(fname):
+            allowed = "، ".join(e.upper().lstrip(".") for e in config.ALLOWED_PRODUCT_FILE_EXTENSIONS)
+            await message.answer(f"⛔️ پسوند «{fname.rsplit('.', 1)[-1]}» مجاز نیست.\nفرمت‌های مجاز:\n{allowed}")
+            return
         data = await state.get_data()
         files = list(data.get("files") or [])
         files.append(message.document.file_id)
@@ -661,6 +671,11 @@ def create_admin_router(db) -> Router:
     @router.message(AdminSampleFiles.waiting_files, F.document)
     async def process_sample_files_upload(message: Message, state: FSMContext):
         if not admin_only(message.from_user.id):
+            return
+        fname = message.document.file_name or ""
+        if not config.is_allowed_product_filename(fname):
+            allowed = "، ".join(e.upper().lstrip(".") for e in config.ALLOWED_PRODUCT_FILE_EXTENSIONS)
+            await message.answer(f"⛔️ پسوند «{fname.rsplit('.', 1)[-1]}» مجاز نیست.\nفرمت‌های مجاز:\n{allowed}")
             return
         data = await state.get_data()
         files = list(data.get("sample_files") or [])

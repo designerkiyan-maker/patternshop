@@ -42,6 +42,34 @@ MAX_TEST_PER_USER = 1
 # آدرس HTTPS مینی‌اپ (فروشگاه وب داخل تلگرام)؛ خالی یعنی دکمه‌ی فروشگاه وب نمایش داده نمی‌شود
 MINIAPP_URL = os.getenv("MINIAPP_URL", "").rstrip("/")
 TELEGRAM_PROXY = "http://127.0.0.1:18080"
+
+# ---------------------------------------------------------------------------
+# پسوندهای مجاز فایل‌های محصول (و «الگوی نمونه») — هم در پنل وب و هم در بات
+# با همین لیست اعتبارسنجی می‌شود تا ورودی‌ها یکدست بمانند.
+#   Vector:        AI, EPS, SVG, PDF, CDR, DXF, DWG, WMF, EMF
+#   Fashion:       DXF, ASTM, AAMA, RUL, PDS, MDL, PAT (+ فرمت‌های نرم‌افزاری رایج)
+#   Raster:        PSD, TIFF, PNG, JPG, WEBP
+#   CLO_3D/PLT:    ZPRJ, ZPAC, AVATAR, GMOD, PLT
+# پیش‌نمایش محصول جدا است و همان محدودیت عکس (image/*) را دارد.
+# ---------------------------------------------------------------------------
+ALLOWED_PRODUCT_FILE_EXTENSIONS = (
+    # Vector
+    ".ai", ".eps", ".svg", ".pdf", ".cdr", ".dxf", ".dwg", ".wmf", ".emf",
+    # Fashion pattern + فرمت‌های نرم‌افزاری رایج (Optitex/Lectra/...)
+    ".astm", ".aama", ".rul", ".pds", ".mdl", ".pat", ".dsn", ".iba",
+    # Raster
+    ".psd", ".tif", ".tiff", ".png", ".jpg", ".jpeg", ".webp",
+    # CLO_3D + PLT
+    ".zprj", ".zpac", ".avatar", ".gmod", ".plt",
+    # بسته‌های زیپ‌شده‌ی فرمت‌های نرم‌افزاری
+    ".zip", ".rar", ".7z",
+)
+
+
+def is_allowed_product_filename(filename: str) -> bool:
+    """آیا پسوند این نام فایل در لیست مجاز فایل‌های محصول هست؟ (مقایسه‌ی case-insensitive)"""
+    name = (filename or "").lower().strip()
+    return name.endswith(tuple(ALLOWED_PRODUCT_FILE_EXTENSIONS))
 # کلید امضای نشست (session) پنل مدیریت وب مستقل. اگر ست نشود، هر ری‌استارت
 # پروسه همه‌ی نشست‌ها را باطل می‌کند (لاگین مجدد لازم می‌شود) اما خطایی نمی‌دهد.
 ADMIN_PANEL_SECRET = os.getenv("ADMIN_PANEL_SECRET", "")

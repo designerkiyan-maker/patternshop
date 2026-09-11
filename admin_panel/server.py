@@ -26,7 +26,8 @@ from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET, VAPID_PUBLIC_KEY, TELEGRAM_PROXY
+from config import (DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET, VAPID_PUBLIC_KEY,
+                    TELEGRAM_PROXY, ALLOWED_PRODUCT_FILE_EXTENSIONS, is_allowed_product_filename)
 from database import Database, WEB_ADMIN_PERMISSIONS, MENU_BUTTON_META
 from admin_panel.vless_manager import VLESSManager
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
@@ -997,6 +998,12 @@ async def api_add_product_file(product_id: int, file: UploadFile = File(...), ad
     content = await file.read()
     if not content:
         raise HTTPException(400, "فایل خالی است.")
+    if not is_allowed_product_filename(file.filename or ""):
+        raise HTTPException(
+            400,
+            "پسوند «" + (file.filename or "").rsplit(".", 1)[-1] + "» مجاز نیست. فرمت‌های مجاز: "
+            + "، ".join(ext.upper().lstrip(".") for ext in ALLOWED_PRODUCT_FILE_EXTENSIONS),
+        )
     if len(content) > 50 * 1024 * 1024:
         raise HTTPException(400, "حجم فایل نباید بیشتر از ۵۰ مگابایت باشد (محدودیت تلگرام).")
 
@@ -1039,6 +1046,12 @@ async def api_add_sample_file(file: UploadFile = File(...), admin=Depends(requir
     content = await file.read()
     if not content:
         raise HTTPException(400, "فایل خالی است.")
+    if not is_allowed_product_filename(file.filename or ""):
+        raise HTTPException(
+            400,
+            "پسوند «" + (file.filename or "").rsplit(".", 1)[-1] + "» مجاز نیست. فرمت‌های مجاز: "
+            + "، ".join(ext.upper().lstrip(".") for ext in ALLOWED_PRODUCT_FILE_EXTENSIONS),
+        )
     if len(content) > 50 * 1024 * 1024:
         raise HTTPException(400, "حجم فایل نباید بیشتر از ۵۰ مگابایت باشد (محدودیت تلگرام).")
 

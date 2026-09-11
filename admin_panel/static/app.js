@@ -2200,7 +2200,7 @@ async function showProductFiles(p) {
   openModal(`فایل‌های «${esc(p.name)}»`, `
     <div class="card-sub" style="margin-bottom:10px">${fmt(res.count ?? files.length)} فایل ثبت شده — بعد از تایید سفارش، همه‌ی این فایل‌ها برای خریدار ارسال می‌شوند (فروش نامحدود).</div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-      <input type="file" id="pf-file" hidden multiple accept=".pdf,image/*,.zip,.rar,.doc,.docx,.ai,.svg,.pptx">
+      <input type="file" id="pf-file" hidden multiple accept=".ai,.eps,.svg,.pdf,.cdr,.dxf,.dwg,.wmf,.emf,.astm,.aama,.rul,.pds,.mdl,.pat,.psd,.tif,.tiff,.png,.jpg,.jpeg,.webp,.zprj,.zpac,.avatar,.gmod,.plt,.zip,.rar,.7z,.dsn,.iba">
       <button type="button" class="btn btn-primary btn-sm" id="pf-pick">➕ آپلود فایل</button>
       <span class="card-sub" id="pf-progress"></span>
     </div>
@@ -3271,7 +3271,7 @@ async function renderSalesSettings() {
       <h3>🧪 الگوهای نمونه رایگان</h3>
       <div class="card-sub" style="margin-bottom:8px">این فایل‌ها با دکمه‌ی «الگوی نمونه رایگان» ربات برای کاربران ارسال می‌شوند (PDF و سایر اسناد، حداکثر ۵۰ مگابایت).</div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
-        <input type="file" id="sample-file" hidden multiple accept=".pdf,image/*,.zip,.rar,.doc,.docx,.ai,.svg,.pptx">
+        <input type="file" id="sample-file" hidden multiple accept=".ai,.eps,.svg,.pdf,.cdr,.dxf,.dwg,.wmf,.emf,.astm,.aama,.rul,.pds,.mdl,.pat,.psd,.tif,.tiff,.png,.jpg,.jpeg,.webp,.zprj,.zpac,.avatar,.gmod,.plt,.zip,.rar,.7z,.dsn,.iba">
         <button type="button" class="btn btn-primary btn-sm" id="sample-upload">➕ آپلود الگوی نمونه</button>
         <span class="card-sub" id="sample-progress"></span>
       </div>
