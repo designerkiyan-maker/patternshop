@@ -1690,7 +1690,7 @@ class Database:
             if user_tg_id:
                 result["has_purchased"] = bool(
                     conn.execute(
-                        "SELECT 1 FROM orders WHERE user_id=? AND product_id=? AND status=approved LIMIT 1",
+                        "SELECT 1 FROM orders WHERE user_id=? AND product_id=? AND status='approved' LIMIT 1",
                         (user_tg_id, product_id),
                     ).fetchone()
                 )

@@ -393,7 +393,7 @@ def api_catalog(auth=Depends(get_verified_user)):
             conn = db._get_conn()
             pd["has_purchased"] = bool(
                 conn.execute(
-                    "SELECT 1 FROM orders WHERE user_id=? AND product_id=? AND status=approved LIMIT 1",
+                    "SELECT 1 FROM orders WHERE user_id=? AND product_id=? AND status='approved' LIMIT 1",
                     (tg_id, p["id"]),
                 ).fetchone()
             )
