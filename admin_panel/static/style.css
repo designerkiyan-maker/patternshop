@@ -706,7 +706,7 @@ html[data-theme="bento"] .sidebar-footer { width:auto; }
 html[data-theme="bento"] .me-card { flex-direction:row; padding:6px 8px 14px; text-align:right; }
 html[data-theme="bento"] .me-info { display:flex; }
 html[data-theme="bento"] .logout-btn,
-html[data-theme="bento"] #logout-btn { font-size:13px; padding:9px 13px; border-radius:var(--radius-xs); }
+html[data-theme="bento"] #logout-btn { font-size:14px; padding:9px 13px; border-radius:var(--radius-xs); }
 html[data-theme="bento"] #logout-btn .icon { width:16px; height:16px; }
 
 /* تاپ‌بار: شناور و کپسولی */
