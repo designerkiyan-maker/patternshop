@@ -2345,6 +2345,10 @@ def create_admin_router(db) -> Router:
             await message.answer("⚠️ حذف ادمین ناموفق بود. دوباره تلاش کنید.")
 
     # -------------------------------------------------------------------
+    # -------------------------------------------------------------------
+
+
+    # -------------------------------------------------------------------
     # پیام همگانی
     # -------------------------------------------------------------------
 
@@ -2353,28 +2357,49 @@ def create_admin_router(db) -> Router:
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
         await state.set_state(AdminBroadcast.waiting_message)
-        await replace_admin_view(call, "متن پیام همگانی را ارسال کنید (برای همه کاربران ارسال می‌شود):", reply_markup=kb.admin_back_kb())
+        await replace_admin_view(call,
+            "متن پیام همگانی را ارسال کنید (برای همه کاربران ارسال میشود):",
+            reply_markup=kb.admin_back_kb(),
+        )
         await call.answer()
 
     @router.message(AdminBroadcast.waiting_message)
     async def process_broadcast(message: Message, state: FSMContext, bot: Bot):
         user_ids = (await asyncio.to_thread(db.get_all_user_ids))
-        success, failed = 0, 0
+        success, failed, skipped = 0, 0, 0
         for uid in user_ids:
             try:
-                await message.copy_to(uid)
-                success += 1
-            except Exception:
+                text = (message.text or "").strip()
+                if not text:
+                    failed += 1
+                    continue
+                try:
+                    await message.copy_to(uid)
+                    success += 1
+                except Exception as e:
+                    err = str(e).lower()
+                    if "bot was blocked" in err or "forbidden" in err:
+                        skipped += 1
+                    elif "privacy" in err or "restricted" in err:
+                        skipped += 1
+                    else:
+                        failed += 1
+                        logger.warning("broadcast fail uid=%s err=%s", uid, err[:80])
+            except Exception as e:
                 failed += 1
+                logger.warning("broadcast loop err uid=%s err=%s", uid, e)
         await state.clear()
-        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "broadcast", f"ارسال به {len(user_ids)} کاربر | موفق: {success} | ناموفق: {failed}"))
-        await message.answer(
-            f"📢 پیام همگانی ارسال شد.\n✅ موفق: {success}\n❌ ناموفق: {failed}", reply_markup=kb.admin_category_kb(db, "marketing")
-        )
-
-    # -------------------------------------------------------------------
-    # پاسخ به پیام پشتیبانی کاربر
-    # -------------------------------------------------------------------
+        note_parts = [f"ارسال به {len(user_ids)} کاربر | موفق: {success}"]
+        if failed > 0: note_parts.append(f"خطا: {failed}")
+        if skipped > 0: note_parts.append(f"نادیده (بلاک/حریم خصوصی): {skipped}")
+        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "broadcast", " | ".join(note_parts)))
+        resp = f"📢 پیام همگانی ارسال شد.
+✅ موفق: {success}"
+        if failed > 0: resp += f"
+❌ خطا: {failed}"
+        if skipped > 0: resp += f"
+⏭ نادیده: {skipped} (کاربر بات را استارت نکرده یا حریم خصوصی بسته)"
+        await message.answer(resp, reply_markup=kb.admin_category_kb(db, "marketing"))
 
     @router.callback_query(F.data.startswith("reply_user:"))
     async def cb_reply_user(call: CallbackQuery, state: FSMContext):
