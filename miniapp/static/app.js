@@ -767,9 +767,8 @@ async function renderProfile() {
           <div class="stat-card"><span class="plumpy-ic stat-ic" style="--ic:url('icons/box.svg')"></span><div class="stat-num">${fmt(deliveredCount)}</div><div class="stat-label">الگوی خریداری‌شده</div></div>
           <div class="stat-card"><span class="plumpy-ic stat-ic" style="--ic:url('icons/wallet.svg')"></span><div class="stat-num">${fmt(me.wallet_credit)}</div><div class="stat-label">موجودی کیف پول</div></div>
           ${me.loyalty && me.loyalty.points != null ? `<div class="stat-card"><span class="plumpy-ic stat-ic" style="--ic:url('icons/star.svg')"></span><div class="stat-num">${fmt(me.loyalty.points)}</div><div class="stat-label">امتیاز باشگاه</div></div>` : ""}
+          <div class="stat-card"><span class="plumpy-ic stat-ic" style="--ic:url('icons/calendar.svg')"></span><div class="stat-num stat-date">${me.joined_at ? toJalaliStr(me.joined_at) : "—"}</div><div class="stat-label">تاریخ عضویت</div></div>
         </div>
-
-        ${me.joined_at ? `<div class="join-row">${plumpyIc("calendar")}<span>عضو از ${toJalaliStr(me.joined_at)}</span></div>` : ""}
       </div>
 
       <div class="card">

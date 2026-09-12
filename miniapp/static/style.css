@@ -1609,3 +1609,17 @@ html[data-theme="clean-light"] .join-row {
   border-color: rgba(30, 136, 229, 0.18);
 }
 .stat-card { align-items: center; text-align: center; }
+
+/* تاریخ عضویت به‌عنوان کارت آماری: فونت کوچک‌تر تا در نیم‌کارت جا شود */
+.stat-num.stat-date {
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+/* قاب زیباتر آواتار: حلقه‌ی سفید + حلقه‌ی آبی + سایه‌ی نرم */
+.profile-avatar {
+  border: 3px solid #fff;
+  box-shadow:
+    0 0 0 3px #1E88E5,
+    0 14px 28px -12px rgba(30, 136, 229, 0.65);
+}
