@@ -750,7 +750,7 @@ async function renderProfile() {
       <div class="card profile-hero">
         <div class="profile-avatar-wrap">
           <div class="profile-avatar">${initial}${photoUrl
-            ? `<img src="${escHtml(photoUrl)}" alt="" onerror="this.remove()" />`
+            ? `<img src="/api/avatar?u=${encodeURIComponent(photoUrl)}" alt="" onerror="this.remove()" />`
             : ""}</div>
         </div>
         <div class="profile-name">${me.first_name || ""}</div>

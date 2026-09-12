@@ -523,6 +523,50 @@ def api_rate_product(product_id: int, body: RatingBody, auth=Depends(get_verifie
     return db.rate_product(tg_id, product_id, body.rating)
 
 
+# ---------------------------------------------------------------------------
+# پروکسی عکس پروفایل کاربر: لینک t.me از داخل وب‌ویو (بدون پروکسی تلگرام) روی
+# خیلی از شبکه‌ها لود نمی‌شود؛ سرور خودش با Xray می‌گیرد و از دامنه‌ی ما می‌دهد.
+# ---------------------------------------------------------------------------
+_AVATAR_ALLOWED_HOSTS = ("t.me", "www.gravatar.com", "cdn4.telesco.pe", "cdn1.telesco.pe",
+                         "cdn2.telesco.pe", "cdn3.telesco.pe", "cdn5.telesco.pe")
+
+@app.get("/api/avatar")
+async def api_avatar(u: str):
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(u)
+    except Exception:
+        raise HTTPException(status_code=400, detail="لینک نامعتبر است.")
+    if parsed.scheme != "https" or parsed.hostname not in _AVATAR_ALLOWED_HOSTS:
+        raise HTTPException(status_code=400, detail="فقط لینک عکس تلگرام مجاز است.")
+    if len(u) > 500:
+        raise HTTPException(status_code=400, detail="لینک خیلی طولانی است.")
+    try:
+        async with ProxiedClientSession() as session:
+            async with session.get(
+                u,
+                timeout=aiohttp.ClientTimeout(total=20),
+                headers={"User-Agent": "Mozilla/5.0 (compatible; PatternShop/1.0)"},
+            ) as resp:
+                if resp.status != 200:
+                    raise HTTPException(status_code=404, detail="عکس پروفایل دریافت نشد.")
+                if (resp.headers.get("Content-Type") or "").split(";")[0].strip() not in ("image/jpeg", "image/png", "image/webp"):
+                    raise HTTPException(status_code=404, detail="محتوای تصویری معتبر نبود.")
+                data = await resp.read()
+    except HTTPException:
+        raise
+    except Exception:
+        logging.getLogger("miniapp.telegram").exception("دریافت عکس پروفایل ناموفق بود.")
+        raise HTTPException(status_code=502, detail="دریافت عکس پروفایل از تلگرام ناموفق بود.")
+    if len(data) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=404, detail="حجم عکس بیش از حد مجاز است.")
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400", "Access-Control-Allow-Origin": "*"},
+    )
+
+
 @app.get("/api/products/{product_id}/preview")
 async def api_product_preview(product_id: int):
     # عکس پیش‌نمایش محصول عمداً بدون احراز هویت (عمومی) سرو می‌شود تا هم با
