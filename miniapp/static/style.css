@@ -1439,3 +1439,21 @@ header.topbar .wallet-chip {
   font-size: 13px;
   padding: 9px 16px;
 }
+
+/* ===================================================================
+   تریم فضای بالای صفحه — safe-top تلگرام روی بعضی گوشی‌ها بزرگ است
+   و هدر را خیلی بلند می‌کرد؛ حداکثر ۱۲px از آن اعمال می‌شود.
+=================================================================== */
+header.topbar {
+  height: calc(54px + min(var(--telegram-safe-top, 0px), 12px)) !important;
+  padding: min(var(--telegram-safe-top, 0px), 12px) 14px 0 !important;
+}
+#content {
+  padding-top: 6px !important;
+}
+.home-greet {
+  margin-bottom: 10px !important;
+}
+.home-greet h1 {
+  margin: 0;
+}
