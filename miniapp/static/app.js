@@ -757,15 +757,19 @@ async function renderProfile() {
             : ""}</div>
         </div>
         <div class="profile-name">${me.first_name || ""}</div>
-        ${username ? `<div class="profile-meta-row" id="copy-username"><span>📋</span>@${escHtml(username)}</div>` : ""}
-        <div class="profile-meta-row" id="copy-userid"><span>📋</span>شناسه: ${me.telegram_id}</div>
+
+        <div class="profile-chips">
+          ${username ? `<button class="profile-chip" id="copy-username" title="کپی">${plumpyIc("copy")}<span dir="ltr">@${escHtml(username)}</span></button>` : ""}
+          <button class="profile-chip" id="copy-userid" title="کپی">${plumpyIc("copy")}<span>شناسه: ${me.telegram_id}</span></button>
+        </div>
 
         <div class="profile-info-grid">
-          <div class="stat-card"><div class="stat-num">${fmt(deliveredCount)}</div><div class="stat-label">الگوی خریداری‌شده</div></div>
-          <div class="stat-card"><div class="stat-num">${fmt(me.wallet_credit)}</div><div class="stat-label">موجودی کیف پول</div></div>
-          ${me.loyalty && me.loyalty.points != null ? `<div class="stat-card"><div class="stat-num">${fmt(me.loyalty.points)}</div><div class="stat-label">⭐ امتیاز باشگاه</div></div>` : ""}
-          <div class="stat-card"><div class="stat-num">${me.joined_at ? toJalaliStr(me.joined_at) : "-"}</div><div class="stat-label">📅 تاریخ عضویت</div></div>
+          <div class="stat-card"><span class="plumpy-ic stat-ic" style="--ic:url('icons/box.svg')"></span><div class="stat-num">${fmt(deliveredCount)}</div><div class="stat-label">الگوی خریداری‌شده</div></div>
+          <div class="stat-card"><span class="plumpy-ic stat-ic" style="--ic:url('icons/wallet.svg')"></span><div class="stat-num">${fmt(me.wallet_credit)}</div><div class="stat-label">موجودی کیف پول</div></div>
+          ${me.loyalty && me.loyalty.points != null ? `<div class="stat-card"><span class="plumpy-ic stat-ic" style="--ic:url('icons/star.svg')"></span><div class="stat-num">${fmt(me.loyalty.points)}</div><div class="stat-label">امتیاز باشگاه</div></div>` : ""}
         </div>
+
+        ${me.joined_at ? `<div class="join-row">${plumpyIc("calendar")}<span>عضو از ${toJalaliStr(me.joined_at)}</span></div>` : ""}
       </div>
 
       <div class="card">

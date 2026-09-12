@@ -1548,3 +1548,64 @@ header.topbar {
   position: absolute;
   inset: 0;
 }
+
+/* ===================================================================
+   پروفایل بازطراحی‌شده — چیپ‌های کپی، کارت‌های آماری آیکون‌دار، نوار عضویت
+=================================================================== */
+.profile-chips {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 10px 0 2px;
+}
+.profile-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--glass);
+  border: 1px solid var(--glass-brd);
+  border-radius: 999px;
+  padding: 6px 13px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease;
+}
+.profile-chip:active { transform: scale(0.95); }
+.profile-chip .plumpy-ic {
+  width: 14px; height: 14px;
+  color: #1E88E5;
+}
+.stat-card .stat-ic {
+  width: 18px; height: 18px;
+  color: #1E88E5;
+  margin-bottom: 2px;
+}
+.stat-card { gap: 1px; }
+.join-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 9px 12px;
+  background: var(--glass);
+  border: 1px solid var(--glass-brd);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.join-row .plumpy-ic {
+  width: 15px; height: 15px;
+  color: #1E88E5;
+}
+html[data-theme="clean-light"] .join-row {
+  background: rgba(30, 136, 229, 0.06);
+  border-color: rgba(30, 136, 229, 0.18);
+}
+.stat-card { align-items: center; text-align: center; }

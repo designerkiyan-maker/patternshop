@@ -1309,7 +1309,7 @@ function renderDashboardBrutalist(s, sys) {
       </div>
     </div>` : '';
   const bars = s.daily_series.map((d, i) => `
-    <div class="bru-bar-col" title="${d.date}: ${fmt(d.revenue)} تومان">
+    <div class="bru-bar-col" title="${fmtDateOnly(d.date)}: ${fmt(d.revenue)} تومان">
       <span class="bru-bar-val mono">${fmt(d.revenue)}</span>
       <div class="bru-bar" data-h="${Math.max((d.revenue / maxRev) * 100, 4)}" style="background:${bruColors[i % bruColors.length]}"></div>
     </div>`).join('');
