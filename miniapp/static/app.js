@@ -743,17 +743,17 @@ async function renderProfile() {
 
     const tgUser = (tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
     const username = me.username || tgUser.username || "";
-    // photo_url که .svg است، placeholder سفید پیش‌فرض تلگرام است (نه عکس واقعی)
-    // — در این صورت حرف اول اسم نمایش داده می‌شود.
-    const rawPhoto = tgUser.photo_url || "";
-    const photoUrl = rawPhoto && !rawPhoto.endsWith(".svg") ? rawPhoto : "";
+    // عکس پروفایل واقعی: سرور با getUserProfilePhotos از Bot API می‌گیرد و
+    // لینک امضاشده‌ی /api/avatar/tg برمی‌گرداند (اگر کاربر عکس نداشته باشد
+    // این فیلد هست ولی endpoint 404 می‌دهد → onerror → حرف اول اسم).
+    const photoUrl = me.avatar_url || "";
     const initial = (me.first_name || "؟").trim().charAt(0).toUpperCase();
 
     content.innerHTML = `
       <div class="card profile-hero">
         <div class="profile-avatar-wrap">
           <div class="profile-avatar">${initial}${photoUrl
-            ? `<img src="/api/avatar?u=${encodeURIComponent(photoUrl)}" alt="" onerror="this.remove()" />`
+            ? `<img src="${photoUrl}" alt="" onerror="this.remove()" />`
             : ""}</div>
         </div>
         <div class="profile-name">${me.first_name || ""}</div>

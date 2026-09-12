@@ -34,7 +34,8 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("miniapp")
 
-from config import BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, TELEGRAM_PROXY, MINIAPP_URL
+from config import (BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, TELEGRAM_PROXY,
+                    MINIAPP_URL, ADMIN_PANEL_SECRET)
 from database import Database
 from miniapp.auth import validate_init_data
 from core.telegram_proxy import ProxiedClientSession
@@ -361,7 +362,7 @@ def api_me(auth=Depends(get_verified_user)):
         }
     except Exception:
         logger.exception("خلاصه‌ی باشگاه وفاداری کاربر %s دریافت نشد.", tg_id)
-    return {
+    payload = {
         "telegram_id": tg_id,
         "first_name": user["first_name"],
         "username": user["username"] if "username" in user.keys() else None,
@@ -373,6 +374,63 @@ def api_me(auth=Depends(get_verified_user)):
         "admin_role": db.get_admin_role(tg_id),
         "loyalty": loyalty_summary,
     }
+    # عکس پروفایل واقعی از Bot API (getUserProfilePhotos) — امضاشده و منقضی‌شدنی،
+    # چون تگ <img> نمی‌تواند هدر احراز هویت بفرستد.
+    try:
+        import time as _time, hmac as _hmac, hashlib as _hashlib
+        _exp = int(_time.time()) + 86400
+        _sig = _hmac.new(
+            (ADMIN_PANEL_SECRET or BOT_TOKEN).encode(),
+            f"{tg_id}:{_exp}".encode(),
+            _hashlib.sha256,
+        ).hexdigest()
+        payload["avatar_url"] = f"/api/avatar/tg?uid={tg_id}&exp={_exp}&sig={_sig}"
+    except Exception:
+        logging.getLogger("miniapp.telegram").exception("ساخت لینک آواتار ناموفق بود.")
+    return payload
+
+
+@app.get("/api/avatar/tg")
+async def api_avatar_tg(uid: int, exp: int, sig: str):
+    """عکس پروفایل واقعی کاربر از Bot API. لینک امضاشده است (HMAC + انقضا) تا
+    هر کسی با حدس زدن user_id نتواند عکس بگیرد. اگر کاربر عکس نداشته باشد 404
+    برمی‌گردد و فرانت به حرف اول اسم برمی‌گردد."""
+    import time as _time, hmac as _hmac, hashlib as _hashlib
+    if _time.time() > exp:
+        raise HTTPException(status_code=404, detail="لینک عکس منقضی شده است.")
+    expected = _hmac.new(
+        (ADMIN_PANEL_SECRET or BOT_TOKEN).encode(),
+        f"{uid}:{exp}".encode(),
+        _hashlib.sha256,
+    ).hexdigest()
+    if not _hmac.compare_digest(expected, sig or ""):
+        raise HTTPException(status_code=403, detail="امضای نامعتبر.")
+    try:
+        async with ProxiedClientSession() as session:
+            async with session.get(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/getUserProfilePhotos",
+                params={"user_id": uid, "limit": 1},
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                photos_data = await resp.json()
+        photos = ((photos_data.get("result") or {}).get("photos") or [])
+        if not photos_data.get("ok") or not photos or not photos[0]:
+            raise HTTPException(status_code=404, detail="کاربر عکس پروفایل ندارد.")
+        # بزرگ‌ترین سایز همان عکس (آخرین عضو آرایه‌ی سایزها)
+        file_id = photos[0][-1]["file_id"]
+        data = await _tg_download_file(BOT_TOKEN, file_id)
+    except HTTPException:
+        raise
+    except Exception:
+        logging.getLogger("miniapp.telegram").exception("دریافت عکس پروفایل کاربر ناموفق بود.")
+        raise HTTPException(status_code=502, detail="دریافت عکس پروفایل ناموفق بود.")
+    if not data:
+        raise HTTPException(status_code=502, detail="دریافت عکس پروفایل ناموفق بود.")
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 # ---------------------------------------------------------------------------
