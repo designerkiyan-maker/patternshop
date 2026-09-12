@@ -1538,3 +1538,13 @@ header.topbar {
   border-radius: var(--radius-lg) var(--radius-lg) 0 0 !important;
   border-bottom: 1px solid var(--border-soft) !important;
 }
+
+/* آواتار پروفایل: حرف اول همیشه زیر است؛ عکس روش را کامل می‌پوشاند.
+   اگر لینک عکس تلگرام منقضی/خراب بود، onerror حذفش می‌کند و حرف دیده می‌شود. */
+.profile-avatar {
+  position: relative;
+}
+.profile-avatar img {
+  position: absolute;
+  inset: 0;
+}

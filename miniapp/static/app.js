@@ -749,7 +749,9 @@ async function renderProfile() {
     content.innerHTML = `
       <div class="card profile-hero">
         <div class="profile-avatar-wrap">
-          <div class="profile-avatar">${photoUrl ? `<img src="${photoUrl}" alt="" />` : initial}</div>
+          <div class="profile-avatar">${initial}${photoUrl
+            ? `<img src="${escHtml(photoUrl)}" alt="" onerror="this.remove()" />`
+            : ""}</div>
         </div>
         <div class="profile-name">${me.first_name || ""}</div>
         ${username ? `<div class="profile-meta-row" id="copy-username"><span>📋</span>@${escHtml(username)}</div>` : ""}
