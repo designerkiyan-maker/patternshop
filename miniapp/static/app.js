@@ -25,7 +25,9 @@ updateTelegramSafeArea();
 
 tg.onEvent("safeAreaChanged", updateTelegramSafeArea);
 tg.onEvent("contentSafeAreaChanged", updateTelegramSafeArea);
-try { tg.setHeaderColor("#0a0e17"); tg.setBackgroundColor("#0a0e17"); } catch (e) {}
+// هدر و پس‌زمینه سفید (هم‌رنگ تم clean-light) → تلگرام خودش متنِ نوار وضعیت
+// (ساعت/آنتن/باتری) را مشکی می‌کند. اگر هدر تیره شود، تلگرام متن را سفید می‌کند.
+try { tg.setHeaderColor("#ffffff"); tg.setBackgroundColor("#ffffff"); } catch (e) {}
 
 // جلوگیری از بستن تصادفی مینی‌اپ:
 // ۱) با لمس ✕ تلگرام تأییدیه «مطمئنید می‌خواهید ببندید؟» نشان می‌دهد
