@@ -215,8 +215,6 @@ def get_verified_user(x_init_data: str = Header(...)):
         logger.warning("initData valid but no user field: keys=%s", list(result.keys()) if result else "None")
         raise HTTPException(status_code=401, detail="initData نامعتبر است.")
     tg_user = result["user"]
-    # دیباگ عکس پروفایل: موقت — لینک عکس برای تست endpoint لاگ می‌شود
-    logger.info("DEBUG avatar url: %s", tg_user.get("photo_url"))
     try:
         db.add_or_update_user(tg_user["id"], tg_user.get("username"), tg_user.get("first_name"))
     except Exception:
@@ -543,10 +541,6 @@ async def api_avatar(u: str):
                 timeout=aiohttp.ClientTimeout(total=20),
                 headers={"User-Agent": "Mozilla/5.0 (compatible; PatternShop/1.0)"},
             ) as resp:
-                logging.getLogger("miniapp.telegram").info(
-                    "DEBUG avatar fetch: status=%s type=%s len=%s final=%s",
-                    resp.status, resp.headers.get("Content-Type"), resp.headers.get("Content-Length"), resp.url,
-                )
                 if resp.status != 200:
                     raise HTTPException(status_code=404, detail="عکس پروفایل دریافت نشد.")
                 if (resp.headers.get("Content-Type") or "").split(";")[0].strip() not in ("image/jpeg", "image/png", "image/webp"):

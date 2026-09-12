@@ -743,7 +743,10 @@ async function renderProfile() {
 
     const tgUser = (tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
     const username = me.username || tgUser.username || "";
-    const photoUrl = tgUser.photo_url || "";
+    // photo_url که .svg است، placeholder سفید پیش‌فرض تلگرام است (نه عکس واقعی)
+    // — در این صورت حرف اول اسم نمایش داده می‌شود.
+    const rawPhoto = tgUser.photo_url || "";
+    const photoUrl = rawPhoto && !rawPhoto.endsWith(".svg") ? rawPhoto : "";
     const initial = (me.first_name || "؟").trim().charAt(0).toUpperCase();
 
     content.innerHTML = `
