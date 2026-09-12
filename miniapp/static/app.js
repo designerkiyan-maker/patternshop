@@ -757,7 +757,7 @@ async function renderProfile() {
           <div class="stat-card"><div class="stat-num">${fmt(deliveredCount)}</div><div class="stat-label">الگوی خریداری‌شده</div></div>
           <div class="stat-card"><div class="stat-num">${fmt(me.wallet_credit)}</div><div class="stat-label">موجودی کیف پول</div></div>
           ${me.loyalty && me.loyalty.points != null ? `<div class="stat-card"><div class="stat-num">${fmt(me.loyalty.points)}</div><div class="stat-label">⭐ امتیاز باشگاه</div></div>` : ""}
-          <div class="profile-info-row"><span>تاریخ عضویت</span><b>${me.joined_at ? toJalaliStr(me.joined_at) : "-"}</b></div>
+          <div class="stat-card"><div class="stat-num">${me.joined_at ? toJalaliStr(me.joined_at) : "-"}</div><div class="stat-label">📅 تاریخ عضویت</div></div>
         </div>
       </div>
 
