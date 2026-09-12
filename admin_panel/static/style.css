@@ -22,7 +22,7 @@
   --text-muted: #8B8DA6;
   --text-dim: #5A5C74;
 
-  --primary: #7367F0;
+  --primary: #1E88E5;
   --primary-ink: #FFFFFF;
   --cyan: #00CFE8;
   --amber: #FF9F43;
@@ -189,15 +189,20 @@ button, input, select, textarea{ font-family:inherit; }
   cursor:pointer; margin-bottom:2px; transition:color .15s, background .15s;
 }
 .nav-icon{
-  position:relative; width:30px; height:30px; border-radius:8px; flex-shrink:0;
-  background:transparent; display:flex; align-items:center; justify-content:center;
-  color:var(--text-dim); transition:background .15s, color .15s;
+  position:relative; width:22px; height:22px; flex-shrink:0;
+  display:inline-block;
+  /* آیکون Plumpy با mask: غیرفعال خاکستری، فعال سفید روی پس‌زمینه‌ی --primary (#1E88E5) */
+  background-color:var(--text-dim);
+  -webkit-mask-image:var(--ic); mask-image:var(--ic);
+  -webkit-mask-position:center; mask-position:center;
+  -webkit-mask-size:contain; mask-size:contain;
+  -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat;
+  transition:background-color .15s;
 }
-.nav-icon .icon{ width:16px; height:16px; }
 .nav-item:hover{ color:var(--text); background:var(--surface-hi); }
-.nav-item:hover .nav-icon{ color:var(--text); }
+.nav-item:hover .nav-icon{ background-color:var(--text); }
 .nav-item.active{ color:#fff; background:var(--primary); }
-.nav-item.active .nav-icon{ color:#fff; }
+.nav-item.active .nav-icon{ background-color:#fff; }
 .nav-item .dot-count{
   margin-inline-start:auto; background:rgba(234,84,85,.16); color:var(--rose); font-size:10.5px;
   font-weight:700; padding:1px 7px; border-radius:20px; font-family:var(--font-mono);
@@ -652,7 +657,7 @@ html[data-theme="bento"]{
   --text-muted: #6E6E73;
   --text-dim: #AEAEB2;
 
-  --primary: #0A84FF;
+  --primary: #1E88E5;
   --primary-ink: #FFFFFF;
   --cyan: #40C8E0;
   --amber: #FF9F0A;

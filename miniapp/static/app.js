@@ -1049,6 +1049,7 @@ async function renderStore() {
         !selectedCategory
           ? `
             <div class="search-bar" id="store-search-bar">
+              <img src="icons/search.svg" alt="" class="search-ic" />
               <input type="text" id="store-search-input" placeholder="جستجوی الگو..." class="search-input" />
             </div>
           `

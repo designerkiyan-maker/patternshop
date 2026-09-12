@@ -384,6 +384,16 @@ const ROLE_LABEL = { owner: 'مالک', admin: 'مدیر کامل', mid: 'ادم
 /* ==================================================== live notifications === */
 let NOTIF_COUNTS = {};
 
+/* آیکون‌های Plumpy نوار کنار — map کلید nav به فایل svg در /icons/ */
+const NAV_PLUMPY = {
+  dashboard: 'dashboard', orders: 'orders', topups: 'wallet',
+  users: 'customer', tickets: 'list', support: 'chat',
+  carts: 'cart', catalog: 'hanger', discounts: 'discount',
+  broadcast: 'bell', settings: 'settings', salessettings: 'gear',
+  webadmins: 'user', tgadmins: 'user', proxies: 'shield',
+  system: 'database', logs: 'eye', account: 'user',
+};
+
 function renderNav() {
   const el = $('#nav-tunnel');
   const CYCLE = ['nav-c1', 'nav-c2', 'nav-c3', 'nav-c4'];
@@ -396,9 +406,10 @@ function renderNav() {
       lastSection = n.section;
     }
     const count = NOTIF_COUNTS[n.key] || 0;
+    const icFile = NAV_PLUMPY[n.icon] || n.icon;
     html += `
     <div class="nav-item ${CYCLE[i % 4]} ${n.key === CURRENT_TAB ? 'active' : ''}" data-tab="${n.key}">
-      <span class="nav-icon">${svg(n.icon)}</span><span>${n.label}</span>${count ? `<span class="dot-count">${count > 99 ? '99+' : count}</span>` : ''}
+      <span class="nav-icon" style="--ic:url('icons/${icFile}.svg')"></span><span>${n.label}</span>${count ? `<span class="dot-count">${count > 99 ? '99+' : count}</span>` : ''}
     </div>`;
   });
   el.innerHTML = html;

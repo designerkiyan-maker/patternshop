@@ -878,16 +878,27 @@ textarea.input { font-family: var(--font-mono); min-height: 90px; }
   padding: 8px 2px 6px;
   border: none; background: none; border-radius: 12px;
   font-family: var(--font-body); font-size: 10.5px; font-weight: 600;
-  color: var(--text-muted);
+  color: #8b93a1; /* غیرفعال: خاکستری */
   position: relative; white-space: nowrap;
   transition: color 0.15s ease;
   cursor: pointer; -webkit-tap-highlight-color: transparent;
 }
-#tabbar button svg { width: 22px; height: 22px; }
-#tabbar button .ic-filled { display: none; }
-#tabbar button.active .ic-outline { display: none; }
-#tabbar button.active .ic-filled { display: block; }
-#tabbar button.active { color: var(--pink); font-weight: 700; }
+/* آیکون‌های Plumpy — با mask رنگ‌آمیزی می‌شوند: غیرفعال خاکستری، فعال #1E88E5 */
+#tabbar .tab-ic {
+  width: 24px; height: 24px; display: block;
+  background-color: #8b93a1;
+  -webkit-mask-image: var(--ic);
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-image: var(--ic);
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  transition: background-color 0.15s ease;
+}
+#tabbar button.active { color: #1E88E5; font-weight: 700; }
+#tabbar button.active .tab-ic { background-color: #1E88E5; }
 #tabbar button:active { transform: scale(0.94); }
 
 /* ===================================================================
@@ -896,7 +907,9 @@ textarea.input { font-family: var(--font-mono); min-height: 90px; }
 =================================================================== */
 html[data-theme="clean-light"] body { background: var(--bg); }
 html[data-theme="clean-light"] .grid-fx { display: none; }
-html[data-theme="clean-light"] #tabbar button.active { color: #2f9e57; }
+html[data-theme="clean-light"] #tabbar button.active { color: #1E88E5; }
+html[data-theme="clean-light"] #tabbar button.active .tab-ic { background-color: #1E88E5; }
+html[data-theme="clean-light"] #tabbar button { color: #8b93a1; }
 
 html[data-theme="clean-light"] .eyebrow { color: var(--cyan); }
 html[data-theme="clean-light"] .eyebrow::after { background: linear-gradient(90deg, rgba(20, 40, 25, 0.12), transparent); }
@@ -1385,4 +1398,13 @@ html[data-theme="clean-light"] .star-row .star.on {
 }
 html[data-theme="clean-light"] .rating-avg {
   color: #6b7a6e;
+}
+
+/* آیکون جستجوی Plumpy داخل نوار جستجو */
+.search-bar { align-items: center; }
+.search-ic {
+  width: 20px; height: 20px; flex-shrink: 0;
+  background-color: #8b93a1;
+  -webkit-mask: url("icons/search.svg") center / contain no-repeat;
+  mask: url("icons/search.svg") center / contain no-repeat;
 }
