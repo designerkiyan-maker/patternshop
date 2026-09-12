@@ -1408,3 +1408,34 @@ html[data-theme="clean-light"] .rating-avg {
   -webkit-mask: url("icons/search.svg") center / contain no-repeat;
   mask: url("icons/search.svg") center / contain no-repeat;
 }
+
+/* ===================================================================
+   TOPBAR نهایی — یک ردیف باریک فقط با چیپ کیف پول
+   نام فروشگاه را هدر بومی تلگرام نشان می‌دهد؛ ردیف قبلی با دکمه‌های
+   ✕ و ··· تلگرام تداخل بصری داشت و ۱۲ بلوک CSS متناقض رویش بود.
+   این بلوک عمداً آخر فایل است تا همه‌ی قوانین قبلی را ببلعد.
+=================================================================== */
+header.topbar {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 1000 !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important; /* وسط ردیف: نه زیر ✕ (چپ) نه زیر ··· (راست) */
+  gap: 10px !important;
+  height: calc(54px + var(--telegram-safe-top, 0px)) !important;
+  min-height: 0 !important;
+  padding: var(--telegram-safe-top, 0px) 14px 0 !important;
+  box-sizing: border-box !important;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border-soft);
+}
+header.topbar > * {
+  min-height: 0 !important;
+  min-width: 0 !important;
+}
+header.topbar .wallet-chip {
+  font-size: 13px;
+  padding: 9px 16px;
+}
