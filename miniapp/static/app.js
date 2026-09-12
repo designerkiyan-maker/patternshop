@@ -27,6 +27,13 @@ tg.onEvent("safeAreaChanged", updateTelegramSafeArea);
 tg.onEvent("contentSafeAreaChanged", updateTelegramSafeArea);
 try { tg.setHeaderColor("#0a0e17"); tg.setBackgroundColor("#0a0e17"); } catch (e) {}
 
+// جلوگیری از بستن تصادفی مینی‌اپ:
+// ۱) با لمس ✕ تلگرام تأییدیه «مطمئنید می‌خواهید ببندید؟» نشان می‌دهد
+// ۲) سوایپ عمودی دیگر اپ را نمی‌بندد (فقط اسکرول عادی است)
+// هر دو با گارد وجود-API تا روی کلاینت‌های قدیمی‌تر تلگرام خطا ندهند.
+try { tg.enableClosingConfirmation(); } catch (e) {}
+try { if (typeof tg.disableVerticalSwipes === "function") tg.disableVerticalSwipes(); } catch (e) {}
+
 function getInitData() {
   return (window.Telegram?.WebApp?.initData || "").trim();
 }
