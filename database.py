@@ -1731,10 +1731,11 @@ class Database:
             return [r["product_id"] for r in rows]
 
     def toggle_wishlist(self, user_tg_id: int, product_id: int) -> bool:
-        """افزودن یا حذف از لیست پسندیده. True اگر اضافه شد، False اگر حذف شد."""
+        """افزودن یا حذف از لیست پسندیده. True اگر اضافه شد، False اگر حذف شد.
+        نکته: جدول wishlist ستون id ندارد (PK ترکیبی user_id+product_id است)."""
         with self._get_conn() as conn:
             existing = conn.execute(
-                "SELECT id FROM wishlist WHERE user_id=? AND product_id=?",
+                "SELECT 1 FROM wishlist WHERE user_id=? AND product_id=?",
                 (user_tg_id, product_id),
             ).fetchone()
             if existing:
