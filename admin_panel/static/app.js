@@ -409,7 +409,7 @@ function renderNav() {
     const icFile = NAV_PLUMPY[n.icon] || n.icon;
     html += `
     <div class="nav-item ${CYCLE[i % 4]} ${n.key === CURRENT_TAB ? 'active' : ''}" data-tab="${n.key}">
-      <span class="nav-icon" style="--ic:url('icons/${icFile}.svg')"></span><span>${n.label}</span>${count ? `<span class="dot-count">${count > 99 ? '99+' : count}</span>` : ''}
+      <span class="nav-icon" style="--ic:url('/assets/icons/${icFile}.svg')"></span><span>${n.label}</span>${count ? `<span class="dot-count">${count > 99 ? '99+' : count}</span>` : ''}
     </div>`;
   });
   el.innerHTML = html;
