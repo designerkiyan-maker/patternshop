@@ -561,12 +561,14 @@ async function renderTicketThread(body) {
 // تب خانه
 // ---------------------------------------------------------------------------
 // آیکون‌های خطی (outline) برای گرید دسترسی سریع — هم‌راستا با آیکون‌های نوار پایین
-const ICON_STORE = `<svg viewBox="0 0 24 24" fill="none"><path d="M4 8h16l-1.2 10.2a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 8V6a4 4 0 0 1 8 0v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
-const ICON_SHIELD = `<svg viewBox="0 0 24 24" fill="none"><path d="M12 2 4 6v6c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V6l-8-4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 12.2 11.3 14l3.2-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-const ICON_WALLET = `<svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="6" width="17" height="12.5" rx="2.2" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 10h17" stroke="currentColor" stroke-width="1.8"/><circle cx="16.5" cy="14.2" r="1.3" fill="currentColor"/></svg>`;
-const ICON_PROFILE = `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.4" stroke="currentColor" stroke-width="1.8"/><path d="M5 19.5c0-3.6 3.1-6.2 7-6.2s7 2.6 7 6.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
-const ICON_SUPPORT = `<svg viewBox="0 0 24 24" fill="none"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7A2.5 2.5 0 0 1 17.5 16H10l-4 3.5V16H6.5A2.5 2.5 0 0 1 4 13.5v-7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
-const ICON_REFERRAL = `<svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8.5" r="2.7" stroke="currentColor" stroke-width="1.8"/><path d="M4 19c0-3 2.3-5 5-5s5 2 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="17" cy="7.5" r="2.1" stroke="currentColor" stroke-width="1.8"/><path d="M15.5 13c2.2.3 3.8 2 3.8 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+// آیکون‌های Plumpy — با mask رندر می‌شوند و رنگ‌شان از currentColor پیروی می‌کند
+const plumpyIc = (name, cls = "") => `<span class="plumpy-ic ${cls}" style="--ic:url('icons/${name}.svg')"></span>`;
+const ICON_STORE = plumpyIc("shop");
+const ICON_SHIELD = plumpyIc("box");
+const ICON_WALLET = plumpyIc("wallet");
+const ICON_PROFILE = plumpyIc("user");
+const ICON_SUPPORT = plumpyIc("chat");
+const ICON_REFERRAL = plumpyIc("gift");
 
 function setHeaderWallet(amount) {
   const el = document.getElementById("header-wallet-amount");
@@ -1250,7 +1252,7 @@ async function openProductDetail(productId) {
 
           <button class="btn outline" id="buy-now-btn"
             style="margin-top:8px">
-            ⚡ خرید فوری
+            ${plumpyIc('flash')} خرید فوری
           </button>
         ` : `
           <div class="state-msg" style="margin-top:10px">
@@ -1362,7 +1364,7 @@ async function openProductDetail(productId) {
         } catch (e) {
           notify("خطا: " + e.message);
           buyNowBtn.disabled = false;
-          buyNowBtn.textContent = "⚡ خرید فوری";
+          buyNowBtn.innerHTML = plumpyIc("flash") + " خرید فوری";
         }
       };
     }
@@ -1412,8 +1414,8 @@ async function openProductDetail(productId) {
           questions.forEach(q => {
             const answered = q.is_answered === 1;
             html += `<div class="qa-item ${answered ? 'answered' : 'pending'}">` +
-              `<div class="qa-question">❓ ${escHtml(q.question)}</div>` +
-              (answered ? `<div class="qa-answer">✅ ${escHtml(q.answer)}</div>` : '') +
+              `<div class="qa-question">${plumpyIc("question")} ${escHtml(q.question)}</div>` +
+              (answered ? `<div class="qa-answer">${plumpyIc("check")} ${escHtml(q.answer)}</div>` : '') +
               `<div class="qa-meta">${q.first_name || 'کاربر'} - ${toJalaliStr(q.created_at).split(' ')[0]}</div>` +
               `</div>`;
           });

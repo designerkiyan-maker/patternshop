@@ -123,7 +123,23 @@ const ICONS = {
   check: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>',
   empty: '<path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z"></path>',
 };
-const svg = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
+const svg = (name, cls = '') => {
+  // آیکون‌های Plumpy — mask با currentColor: رنگ را از زمینه می‌گیرد
+  // (خاکستری در متن کم‌رنگ، سفید روی دکمه‌ی آبی #1E88E5، آبی در لینک‌ها)
+  const plumpy = {
+    dashboard: 'dashboard', orders: 'orders', topups: 'wallet', users: 'customer',
+    catalog: 'hanger', discounts: 'discount', tickets: 'list', broadcast: 'bell',
+    support: 'chat', settings: 'settings', logs: 'eye', system: 'database',
+    webadmins: 'shield', account: 'user', logout: 'logout', revenue: 'chart',
+    check: 'check', empty: 'box', box: 'box', download: 'download',
+    plus: 'plus', edit: 'edit', trash: 'trash', eye: 'eye', info: 'info',
+    search: 'search', send: 'send', refresh: 'refresh', upload: 'upload',
+  };
+  if (plumpy[name]) {
+    return `<span class="icon plumpy ${cls}" style="--ic:url('/assets/icons/${plumpy[name]}.svg')"></span>`;
+  }
+  return `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
+};
 const fmt = n => (n === null || n === undefined) ? '—' : Number(n).toLocaleString('fa-IR');
 const fmtDate = iso => iso ? new Date(iso.replace(' ', 'T') + (iso.includes('Z') ? '' : 'Z')).toLocaleString('fa-IR') : '—';
 // برای تاریخ‌های خالص بدون ساعت (مثل start_date/end_date بازه‌ی آمار که به

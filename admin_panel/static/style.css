@@ -2334,3 +2334,20 @@ html[data-theme="streetops"] .so-mission-val{ color:var(--primary); font-size:12
   }
 }
 
+
+/* ===================================================================
+   Plumpy icons (svg() override) — mask spans با currentColor
+=================================================================== */
+span.icon.plumpy {
+  display: inline-block;
+  width: 18px; height: 18px;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask: var(--ic) center / contain no-repeat;
+  mask: var(--ic) center / contain no-repeat;
+  vertical-align: -4px;
+}
+.btn .icon.plumpy { width: 16px; height: 16px; margin-inline-end: 6px; vertical-align: -3px; }
+.nav-icon .icon.plumpy { width: 20px; height: 20px; }
+.empty-state .icon.plumpy { width: 56px; height: 56px; color: var(--text-dim); }
+html[data-theme="bento"] { --cyan: #1E88E5; }
