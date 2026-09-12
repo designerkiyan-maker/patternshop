@@ -84,7 +84,7 @@ html[data-theme="aurora-ice"] {
 }
 html[data-theme="clean-light"] {
   --bg: #f2f5f2; --bg2: #ffffff; --bg-elevated: #ffffff;
-  --pink: #1E88E5; --orange: #1E88E5; --cyan: #1E88E5; --violet: #42A5F5 --amber: #ffb020; --danger: #e5484d;
+  --pink: #1E88E5; --orange: #1E88E5; --cyan: #1E88E5; --violet: #42A5F5; --amber: #ffb020; --danger: #e5484d;
   --glass: rgba(30, 80, 140, 0.035); --glass-2: rgba(30, 80, 140, 0.055); --glass-brd: rgba(30, 80, 140, 0.1); --border-soft: rgba(30, 80, 140, 0.08);
   --text: #161c17; --text-muted: #7c8880;
   --font-disp: var(--font-body);
