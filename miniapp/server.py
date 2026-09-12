@@ -215,6 +215,13 @@ def get_verified_user(x_init_data: str = Header(...)):
         logger.warning("initData valid but no user field: keys=%s", list(result.keys()) if result else "None")
         raise HTTPException(status_code=401, detail="initData نامعتبر است.")
     tg_user = result["user"]
+    # دیباگ عکس پروفایل: فقط نام فیلدهای ارسالی تلگرام لاگ می‌شود (بدون مقدارها)
+    logger.info(
+        "initData user fields for %s: %s (photo_url_present=%s)",
+        tg_user.get("id"),
+        sorted(tg_user.keys()),
+        "photo_url" in tg_user and bool(tg_user.get("photo_url")),
+    )
     try:
         db.add_or_update_user(tg_user["id"], tg_user.get("username"), tg_user.get("first_name"))
     except Exception:
