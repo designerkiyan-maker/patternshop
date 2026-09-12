@@ -1493,3 +1493,48 @@ header.topbar {
   vertical-align: -3px;
   margin-inline-end: 4px;
 }
+
+/* ===================================================================
+   قلب علاقه‌مندی Plumpy + بج‌های آیکون‌دار + یکپارچه‌سازی عکس با کارت
+=================================================================== */
+.heart-ic {
+  color: #8b93a1;               /* غیرفعال: خاکستری */
+  width: 18px !important;
+  height: 18px !important;
+}
+.heart-ic.on {
+  color: #FF375F;               /* فعال: رز */
+}
+.wishlist-btn { font-size: 0; } /* سایز ایموجی قبلی بی‌اثر شود */
+.detail-hero .wishlist-btn .heart-ic {
+  width: 20px !important;
+  height: 20px !important;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.badge-ic {
+  width: 12px !important;
+  height: 12px !important;
+  vertical-align: -2px;
+}
+/* عکس کارت: full-bleed با گوشه‌ی هم‌راستای کارت، بدون قاب اضافه */
+.product-thumb {
+  border-radius: var(--radius-md) var(--radius-md) 0 0 !important;
+  border: none !important;
+  border-bottom: 1px solid var(--border-soft) !important;
+  margin-bottom: 0 !important;
+}
+.pattern-card-body {
+  padding-top: 11px;
+}
+/* عکس بزرگ صفحه‌ی جزئیات: تمام-عرض کارت با گوشه‌ی بالای کارت */
+.detail-hero {
+  margin: -17px -17px 12px !important;
+}
+.detail-hero .product-thumb {
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0 !important;
+  border-bottom: 1px solid var(--border-soft) !important;
+}

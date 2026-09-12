@@ -957,14 +957,14 @@ function productCardHtml(p) {
         ? `<img class="product-thumb" alt="" loading="lazy" />`
         : `<div class="product-thumb-ph">🧵</div>`}
       <button class="wishlist-btn" data-product-id="${p.id}" title="افزودن به پسندیده‌ها">
-        ${wishlisted ? "❤️" : "💓"}
+        <span class="plumpy-ic heart-ic${wishlisted ? " on" : ""}" style="--ic:url('icons/heart.svg')"></span>
       </button>
       <div class="pattern-card-body">
         <div class="product-name">${escHtml(p.name)}</div>
         <div class="price">${fmt(p.price)} <span style="font-family:var(--font-body);font-size:10.5px">تومان</span></div>
         <div class="pattern-badge-row">
-          <span class="badge ${available ? "approved" : "rejected"}">${available ? "✅ موجود" : "⛔️ ناموجود"}</span>
-          ${purchased ? "<span class=\"badge approved\">✅ خریداری شده</span>" : ""}
+          <span class="badge ${available ? "approved" : "rejected"}"><span class="plumpy-ic badge-ic" style="--ic:url('icons/${available ? "check" : "x"}.svg')"></span>${available ? "موجود" : "ناموجود"}</span>
+          ${purchased ? "<span class='badge approved'><span class='plumpy-ic badge-ic' style='--ic:url(icons/check.svg)'></span>خریداری شده</span>" : ""}
         </div>
       </div>
     </div>
@@ -993,7 +993,7 @@ function wireProductCards(root) {
         heartBtn.disabled = true;
         try {
           const r = await api(`/api/wishlist/${productId}`, { method: "POST" });
-          heartBtn.textContent = r.status === "added" ? "❤️" : "💓";
+          const hIc = heartBtn.querySelector(".heart-ic"); if (hIc) hIc.classList.toggle("on", r.status === "added");
           el.dataset.wishlisted = r.status === "added" ? "1" : "0";
           tg.HapticFeedback?.selectionChanged();
           notify(r.status === "added" ? "❤️ به پسندیده‌ها اضافه شد." : "از پسندیده‌ها حذف شد.");
@@ -1218,7 +1218,7 @@ async function openProductDetail(productId) {
             ? `<img class="product-thumb pattern-hero" alt="" />`
             : `<div class="product-thumb-ph">🧵</div>`}
           <button class="wishlist-btn" id="detail-heart-btn" title="افزودن به پسندیده‌ها">
-            ${p.is_wishlisted ? "❤️" : "💓"}
+            <span class="plumpy-ic heart-ic${p.is_wishlisted ? " on" : ""}" style="--ic:url('icons/heart.svg')"></span>
           </button>
         </div>
 
@@ -1228,9 +1228,9 @@ async function openProductDetail(productId) {
 
         <div class="pattern-badge-row">
           <span class="badge ${available ? "approved" : "rejected"}">
-            ${available ? "✅ موجود" : "⛔️ ناموجود"}
+            <span class="plumpy-ic badge-ic" style="--ic:url('icons/${available ? "check" : "x"}.svg')"></span>${available ? "موجود" : "ناموجود"}
           </span>
-          ${p.has_purchased ? `<span class="badge approved">✅ خریداری شده</span>` : ""}
+          ${p.has_purchased ? `<span class="badge approved"><span class="plumpy-ic badge-ic" style="--ic:url(icons/check.svg)"></span>خریداری شده</span>` : ""}
           <span class="price" style="margin:0">${fmt(p.price)} تومان</span>
         </div>
 
@@ -1274,7 +1274,7 @@ async function openProductDetail(productId) {
         try {
           const r = await api(`/api/wishlist/${p.id}`, { method: "POST" });
           p.is_wishlisted = r.status === "added";
-          detailHeart.textContent = p.is_wishlisted ? "❤️" : "💓";
+          const dhIc = detailHeart.querySelector(".heart-ic"); if (dhIc) dhIc.classList.toggle("on", p.is_wishlisted);
           tg.HapticFeedback?.selectionChanged();
           notify(p.is_wishlisted ? "❤️ به پسندیده‌ها اضافه شد." : "از پسندیده‌ها حذف شد.");
         } catch (e) {
@@ -1385,7 +1385,7 @@ async function openProductDetail(productId) {
           await api(`/api/products/${p.id}/oos-subscribe`, { method: 'POST' });
           tg.HapticFeedback?.notificationOccurred('success');
           notify('✅ در صورت موجود شدن، شما را اطلاع می‌دهیم.');
-          oosBtn.textContent = '✅ ثبت شد';
+          oosBtn.innerHTML = plumpyIc("check") + " ثبت شد";
           oosBtn.disabled = true;
         } catch (e) {
           notify('خطا: ' + e.message);
