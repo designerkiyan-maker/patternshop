@@ -132,45 +132,6 @@ body {
 /* ===================================================================
    Header — compact flat top bar (wallet chip + brand)
 =================================================================== */
-header.topbar {
-  position: relative;
-  z-index: 2;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: row-reverse;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 12px 14px;
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border-soft);
-}
-.wallet-chip {
-  display: flex; align-items: center; gap: 7px;
-  border: 1px solid var(--glass-brd);
-  background: var(--glass);
-  color: var(--text);
-  padding: 8px 13px; border-radius: 999px;
-  font-family: var(--font-body); font-size: 12.5px; font-weight: 700;
-  cursor: pointer; -webkit-tap-highlight-color: transparent;
-  transition: transform .12s ease;
-}
-.wallet-chip:active { transform: scale(0.95); }
-.wallet-chip svg { width: 17px; height: 17px; flex-shrink: 0; color: var(--cyan); }
-.topbar-brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.brand { font-family: var(--font-body); font-size: 14px; font-weight: 800; color: var(--text); white-space: nowrap; }
-.brand-avatar {
-  position: relative;
-  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, var(--pink), var(--violet));
-  overflow: hidden;
-}
-.brand-avatar-fallback { font-size: 16px; line-height: 1; }
-.brand-logo { display: none; width: 34px; height: 34px; border-radius: 50%; object-fit: cover; }
-header.topbar.has-logo .brand-logo { display: block; }
-header.topbar.has-logo .brand-avatar-fallback { display: none; }
-header.topbar.has-logo .brand-avatar { background: none; }
 
 /* ===================================================================
    Content area
@@ -244,7 +205,7 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
   flex: 1 1 auto; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.stat-row b, .stat-row > span.badge {
+.stat-row b {
   flex-shrink: 0;
 }
 .stat-row b {
@@ -279,13 +240,11 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
   display: flex; align-items: center; justify-content: center;
   color: var(--pink);
 }
-.quick-item .q-ic svg { width: 100%; height: 100%; }
 .quick-item.full { grid-column: 1 / -1; }
 
 /* ===================================================================
    Home greeting (moved out of header — sits at top of #content)
 =================================================================== */
-.home-greet { margin-bottom: 14px; }
 .home-greet h1 { font-size: 19px; font-weight: 800; color: var(--text); }
 .home-greet p { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; }
 
@@ -312,7 +271,6 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
   content: ""; position: absolute; inset: 0; z-index: 0;
   background: var(--promo-bg, linear-gradient(120deg, #10151c, #1c2733));
 }
-.promo-slide-image-only { padding: 0; min-height: 0; aspect-ratio: 3 / 1; }
 .promo-slide-icon, .promo-slide-body { position: relative; z-index: 1; }
 .promo-slide-icon { font-size: 40px; flex-shrink: 0; filter: drop-shadow(0 0 12px rgba(126,249,255,.35)); }
 .promo-slide-title { font-size: 15px; font-weight: 800; margin-bottom: 4px; }
@@ -349,23 +307,9 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
 }
 .profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .profile-name { font-size: 19px; font-weight: 800; color: var(--text); margin-bottom: 4px; }
-.profile-meta-row {
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  font-size: 12.5px; color: var(--text-muted); margin-bottom: 3px;
-  cursor: pointer; -webkit-tap-highlight-color: transparent;
-}
-.profile-meta-row svg { width: 13px; height: 13px; opacity: 0.7; }
 .profile-info-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px;
 }
-.profile-info-row {
-  grid-column: 1 / -1;
-  display: flex; align-items: center; justify-content: space-between;
-  background: var(--glass); border: 1px solid var(--glass-brd);
-  border-radius: var(--radius-sm); padding: 12px 14px;
-  font-size: 12.5px; color: var(--text-muted);
-}
-.profile-info-row b { color: var(--text); font-weight: 700; font-size: 13px; }
 
 /* ===================================================================
    List rows (دسته‌بندی فروشگاه، ردیف‌های ناوبری)
@@ -389,7 +333,6 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
   background: linear-gradient(135deg, var(--pink), var(--violet)); color: #fff;
 }
 .list-row-ic.line { background: none; color: var(--pink); width: 24px; height: 24px; }
-.list-row-ic.line svg { width: 100%; height: 100%; }
 .list-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .list-row-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
 .list-row-sub { font-size: 11.5px; color: var(--text-muted); }
@@ -398,24 +341,6 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
 /* ===================================================================
    Filter chips (تب سرویس‌ها)
 =================================================================== */
-.chip-row {
-  display: flex; gap: 8px; margin-bottom: 14px;
-  overflow-x: auto; overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-.chip-row::-webkit-scrollbar { display: none; }
-.chip {
-  flex: 0 0 auto;
-  border: 1px solid var(--glass-brd);
-  background: var(--glass);
-  color: var(--text-muted);
-  padding: 8px 16px; border-radius: 999px;
-  font-family: var(--font-body); font-size: 12.5px; font-weight: 600;
-  cursor: pointer; white-space: nowrap;
-  transition: background .15s ease, color .15s ease;
-}
-.chip.active { background: linear-gradient(135deg, var(--pink), var(--violet)); color: #160a2e; border-color: transparent; font-weight: 700; }
 
 /* ===================================================================
    Buttons
@@ -443,27 +368,11 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
   box-shadow: none;
 }
 .btn.small { width: auto; padding: 9px 16px; font-size: 12.5px; margin-top: 0; }
-.btn.violet { background: linear-gradient(135deg, var(--violet), var(--accent-2-dim)); color: #f4f2ff; box-shadow: 0 8px 22px -8px rgba(176, 107, 255, 0.55); }
 
 /* ===================================================================
    Product rows
 =================================================================== */
-.product {
-  display: flex; justify-content: space-between; align-items: center;
-  gap: 10px; padding: 12px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-.product:last-child { border-bottom: none; }
 .product-name { font-size: 13.5px; font-weight: 700; }
-.qty-stepper {
-  display: flex; align-items: center; justify-content: center; gap: 14px;
-  margin-top: 12px;
-}
-.qty-stepper .btn.small { padding: 8px 14px; }
-.qty-stepper .qty-value {
-  font-family: var(--font-mono); font-size: 17px; font-weight: 700;
-  min-width: 32px; text-align: center; color: var(--cyan);
-}
 .price {
   font-family: var(--font-mono); font-weight: 700; font-size: 13px;
   margin-top: 3px; direction: ltr;
@@ -473,23 +382,6 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
 /* ===================================================================
    Pattern shop — product cards with preview thumbnails
 =================================================================== */
-.product-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
-  margin-bottom: 14px;
-}
-.product-card {
-  position: relative;
-  display: flex; flex-direction: column;
-  background: var(--glass);
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-  border: 1px solid var(--glass-brd);
-  border-radius: var(--radius-md);
-  padding: 10px;
-  cursor: pointer; -webkit-tap-highlight-color: transparent;
-  transition: transform .12s ease, filter .12s ease;
-  animation: cardPop 0.32s cubic-bezier(.2, .9, .3, 1.2);
-}
-.product-card:active { transform: scale(0.97); filter: brightness(0.97); }
 /* square-ish preview image area, glass-consistent corners */
 .product-thumb {
   width: 100%; aspect-ratio: 1 / 1;
@@ -503,10 +395,6 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
 }
 .product-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 /* «ناموجود» (out of stock) */
-.product-card.disabled, .product-card.unavailable {
-  opacity: 0.55; filter: grayscale(0.8); cursor: default;
-}
-.product-card.disabled:active, .product-card.unavailable:active { transform: none; filter: grayscale(0.8); }
 
 /* ===================================================================
    Badges
@@ -517,25 +405,13 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
   color: var(--cyan); border: 1px solid rgba(126, 249, 255, 0.35);
 }
 /* order status badges — hyphenated aliases so `badge-approved` also works standalone */
-.badge-approved, .badge-pending, .badge-rejected {
-  font-size: 10px; padding: 5px 11px; border-radius: 999px; font-weight: 700;
-}
-.badge.approved, .badge-approved { background: linear-gradient(135deg, rgba(126, 249, 255, 0.18), rgba(126, 249, 255, 0.05)); color: var(--success); border: 1px solid rgba(126, 249, 255, 0.35); }
-.badge.pending, .badge-pending { background: linear-gradient(135deg, rgba(255, 207, 107, 0.2), rgba(255, 207, 107, 0.05)); color: var(--amber); border: 1px solid rgba(255, 207, 107, 0.4); }
-.badge.rejected, .badge-rejected { background: linear-gradient(135deg, rgba(255, 77, 109, 0.2), rgba(255, 77, 109, 0.05)); color: var(--danger); border: 1px solid rgba(255, 77, 109, 0.4); }
+.badge.approved { background: linear-gradient(135deg, rgba(126, 249, 255, 0.18), rgba(126, 249, 255, 0.05)); color: var(--success); border: 1px solid rgba(126, 249, 255, 0.35); }
+.badge.pending { background: linear-gradient(135deg, rgba(255, 207, 107, 0.2), rgba(255, 207, 107, 0.05)); color: var(--amber); border: 1px solid rgba(255, 207, 107, 0.4); }
+.badge.rejected { background: linear-gradient(135deg, rgba(255, 77, 109, 0.2), rgba(255, 77, 109, 0.05)); color: var(--danger); border: 1px solid rgba(255, 77, 109, 0.4); }
 
 /* ===================================================================
    Progress bar (generic utility)
 =================================================================== */
-.progress-track {
-  width: 100%; height: 6px; border-radius: 4px;
-  background: rgba(255,255,255,0.08);
-  overflow: hidden; margin: 4px 0;
-}
-.progress-fill {
-  height: 100%; border-radius: 4px;
-  background: linear-gradient(90deg, var(--cyan), var(--violet, var(--cyan)));
-}
 
 /* ===================================================================
    Orders
@@ -704,37 +580,8 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
 /* ===================================================================
    کادرهای تنظیمات (فروش/تخفیف) - برچسب و پیام خطا
 =================================================================== */
-.field-label {
-  display: block; font-size: 11.5px; color: var(--text-muted);
-  margin-bottom: 5px; font-family: var(--font-body);
-}
-.field-error {
-  color: #f87171; font-size: 12px; min-height: 14px; margin-top: 2px;
-}
-.field-switch-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 0; margin-bottom: 12px; border-bottom: 1px solid var(--glass-brd);
-  font-size: 13px; color: var(--text);
-}
 
 /* سوییچ روشن/خاموش به‌سبک iOS */
-.switch {
-  position: relative; display: inline-block; width: 44px; height: 25px;
-  flex-shrink: 0; direction: ltr;
-}
-.switch input { opacity: 0; width: 0; height: 0; position: absolute; }
-.switch-slider {
-  position: absolute; inset: 0; cursor: pointer;
-  background: var(--bg-elevated); border: 1px solid var(--glass-brd);
-  border-radius: 999px; transition: background .2s, border-color .2s;
-}
-.switch-slider::before {
-  content: ""; position: absolute; width: 19px; height: 19px;
-  left: 2px; top: 2px; border-radius: 50%;
-  background: var(--text-muted); transition: transform .2s, background .2s;
-}
-.switch input:checked + .switch-slider { background: var(--cyan); border-color: var(--cyan); }
-.switch input:checked + .switch-slider::before { transform: translateX(19px); background: #06222a; }
 
 /* ===================================================================
    Segmented tabs (support sections / generic sub-tabs)
@@ -756,18 +603,12 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
 }
 .seg-btn.active { background: var(--cyan); color: #06222a; font-weight: 700; }
 
-.btn.danger, .btn.outline.danger {
-  border-color: rgba(239, 68, 68, 0.45); color: #f87171;
-}
 
 textarea.input { font-family: var(--font-mono); min-height: 90px; }
 
 /* ===================================================================
    Stat cards (profile / user stats)
 =================================================================== */
-.stat-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px;
-}
 .stat-card {
   display: flex; flex-direction: column; gap: 4px;
   background: var(--bg-elevated); border: 1px solid var(--glass-brd);
@@ -803,16 +644,6 @@ textarea.input { font-family: var(--font-mono); min-height: 90px; }
 /* ===================================================================
    Warning banner
 =================================================================== */
-.banner {
-  position: relative; border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 14px;
-  animation: cardPop 0.32s cubic-bezier(.2, .9, .3, 1.2);
-}
-.banner-warn {
-  background: linear-gradient(135deg, rgba(255, 207, 107, 0.14), rgba(255, 138, 61, 0.05));
-  border: 1px solid rgba(255, 207, 107, 0.3);
-}
-.banner-title { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-weight: 700; font-size: 12.5px; color: var(--amber); margin-bottom: 8px; }
-.banner-hint { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
 
 /* نکته‌ی تاکیدی تبدیل امتیاز باشگاه مشتریان (تب کیف پول) — هم‌خانواده‌ی banner-warn */
 .redeem-note {
@@ -836,11 +667,6 @@ textarea.input { font-family: var(--font-mono); min-height: 90px; }
   align-self: flex-start;
   background: linear-gradient(135deg, var(--pink), var(--violet));
   color: #1a0a24; border-bottom-right-radius: 4px;
-}
-.chat-bubble.admin {
-  align-self: flex-end;
-  background: var(--glass-2); border: 1px solid var(--glass-brd);
-  color: var(--text); border-bottom-left-radius: 4px;
 }
 .chat-text { white-space: pre-wrap; word-break: break-word; }
 .chat-time { font-size: 10px; opacity: 0.65; margin-top: 4px; text-align: left; }
@@ -932,12 +758,6 @@ html[data-theme="clean-light"] .quick-item {
 }
 html[data-theme="clean-light"] .quick-item .q-ic { color: var(--pink); }
 
-html[data-theme="clean-light"] .product-card {
-  background: var(--bg2);
-  backdrop-filter: none; -webkit-backdrop-filter: none;
-  border: 1px solid var(--border-soft);
-  box-shadow: 0 2px 12px -4px rgba(30, 80, 140, 0.08);
-}
 html[data-theme="clean-light"] .product-thumb { background: #eef3f8; border-color: var(--border-soft); }
 
 html[data-theme="clean-light"] .list-row {
@@ -946,10 +766,6 @@ html[data-theme="clean-light"] .list-row {
   border: 1px solid var(--border-soft);
   box-shadow: 0 2px 12px -4px rgba(30, 80, 140, 0.08);
 }
-html[data-theme="clean-light"] .chip {
-  background: var(--bg2); border-color: var(--border-soft); color: var(--text-muted);
-}
-html[data-theme="clean-light"] .chip.active { color: #ffffff; }
 
 html[data-theme="clean-light"] .stat-row { border-bottom-color: var(--border-soft); }
 html[data-theme="clean-light"] .stat-row b {
@@ -966,16 +782,11 @@ html[data-theme="clean-light"] .btn.outline {
   backdrop-filter: none;
 }
 html[data-theme="clean-light"] .btn:disabled { background: #eef3f8; color: var(--text-muted); }
-html[data-theme="clean-light"] .btn.violet { color: #fff; }
 
 html[data-theme="clean-light"] .badge {
   background: rgba(30, 80, 140, 0.06); color: var(--text-muted); border-color: var(--border-soft);
 }
-html[data-theme="clean-light"] .badge.approved, html[data-theme="clean-light"] .badge-approved { background: rgba(30, 136, 229, 0.12); color: #155FA0; border: 1px solid rgba(30, 136, 229, 0.35); }
-html[data-theme="clean-light"] .badge.pending, html[data-theme="clean-light"] .badge-pending { background: rgba(255, 176, 32, 0.14); color: #9a6300; border: 1px solid rgba(255, 176, 32, 0.4); }
-html[data-theme="clean-light"] .badge.rejected, html[data-theme="clean-light"] .badge-rejected { background: rgba(229, 72, 77, 0.12); color: #c1272d; border: 1px solid rgba(229, 72, 77, 0.35); }
 
-html[data-theme="clean-light"] .progress-track { background: rgba(30, 80, 140, 0.08); }
 
 html[data-theme="clean-light"] .reels { background: #eef3f8; box-shadow: inset 0 2px 8px rgba(30, 80, 140, 0.08); }
 html[data-theme="clean-light"] .reel { background: #fff; border-color: var(--border-soft); }
@@ -1010,78 +821,25 @@ html[data-theme="clean-light"] #tabbar { background: #ffffff; }
    TELEGRAM MINI APP — SAFE AREA HEADER FIX
    ========================================================= */
 
-:root {
-  --tg-safe-top: var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px));
-  --tg-safe-bottom: var(--tg-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
-}
 
 /* هدر از ناحیه بالای تلگرام عبور نکند */
-header.topbar {
-  padding-top: var(--tg-safe-top) !important;
-  min-height: calc(64px + var(--tg-safe-top)) !important;
-  box-sizing: border-box !important;
-}
 
 /* محتوای داخل هدر ارتفاع واقعی داشته باشد */
-header.topbar > * {
-  min-height: 64px;
-}
 
 /* فاصله محتوای اصلی از هدر */
-#content {
-  padding-top: 12px !important;
-}
 
 /* در حالت دسکتاپ/تلگرام دسکتاپ safe area مزاحم نشود */
-@media (min-width: 700px) {
-  header.topbar {
-    padding-top: 0 !important;
-    min-height: 64px !important;
-  }
-
-  header.topbar > * {
-    min-height: 64px;
-  }
-}
-
-
-/* =========================================================
    TELEGRAM MINI APP — SAFE AREA HEADER FIX
    ========================================================= */
 
-:root {
-  --tg-safe-top: var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px));
-  --tg-safe-bottom: var(--tg-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
-}
 
 /* هدر از ناحیه بالای تلگرام عبور نکند */
-header.topbar {
-  padding-top: var(--tg-safe-top) !important;
-  min-height: calc(64px + var(--tg-safe-top)) !important;
-  box-sizing: border-box !important;
-}
 
 /* محتوای داخل هدر ارتفاع واقعی داشته باشد */
-header.topbar > * {
-  min-height: 64px;
-}
 
 /* فاصله محتوای اصلی از هدر */
-#content {
-  padding-top: 12px !important;
-}
 
 /* در حالت دسکتاپ/تلگرام دسکتاپ safe area مزاحم نشود */
-@media (min-width: 700px) {
-  header.topbar {
-    padding-top: 0 !important;
-    min-height: 64px !important;
-  }
-
-  header.topbar > * {
-    min-height: 64px;
-  }
-}
 
 
 /* =========================================================
@@ -1100,45 +858,9 @@ header.topbar > * {
 }
 
 /* هدر واقعی اپ */
-header.topbar {
-  position: sticky !important;
-  top: 0 !important;
-  z-index: 1000 !important;
 
-  box-sizing: border-box !important;
-
-  padding-top: var(--telegram-safe-top) !important;
-
-  min-height: calc(
-    64px + var(--telegram-safe-top)
-  ) !important;
-
-  padding-left: max(
-    12px,
-    var(--telegram-safe-left)
-  ) !important;
-
-  padding-right: max(
-    12px,
-    var(--telegram-safe-right)
-  ) !important;
-}
-
-/* محتوای خود هدر */
-header.topbar .topbar-inner,
-header.topbar .topbar-content,
-header.topbar > div {
-  min-height: 64px;
-  box-sizing: border-box;
-}
 
 /* محتوا از هدر فاصله مناسب داشته باشد */
-#content {
-  padding-top: max(
-    12px,
-    var(--telegram-content-safe-top)
-  ) !important;
-}
 
 /* جلوگیری از چسبیدن پایین صفحه */
 #app,
@@ -1431,23 +1153,11 @@ header.topbar {
   background: var(--bg2);
   border-bottom: 1px solid var(--border-soft);
 }
-header.topbar > * {
-  min-height: 0 !important;
-  min-width: 0 !important;
-}
-header.topbar .wallet-chip {
-  font-size: 13px;
-  padding: 9px 16px;
-}
 
 /* ===================================================================
    تریم فضای بالای صفحه — safe-top تلگرام روی بعضی گوشی‌ها بزرگ است
    و هدر را خیلی بلند می‌کرد؛ حداکثر ۱۲px از آن اعمال می‌شود.
 =================================================================== */
-header.topbar {
-  height: calc(54px + min(var(--telegram-safe-top, 0px), 12px)) !important;
-  padding: min(var(--telegram-safe-top, 0px), 12px) 14px 0 !important;
-}
 #content {
   padding-top: 6px !important;
 }
@@ -1481,9 +1191,6 @@ header.topbar {
 }
 .list-row-ic .plumpy-ic {
   color: #1E88E5;
-}
-.profile-meta-row .plumpy-ic, .meta-ic .plumpy-ic {
-  width: 15px; height: 15px;
 }
 .ic .plumpy-ic {
   width: 18px; height: 18px;
@@ -1586,28 +1293,6 @@ header.topbar {
   margin-bottom: 2px;
 }
 .stat-card { gap: 1px; }
-.join-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  margin-top: 12px;
-  padding: 9px 12px;
-  background: var(--glass);
-  border: 1px solid var(--glass-brd);
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-muted);
-}
-.join-row .plumpy-ic {
-  width: 15px; height: 15px;
-  color: #1E88E5;
-}
-html[data-theme="clean-light"] .join-row {
-  background: rgba(30, 136, 229, 0.06);
-  border-color: rgba(30, 136, 229, 0.18);
-}
 .stat-card { align-items: center; text-align: center; }
 
 /* تاریخ عضویت به‌عنوان کارت آماری: فونت کوچک‌تر تا در نیم‌کارت جا شود */
@@ -1698,28 +1383,20 @@ html[data-theme="dark"] .card,
 html[data-theme="dark"] .stat-card,
 html[data-theme="dark"] .list-row,
 html[data-theme="dark"] .profile-chip,
-html[data-theme="dark"] .join-row,
 html[data-theme="dark"] .search-input,
 html[data-theme="dark"] .qa-textarea {
   background: rgba(255, 255, 255, 0.05);
   border-color: rgba(255, 255, 255, 0.1);
 }
 html[data-theme="dark"] .profile-chip,
-html[data-theme="dark"] .join-row,
-html[data-theme="dark"] .join-row .plumpy-ic,
 html[data-theme="dark"] .stat-card .stat-ic,
 html[data-theme="dark"] .profile-chip .plumpy-ic,
 html[data-theme="dark"] .list-row-ic .plumpy-ic,
 html[data-theme="dark"] .q-ic .plumpy-ic {
   color: #42A5F5;
 }
-html[data-theme="dark"] .profile-chip,
-html[data-theme="dark"] .join-row {
+html[data-theme="dark"] .profile-chip {
   color: var(--text);
-}
-html[data-theme="dark"] .join-row {
-  background: rgba(66, 165, 245, 0.1);
-  border-color: rgba(66, 165, 245, 0.22);
 }
 html[data-theme="dark"] .profile-avatar {
   border-color: #0e1621;
@@ -1752,14 +1429,6 @@ html[data-theme="dark"] .spin-cta {
   background: radial-gradient(circle at 35% 30%, #64B5F6, var(--pink) 55%, var(--violet));
 }
 /* گرادیان روشن کمی پررنگ‌تر و ماندگارتر */
-header.topbar {
-  background: linear-gradient(
-    180deg,
-    #D9E9FC 0%,
-    rgba(217, 233, 252, 0.6) 60%,
-    rgba(217, 233, 252, 0) 100%
-  ) !important;
-}
 /* بج شمارنده‌ی سبد خرید (قبلاً بدون استایل بود) */
 .tab-badge {
   position: absolute;
@@ -1775,11 +1444,6 @@ header.topbar {
 }
 
 /* هدر — گرادیان سفید انتخاب‌شده (بالا مات، ۲۸٪ نیمه‌شفاف، پایین شفاف) */
-header.topbar {
-  background: -webkit-linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.77) 28%, rgba(255, 255, 255, 0) 100%) !important;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.77) 28%, rgba(255, 255, 255, 0) 100%) !important;
-}
-html[data-theme="dark"] header.topbar {
-  background: -webkit-linear-gradient(180deg, rgba(14, 22, 33, 1) 0%, rgba(14, 22, 33, 0.77) 28%, rgba(14, 22, 33, 0) 100%) !important;
-  background: linear-gradient(180deg, rgba(14, 22, 33, 1) 0%, rgba(14, 22, 33, 0.77) 28%, rgba(14, 22, 33, 0) 100%) !important;
-}
+html[data-theme="clean-light"] .badge.approved { background: rgba(30, 136, 229, 0.12); color: #155FA0; border: 1px solid rgba(30, 136, 229, 0.35); }
+html[data-theme="clean-light"] .badge.pending { background: rgba(255, 176, 32, 0.14); color: #9a6300; border: 1px solid rgba(255, 176, 32, 0.4); }
+html[data-theme="clean-light"] .badge.rejected { background: rgba(229, 72, 77, 0.12); color: #c1272d; border: 1px solid rgba(229, 72, 77, 0.35); }
