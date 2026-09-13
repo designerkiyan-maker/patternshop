@@ -1623,3 +1623,21 @@ html[data-theme="clean-light"] .join-row {
     0 0 0 3px #1E88E5,
     0 14px 28px -12px rgba(30, 136, 229, 0.65);
 }
+
+/* ===================================================================
+   هدر نهایی — خالی، فقط یک موج گرادیان: بالا سفید، به‌سمت پایین شفاف
+   (کیف پول از دسترسی سریع خانه و پروفایل در دسترس است)
+=================================================================== */
+header.topbar {
+  height: calc(46px + min(var(--telegram-safe-top, 0px), 12px)) !important;
+  padding: min(var(--telegram-safe-top, 0px), 12px) 14px 0 !important;
+  background: linear-gradient(
+    180deg,
+    #ffffff 0%,
+    rgba(255, 255, 255, 0.72) 42%,
+    rgba(255, 255, 255, 0.28) 74%,
+    rgba(255, 255, 255, 0) 100%
+  ) !important;
+  border-bottom: none !important;
+  pointer-events: none !important; /* هدر خالی است — کلیک‌ها به محتوا برسند */
+}
