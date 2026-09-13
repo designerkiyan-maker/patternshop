@@ -374,37 +374,46 @@ def api_me(auth=Depends(get_verified_user)):
         "admin_role": db.get_admin_role(tg_id),
         "loyalty": loyalty_summary,
     }
-    # عکس پروفایل واقعی از Bot API (getUserProfilePhotos) — امضاشده و منقضی‌شدنی،
-    # چون تگ <img> نمی‌تواند هدر احراز هویت بفرستد.
+    # عکس پروفایل واقعی از Bot API (getUserProfilePhotos) — لینک امضاشده و
+    # «پایدار» (بدون exp) تا کش مرورگر بین باز شدن‌ها کار کند.
     try:
-        import time as _time, hmac as _hmac, hashlib as _hashlib
-        _exp = int(_time.time()) + 86400
+        import hmac as _hmac, hashlib as _hashlib
         _sig = _hmac.new(
             (ADMIN_PANEL_SECRET or BOT_TOKEN).encode(),
-            f"{tg_id}:{_exp}".encode(),
+            str(tg_id).encode(),
             _hashlib.sha256,
         ).hexdigest()
-        payload["avatar_url"] = f"/api/avatar/tg?uid={tg_id}&exp={_exp}&sig={_sig}"
+        payload["avatar_url"] = f"/api/avatar/tg?uid={tg_id}&sig={_sig}"
     except Exception:
         logging.getLogger("miniapp.telegram").exception("ساخت لینک آواتار ناموفق بود.")
     return payload
 
 
+# کش حافظه‌ای عکس پروفایل: هر باز شدن مینی‌اپ دانلود از تلگرام را تکرار نکند
+_avatar_cache = {}  # uid -> {"data": bytes, "ts": float}
+AVATAR_TTL = 6 * 3600  # ۶ ساعت
+
 @app.get("/api/avatar/tg")
-async def api_avatar_tg(uid: int, exp: int, sig: str):
-    """عکس پروفایل واقعی کاربر از Bot API. لینک امضاشده است (HMAC + انقضا) تا
+async def api_avatar_tg(uid: int, sig: str):
+    """عکس پروفایل واقعی کاربر از Bot API. لینک امضاشده است (HMAC) تا
     هر کسی با حدس زدن user_id نتواند عکس بگیرد. اگر کاربر عکس نداشته باشد 404
-    برمی‌گردد و فرانت به حرف اول اسم برمی‌گردد."""
-    import time as _time, hmac as _hmac, hashlib as _hashlib
-    if _time.time() > exp:
-        raise HTTPException(status_code=404, detail="لینک عکس منقضی شده است.")
+    برمی‌گردد و فرانت به حرف اول اسم برمی‌گردد. پاسخ هم در حافظه‌ی سرور (۶ ساعت)
+    و هم در مرورگر (۱ روز) کش می‌شود."""
+    import hmac as _hmac, hashlib as _hashlib, time as _time
     expected = _hmac.new(
         (ADMIN_PANEL_SECRET or BOT_TOKEN).encode(),
-        f"{uid}:{exp}".encode(),
+        str(uid).encode(),
         _hashlib.sha256,
     ).hexdigest()
     if not _hmac.compare_digest(expected, sig or ""):
         raise HTTPException(status_code=403, detail="امضای نامعتبر.")
+    cached = _avatar_cache.get(uid)
+    if cached and _time.time() - cached["ts"] < AVATAR_TTL:
+        return Response(
+            content=cached["data"],
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
     try:
         async with ProxiedClientSession() as session:
             async with session.get(
@@ -426,10 +435,11 @@ async def api_avatar_tg(uid: int, exp: int, sig: str):
         raise HTTPException(status_code=502, detail="دریافت عکس پروفایل ناموفق بود.")
     if not data:
         raise HTTPException(status_code=502, detail="دریافت عکس پروفایل ناموفق بود.")
+    _avatar_cache[uid] = {"data": data, "ts": _time.time()}
     return Response(
         content=data,
         media_type="image/jpeg",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={"Cache-Control": "public, max-age=86400"},
     )
 
 

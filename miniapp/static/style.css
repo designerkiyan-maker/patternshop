@@ -603,7 +603,6 @@ main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px
 }
 .seg-btn.active { background: var(--cyan); color: #06222a; font-weight: 700; }
 
-
 textarea.input { font-family: var(--font-mono); min-height: 90px; }
 
 /* ===================================================================
@@ -787,7 +786,6 @@ html[data-theme="clean-light"] .badge {
   background: rgba(30, 80, 140, 0.06); color: var(--text-muted); border-color: var(--border-soft);
 }
 
-
 html[data-theme="clean-light"] .reels { background: #eef3f8; box-shadow: inset 0 2px 8px rgba(30, 80, 140, 0.08); }
 html[data-theme="clean-light"] .reel { background: #fff; border-color: var(--border-soft); }
 html[data-theme="clean-light"] .spin-cta {
@@ -821,7 +819,6 @@ html[data-theme="clean-light"] #tabbar { background: #ffffff; }
    TELEGRAM MINI APP — SAFE AREA HEADER FIX
    ========================================================= */
 
-
 /* هدر از ناحیه بالای تلگرام عبور نکند */
 
 /* محتوای داخل هدر ارتفاع واقعی داشته باشد */
@@ -832,7 +829,6 @@ html[data-theme="clean-light"] #tabbar { background: #ffffff; }
    TELEGRAM MINI APP — SAFE AREA HEADER FIX
    ========================================================= */
 
-
 /* هدر از ناحیه بالای تلگرام عبور نکند */
 
 /* محتوای داخل هدر ارتفاع واقعی داشته باشد */
@@ -840,7 +836,6 @@ html[data-theme="clean-light"] #tabbar { background: #ffffff; }
 /* فاصله محتوای اصلی از هدر */
 
 /* در حالت دسکتاپ/تلگرام دسکتاپ safe area مزاحم نشود */
-
 
 /* =========================================================
    TELEGRAM MINI APP — FINAL SAFE AREA / HEADER FIX
@@ -859,7 +854,6 @@ html[data-theme="clean-light"] #tabbar { background: #ffffff; }
 
 /* هدر واقعی اپ */
 
-
 /* محتوا از هدر فاصله مناسب داشته باشد */
 
 /* جلوگیری از چسبیدن پایین صفحه */
@@ -867,7 +861,6 @@ html[data-theme="clean-light"] #tabbar { background: #ffffff; }
 body {
   padding-bottom: var(--telegram-safe-bottom);
 }
-
 
 /* =========================================================
    TOAST / NOTIFICATION — ANDROID VISIBILITY FIX
@@ -925,7 +918,6 @@ body {
     -webkit-text-fill-color: #ffffff !important;
   }
 }
-
 
 /* ===================================================================
    Search bar
@@ -1137,22 +1129,6 @@ html[data-theme="clean-light"] .rating-avg {
    ✕ و ··· تلگرام تداخل بصری داشت و ۱۲ بلوک CSS متناقض رویش بود.
    این بلوک عمداً آخر فایل است تا همه‌ی قوانین قبلی را ببلعد.
 =================================================================== */
-header.topbar {
-  position: sticky !important;
-  top: 0 !important;
-  z-index: 1000 !important;
-  display: flex !important;
-  flex-direction: row !important;
-  align-items: center !important;
-  justify-content: center !important; /* وسط ردیف: نه زیر ✕ (چپ) نه زیر ··· (راست) */
-  gap: 10px !important;
-  height: calc(54px + var(--telegram-safe-top, 0px)) !important;
-  min-height: 0 !important;
-  padding: var(--telegram-safe-top, 0px) 14px 0 !important;
-  box-sizing: border-box !important;
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border-soft);
-}
 
 /* ===================================================================
    تریم فضای بالای صفحه — safe-top تلگرام روی بعضی گوشی‌ها بزرگ است
@@ -1313,31 +1289,10 @@ header.topbar {
    هدر نهایی — خالی، فقط یک موج گرادیان: بالا سفید، به‌سمت پایین شفاف
    (کیف پول از دسترسی سریع خانه و پروفایل در دسترس است)
 =================================================================== */
-header.topbar {
-  height: calc(46px + min(var(--telegram-safe-top, 0px), 12px)) !important;
-  padding: min(var(--telegram-safe-top, 0px), 12px) 14px 0 !important;
-  background: linear-gradient(
-    180deg,
-    #ffffff 0%,
-    rgba(255, 255, 255, 0.72) 42%,
-    rgba(255, 255, 255, 0.28) 74%,
-    rgba(255, 255, 255, 0) 100%
-  ) !important;
-  border-bottom: none !important;
-  pointer-events: none !important; /* هدر خالی است — کلیک‌ها به محتوا برسند */
-}
 
 /* ===================================================================
    هدر — گرادیان ملایم آبی‌فام (روی سفیدِ تم روشن دیده می‌شود)
 =================================================================== */
-header.topbar {
-  background: linear-gradient(
-    180deg,
-    #E7F1FC 0%,
-    rgba(231, 241, 252, 0.55) 55%,
-    rgba(231, 241, 252, 0) 100%
-  ) !important;
-}
 
 /* ===================================================================
    تم تاریک — هماهنگ با colorScheme تلگرام (که از سیستم پیروی می‌کند)
@@ -1362,14 +1317,6 @@ html[data-theme="dark"] body { background: var(--bg); color: var(--text); }
 html[data-theme="dark"] .grid-fx { display: none; }
 
 /* هدر تاریک: از تیره به شفاف */
-html[data-theme="dark"] header.topbar {
-  background: linear-gradient(
-    180deg,
-    rgba(14, 22, 33, 0.96) 0%,
-    rgba(14, 22, 33, 0.6) 55%,
-    rgba(14, 22, 33, 0) 100%
-  ) !important;
-}
 
 /* نوار پایین تاریک */
 html[data-theme="dark"] #tabbar { background: #0e1621; border-top-color: rgba(255,255,255,0.07); }
