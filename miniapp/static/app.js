@@ -76,6 +76,8 @@ function gregorianToJalali(gy, gm, gd) {
   return [jy, jm, jd];
 }
 
+const faDigits = (v) => String(v).replace(/[0-9]/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[d]);
+
 function toJalaliStr(value, withTime = false) {
   if (!value) return "-";
   const d = value instanceof Date ? value : new Date(value);
@@ -84,7 +86,7 @@ function toJalaliStr(value, withTime = false) {
   const pad = (n) => String(n).padStart(2, "0");
   let out = `${jy}/${pad(jm)}/${pad(jd)}`;
   if (withTime) out += ` - ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  return out;
+  return faDigits(out);
 }
 
 function notify(message) {
@@ -760,7 +762,7 @@ async function renderProfile() {
 
         <div class="profile-chips">
           ${username ? `<button class="profile-chip" id="copy-username" title="کپی">${plumpyIc("copy")}<span dir="ltr">@${escHtml(username)}</span></button>` : ""}
-          <button class="profile-chip" id="copy-userid" title="کپی">${plumpyIc("copy")}<span>شناسه: ${me.telegram_id}</span></button>
+          <button class="profile-chip" id="copy-userid" title="کپی">${plumpyIc("copy")}<span>شناسه: ${faDigits(me.telegram_id)}</span></button>
         </div>
 
         <div class="profile-info-grid">
@@ -1243,7 +1245,7 @@ async function openProductDetail(productId) {
         </div>
 
         <div class="rating-row">
-          <span class="rating-avg" id="rating-avg-label">★ ${p.rating_avg ?? 0} از ۵ (${p.rating_count ?? 0} نظر)</span>
+          <span class="rating-avg" id="rating-avg-label">★ ${Number(p.rating_avg ?? 0).toLocaleString("fa-IR", { maximumFractionDigits: 1 })} از ۵ (${faDigits(p.rating_count ?? 0)} نظر)</span>
           <div class="star-row" id="my-star-row" title="امتیاز شما">
             ${[1, 2, 3, 4, 5].map((s) => `<span class="star ${s <= (p.my_rating || 0) ? "on" : ""}" data-star="${s}">★</span>`).join("")}
           </div>
@@ -1306,7 +1308,7 @@ async function openProductDetail(productId) {
             p.my_rating = val;
             starRow.querySelectorAll(".star").forEach((s2) => s2.classList.toggle("on", Number(s2.dataset.star) <= val));
             const avgLabel = document.getElementById("rating-avg-label");
-            if (avgLabel) avgLabel.textContent = `★ ${r.avg} از ۵ (${r.count} نظر)`;
+            if (avgLabel) avgLabel.textContent = `★ ${Number(r.avg).toLocaleString("fa-IR", { maximumFractionDigits: 1 })} از ۵ (${faDigits(r.count)} نظر)`;
             tg.HapticFeedback?.notificationOccurred("success");
             notify("⭐ امتیاز شما ثبت شد. ممنون!");
           } catch (e) {
@@ -1414,7 +1416,7 @@ async function openProductDetail(productId) {
       try {
         const data = await api(`/api/products/${p.id}/questions`);
         const questions = Array.isArray(data.questions) ? data.questions : [];
-        let html = '<div class="qa-header">سوالات کاربران (' + questions.length + ')</div>';
+        let html = '<div class="qa-header">سوالات کاربران (' + faDigits(questions.length) + ')</div>';
         html += '<div class="qa-list">';
         if (questions.length === 0) {
           html += '<div class="state-msg" style="margin:8px 0"><span class="ic">💬</span>هنوز سوالی پرسیده نشده است.</div>';
@@ -2088,7 +2090,7 @@ async function renderWishlist() {
     }
 
     content.innerHTML = `
-      <div class="eyebrow">پسندیده‌های من (${items.length})</div>
+      <div class="eyebrow">پسندیده‌های من (${faDigits(items.length)})</div>
       <div class="pattern-grid">
         ${items.map(item => productCardHtml({ ...item, has_purchased: false, is_wishlisted: true })).join('')}
       </div>

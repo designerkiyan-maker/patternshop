@@ -41,7 +41,7 @@
   --fuchsia: #FF6B9D;
 
   --font-body: "Vazirmatn", -apple-system, Tahoma, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "Vazirmatn", monospace;
+  --font-mono: "Vazirmatn", "JetBrains Mono", ui-monospace, monospace;
 
   --radius: 16px;
   --radius-sm: 12px;
