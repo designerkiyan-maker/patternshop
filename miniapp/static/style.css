@@ -1773,3 +1773,13 @@ header.topbar {
   border-radius: 999px;
   font-family: var(--font-body);
 }
+
+/* هدر — گرادیان سفید انتخاب‌شده (بالا مات، ۲۸٪ نیمه‌شفاف، پایین شفاف) */
+header.topbar {
+  background: -webkit-linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.77) 28%, rgba(255, 255, 255, 0) 100%) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.77) 28%, rgba(255, 255, 255, 0) 100%) !important;
+}
+html[data-theme="dark"] header.topbar {
+  background: -webkit-linear-gradient(180deg, rgba(14, 22, 33, 1) 0%, rgba(14, 22, 33, 0.77) 28%, rgba(14, 22, 33, 0) 100%) !important;
+  background: linear-gradient(180deg, rgba(14, 22, 33, 1) 0%, rgba(14, 22, 33, 0.77) 28%, rgba(14, 22, 33, 0) 100%) !important;
+}
