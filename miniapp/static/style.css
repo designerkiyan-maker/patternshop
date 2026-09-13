@@ -1641,3 +1641,135 @@ header.topbar {
   border-bottom: none !important;
   pointer-events: none !important; /* هدر خالی است — کلیک‌ها به محتوا برسند */
 }
+
+/* ===================================================================
+   هدر — گرادیان ملایم آبی‌فام (روی سفیدِ تم روشن دیده می‌شود)
+=================================================================== */
+header.topbar {
+  background: linear-gradient(
+    180deg,
+    #E7F1FC 0%,
+    rgba(231, 241, 252, 0.55) 55%,
+    rgba(231, 241, 252, 0) 100%
+  ) !important;
+}
+
+/* ===================================================================
+   تم تاریک — هماهنگ با colorScheme تلگرام (که از سیستم پیروی می‌کند)
+   data-theme="dark" توسط applyColorScheme در app.js ست می‌شود.
+=================================================================== */
+html[data-theme="dark"] {
+  --bg: #0b1220; --bg2: #0e1621; --bg-elevated: #111b2e;
+  --pink: #1E88E5; --orange: #42A5F5; --cyan: #42A5F5; --violet: #1E88E5;
+  --amber: #ffb74d; --danger: #ff5d7a;
+  --glass: rgba(255, 255, 255, 0.05);
+  --glass-2: rgba(255, 255, 255, 0.08);
+  --glass-brd: rgba(255, 255, 255, 0.12);
+  --border-soft: rgba(255, 255, 255, 0.08);
+  --text: #e8eefc;
+  --text-muted: #8fa0b8;
+  --header-g1: #0b1220; --header-g2: #0e1621; --header-g3: #0b1220; --header-g4: #0e1621;
+  --grid-line: rgba(255, 255, 255, 0.04);
+  --font-disp: var(--font-body);
+  --font-mono: var(--font-body);
+}
+html[data-theme="dark"] body { background: var(--bg); color: var(--text); }
+html[data-theme="dark"] .grid-fx { display: none; }
+
+/* هدر تاریک: از تیره به شفاف */
+html[data-theme="dark"] header.topbar {
+  background: linear-gradient(
+    180deg,
+    rgba(14, 22, 33, 0.96) 0%,
+    rgba(14, 22, 33, 0.6) 55%,
+    rgba(14, 22, 33, 0) 100%
+  ) !important;
+}
+
+/* نوار پایین تاریک */
+html[data-theme="dark"] #tabbar { background: #0e1621; border-top-color: rgba(255,255,255,0.07); }
+html[data-theme="dark"] #tabbar button { color: #7f8ea3; }
+html[data-theme="dark"] #tabbar button .tab-ic { background-color: #7f8ea3; }
+html[data-theme="dark"] #tabbar button.active { color: #42A5F5; }
+html[data-theme="dark"] #tabbar button.active .tab-ic { background-color: #42A5F5; }
+
+/* اجزای پرکاربرد در تم تاریک */
+html[data-theme="dark"] .card,
+html[data-theme="dark"] .stat-card,
+html[data-theme="dark"] .list-row,
+html[data-theme="dark"] .profile-chip,
+html[data-theme="dark"] .join-row,
+html[data-theme="dark"] .search-input,
+html[data-theme="dark"] .qa-textarea {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+html[data-theme="dark"] .profile-chip,
+html[data-theme="dark"] .join-row,
+html[data-theme="dark"] .join-row .plumpy-ic,
+html[data-theme="dark"] .stat-card .stat-ic,
+html[data-theme="dark"] .profile-chip .plumpy-ic,
+html[data-theme="dark"] .list-row-ic .plumpy-ic,
+html[data-theme="dark"] .q-ic .plumpy-ic {
+  color: #42A5F5;
+}
+html[data-theme="dark"] .profile-chip,
+html[data-theme="dark"] .join-row {
+  color: var(--text);
+}
+html[data-theme="dark"] .join-row {
+  background: rgba(66, 165, 245, 0.1);
+  border-color: rgba(66, 165, 245, 0.22);
+}
+html[data-theme="dark"] .profile-avatar {
+  border-color: #0e1621;
+  box-shadow: 0 0 0 3px #42A5F5, 0 14px 28px -12px rgba(66, 165, 245, 0.55);
+}
+html[data-theme="dark"] .stat-num { color: #42A5F5; }
+html[data-theme="dark"] .product-thumb {
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+html[data-theme="dark"] .search-input,
+html[data-theme="dark"] .qa-textarea { color: var(--text); }
+html[data-theme="dark"] .search-input::placeholder,
+html[data-theme="dark"] .qa-textarea::placeholder { color: var(--text-muted); }
+
+/* اصلاحات بازبینی تم تاریک */
+html[data-theme="dark"] {
+  --accent-dim: #42A5F5;
+  --accent-2-dim: #1E88E5;
+}
+html[data-theme="dark"] .btn,
+html[data-theme="dark"] .chip.active,
+html[data-theme="dark"] .chat-bubble.mine,
+html[data-theme="dark"] .chat-bubble.mine .chat-time,
+html[data-theme="dark"] .chat-send-btn {
+  color: #fff;
+  -webkit-text-fill-color: #fff;
+}
+html[data-theme="dark"] .spin-cta {
+  background: radial-gradient(circle at 35% 30%, #64B5F6, var(--pink) 55%, var(--violet));
+}
+/* گرادیان روشن کمی پررنگ‌تر و ماندگارتر */
+header.topbar {
+  background: linear-gradient(
+    180deg,
+    #D9E9FC 0%,
+    rgba(217, 233, 252, 0.6) 60%,
+    rgba(217, 233, 252, 0) 100%
+  ) !important;
+}
+/* بج شمارنده‌ی سبد خرید (قبلاً بدون استایل بود) */
+.tab-badge {
+  position: absolute;
+  top: 2px;
+  inset-inline-end: calc(50% - 22px);
+  background: #FF375F;
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-family: var(--font-body);
+}
