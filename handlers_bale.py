@@ -58,11 +58,23 @@ def _clear(uid: int, bid: int = 0):
     _fsm_data.pop(_sk(bid, uid), None)
 
 def _state_msg_filter(state_name: str, bot_id: int = 0):
-    """Returns a filter matching messages only when user's FSM state equals state_name."""
+    """Returns a filter matching messages only when the user's FSM state equals state_name."""
     class _SF(filters.BaseFilter):
         async def check(self, update):
             return _get_state(update.effective_user.id, bot_id) == state_name
     return _SF()
+
+# ─── Combined media filters (ptb v22 compatibility) ─────────────
+class _PhotoOrDoc(filters.BaseFilter):
+    async def check(self, update):
+        msg = update.effective_message
+        return bool(msg and (msg.photo or msg.document))
+class _NotPhotoOrDoc(filters.BaseFilter):
+    async def check(self, update):
+        msg = update.effective_message
+        return bool(msg and not (msg.photo or msg.document))
+_PHOTO_DOC = _PhotoOrDoc()
+_NOT_PHOTO_DOC = _NotPhotoOrDoc()
 
 # ─── Helpers ─────────────────────────────────────────────────────
 async def _answer(cb: Update, text: str = "", show_alert: bool = False):
@@ -890,9 +902,9 @@ async def make_user_handlers(db: Database, bot_token: str):
         CallbackQueryHandler(_cb_cart_addr_new, pattern="^cart_addr_new$"),
         MessageHandler(_state_msg_filter("waiting_address"), _process_cart_addr),
         CallbackQueryHandler(_cb_cancel_flow, pattern="^cancel_flow$"),
-        MessageHandler(filters.PHOTO | filters.Document, _receive_receipt),
-        MessageHandler(_state_msg_filter("waiting_receipt") & ~filters.PHOTO & ~filters.Document, _receive_receipt_wrong),
-        MessageHandler(filters.PHOTO | filters.Document, _receipt_fallback),
+        MessageHandler(_PHOTO_DOC, _receive_receipt),
+        MessageHandler(_state_msg_filter("waiting_receipt") & _NOT_PHOTO_DOC, _receive_receipt_wrong),
+        MessageHandler(_PHOTO_DOC, _receipt_fallback),
         MessageHandler(filters.TEXT & filters.Regex(f"^{btn_test}$"), _get_test_config),
         MessageHandler(filters.TEXT & filters.Regex(f"^{btn_my_orders}$"), _my_orders),
         CallbackQueryHandler(_cb_mo_back, pattern="^mo_back$"),
@@ -912,8 +924,8 @@ async def make_user_handlers(db: Database, bot_token: str):
         MessageHandler(filters.TEXT & filters.Regex(f"^{btn_wheel}$"), _wheel_of_fortune),
         CallbackQueryHandler(_cb_start_topup, pattern="^start_topup$"),
         MessageHandler(_state_msg_filter("waiting_amount"), _process_topup_amount),
-        MessageHandler(_state_msg_filter("waiting_receipt") & (filters.PHOTO | filters.Document), _receive_topup_receipt),
-        MessageHandler(_state_msg_filter("waiting_receipt") & ~filters.PHOTO & ~filters.Document, _topup_wrong),
+        MessageHandler(_state_msg_filter("waiting_receipt") & _PHOTO_DOC, _receive_topup_receipt),
+        MessageHandler(_state_msg_filter("waiting_receipt") & _NOT_PHOTO_DOC, _topup_wrong),
         MessageHandler(filters.TEXT & filters.Regex(f"^{btn_contact}$"), _contact_start),
         MessageHandler(_state_msg_filter("waiting_message"), _contact_receive),
         CallbackQueryHandler(_cb_mm, pattern="^mm:"),
