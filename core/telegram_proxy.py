@@ -174,7 +174,6 @@ class TelegramFailoverSession(BaseSession):
             timeout=timeout,
             api=api or TelegramAPIServer(
                 base="https://api.telegram.org/bot{token}/{method}",
-                file="https://api.telegram.org/file/bot{token}/{path}",
             ),
         )
 
