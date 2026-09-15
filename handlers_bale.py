@@ -113,7 +113,7 @@ def _receipt_payload(u: Update):
 # Factory — returns list of ptb handlers for one bot instance
 # ===================================================================
 
-async def make_handlers(db: Database, bot_token: str):
+async def make_user_handlers(db: Database, bot_token: str):
     """ساخت لیست handlerهای بات بله — هر بات توکن مستقل handlerهای جداگانه میسازد."""
     BOT_ID = int(bot_token.split(":")[0])
     H = []  # handlers list
