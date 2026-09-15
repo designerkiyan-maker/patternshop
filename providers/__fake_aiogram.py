@@ -794,13 +794,23 @@ class Dispatcher:
         self._message_outer_middlewares.append(mw)
         self._cb_outer_middlewares.append(mw)
 
+    @staticmethod
+    def _make_handler(handler_fn):
+        """Wraps a handler to inject (event, fsm_ctx, bot) regardless of its signature.
+        Handlers may accept 1, 2 or 3 args — we always pass exactly 3."""
+        @functools.wraps(handler_fn)
+        async def _wrapped(event, fsm_ctx, bot):
+            return await handler_fn(event, fsm_ctx, bot)
+        return _wrapped
+
     async def _run_mws(self, mws, handler_fn, event, update):
         idx = [0]
         fsm_ctx = update._fsm_key if hasattr(update, "_fsm_key") else None
         bot = self._bot
+        wrapped = self._make_handler(handler_fn)
         async def _inner():
             if idx[0] >= len(mws):
-                return await handler_fn(event, fsm_ctx, bot)
+                return await wrapped(event, fsm_ctx, bot)
             mw = mws[idx[0]]
             idx[0] += 1
             try:
@@ -812,7 +822,7 @@ class Dispatcher:
                 return result
             except Exception as e:
                 logger.error("Middleware error: %s", e, exc_info=True)
-                return await handler_fn(event, fsm_ctx, bot)
+                return await wrapped(event, fsm_ctx, bot)
         return await _inner()
 
     async def _dispatch(self, update: Update):
