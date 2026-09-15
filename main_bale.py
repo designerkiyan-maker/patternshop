@@ -174,7 +174,7 @@ def _mk_reply_markup(markup):
 async def _dispatch_loop(bot_wrapper, owner_id: int):
     from database import Database
     from aiogram import Dispatcher
-    from aiogram.fsm.storage.memory import MemoryStorage
+    from providers.__fake_aiogram import MemoryStorage  # Bale-compatible FSM storage
     from fsm_storage import SQLiteStorage
     from handlers_user import create_user_router
     from handlers_admin import create_admin_router
