@@ -984,7 +984,6 @@ class MemoryStorage:
 # ===================================================================
 
 Bot = BotWrapper          # from aiogram import Bot
-CommandStart = Command    # alias: Command(["start"]) returns the same filter
 TelegramObject = object   # base type placeholder
 FSInputFile = str         # simple alias (Bale handles file uploads natively)
 
