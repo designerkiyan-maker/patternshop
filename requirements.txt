@@ -6,3 +6,4 @@ python-multipart>=0.0.9
 aiohttp>=3.9
 pywebpush>=2.0.0
 psutil>=5.9
+python-telegram-bot>=22.0  # برای اجرای بات بله (main_bale.py)

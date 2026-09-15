@@ -20,6 +20,10 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID_RAW = os.getenv("OWNER_ID")
 
+# توکن بات بله — اختیاری؛ اگر ست نشود main_bale.py اجرا نمیشود ولی بات تلگرام بدون مشکل کار میکند
+BALE_TOKEN = os.getenv("BALE_TOKEN", "")
+BALE_OWNER_ID_RAW = os.getenv("BALE_OWNER_ID", OWNER_ID_RAW)
+
 if not BOT_TOKEN:
     raise RuntimeError(
         "BOT_TOKEN تنظیم نشده است. یک فایل .env در کنار main.py بساز و مقدار "
