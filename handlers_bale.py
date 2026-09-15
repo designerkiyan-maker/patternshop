@@ -13,7 +13,8 @@ import logging
 import secrets
 from typing import Any
 
-from telegram import Update, Bot, InlineKeyboardMarkup, ParseMode
+from telegram import Update, Bot, InlineKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 import config as cfg
