@@ -337,7 +337,7 @@ class CallbackQuery(_Proxy):
 
 # --- Update ---
 class Update:
-    __slots__ = ("update_id", "message", "edited_message", "callback_query", "_raw")
+    __slots__ = ("update_id", "message", "edited_message", "callback_query", "_raw", "_fsm_key")
 
     def __init__(self, raw_update):
         self._raw = raw_update
@@ -779,6 +779,7 @@ class Dispatcher:
     def callback_query(self):
         return self._router
 
+    @property
     def errors(self):
         class ErrRegistry:
             def __init__(inner_self):

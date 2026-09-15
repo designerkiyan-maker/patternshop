@@ -14,6 +14,7 @@ import asyncio
 import logging
 import os
 import sys
+import time
 from logging.handlers import RotatingFileHandler
 
 # ─── مسیر پروژه را اول از همه به sys.path اضافه میکنیم ───────────────
@@ -44,8 +45,9 @@ class BotWrapper:
 
     def __init__(self, token: str):
         self.token = token
-        self._base_url = f"{BALE_API_BASE}/{token}"
-        self._base_file_url = f"{BALE_FILE_BASE}/{token}"
+        # ptb خودش /{token} را به base_url میچسباند → https://tapi.bale.ai/{token}/method
+        self._base_url = f"https://tapi.bale.ai/"
+        self._base_file_url = f"https://tapi.bale.ai/"
         self._ptb = None
 
     def _get_ptb(self):
@@ -151,7 +153,27 @@ async def _dispatch_loop(bot_wrapper, owner_id: int):
     from handlers_admin import create_admin_router
     from blocked_user import BlockedUserMiddleware as _BUM
     from force_join import ForceJoinMiddleware as _FJM
-    from bot_manager import AdminPresenceMiddleware as _APM
+
+    # AdminPresenceMiddleware — نسخه سادهشده بدون وابستگی به bot_manager
+    class _AdminPresenceMiddleware:
+        PRESENCE_WRITE_INTERVAL = 20  # ثانیه
+        def __init__(self, db):
+            self.db = db
+            self._last_write = {}
+        async def __call__(self, handler, event, data: dict):
+            user = data.get("event_from_user")
+            if user is not None and self.db.is_admin(user.id):
+                now = time.monotonic()
+                last = self._last_write.get(user.id, 0.0)
+                if now - last >= self.PRESENCE_WRITE_INTERVAL:
+                    self._last_write[user.id] = now
+                    try:
+                        self.db.touch_admin_presence(user.id)
+                    except Exception:
+                        pass
+            return await handler(event, data)
+
+    _APM = _AdminPresenceMiddleware
 
     db_path = os.getenv("BALE_DB_PATH") or DB_PATH
     db_obj = Database(db_path)
@@ -171,12 +193,10 @@ async def _dispatch_loop(bot_wrapper, owner_id: int):
     blocked_mw = _BUM(db_obj)
     presence_mw = _APM(db_obj)
     force_join_mw = _FJM(db_obj)
-    dp.message.outer_middleware(blocked_mw)
-    dp.callback_query.outer_middleware(blocked_mw)
-    dp.message.outer_middleware(presence_mw)
-    dp.callback_query.outer_middleware(presence_mw)
-    dp.message.outer_middleware(force_join_mw)
-    dp.callback_query.outer_middleware(force_join_mw)
+    # Middleware روی Dispatcher ثبت میشود نه Router
+    dp.outer_middleware(blocked_mw)
+    dp.outer_middleware(presence_mw)
+    dp.outer_middleware(force_join_mw)
 
     @dp.errors.register
     async def error_handler(error, update):
@@ -216,11 +236,8 @@ async def _dispatch_loop(bot_wrapper, owner_id: int):
 
 def _fake_update(raw):
     """تبدیل ptb Update به fake aiogram Update."""
-    from aiogram.types import Update as FakeUpdate
-    from providers.__fake_aiogram import Message as FakeMessage, CallbackQuery as FakeCBQ
-    msg = FakeMessage(raw.message) if hasattr(raw, "message") and raw.message else None
-    cb = FakeCBQ(raw.callback_query) if hasattr(raw, "callback_query") and raw.callback_query else None
-    return FakeUpdate(msg=msg, callback_query=cb)
+    from providers.__fake_aiogram import Update as FakeUpdate
+    return FakeUpdate(raw)
 
 
 # ===================================================================
@@ -238,11 +255,9 @@ async def main():
     miniapp_url = os.getenv("BALE_MINIAPP_URL") or MINIAPP_URL
 
     logger.info("=" * 50)
-    logger.info("بات بله PatternShop در حال راهاندازی…")
+    logger.info("بات بله PatternShop در حال راهاندازی...")
     logger.info("  TOKEN  : %s…", token[:10])
     logger.info("  OWNER  : %s", owner_id)
-    logger.info("  API    : %s/%s…", BALE_API_BASE, token[:10])
-    logger.info("  File   : %s/%s…", BALE_FILE_BASE, token[:10])
     if miniapp_url:
         logger.info("  MiniApp: %s", miniapp_url)
     logger.info("=" * 50)

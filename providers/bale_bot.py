@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # ثابتها
 # ---------------------------------------------------------------------------
-BALE_API_BASE = "https://tapi.bale.ai/bot"
-BALE_FILE_BASE = "https://tapi.bale.ai/file/bot"
+BALE_API_BASE = "https://tapi.bale.ai/"
+BALE_FILE_BASE = "https://tapi.bale.ai/"
 
 # URL منوی شیشهای باله برای منوی اصلی (در صورت تنظیم بودن).
 # اگر خالی باشد، دکمهی منو نشان داده نمیشود.
