@@ -22,6 +22,33 @@ _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+# ─── fake-aiogram shim: قبل از هر import aiogram، ماژول‌های ساختگی را در sys.modules قرار میدهیم
+# تا handlers_user/handlers_admin بدون تغییر به aiogram 3.x فکر کنند ولی در واقعیت
+# از python-telegram-bot v22 روی tapi.bale.ai استفاده کنند.
+FAKE_AIOPATH = os.path.join(_PROJECT_ROOT, 'providers')
+_fake_modules = {
+    'aiogram': FAKE_AIOPATH,
+    'aiogram.types': FAKE_AIOPATH + '/__fake_aiogram',
+    'aiogram.filters': FAKE_AIOPATH + '/__fake_aiogram',
+    'aiogram.fsm.context': FAKE_AIOPATH + '/__fake_aiogram',
+    'aiogram.fsm.state': FAKE_AIOPATH + '/__fake_aiogram',
+    'aiogram.fsm.storage.memory': FAKE_AIOPATH + '/__fake_aiogram',
+    'aiogram.fsm.storage.base': FAKE_AIOPATH + '/__fake_aiogram',
+    'aiogram.client.default': FAKE_AIOPATH + '/__fake_aiogram',
+    'aiogram.enums': FAKE_AIOPATH + '/__fake_aiogram',
+    'aiogram.exceptions': FAKE_AIOPATH + '/__fake_aiogram',
+}
+for _mod_name, _mod_path in _fake_modules.items():
+    if _mod_name not in sys.modules:
+        import importlib.util, types
+        spec = importlib.util.spec_from_file_location(
+            _mod_name,
+            os.path.join(_PROJECT_ROOT, 'providers', '__fake_aiogram.py'),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        sys.modules[_mod_name] = mod
+
 from config import OWNER_ID, DB_PATH, MINIAPP_URL, BALE_TOKEN, BALE_OWNER_ID_RAW
 from providers.bale_bot import BALE_API_BASE, BALE_FILE_BASE
 

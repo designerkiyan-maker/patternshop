@@ -1,1 +1,0 @@
-from providers.__fake_aiogram import MemoryStorage
