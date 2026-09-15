@@ -57,6 +57,13 @@ def _clear(uid: int, bid: int = 0):
     _fsm_state.pop(_sk(bid, uid), None)
     _fsm_data.pop(_sk(bid, uid), None)
 
+def _state_msg_filter(state_name: str, bot_id: int = 0):
+    """Returns a filter matching messages only when user's FSM state equals state_name."""
+    class _SF(filters.BaseFilter):
+        async def check(self, update):
+            return _get_state(update.effective_user.id, bot_id) == state_name
+    return _SF()
+
 # ─── Helpers ─────────────────────────────────────────────────────
 async def _answer(cb: Update, text: str = "", show_alert: bool = False):
     await cb.callback_query.answer(text=text, show_alert=show_alert)
@@ -106,7 +113,7 @@ def _receipt_payload(u: Update):
 # Factory — returns list of ptb handlers for one bot instance
 # ===================================================================
 
-def make_handlers(db: Database, bot_token: str):
+async def make_handlers(db: Database, bot_token: str):
     """ساخت لیست handlerهای بات بله — هر بات توکن مستقل handlerهای جداگانه میسازد."""
     BOT_ID = int(bot_token.split(":")[0])
     H = []  # handlers list
@@ -871,7 +878,7 @@ def make_handlers(db: Database, bot_token: str):
         CallbackQueryHandler(_cb_product, pattern="^prod:"),
         CallbackQueryHandler(_cb_noop, pattern="^noop$"),
         CallbackQueryHandler(_cb_enter_code, pattern="^enter_code:"),
-        MessageHandler(filters.StateFilter([DiscountEntry.waiting_code]), _process_disc_code),
+        MessageHandler(_state_msg_filter("waiting_code"), _process_disc_code),
         CallbackQueryHandler(_cb_buy_start, pattern="^buy_start:"),
         CallbackQueryHandler(_cb_cart_show, pattern="^cart_show$"),
         CallbackQueryHandler(_cb_cart_qty, pattern="^(?:cart_dec|cart_inc):"),
@@ -881,10 +888,10 @@ def make_handlers(db: Database, bot_token: str):
         CallbackQueryHandler(_cb_cart_ship, pattern="^cart_ship:"),
         CallbackQueryHandler(_cb_cart_addr, pattern="^cart_addr:"),
         CallbackQueryHandler(_cb_cart_addr_new, pattern="^cart_addr_new$"),
-        MessageHandler(filters.StateFilter([CartFlow.waiting_address]), _process_cart_addr),
+        MessageHandler(_state_msg_filter("waiting_address"), _process_cart_addr),
         CallbackQueryHandler(_cb_cancel_flow, pattern="^cancel_flow$"),
         MessageHandler(filters.PHOTO | filters.DOCUMENT, _receive_receipt),
-        MessageHandler(filters.StateFilter([BuyFlow.waiting_receipt]) & ~filters.PHOTO & ~filters.DOCUMENT, _receive_receipt_wrong),
+        MessageHandler(_state_msg_filter("waiting_receipt") & ~filters.PHOTO & ~filters.DOCUMENT, _receive_receipt_wrong),
         MessageHandler(filters.PHOTO | filters.DOCUMENT, _receipt_fallback),
         MessageHandler(filters.TEXT & filters.Regex(f"^{btn_test}$"), _get_test_config),
         MessageHandler(filters.TEXT & filters.Regex(f"^{btn_my_orders}$"), _my_orders),
@@ -900,15 +907,15 @@ def make_handlers(db: Database, bot_token: str):
         CallbackQueryHandler(_cb_loy_back, pattern="^loy_back$"),
         CallbackQueryHandler(_cb_loy_rules, pattern="^loy_rules$"),
         CallbackQueryHandler(_cb_loy_redeem, pattern="^loy_redeem$"),
-        MessageHandler(filters.StateFilter([LoyaltyRedeem.waiting_points]), _process_loy_redeem),
+        MessageHandler(_state_msg_filter("waiting_points"), _process_loy_redeem),
         CallbackQueryHandler(_cb_loy_redeem_ok, pattern="^loy_redeem_ok:"),
         MessageHandler(filters.TEXT & filters.Regex(f"^{btn_wheel}$"), _wheel_of_fortune),
         CallbackQueryHandler(_cb_start_topup, pattern="^start_topup$"),
-        MessageHandler(filters.StateFilter([WalletTopup.waiting_amount]), _process_topup_amount),
-        MessageHandler(filters.StateFilter([WalletTopup.waiting_receipt]) & (filters.PHOTO | filters.DOCUMENT), _receive_topup_receipt),
-        MessageHandler(filters.StateFilter([WalletTopup.waiting_receipt]) & ~filters.PHOTO & ~filters.DOCUMENT, _topup_wrong),
+        MessageHandler(_state_msg_filter("waiting_amount"), _process_topup_amount),
+        MessageHandler(_state_msg_filter("waiting_receipt") & (filters.PHOTO | filters.DOCUMENT), _receive_topup_receipt),
+        MessageHandler(_state_msg_filter("waiting_receipt") & ~filters.PHOTO & ~filters.DOCUMENT, _topup_wrong),
         MessageHandler(filters.TEXT & filters.Regex(f"^{btn_contact}$"), _contact_start),
-        MessageHandler(filters.StateFilter([ContactFlow.waiting_message]), _contact_receive),
+        MessageHandler(_state_msg_filter("waiting_message"), _contact_receive),
         CallbackQueryHandler(_cb_mm, pattern="^mm:"),
         MessageHandler(filters.TEXT & ~filters.COMMAND, _unknown_text),
     ]
@@ -919,7 +926,7 @@ def make_handlers(db: Database, bot_token: str):
 # Admin handlers (same patterns, adapted)
 # ===================================================================
 
-def make_admin_handlers(db: Database, bot_token: str):
+async def make_admin_handlers(db: Database, bot_token: str):
     BOT_ID = int(bot_token.split(":")[0])
     H = []
 
@@ -1686,24 +1693,24 @@ def make_admin_handlers(db: Database, bot_token: str):
         CallbackQueryHandler(_cb_cat_toggle, pattern="^adm_cat_toggle:"),
         CallbackQueryHandler(_cb_cat_del, pattern="^adm_cat_del:"),
         CallbackQueryHandler(_cb_cat_add, pattern="^adm_cat_add$"),
-        MessageHandler("adm_add_cat", _process_add_cat),
+        MessageHandler(_state_msg_filter("adm_add_cat", BOT_ID), _process_add_cat),
         CallbackQueryHandler(_cb_admin_products, pattern="^adm_products$"),
         CallbackQueryHandler(_cb_prod_cat, pattern="^adm_prod_cat:"),
         CallbackQueryHandler(_cb_prod_toggle, pattern="^adm_prod_toggle:"),
         CallbackQueryHandler(_cb_prod_del, pattern="^adm_prod_del:"),
         CallbackQueryHandler(_cb_prod_add, pattern="^adm_prod_add$"),
         CallbackQueryHandler(_cb_pick_newprod_cat, pattern="^adm_newprod_cat:"),
-        MessageHandler("adm_newprod_name", _process_newprod_name),
-        MessageHandler("adm_newprod_price", _process_newprod_price),
-        MessageHandler("adm_newprod_desc", _process_newprod_desc),
-        MessageHandler("adm_newprod_preview", _process_newprod_preview),
-        MessageHandler("adm_newprod_files", _process_newprod_files),
+        MessageHandler(_state_msg_filter("adm_newprod_name", BOT_ID), _process_newprod_name),
+        MessageHandler(_state_msg_filter("adm_newprod_price", BOT_ID), _process_newprod_price),
+        MessageHandler(_state_msg_filter("adm_newprod_desc", BOT_ID), _process_newprod_desc),
+        MessageHandler(_state_msg_filter("adm_newprod_preview", BOT_ID), _process_newprod_preview),
+        MessageHandler(_state_msg_filter("adm_newprod_files", BOT_ID), _process_newprod_files),
         CallbackQueryHandler(_cb_newprod_files_done, pattern="^adm_files_done$"),
         CallbackQueryHandler(_cb_prod_files, pattern="^adm_product_files$"),
         CallbackQueryHandler(_cb_file_pick, pattern="^adm_file_pick:"),
         CallbackQueryHandler(_cb_file_del, pattern="^adm_file_del:"),
         CallbackQueryHandler(_cb_file_add, pattern="^adm_file_add:"),
-        MessageHandler("adm_prod_files_waiting", _process_prod_files),
+        MessageHandler(_state_msg_filter("adm_prod_files_waiting", BOT_ID), _process_prod_files),
         CallbackQueryHandler(_cb_prod_files_done, pattern="^adm_files_done$"),
         CallbackQueryHandler(_cb_pending_orders, pattern="^adm_pending_orders$"),
         CallbackQueryHandler(_cb_view_order, pattern="^view_order:"),
@@ -1717,39 +1724,39 @@ def make_admin_handlers(db: Database, bot_token: str):
         CallbackQueryHandler(_cb_disc_toggle, pattern="^adm_disc_toggle:"),
         CallbackQueryHandler(_cb_disc_del, pattern="^adm_disc_del:"),
         CallbackQueryHandler(_cb_disc_add, pattern="^adm_disc_add$"),
-        MessageHandler("adm_disc_code", _process_disc_code),
-        MessageHandler("adm_disc_tv", _process_disc_tv),
-        MessageHandler("adm_disc_mu", _process_disc_mu),
+        MessageHandler(_state_msg_filter("adm_disc_code", BOT_ID), _process_disc_code),
+        MessageHandler(_state_msg_filter("adm_disc_tv", BOT_ID), _process_disc_tv),
+        MessageHandler(_state_msg_filter("adm_disc_mu", BOT_ID), _process_disc_mu),
         CallbackQueryHandler(_cb_forcejoin_menu, pattern="^adm_forcejoin_menu$"),
         CallbackQueryHandler(_cb_forcejoin_toggle, pattern="^adm_forcejoin_toggle$"),
         CallbackQueryHandler(_cb_forcejoin_set_channel, pattern="^adm_forcejoin_set_channel$"),
-        MessageHandler("adm_forcejoin_ch", _process_forcejoin_ch),
+        MessageHandler(_state_msg_filter("adm_forcejoin_ch", BOT_ID), _process_forcejoin_ch),
         CallbackQueryHandler(_cb_ref_settings, pattern="^adm_referral_settings$"),
         CallbackQueryHandler(_cb_ref_toggle, pattern="^adm_referral_toggle$"),
         CallbackQueryHandler(_cb_ref_percent_edit, pattern="^adm_referral_percent_edit$"),
-        MessageHandler("adm_ref_pct", _process_ref_percent),
+        MessageHandler(_state_msg_filter("adm_ref_pct", BOT_ID), _process_ref_percent),
         CallbackQueryHandler(_cb_ref_comm_max_edit, pattern="^adm_referral_commission_max_edit$"),
-        MessageHandler("adm_ref_cmx", _process_ref_comm_max),
+        MessageHandler(_state_msg_filter("adm_ref_cmx", BOT_ID), _process_ref_comm_max),
         CallbackQueryHandler(_cb_ref_fc_toggle, pattern="^adm_referral_freeconfig_toggle$"),
         CallbackQueryHandler(_cb_ref_fc_thresh_edit, pattern="^adm_referral_freeconfig_threshold_edit$"),
-        MessageHandler("adm_ref_fct", _process_ref_fc_thresh),
+        MessageHandler(_state_msg_filter("adm_ref_fct", BOT_ID), _process_ref_fc_thresh),
         CallbackQueryHandler(_cb_ref_fc_product, pattern="^adm_referral_freeconfig_product$"),
         CallbackQueryHandler(_cb_ref_fc_setprod, pattern="^adm_referral_freeconfig_setprod:"),
         CallbackQueryHandler(_cb_ref_ib_toggle, pattern="^adm_referral_invitebonus_toggle$"),
         CallbackQueryHandler(_cb_ref_ib_amt_edit, pattern="^adm_referral_invitebonus_amount_edit$"),
-        MessageHandler("adm_ref_iba", _process_ref_ib_amt),
+        MessageHandler(_state_msg_filter("adm_ref_iba", BOT_ID), _process_ref_ib_amt),
         CallbackQueryHandler(_cb_ref_ib_max_edit, pattern="^adm_referral_invitebonus_max_edit$"),
-        MessageHandler("adm_ref_ibmx", _process_ref_ib_max),
+        MessageHandler(_state_msg_filter("adm_ref_ibmx", BOT_ID), _process_ref_ib_max),
         CallbackQueryHandler(_cb_wheel_settings, pattern="^adm_wheel_settings$"),
         CallbackQueryHandler(_cb_wheel_toggle, pattern="^adm_wheel_toggle$"),
         CallbackQueryHandler(_cb_wheel_edit_percent, pattern="^adm_wheel_edit_percent$"),
-        MessageHandler("adm_wheel_wp", _process_wheel_percent),
+        MessageHandler(_state_msg_filter("adm_wheel_wp", BOT_ID), _process_wheel_percent),
         CallbackQueryHandler(_cb_wheel_edit_prizes, pattern="^adm_wheel_edit_prizes$"),
-        MessageHandler("adm_wheel_wpz", _process_wheel_prizes),
+        MessageHandler(_state_msg_filter("adm_wheel_wpz", BOT_ID), _process_wheel_prizes),
         CallbackQueryHandler(_cb_wheel_edit_expiry, pattern="^adm_wheel_edit_expiry$"),
-        MessageHandler("adm_wheel_wex", _process_wheel_expiry),
+        MessageHandler(_state_msg_filter("adm_wheel_wex", BOT_ID), _process_wheel_expiry),
         CallbackQueryHandler(_cb_wheel_edit_cooldown, pattern="^adm_wheel_edit_cooldown$"),
-        MessageHandler("adm_wheel_wcd", _process_wheel_cooldown),
+        MessageHandler(_state_msg_filter("adm_wheel_wcd", BOT_ID), _process_wheel_cooldown),
         CommandHandler("admin", _cmd_admin),
         CommandHandler("cancel", _cmd_cancel),
     ]

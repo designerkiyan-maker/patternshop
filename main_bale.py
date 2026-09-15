@@ -58,9 +58,9 @@ async def main():
     db.init_db(owner_id=owner_id)
 
     # نصب handlerها
-    for h in make_user_handlers(db, token):
+    for h in await make_user_handlers(db, token):
         app.add_handler(h)
-    for h in make_admin_handlers(db, token):
+    for h in await make_admin_handlers(db, token):
         app.add_handler(h)
     app.add_error_handler(_error_handler)
 
