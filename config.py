@@ -15,11 +15,11 @@ import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 from dotenv import load_dotenv
 
-# تلاش اول: repo/.env (برای اجرای محلی / pip install)
-# تلاش دوم: ../.env (برای نصب systemd با EnvironmentFile در /opt/patternshop/.env)
+# تلاش اول: ../.env (برای نصب systemd — EnvironmentFile=/opt/patternshop/.env)
+# تلاش دوم: ./ .env (برای اجرای محلی / pip install)
 _load_paths = [
-    os.path.join(BASE_DIR, ".env"),
     os.path.join(BASE_DIR, "..", ".env"),
+    os.path.join(BASE_DIR, ".env"),
 ]
 for _p in _load_paths:
     if os.path.isfile(_p):
