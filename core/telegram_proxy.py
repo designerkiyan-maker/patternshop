@@ -182,9 +182,9 @@ class TelegramFailoverSession(BaseSession):
     async def make_request(
         self,
         bot,
-        method: TelegramMethod[TelegramType],
+        method: _TM,  # type: ignore[assignment]
         timeout: int | None = None,
-    ) -> TelegramType:
+    ) -> _TT:  # type: ignore[assignment]
 
         session = await self._ensure_session()
 
