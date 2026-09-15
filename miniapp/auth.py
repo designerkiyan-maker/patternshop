@@ -14,7 +14,7 @@ logger = logging.getLogger("miniapp.auth")
 
 
 def validate_init_data(init_data: str, bot_token: str, max_age_seconds: int = 86400):
-    """اگر معتبر باشد، دیکشنری پارس‌شده (شامل user) را برمی‌گرداند؛ وگرنه None."""
+    """اگر معتبر باشد، دیکشنری پارسشده (شامل user) را برمیگرداند؛ وگرنه None."""
     if not init_data:
         logger.warning("initData خالی است.")
         return None
@@ -51,3 +51,24 @@ def validate_init_data(init_data: str, bot_token: str, max_age_seconds: int = 86
     if "user" in pairs:
         pairs["user"] = json.loads(pairs["user"])
     return pairs
+
+
+def validate_init_data_any(init_data: str, tokens: list[str], max_age_seconds: int = 86400):
+    """نسخهی چندتوکنی: تا زمانی که یکی از توکنها initData را تأیید نکند، ادامه میدهد.
+
+    مناسب برای سناریوهایی که یک Mini App همزمان روی تلگرام و بله کار میکند
+    (هر کدام توکن BOT_TOKEN / BALE_TOKEN جداگانه دارند).
+    باز میگرداند: (parsed_dict, matched_token_label) یا (None, None).
+    """
+    if not init_data or not tokens:
+        return None, None
+    for token in tokens:
+        if not token:
+            continue
+        result = validate_init_data(init_data, token, max_age_seconds)
+        if result is not None:
+            label = token[:8] + "..." + token[-4:]
+            logger.info("initData با توکن %s تأیید شد.", label)
+            return result, label
+    logger.warning("initData با هیچکدام از %d توکن تأیید نشد.", len(tokens))
+    return None, None

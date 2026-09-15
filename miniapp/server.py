@@ -35,9 +35,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("miniapp")
 
 from config import (BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, TELEGRAM_PROXY,
-                    MINIAPP_URL, ADMIN_PANEL_SECRET)
+                    MINIAPP_URL, ADMIN_PANEL_SECRET, BALE_TOKEN)
 from database import Database
-from miniapp.auth import validate_init_data
+from miniapp.auth import validate_init_data, validate_init_data_any
 from core.telegram_proxy import ProxiedClientSession
 import loyalty
 from services import cart as cart_svc
@@ -203,13 +203,13 @@ def get_verified_user(x_init_data: str = Header(...)):
     قبلاً /start را در بات زده باشد. بدون این کار، پیام‌های چت زنده/تیکت چنین
     کاربری در دیتابیس ثبت می‌شد ولی چون ردیفی در users نداشت، سمت ادمین با
     خطای «کاربر یافت نشد» مواجه می‌شد."""
-    result = validate_init_data(x_init_data, BOT_TOKEN)
+    # سعی اول: توکن تلگرام | سعی دوم: توکن بله
+    _tokens = [t for t in (BOT_TOKEN, BALE_TOKEN) if t]
+    result, matched = validate_init_data_any(x_init_data, _tokens)
     if not result:
         logger.warning(
-            "initData validate failed: token=%s...%s data_len=%d",
-            BOT_TOKEN[:6] if BOT_TOKEN else "NONE",
-            BOT_TOKEN[-4:] if BOT_TOKEN and len(BOT_TOKEN) > 4 else "NONE",
-            len(x_init_data),
+            "initData validate failed: data_len=%d tokens_tried=%d",
+            len(x_init_data), len(_tokens),
         )
         raise HTTPException(status_code=401, detail="initData نامعتبر است.")
     if "user" not in result:
