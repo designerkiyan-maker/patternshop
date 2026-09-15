@@ -977,3 +977,33 @@ class MemoryStorage:
         return self._data.get(key, {})
     async def close(self):
         pass
+
+
+# ===================================================================
+# Final re-export aliases (must be last for `from aiogram import X` to work)
+# ===================================================================
+
+Bot = BotWrapper          # from aiogram import Bot
+CommandStart = Command    # alias: Command(["start"]) returns the same filter
+TelegramObject = object   # base type placeholder
+FSInputFile = str         # simple alias (Bale handles file uploads natively)
+
+# Dummy providers for unused Telegram-specific symbols
+class DefaultBotProperties:
+    parse_mode: str = "HTML"
+    protect_content: bool = False
+    link_preview_is_disabled: bool = False
+    allow_sending_without_reply: bool = False
+
+class ParseMode:
+    HTML = "HTML"
+    MARKDOWN = "Markdown"
+    MARKDOWNV2 = "MarkdownV2"
+
+# ErrorEvent used for Telegram bot global error handler; Bale bot ignores it
+class ErrorEvent:
+    """Fake ErrorEvent type annotation holder."""
+    def __init__(self, update=None):
+        self.update = update
+    def __repr__(self):
+        return "ErrorEvent"
