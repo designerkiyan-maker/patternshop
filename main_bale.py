@@ -218,6 +218,15 @@ async def _dispatch_loop(bot_wrapper, owner_id: int):
                 for raw_upd in updates:
                     update = _fake_update(raw_upd)
                     offset = max(offset, raw_upd.update_id) + 1
+                    msg = update.effective_message
+                    logger.info(
+                        "آپدیت #%s | msg=%s text=%r chat=%s user=%s",
+                        update.update_id,
+                        bool(msg),
+                        (msg.text or "")[:60] if msg else None,
+                        msg.chat.id if msg else None,
+                        msg.from_user.id if msg else None,
+                    )
                     await dp._dispatch(update)
             else:
                 await asyncio.sleep(0.5)
