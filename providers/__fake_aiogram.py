@@ -144,6 +144,35 @@ class BotWrapper:
     async def export_chat_invite_link(self, chat_id, **kwargs):
         return await self._call("export_chat_invite_link", chat_id=int(chat_id), **kwargs)
 
+    async def get_chat_member(self, chat_id, user_id, **kwargs):
+        """میانبر برای force_join middleware — وضعیت عضویت کاربر در چت/کانال."""
+        from telegram import ChatMember
+        result = await self._bot.get_chat_member(chat_id=int(chat_id), user_id=int(user_id))
+        # برگرداندن یک شیء با خاصیت status (مشابه aiogram)
+        class _Member:
+            def __init__(self, m):
+                self.status = m.status
+                self.user = m.user
+        return _Member(result)
+
+    async def edit_message_caption(self, caption, chat_id=None, message_id=None,
+                                    inline_message_id=None, reply_markup=None, **kwargs):
+        args = {"caption": caption}
+        if chat_id is not None: args["chat_id"] = int(chat_id)
+        if message_id is not None: args["message_id"] = int(message_id)
+        if inline_message_id: args["inline_message_id"] = inline_message_id
+        if reply_markup: args["reply_markup"] = _mk(reply_markup)
+        return await self._call("edit_message_caption", **args)
+
+    async def answer_callback_query(self, text="", show_alert=False, url="",
+                                     cache_time=0, **kwargs):
+        """معادل call.answer() — از طریق bot.call_answer."""
+        try:
+            await self._bot.answer_callback_query(callback_query_id=kwargs.get("callback_query_id"),
+                                                   text=text, show_alert=show_alert, url=url)
+        except Exception:
+            pass
+
     # --- Helper aliases ---
     @functools.cached_property
     def loop(self):
