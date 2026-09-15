@@ -765,6 +765,7 @@ class Dispatcher:
         self._message_outer_middlewares: List[Callable] = []
         self._cb_outer_middlewares: List[Callable] = []
         self._error_handlers: List[Callable] = []
+        self._bot = None  # Set by main_bale.py before starting polling
 
     @property
     def router(self):
@@ -795,9 +796,11 @@ class Dispatcher:
 
     async def _run_mws(self, mws, handler_fn, event, update):
         idx = [0]
+        fsm_ctx = update._fsm_key if hasattr(update, "_fsm_key") else None
+        bot = self._bot
         async def _inner():
             if idx[0] >= len(mws):
-                return await handler_fn(event, update)
+                return await handler_fn(event, fsm_ctx, bot)
             mw = mws[idx[0]]
             idx[0] += 1
             try:
@@ -809,7 +812,7 @@ class Dispatcher:
                 return result
             except Exception as e:
                 logger.error("Middleware error: %s", e, exc_info=True)
-                return await handler_fn(event, update)
+                return await handler_fn(event, fsm_ctx, bot)
         return await _inner()
 
     async def _dispatch(self, update: Update):
