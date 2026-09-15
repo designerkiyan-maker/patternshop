@@ -187,6 +187,7 @@ async def _dispatch_loop(bot_wrapper, owner_id: int):
         fsm_storage = MemoryStorage()
 
     dp = Dispatcher(storage=fsm_storage)
+    dp._bot = bot_wrapper  # تزریق bot به روترها
     dp.include_router(create_user_router(db_obj))
     dp.include_router(create_admin_router(db_obj))
 
