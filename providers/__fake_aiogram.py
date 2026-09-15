@@ -955,3 +955,25 @@ def set_global_dispatcher(dp: Dispatcher) -> None:
 
 def get_global_dispatcher() -> Dispatcher:
     return _global_dispatcher
+
+
+# ===================================================================
+# Memory storage (simple in-memory FSM for Bale bot)
+# ===================================================================
+
+class MemoryStorage:
+    """نسخهی سادهی FSM Storage — state + data در RAM ذخیره میشود."""
+    def __init__(self):
+        self._states = {}
+        self._data = {}
+    async def set_state(self, key, state=None):
+        self._states[key] = state
+    async def get_state(self, key):
+        return self._states.get(key)
+    async def set_data(self, key, data=None):
+        if data is not None:
+            self._data[key] = data
+    async def get_data(self, key):
+        return self._data.get(key, {})
+    async def close(self):
+        pass
