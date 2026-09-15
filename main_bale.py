@@ -44,7 +44,7 @@ async def main():
     logger.info("  OWNER  : %s", owner_id)
     logger.info("=" * 50)
 
-    app = ApplicationBuilder().token(token).build()
+    app = ApplicationBuilder().token(token).base_url("https://tapi.bale.ai/").connect_timeout(30).read_timeout(30).write_timeout(30).build()
     bot = app.bot
 
     try:
