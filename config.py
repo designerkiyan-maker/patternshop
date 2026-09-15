@@ -15,7 +15,16 @@ import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(BASE_DIR, ".env"))
+# تلاش اول: repo/.env (برای اجرای محلی / pip install)
+# تلاش دوم: ../.env (برای نصب systemd با EnvironmentFile در /opt/patternshop/.env)
+_load_paths = [
+    os.path.join(BASE_DIR, ".env"),
+    os.path.join(BASE_DIR, "..", ".env"),
+]
+for _p in _load_paths:
+    if os.path.isfile(_p):
+        load_dotenv(_p)
+        break
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID_RAW = os.getenv("OWNER_ID")
