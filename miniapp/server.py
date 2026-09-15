@@ -38,7 +38,7 @@ from config import (BOT_TOKEN, DB_PATH, OWNER_ID, MAX_TEST_PER_USER, TELEGRAM_PR
                     MINIAPP_URL, ADMIN_PANEL_SECRET, BALE_TOKEN)
 from database import Database
 from miniapp.auth import validate_init_data, validate_init_data_any
-from core.telegram_proxy import ProxiedClientSession
+from core.telegram_proxy import DirectClientSession
 import loyalty
 from services import cart as cart_svc
 from services import checkout as checkout_svc
@@ -50,7 +50,7 @@ from services.errors import (
 def telegram_session():
     # نکته: ClientSession(proxy=...) در aiohttp 3.9 پشتیبانی نمی‌شود و با
     # TypeError می‌شکند؛ کلاس پایین پروکسی را به‌صورت per-request تزریق می‌کند.
-    return ProxiedClientSession()
+    return DirectClientSession()
 
 app = FastAPI(title="Pattern Shop Mini App API")
 # Originها بهصورت صریح لیست میشوند؛ wildcard ممنوع. از MINIAPP_URL env استفاده
@@ -415,7 +415,7 @@ async def api_avatar_tg(uid: int, sig: str):
             headers={"Cache-Control": "public, max-age=86400"},
         )
     try:
-        async with ProxiedClientSession() as session:
+        async with DirectClientSession() as session:
             async with session.get(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/getUserProfilePhotos",
                 params={"user_id": uid, "limit": 1},
@@ -603,7 +603,7 @@ async def api_avatar(u: str):
     if len(u) > 500:
         raise HTTPException(status_code=400, detail="لینک خیلی طولانی است.")
     try:
-        async with ProxiedClientSession() as session:
+        async with DirectClientSession() as session:
             async with session.get(
                 u,
                 timeout=aiohttp.ClientTimeout(total=20),

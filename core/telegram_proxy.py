@@ -56,18 +56,34 @@ XRAY_HTTP_PROXY = "http://127.0.0.1:18080"
 
 
 class ProxiedClientSession(aiohttp.ClientSession):
-    """aiohttp.ClientSession با پروکسی پیش‌فرض Xray — سازگار با همه‌ی نسخه‌های aiohttp.
+    """aiohttp.ClientSession با پروکسی پیشفرض Xray — مناسب برای اتصال به api.telegram.org
+    از داخل شبکهی فیلترشدهی ایران.
 
-    پارامتر proxy سازنده‌ی ClientSession در aiohttp 3.9 (نسخه‌ای که aiogram پین
+    پارامتر proxy سازندهی ClientSession در aiohttp 3.9 (نسخهای که aiogram پین
     کرده) وجود ندارد و از 3.10 اضافه شده؛ پس ClientSession(proxy=...) با
-    TypeError می‌شکند و تماس‌های HTTP سرویس‌های FastAPI (پنل/مینی‌اپ) با
-    api.telegram.org بی‌صدا شکست می‌خورند (خطای 502 آپلود/پیش‌نمایش). برای
-    همین پروکسی به‌صورت per-request داخل _request تزریق می‌شود؛ مقدار
-    per-request در صورت پاس‌دادن صریح، بر این پیش‌فرض مقدم است."""
+    TypeError میشکند و تماسهای HTTP سرویسهای FastAPI (پنل/مینیاپ) با
+    api.telegram.org بیصدا شکست میخورند (خطای 502 آپلود/پیشنمایش). برای
+    همین پروکسی بهصورت per-request داخل _request تزریق میشود; مقدار
+    per-request در صورت پاسدادن صریح، بر این پیشفرض مقدم است."""
 
     def _request(self, method, str_or_url, **kwargs):
         kwargs.setdefault("proxy", XRAY_HTTP_PROXY)
         return super()._request(method, str_or_url, **kwargs)
+
+
+class DirectClientSession(aiohttp.ClientSession):
+    """نسخهی بدون پروکسی — مناسب برای سرویسهایی که مستقیماً به اینترنت دسترسی دارند
+    (مانند MiniApp و پنل مدیریت). استفاده از این کلاس به جای ProxiedClientSession
+    باعث میشود درخواستها مستقیم به api.telegram.org بروند و نیاز به Xray نباشد.
+
+    برای بات بله (tapi.bale.ai) اصلاً نیازی به پروکسی نیست چون بله فیلتر نیست."""
+
+    pass  # همان aiohttp.ClientSession پایه — بدون proxy
+
+
+def direct_session():
+    """ساخت یک نشست مستقیم (بدون پروکسی)."""
+    return DirectClientSession()
 
 
 class TelegramProxyManager:
