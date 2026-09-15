@@ -4367,9 +4367,29 @@ async function renderTgAdmins() {
 async function renderSystem() {
   const jobs = await apiGet('/system/jobs');
   const backupStatus = await apiGet('/system/backup/status');
+  const updateInfo = await apiGet('/system/update/check');
   const isOwner = ME.role === 'owner';
 
+  const updateBadge = updateInfo.has_update
+    ? `<span class="chip" style="background:var(--rose);color:#fff;border-radius:20px;padding:2px 10px;font-size:12px">⬆️ نسخه‌ی جدید: ${esc(updateInfo.latest)}</span>`
+    : `<span class="chip" style="background:var(--teal);color:#fff;border-radius:20px;padding:2px 10px;font-size:12px">✓ به‌روز</span>`;
   setContent(`
+    <div class="card" style="margin-bottom:18px;border-color:${updateInfo.has_update ? 'var(--rose)' : 'var(--muted)'}">
+      <div class="card-head"><h3>🔄 بروزرسانی نرم‌افزار</h3></div>
+      <div class="chip-row" style="margin-bottom:14px">
+        <span class="chip">نسخه‌ی فعلی: <strong>${esc(updateInfo.current)}</strong></span>
+        ${updateInfo.has_update ? `<span class="chip">آخرین نسخه: <strong>${esc(updateInfo.latest)}</strong></span>` : ''}
+        ${updateBadge}
+      </div>
+      ${isOwner && updateInfo.has_update ? `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn btn-primary" id="update-run-btn">🚀 شروع بروزرسانی</button>
+        ${updateInfo.url ? `<a href="${esc(updateInfo.url)}" target="_blank" class="btn btn-ghost btn-sm">📋 جزئیات تغییرات</a>` : ''}
+      </div>
+      <div id="update-status"></div>
+      ` : isOwner ? `<p class="card-sub">همه‌چیز به‌روز است ✅</p>` : ''}
+    </div>
+
     <div class="card" style="margin-bottom:18px">
       <div class="card-head"><h3>بکاپ خودکار دیتابیس</h3></div>
       <p class="card-sub" style="margin-bottom:10px">زمان‌بندی بکاپ خودکار در پردازش بات تنظیم می‌شود و از اینجا قابل تغییر نیست؛ وضعیت آخرین اجرا:</p>
@@ -4417,6 +4437,36 @@ async function renderSystem() {
       btn.disabled = false;
     }
   });
+
+  // ── بروزرسانی نرم‌افزار ──────────────────────────────────────
+  const _updateBtn = $('#update-run-btn');
+  if (_updateBtn) {
+    _updateBtn.addEventListener('click', async () => {
+      const btn = _updateBtn;
+      const status = $('#update-status', content());
+      btn.disabled = true;
+      btn.textContent = '⏳ در حال اجرا…';
+      status.innerHTML = '<span class="card-sub">⏳ بروزرسانی شروع شد. لطفاً صبر کنید…</span>';
+      try {
+        const res = await apiPost('/system/update/run');
+        if (res.ok) {
+          toast(`✅ بروزرسانی موفق! نسخه جدید: ${res.new_version}`);
+          status.innerHTML = `<span class="card-sub">✅ بروزرسانی با موفقیت انجام شد. نسخه فعلی: <strong>${esc(res.new_version)}</strong></span>`;
+          // رفرش صفحه برای لود content تازه
+          setTimeout(() => location.reload(), 2000);
+        } else {
+          status.innerHTML = `<div style="margin-top:10px"><span class="card-sub" style="color:var(--rose)">❌ بروزرسانی ناموفق بود.</span><pre style="background:var(--surface2);padding:10px;border-radius:8px;font-size:12px;max-height:200px;overflow:auto;margin-top:8px;direction:ltr;text-align:left">${esc(res.logs || '')}</pre></div>`;
+          toast('بروزرسانی شکست خورد — لاگ را بررسی کنید.', true);
+        }
+      } catch (e) {
+        status.innerHTML = '';
+        handleErr(e);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🚀 شروع بروزرسانی';
+      }
+    });
+  }
 
   let restorePendingFile = null;
 

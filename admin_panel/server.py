@@ -503,6 +503,104 @@ def api_system_jobs(admin=Depends(require_permission("system"))):
     }
 
 
+# ------------------------------------------------------------------ update --
+
+_UPDATE_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "deploy", "update.sh"
+)
+_CURRENT_VERSION_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "VERSION"
+)
+
+
+def _read_version() -> str:
+    """نسخه فعلی را از فایل VERSION میخواند."""
+    try:
+        with open(_CURRENT_VERSION_FILE, encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return "unknown"
+
+
+def _latest_git_version() -> tuple[str, str]:
+    """آخرین TAG گیت‌هاب را بدون HTTP خارجی تشخیص میدهد (git ls-remote).
+    باز میگرداند: (tag, html_url). در صورت خطا ('none', '')."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "--tags", "--sort=-v:refname",
+             "https://github.com/designerkiyan-maker/patternshop.git",
+             "refs/tags/v*"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return "none", ""
+        # اولین سطر = نزدیکترین tag
+        first_line = result.stdout.strip().split("\n")[0]
+        tag_ref = first_line.split("\t")[1]  # refs/tags/vX.Y.Z
+        tag_name = tag_ref.replace("refs/tags/", "")
+        url = f"https://github.com/designerkiyan-maker/patternshop/releases/tag/{tag_name}"
+        return tag_name.lstrip("v"), url
+    except Exception:
+        return "none", ""
+
+
+@app.get("/api/system/update/check")
+def api_update_check(admin=Depends(require_permission("system"))):
+    """بررسی نسخهی جدید از گیت‌هاب (بدون HTTP خارجی).
+    باز میگرداند: has_update, current, latest, url."""
+    current = _read_version()
+    latest, url = _latest_git_version()
+    has_update = latest not in ("none", "unknown") and latest != current
+    return {
+        "has_update": has_update,
+        "current": current,
+        "latest": latest,
+        "url": url,
+    }
+
+
+@app.post("/api/system/update/run")
+async def api_update_run(admin=Depends(require_owner)):
+    """اجرای بروزرسانی deploy/update.sh. فقط مالک مجاز."""
+    script = _UPDATE_SCRIPT
+    if not os.path.isfile(script):
+        raise HTTPException(404, f"فایل بروزرسانی یافت نشد: {script}")
+
+    old_version = _read_version()
+
+    # بکاپ قبل از بروزرسانی
+    backup_ok = False
+    try:
+        bp = await asyncio.to_thread(create_backup, DB_PATH, _backup_dir(), 14)
+        backup_ok = bool(bp)
+    except Exception:
+        pass
+
+    proc = await asyncio.create_subprocess_exec(
+        "bash", script,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    stdout, _ = await proc.communicate()
+    logs = (stdout or b"").decode("utf-8", errors="replace")
+    ok = proc.returncode == 0
+    new_version = _read_version()
+
+    await asyncio.to_thread(db.log_admin_action,
+        admin["id"], "system_update",
+        f"بروزرسانی {'موفق' if ok else 'ناموفق'} → نسخه {new_version} | بکاپ: {'✓' if backup_ok else '✗'}",
+    )
+
+    return {
+        "ok": ok,
+        "old_version": old_version,
+        "new_version": new_version,
+        "backup": backup_ok,
+        "logs": logs[-3000:],
+    }
+
+
 # ------------------------------------------------------------------ backup --
 
 @app.get("/api/system/backup/status")
