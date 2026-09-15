@@ -13,10 +13,36 @@ from typing import Optional
 
 import aiohttp
 
-from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.client.session.base import BaseSession
-from aiogram.client.telegram import TelegramAPIServer
-from aiogram.methods.base import TelegramMethod, TelegramType
+# ─── compatibility shim برای نسخههای مختلف aiogram ─────────────────────
+# در aiogram ≤3.10 مسیرها aiogram.client.session.aiohttp بودند.
+# در aiogram ≥3.12 این ماژول‌ها بازچینش شدند؛ سعی میکنیم هر دو حالت را پوشش دهیم.
+try:
+    from aiogram.client.session.aiohttp import AiohttpSession
+except ImportError:
+    try:
+        from aiogram.client.session.httpx import AiohttpSession  # noqa: F401  (fallback)
+    except ImportError:
+        AiohttpSession = None  # type: ignore[misc,assignment]
+
+try:
+    from aiogram.client.session.base import BaseSession
+except ImportError:
+    try:
+        from aiogram.client.session import BaseSession  # type: ignore[no-redef]
+    except ImportError:
+        BaseSession = None  # type: ignore[misc,assignment]
+
+try:
+    from aiogram.client.telegram import TelegramAPIServer
+except ImportError:
+    TelegramAPIServer = None  # type: ignore[misc,assignment]
+
+try:
+    from aiogram.methods.base import TelegramMethod, TelegramType
+except ImportError:
+    TelegramMethod = None  # type: ignore[misc,assignment]
+    TelegramType = None  # type: ignore[misc,assignment]
+# ────────────────────────────────────────────────────────────────────────
 
 
 logger = logging.getLogger("telegram_proxy")
