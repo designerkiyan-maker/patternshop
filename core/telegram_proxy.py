@@ -39,9 +39,14 @@ except ImportError:
 
 try:
     from aiogram.methods.base import TelegramMethod, TelegramType
+    # در aiogram >=3.12 ممکن است Generic نباشند؛ برای type hint ایمن از Any استفاده میکنیم
+    _TM = TelegramMethod  # type: ignore[assignment]
+    _TT = TelegramType  # type: ignore[assignment]
 except ImportError:
     TelegramMethod = None  # type: ignore[misc,assignment]
     TelegramType = None  # type: ignore[misc,assignment]
+    _TM = object  # type: ignore[misc,assignment]
+    _TT = object  # type: ignore[misc,assignment]
 # ────────────────────────────────────────────────────────────────────────
 
 
