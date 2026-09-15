@@ -210,7 +210,7 @@ async def _dispatch_loop(bot_wrapper, owner_id: int):
 
     logger.info("ربات بله آماده شد. شروع polling…")
 
-    offset = 0
+    offset = -1  # -1 bootstrap: first poll fetches last known ID, no updates lost
     while True:
         try:
             updates = await bot_wrapper.get_updates(offset=offset, limit=100, timeout=10)
