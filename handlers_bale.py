@@ -13,7 +13,7 @@ import logging
 import secrets
 from typing import Any
 
-from telegram import Update, Bot, InlineKeyboardMarkup
+from telegram import Update, Bot, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 import config as cfg
@@ -185,19 +185,19 @@ async def make_user_handlers(db: Database, bot_token: str):
                         rp = await asyncio.to_thread(loyalty.award_referral, db, referrer_id, uid)
                     except Exception: logger.exception("award_referral failed"); rp = 0
                     if rp > 0:
-                        try: await context.context.bot.send_message(referrer_id, f"🎁 {rp} امتیاز باشگاه مشتریان بابت معرفی دوستتان اضافه شد!")
+                        try: await context.bot.send_message(referrer_id, f"🎁 {rp} امتیاز باشگاه مشتریان بابت معرفی دوستتان اضافه شد!")
                         except Exception: pass
                     ri = await asyncio.to_thread(db.apply_referral_invite_rewards, uid, referrer_id)
                     if ri:
                         ib = ri.get("invite_bonus")
                         if ib:
-                            try: await context.context.bot.send_message(referrer_id, f"🤝 یک نفر با لینک دعوت شما آمد!\n💰 {ib:,} تومان به کیف پول اضافه شد.")
+                            try: await context.bot.send_message(referrer_id, f"🤝 یک نفر با لینک دعوت شما آمد!\n💰 {ib:,} تومان به کیف پول اضافه شد.")
                             except Exception: pass
                         fp_id = ri.get("free_config_product_id")
                         if fp_id:
                             prod = await asyncio.to_thread(db.get_product, fp_id)
                             if prod and await asyncio.to_thread(db.has_product_files, fp_id):
-                                try: await context.context.bot.send_message(referrer_id, "🎁 یک الگوی رایگان به خاطر معرفی دوستتان تعلق گرفت!")
+                                try: await context.bot.send_message(referrer_id, "🎁 یک الگوی رایگان به خاطر معرفی دوستتان تعلق گرفت!")
                                 except Exception: pass
         welcome = await asyncio.to_thread(db.get_setting, "welcome_text")
         await context.bot.send_message(chat_id=update.effective_message.chat.id, text=welcome, reply_markup=kb.menu_for_user(db, uid))
@@ -389,7 +389,7 @@ async def make_user_handlers(db: Database, bot_token: str):
             if it.product_type != "digital": continue
             fs = await asyncio.to_thread(db.get_product_files, it.product_id)
             if fs:
-                try: await deliver_pattern_to_user(bot, uid, it.product_name, [f["file_id"] for f in fs], 0, result.order_id)
+                try: await deliver_pattern_to_user(context.bot, uid, it.product_name, [f["file_id"] for f in fs], 0, result.order_id)
                 except: logger.exception("Digital delivery failed for #%s", result.order_id)
         sm = await asyncio.to_thread(cart_svc.cart_summary, db, uid)
         await _edit_text(update, context, "✅ سفارش ثبت شد! پس از تایید ادمین، فایل الگو ارسال میشود.",
@@ -479,8 +479,8 @@ async def make_user_handlers(db: Database, bot_token: str):
             try:
                 cap = f"سفارش #{oid} | کاربر {fn} (@{un or '---'})"
                 mk = kb.order_review_kb(oid)
-                if rt == "document": await context.bot.send_document(aid, fid, caption=cap, reply_markup=mk)
-                else: await context.bot.send_photo(aid, fid, caption=cap, reply_markup=mk)
+                if rt == "document": await bot.send_document(aid, fid, caption=cap, reply_markup=mk)
+                else: await bot.send_photo(aid, fid, caption=cap, reply_markup=mk)
             except Exception: logger.exception("Order notification failed for admin %s", aid)
 
     async def _receive_receipt(update, context):
@@ -492,7 +492,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         fid, rt = _receipt_payload(update)
         if not fid: return
         await asyncio.to_thread(db.set_order_receipt, oid, fid, rt or "photo")
-        await _notify_admins_of_order(bot, oid, fid, rt or "photo")
+        await _notify_admins_of_order(context.bot, oid, fid, rt or "photo")
         _clear(uid, BOT_ID)
         await context.bot.send_message(chat_id=update.effective_message.chat.id, text="✅ رسید ارسال شد. پس از تایید ادمین، فایل الگو ارسال میشود.",
                                     reply_markup=kb.menu_for_user(db, uid))
@@ -511,7 +511,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         if order:
             try:
                 await asyncio.to_thread(db.set_order_receipt, order["id"], fid, rt)
-                await _notify_admins_of_order(bot, order["id"], fid, rt)
+                await _notify_admins_of_order(context.bot, order["id"], fid, rt)
             except Exception:
                 logger.exception("Fallback receipt failed for #%s", order["id"])
                 await context.bot.send_message(chat_id=update.effective_message.chat.id, text="⚠️ خطایی رخ داد. دوباره تلاش کنید."); return
@@ -526,7 +526,7 @@ async def make_user_handlers(db: Database, bot_token: str):
                 cap = f"👛 شارژ #{topup['id']}\n👤 {(ur or {}).get('first_name','')}\n💰 {topup['amount']:,} ت"
                 for aid in await asyncio.to_thread(db.list_admins):
                     try:
-                        sent = await context.bot.send_photo(aid, fid, caption=cap, reply_markup=kb.topup_review_kb(topup["id"]))
+                        sent = await bot.send_photo(aid, fid, caption=cap, reply_markup=kb.topup_review_kb(topup["id"]))
                         if sent: await asyncio.to_thread(db.set_topup_admin_message, topup["id"], aid, sent.message_id)
                     except Exception: pass
             except Exception:
@@ -625,7 +625,7 @@ async def make_user_handlers(db: Database, bot_token: str):
             try: await context.bot.send_document(update.effective_user.id, fid, caption=f"📥 دانلود مجدد #{o['id']} | {pn}")
             except: miss += 1
         if miss:
-            try: await context.context.bot.send_message(update.effective_user.id, "⚠️ یکی از فایلها در دسترس نیست.")
+            try: await context.bot.send_message(update.effective_user.id, "⚠️ یکی از فایلها در دسترس نیست.")
             except: pass
 
     async def _cb_mo_del_ask(update, context):
@@ -766,7 +766,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         _set_state(update.effective_user.id, LoyaltyRedeem.waiting_points.state, BOT_ID)
         try: await update.callback_query.message.edit_text(
             f"🔄 چند امتیاز؟ (مضرب {s['redeem_points']} — حداقل {s['min_redeem']})")
-        except: await update.callback_query.context.bot.send_message(chat_id=update.effective_message.chat.id, text=...)
+        except: await context.bot.send_message(chat_id=update.effective_message.chat.id, text=...)
         await update.callback_query.answer()
 
     async def _process_loy_redeem(update, context):
@@ -844,7 +844,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         cap = f"👛 شارژ #{tid}\n👤 {(ur or {}).get('first_name','')}\n💰 {amt:,} ت"
         for aid in await asyncio.to_thread(db.list_admins):
             try:
-                sent = await context.bot.send_photo(aid, fid, caption=cap, reply_markup=kb.topup_review_kb(tid))
+                sent = await bot.send_photo(aid, fid, caption=cap, reply_markup=kb.topup_review_kb(tid))
                 if sent: await asyncio.to_thread(db.set_topup_admin_message, tid, aid, sent.message_id)
             except Exception: logger.exception("Topup notif failed for %s", aid)
         _clear(uid, BOT_ID)
@@ -1010,13 +1010,13 @@ async def make_admin_handlers(db: Database, bot_token: str):
     async def _notify_inline(bot, uid):
         try:
             ikb = await asyncio.to_thread(kb.inline_menu_for_user, db, uid)
-            if ikb: await context.context.bot.send_message(uid, "📋 منو:", reply_markup=ikb)
+            if ikb: await bot.send_message(uid, "📋 منو:", reply_markup=ikb)
         except: pass
 
     async def _send_receipt(bot, chat_id, fid, rt, cap, reply_markup=None):
         if (rt or "photo") == "document":
-            return await context.bot.send_document(chat_id, fid, caption=cap, reply_markup=reply_markup)
-        return await context.bot.send_photo(chat_id, fid, caption=cap, reply_markup=reply_markup)
+            return await bot.send_document(chat_id, fid, caption=cap, reply_markup=reply_markup)
+        return await bot.send_photo(chat_id, fid, caption=cap, reply_markup=reply_markup)
 
     # --- Panel entry ---
     btn_panel = await asyncio.to_thread(db.get_setting, "btn_admin_panel")
@@ -1292,9 +1292,9 @@ async def make_admin_handlers(db: Database, bot_token: str):
         if qty > 1: cap += f" ×{qty}"
         if order.get("receipt_file_id"):
             rt = order.get("receipt_type") or "photo"
-            await _send_receipt(bot, update.effective_user.id, order["receipt_file_id"], rt, cap, kb.order_review_kb(oid))
+            await _send_receipt(context.bot, update.effective_user.id, order["receipt_file_id"], rt, cap, kb.order_review_kb(oid))
         else:
-            await update.callback_query.context.bot.send_message(chat_id=update.effective_message.chat.id, text=cap, reply_markup=kb.order_review_kb(oid))
+            await context.bot.send_message(chat_id=update.effective_message.chat.id, text=cap, reply_markup=kb.order_review_kb(oid))
         await update.callback_query.answer()
 
     async def _cb_order_approve(update, context):
@@ -1319,14 +1319,14 @@ async def make_admin_handlers(db: Database, bot_token: str):
         (await asyncio.to_thread(db.log_admin_action, update.effective_user.id, "order_approve",
                                  f"#{oid} | {order['user_id']} | {pn} | {(order.get('final_price') or (prod['price'] if prod else 0)):,}"))
         if ri:
-            try: await context.context.bot.send_message(ri[1], f"🤝 زیرمجموعه شما خرید کرد!\n💰 {ri[0]:,} تومان پورسانت.")
+            try: await context.bot.send_message(ri[1], f"🤝 زیرمجموعه شما خرید کرد!\n💰 {ri[0]:,} تومان پورسانت.")
             except: pass
         try:
             ln = f"\n🎁 {awarded} امتیاز باشگاه مشتریان" if awarded > 0 else ""
-            await context.context.bot.send_message(order["user_id"], f"✅ خرید شما تایید شد!\n🧵 {pn}{ln}")
-            await deliver_pattern_to_user(bot, order["user_id"], pn, [f["file_id"] for f in files],
+            await context.bot.send_message(order["user_id"], f"✅ خرید شما تایید شد!\n🧵 {pn}{ln}")
+            await deliver_pattern_to_user(context.bot, order["user_id"], pn, [f["file_id"] for f in files],
                                            final_price=order.get("final_price"), order_id=oid)
-            await _notify_inline(bot, order["user_id"])
+            await _notify_inline(context.bot, order["user_id"])
         except: pass
         nc = (update.callback_query.message.caption or update.callback_query.message.text or "") + "\n\n✅ تایید شد."
         try: await context.bot.edit_message_caption(chat_id=update.effective_user.id, message_id=update.callback_query.message.message_id, caption=nc)
@@ -1348,8 +1348,8 @@ async def make_admin_handlers(db: Database, bot_token: str):
         except: logger.exception("refund_loyalty error")
         (await asyncio.to_thread(db.log_admin_action, update.effective_user.id, "order_reject", f"#{oid} | {order['user_id']}"))
         try:
-            await context.context.bot.send_message(order["user_id"], "❌ رسید شما تایید نشد. با پشتیبانی تماس بگیرید.")
-            await _notify_inline(bot, order["user_id"])
+            await context.bot.send_message(order["user_id"], "❌ رسید شما تایید نشد. با پشتیبانی تماس بگیرید.")
+            await _notify_inline(context.bot, order["user_id"])
         except: pass
         nc = (update.callback_query.message.caption or update.callback_query.message.text or "") + "\n\n❌ رد شد."
         try: await context.bot.edit_message_caption(chat_id=update.effective_user.id, message_id=update.callback_query.message.message_id, caption=nc)
@@ -1375,9 +1375,9 @@ async def make_admin_handlers(db: Database, bot_token: str):
         cap = f"شارژ #{tid}\nکاربر: {tu['user_id']}\nمبلغ: {tu['amount']:,} ت"
         if tu.get("receipt_file_id"):
             rt = tu.get("receipt_type") or "photo"
-            await _send_receipt(bot, update.effective_user.id, tu["receipt_file_id"], rt, cap, kb.topup_review_kb(tid))
+            await _send_receipt(context.bot, update.effective_user.id, tu["receipt_file_id"], rt, cap, kb.topup_review_kb(tid))
         else:
-            await update.callback_query.context.bot.send_message(chat_id=update.effective_message.chat.id, text=cap, reply_markup=kb.topup_review_kb(tid))
+            await context.bot.send_message(chat_id=update.effective_message.chat.id, text=cap, reply_markup=kb.topup_review_kb(tid))
         await update.callback_query.answer()
 
     async def _cb_topup_approve(update, context):
@@ -1392,8 +1392,8 @@ async def make_admin_handlers(db: Database, bot_token: str):
         (await asyncio.to_thread(db.log_admin_action, update.effective_user.id, "topup_approve",
                                  f"#{tid} | {tu['user_id']} | {tu['amount']:,} | جدید: {nb:,}"))
         try:
-            await context.context.bot.send_message(tu["user_id"], f"✅ شارژ {tu['amount']:,} ت تایید شد!\n👛 موجودی: {nb:,} ت")
-            await _notify_inline(bot, tu["user_id"])
+            await context.bot.send_message(tu["user_id"], f"✅ شارژ {tu['amount']:,} ت تایید شد!\n👛 موجودی: {nb:,} ت")
+            await _notify_inline(context.bot, tu["user_id"])
         except: pass
         nc = (update.callback_query.message.caption or update.callback_query.message.text or "") + "\n\n✅ تایید شد."
         try: await context.bot.edit_message_caption(chat_id=update.effective_user.id, message_id=update.callback_query.message.message_id, caption=nc)
@@ -1412,8 +1412,8 @@ async def make_admin_handlers(db: Database, bot_token: str):
         await asyncio.to_thread(db.reject_topup, tid)
         (await asyncio.to_thread(db.log_admin_action, update.effective_user.id, "topup_reject", f"#{tid} | {tu['user_id']}"))
         try:
-            await context.context.bot.send_message(tu["user_id"], "❌ شارژ کیف پول تایید نشد.")
-            await _notify_inline(bot, tu["user_id"])
+            await context.bot.send_message(tu["user_id"], "❌ شارژ کیف پول تایید نشد.")
+            await _notify_inline(context.bot, tu["user_id"])
         except: pass
         nc = (update.callback_query.message.caption or update.callback_query.message.text or "") + "\n\n❌ رد شد."
         try: await context.bot.edit_message_caption(chat_id=update.effective_user.id, message_id=update.callback_query.message.message_id, caption=nc)

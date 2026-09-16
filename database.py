@@ -1065,7 +1065,8 @@ class Database:
 
     def get_user(self, tg_id: int):
         with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM users WHERE telegram_id=?", (tg_id,)).fetchone()
+            row = conn.execute("SELECT * FROM users WHERE telegram_id=?", (tg_id,)).fetchone()
+            return dict(row) if row else None
 
     def set_user_blocked(self, tg_id: int, blocked: bool):
         with self._get_conn() as conn:
@@ -1677,7 +1678,8 @@ class Database:
 
     def get_product(self, product_id: int):
         with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
+            row = conn.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
+            return dict(row) if row else None
 
     def search_products(self, query: str):
         """جستجوی حساس به حرف و کلمه در نام و توضیحات محصولات."""
@@ -2062,7 +2064,8 @@ class Database:
 
     def get_order(self, order_id: int):
         with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+            row = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+            return dict(row) if row else None
 
     def approve_order(self, order_id: int, file_ids: list,
                       payment_status: str = "paid",
@@ -2179,12 +2182,13 @@ class Database:
         برای fallback بازیابی رسیدهایی که به‌خاطر گم‌شدن FSM state
         (مثلاً ری‌استارت بات) به هندلر state-دار اصلی نرسیده‌اند."""
         with self._get_conn() as conn:
-            return conn.execute(
+            row = conn.execute(
                 "SELECT * FROM orders WHERE user_id=? AND status='pending' "
                 "AND receipt_file_id IS NULL "
                 "ORDER BY id DESC LIMIT 1",
                 (user_tg_id,),
             ).fetchone()
+            return dict(row) if row else None
 
     def get_user_orders(self, user_tg_id: int):
         """سفارش‌های «سفارش‌های من» کاربر (بدون سفارش‌های حذف‌شده توسط خودش)،
@@ -2862,18 +2866,20 @@ class Database:
 
     def get_topup(self, topup_id: int):
         with self._get_conn() as conn:
-            return conn.execute("SELECT * FROM wallet_topups WHERE id=?", (topup_id,)).fetchone()
+            row = conn.execute("SELECT * FROM wallet_topups WHERE id=?", (topup_id,)).fetchone()
+            return dict(row) if row else None
 
     def get_latest_pending_topup_awaiting_receipt(self, user_tg_id: int):
         """آخرین درخواست شارژ کیف‌پول این کاربر که هنوز pending است و رسیدی
         برایش ثبت نشده - برای fallback بازیابی رسیدهایی که FSM state‌شان گم شده."""
         with self._get_conn() as conn:
-            return conn.execute(
+            row = conn.execute(
                 "SELECT * FROM wallet_topups WHERE user_id=? AND status='pending' "
                 "AND receipt_file_id IS NULL "
                 "ORDER BY id DESC LIMIT 1",
                 (user_tg_id,),
             ).fetchone()
+            return dict(row) if row else None
 
     def approve_topup(self, topup_id: int) -> bool:
         """تایید شارژ کیف پول - ضدِ P0-1.
