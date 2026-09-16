@@ -883,16 +883,16 @@ async def make_user_handlers(db: Database, bot_token: str):
             effective_user = type('U', (), {"id": uid, "username": "", "first_name": ""})()
             effective_message = type('M', (), {"answer": lambda *a,**k: asyncio.sleep(0)})()
             effective_chat = type('C', (), {"id": uid})()
-            bot = update.bot
+            bot = context.bot
         fu = FakeU()
-        if key == "btn_buy": await _show_buy(fu)
-        elif key == "btn_test": await _get_test_config(fu)
-        elif key == "btn_my_orders": await _my_orders(fu)
-        elif key == "btn_wallet": await _wallet_menu(fu)
-        elif key == "btn_referral": await _referral_menu(fu, update.bot)
-        elif key == "btn_wheel": await _wheel_of_fortune(fu, update.bot)
-        elif key == "btn_loyalty": await _loyalty_menu(fu)
-        elif key == "btn_contact": await _contact_start(fu)
+        if key == "btn_buy": await _show_buy(fu, context)
+        elif key == "btn_test": await _get_test_config(fu, context)
+        elif key == "btn_my_orders": await _my_orders(fu, context)
+        elif key == "btn_wallet": await _wallet_menu(fu, context)
+        elif key == "btn_referral": await _referral_menu(fu, context)
+        elif key == "btn_wheel": await _wheel_of_fortune(fu, context)
+        elif key == "btn_loyalty": await _loyalty_menu(fu, context)
+        elif key == "btn_contact": await _contact_start(fu, context)
 
     # ── Unknown text → menu ─────────────────────────────────────
     async def _unknown_text(update, context):
