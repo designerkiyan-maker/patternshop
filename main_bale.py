@@ -27,7 +27,7 @@ logging.basicConfig(level=logging.INFO, handlers=[_fh, logging.StreamHandler()])
 logger = logging.getLogger(__name__)
 
 
-def _error_handler(update: object, context):
+async def _error_handler(update: object, context):
     logger.error("Unhandled: %s", context.error, exc_info=context.error)
 
 

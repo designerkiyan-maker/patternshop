@@ -30,6 +30,31 @@ from services import checkout as checkout_svc
 from services import orders as service_orders
 from services.errors import CartError, CatalogError, DiscountError, InventoryError, ShopError, WalletError
 
+
+def _kb_wrap(fn):
+    """Wrap a keyboards.py function so its return value is always a plain dict."""
+    def wrapper(*args, **kwargs):
+        result = fn(*args, **kwargs)
+        if result is None:
+            return None
+        for method in ("model_dump", "to_dict"):
+            if hasattr(result, method):
+                return getattr(result, method)(exclude_none=True, by_alias=False)
+        return result
+    return wrapper
+
+
+# Patch all keyboard-returning functions to emit plain dicts (ptb needs them).
+for _name in dir(kb):
+    if _name.startswith("_"):
+        continue
+    _fn = getattr(kb, _name)
+    if callable(_fn) and not getattr(_fn, "__wrapped__", False):
+        try:
+            setattr(kb, _name, _kb_wrap(_fn))
+        except Exception:
+            pass
+
 logger = logging.getLogger("handlers_bale")
 
 # ─── Simple dict-based FSM ──────────────────────────────────────
@@ -83,6 +108,13 @@ async def _answer(cb: Update, text: str = "", show_alert: bool = False):
 def _msg(u: Update):
     return u.effective_message if u.effective_message else getattr(getattr(u, "callback_query", None), "message", None)
 
+async def _send(u: Update, text: str, **kwargs):
+    """Send a text message — works for both regular messages and callback-query contexts."""
+    chat_id = u.effective_chat.id if u.effective_chat else (u.callback_query.chat.id if u.callback_query else None)
+    if not chat_id: return
+    kwargs["chat_id"] = chat_id
+    await u.bot.send_message(**kwargs)
+
 async def _edit_text(u: Update, text: str, reply_markup=None, parse_mode=None):
     """Try edit_message_text; fall back to send_message."""
     if u.callback_query and getattr(u.callback_query, "message", None):
@@ -107,7 +139,7 @@ async def _send_inline_main_menu(u: Update, uid: int, db: Database):
     if inline_kb is not None:
         msg = u.callback_query.message if u.callback_query else u.effective_message
         if msg:
-            await msg.reply_text("📋 منو:", reply_markup=inline_kb)
+            await u.bot.send_message(chat_id=u.effective_chat.id, text="📋 منو:", reply_markup=inline_kb)
 
 
 def _receipt_payload(u: Update):
@@ -168,10 +200,10 @@ async def make_user_handlers(db: Database, bot_token: str):
                                 try: await bot.send_message(referrer_id, "🎁 یک الگوی رایگان به خاطر معرفی دوستتان تعلق گرفت!")
                                 except Exception: pass
         welcome = await asyncio.to_thread(db.get_setting, "welcome_text")
-        await update.effective_message.reply_text(welcome, reply_markup=kb.menu_for_user(db, uid))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=welcome, reply_markup=kb.menu_for_user(db, uid))
         await _send_inline_main_menu(update, uid, db)
         if reg_points > 0:
-            try: await update.effective_message.reply_text(f"🎁 {reg_points} امتیاز خوشآمدگویی!")
+            try: await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"🎁 {reg_points} امتیاز خوشآمدگویی!")
             except Exception: pass
 
     H.append(CommandHandler("start", cmd_start))
@@ -214,9 +246,9 @@ async def make_user_handlers(db: Database, bot_token: str):
     async def _show_buy(update: Update):
         cats = await asyncio.to_thread(db.get_active_categories)
         if not cats:
-            await update.effective_message.reply_text("هنوز دستهبندیای اضافه نشده است.")
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="هنوز دستهبندیای اضافه نشده است.")
             return
-        await update.effective_message.reply_text("📂 دستهبندیها:", reply_markup=kb.categories_kb(db, cats))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="📂 دستهبندیها:", reply_markup=kb.categories_kb(db, cats))
 
     async def _show_categories_from_cb(update: Update):
         cats = await asyncio.to_thread(db.get_active_categories)
@@ -278,10 +310,10 @@ async def make_user_handlers(db: Database, bot_token: str):
         pid = data.get("discount_product_id")
         prod = await asyncio.to_thread(db.get_product, pid) if pid else None
         if not prod:
-            await update.effective_message.reply_text("محصول معتبر نیست."); _clear(uid, BOT_ID); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="محصول معتبر نیست."); _clear(uid, BOT_ID); return
         cr = await asyncio.to_thread(db.get_discount_code, update.message.text.strip())
         if not await asyncio.to_thread(db.is_discount_code_valid, cr):
-            await update.effective_message.reply_text("❌ کد تخفیف نامعتبر است.", reply_markup=kb.cancel_kb()); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="❌ کد تخفیف نامعتبر است.", reply_markup=kb.cancel_kb()); return
         total = prod["price"]; disc = await asyncio.to_thread(db.compute_discount_amount, cr, total)
         _set_data(uid, {**data, "discount_code": update.message.text.strip(), "discount_code_id": cr["id"], "discount_amount": disc}, BOT_ID)
         _clear(uid, BOT_ID)
@@ -290,7 +322,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         txt = f"✅ کد تخفیف اعمال شد!\n\n🧵 {prod['name']}\n💰 قیمت: {total:,} تومان\n🎟 تخفیف: {disc:,} تومان"
         if wu > 0: txt += f"\n👛 اعمال کیف پول: {wu:,} تومان"
         txt += f"\n💵 مبلغ نهایی: {final:,} تومان"
-        await update.effective_message.reply_text(txt, reply_markup=kb.product_confirm_kb(pid))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=txt, reply_markup=kb.product_confirm_kb(pid))
 
     # ── Checkout flow ───────────────────────────────────────────
     async def _cb_buy_start(update: Update, bot: Bot):
@@ -416,14 +448,14 @@ async def make_user_handlers(db: Database, bot_token: str):
 
     async def _process_cart_addr(update: Update):
         t = (update.message.text or "").strip()
-        if not t: await update.effective_message.reply_text("لطفاً آدرس را متن ارسال کنید.", reply_markup=kb.cancel_kb()); return
+        if not t: await update.bot.send_message(chat_id=update.effective_message.chat.id, text="لطفاً آدرس را متن ارسال کنید.", reply_markup=kb.cancel_kb()); return
         aid = await asyncio.to_thread(db.add_address, update.effective_user.id,
                                        update.effective_user.first_name or "", update.effective_user.username or "",
                                        "", "", t, "")
         d = _get_data(update.effective_user.id, BOT_ID); d["cart_address_id"] = aid
         _set_data(update.effective_user.id, d, BOT_ID); _clear(update.effective_user.id, BOT_ID)
         sm = await asyncio.to_thread(cart_svc.cart_summary, db, update.effective_user.id)
-        await update.effective_message.reply_text("✅ آدرس ذخیره شد. تسویه را بزنید:", reply_markup=kb.cart_menu_kb(sm))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="✅ آدرس ذخیره شد. تسویه را بزنید:", reply_markup=kb.cart_menu_kb(sm))
 
     async def _cb_cancel_flow(update: Update):
         d = _get_data(update.effective_user.id, BOT_ID)
@@ -456,18 +488,18 @@ async def make_user_handlers(db: Database, bot_token: str):
         data = _get_data(uid, BOT_ID)
         oid = data.get("order_id")
         if not oid:
-            await update.effective_message.reply_text("درخواست معتبر یافت نشد."); _clear(uid, BOT_ID); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="درخواست معتبر یافت نشد."); _clear(uid, BOT_ID); return
         fid, rt = _receipt_payload(update)
         if not fid: return
         await asyncio.to_thread(db.set_order_receipt, oid, fid, rt or "photo")
         await _notify_admins_of_order(bot, oid, fid, rt or "photo")
         _clear(uid, BOT_ID)
-        await update.effective_message.reply_text("✅ رسید ارسال شد. پس از تایید ادمین، فایل الگو ارسال میشود.",
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="✅ رسید ارسال شد. پس از تایید ادمین، فایل الگو ارسال میشود.",
                                     reply_markup=kb.menu_for_user(db, uid))
         await _send_inline_main_menu(update, uid, db)
 
     async def _receive_receipt_wrong(update: Update):
-        await update.effective_message.reply_text("لطفاً عکس رسید را بهصورت Photo بفرستید.")
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="لطفاً عکس رسید را بهصورت Photo بفرستید.")
 
     async def _receipt_fallback(update: Update, bot: Bot):
         if _get_state(update.effective_user.id, BOT_ID): return
@@ -482,8 +514,8 @@ async def make_user_handlers(db: Database, bot_token: str):
                 await _notify_admins_of_order(bot, order["id"], fid, rt)
             except Exception:
                 logger.exception("Fallback receipt failed for #%s", order["id"])
-                await update.effective_message.reply_text("⚠️ خطایی رخ داد. دوباره تلاش کنید."); return
-            await update.effective_message.reply_text("✅ رسید ارسال شد.", reply_markup=kb.menu_for_user(db, uid))
+                await update.bot.send_message(chat_id=update.effective_message.chat.id, text="⚠️ خطایی رخ داد. دوباره تلاش کنید."); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="✅ رسید ارسال شد.", reply_markup=kb.menu_for_user(db, uid))
             await _send_inline_main_menu(update, uid, db); return
         try: topup = await asyncio.to_thread(db.get_latest_pending_topup_awaiting_receipt, uid)
         except Exception: topup = None
@@ -499,11 +531,11 @@ async def make_user_handlers(db: Database, bot_token: str):
                     except Exception: pass
             except Exception:
                 logger.exception("Fallback topup receipt failed for #%s", topup["id"])
-                await update.effective_message.reply_text("⚠️ خطایی رخ داد."); return
-            await update.effective_message.reply_text("✅ شارژ کیف پول ثبت شد.", reply_markup=kb.menu_for_user(db, uid))
+                await update.bot.send_message(chat_id=update.effective_message.chat.id, text="⚠️ خطایی رخ داد."); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="✅ شارژ کیف پول ثبت شد.", reply_markup=kb.menu_for_user(db, uid))
             await _send_inline_main_menu(update, uid, db); return
         logger.warning("Photo/doc without state for user %s", uid)
-        await update.effective_message.reply_text("❌ رسید ثبت نشد. لطفاً از منوی اصلی مسیر خرید/شارژ را طی کنید.",
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="❌ رسید ثبت نشد. لطفاً از منوی اصلی مسیر خرید/شارژ را طی کنید.",
                                     reply_markup=kb.menu_for_user(db, uid))
         await _send_inline_main_menu(update, uid, db)
 
@@ -511,16 +543,16 @@ async def make_user_handlers(db: Database, bot_token: str):
     async def _get_test_config(update: Update):
         uid = update.effective_user.id
         if await asyncio.to_thread(db.count_test_files) == 0:
-            await update.effective_message.reply_text("الگوی نمونه موجود نیست."); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="الگوی نمونه موجود نیست."); return
         ok, rem = await asyncio.to_thread(db.can_get_test, uid)
         if not ok:
-            await update.effective_message.reply_text(f"شما {rem} بار گرفته‌اید. سقف: ۱ بار."); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"شما {rem} بار گرفته‌اید. سقف: ۱ بار."); return
         samples = await asyncio.to_thread(db.get_sample_files)
         if not samples:
-            await update.effective_message.reply_text("الگوی نمونه موجود نیست."); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="الگوی نمونه موجود نیست."); return
         f = samples[0]
         fid = f["file_id"] if isinstance(f, dict) else getattr(f, "file_id", None)
-        if not fid: await update.effective_message.reply_text("خطا."); return
+        if not fid: await update.bot.send_message(chat_id=update.effective_message.chat.id, text="خطا."); return
         await asyncio.to_thread(db.record_test_download, uid)
         await update.message.answer_document(fid, caption="🧪 الگوی نمونه رایگان خیاطی")
 
@@ -546,12 +578,12 @@ async def make_user_handlers(db: Database, bot_token: str):
         if not items:
             t = "شما تاکنون سفارشی ثبت نکرده‌اید."
             if edit: await _edit_text(target, t)
-            elif target.effective_message: await target.effective_message.reply_text(t)
+            elif target.effective_message: await target.bot.send_message(chat_id=update.effective_message.chat.id, text=t)
             return
         t = "🧵 سفارشهای من\n\nیکی را انتخاب کنید:"
         mk = kb.my_orders_menu_kb(items)
         if edit: await _edit_text(target, t, reply_markup=mk)
-        elif target.effective_message: await target.effective_message.reply_text(t, reply_markup=mk)
+        elif target.effective_message: await target.bot.send_message(chat_id=update.effective_message.chat.id, text=t, reply_markup=mk)
 
     async def _my_orders(update: Update):
         await _show_my_orders_list(update, update.effective_user.id, edit=False)
@@ -621,12 +653,12 @@ async def make_user_handlers(db: Database, bot_token: str):
     async def _referral_menu(update: Update, bot: Bot):
         s = await asyncio.to_thread(db.get_all_settings)
         if s.get("referral_button_enabled", "1") != "1":
-            await update.effective_message.reply_text("سیستم زیرمجموعهگیری غیرفعال است."); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="سیستم زیرمجموعهگیری غیرفعال است."); return
         en = s.get("referral_enabled", "1") == "1"
         fc = s.get("referral_free_config_enabled", "0") == "1"
         ib = s.get("referral_invite_bonus_enabled", "0") == "1"
         if not (en or fc or ib):
-            await update.effective_message.reply_text("سیستم زیرمجموعهگیری غیرفعال است."); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="سیستم زیرمجموعهگیری غیرفعال است."); return
         me = await bot.get_me()
         link = f"https://t.me/{me.username}?start=ref{update.effective_user.id}"
         st = await asyncio.to_thread(db.get_referral_stats, update.effective_user.id)
@@ -642,12 +674,12 @@ async def make_user_handlers(db: Database, bot_token: str):
             imx = int(s.get("referral_invite_bonus_max_count", "0") or 0)
             L.append(f"💰 {am:,} تومان به ازای هر دعوت{(' (فقط '+str(imx)+' نفر اول)' if imx else '')}.")
         L += ["", f"👥 زیرمجموعهها: {st['count']}", f"👛 موجودی: {st['credit']:,} ت"]
-        await update.effective_message.reply_text("\n".join(L))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="\n".join(L))
 
     # ── Wallet ──────────────────────────────────────────────────
     async def _wallet_menu(update: Update):
         bal = await asyncio.to_thread(db.get_wallet_credit, update.effective_user.id)
-        await update.effective_message.reply_text(f"👛 کیف پول شما\n\nموجودی: {bal:,} تومان", reply_markup=kb.wallet_menu_kb())
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"👛 کیف پول شما\n\nموجودی: {bal:,} تومان", reply_markup=kb.wallet_menu_kb())
 
     # ── Loyalty ─────────────────────────────────────────────────
     _LTX = {"purchase": "🛍", "purchase_refund": "↩️", "registration": "🎁",
@@ -661,7 +693,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         await asyncio.to_thread(db.add_or_update_user, update.effective_user.id,
                                 update.effective_user.username or "", update.effective_user.first_name or "")
         if not await asyncio.to_thread(loyalty.is_enabled, db):
-            await update.effective_message.reply_text("باشگاه مشتریان غیرفعال است."); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="باشگاه مشتریان غیرفعال است."); return
         s = await asyncio.to_thread(loyalty.get_summary, db, update.effective_user.id)
         T = ["🎁 <b>باشگاه مشتریان</b>", "",
              f"⭐ امتیاز: {s['current']}",
@@ -669,7 +701,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         if s.get("next_tier"): T.append(f"📈 تا بعد: {s['points_to_next']} ({s['next_tier']['name']})")
         else: T.append("🎉 بالاترین سطح!")
         T += ["", f"هر {s['redeem_points']} امتیاز = {s['redeem_toman']:,} تومان"]
-        await update.effective_message.reply_text("\n".join(T), parse_mode="HTML", reply_markup=kb.loyalty_menu_kb())
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="\n".join(T), parse_mode="HTML", reply_markup=kb.loyalty_menu_kb())
 
     async def _cb_loy_hist(update: Update):
         _clear(update.effective_user.id, BOT_ID)
@@ -734,23 +766,23 @@ async def make_user_handlers(db: Database, bot_token: str):
         _set_state(update.effective_user.id, LoyaltyRedeem.waiting_points.state, BOT_ID)
         try: await update.callback_query.message.edit_text(
             f"🔄 چند امتیاز؟ (مضرب {s['redeem_points']} — حداقل {s['min_redeem']})")
-        except: await update.callback_query.reply_text(...)
+        except: await update.callback_query.bot.send_message(chat_id=update.effective_message.chat.id, text=...)
         await update.callback_query.answer()
 
     async def _process_loy_redeem(update: Update):
         raw = (update.message.text or "").strip().replace(",", "")
         if not raw.isdigit() or int(raw) <= 0:
-            await update.effective_message.reply_text("تعداد امتیاز (مثال: 200):"); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="تعداد امتیاز (مثال: 200):"); return
         pts = int(raw); s = await asyncio.to_thread(loyalty.get_summary, db, update.effective_user.id)
-        if not s["redeem_enabled"]: _clear(update.effective_user.id, BOT_ID); await update.effective_message.reply_text("تبدیل فعال نیست."); return
+        if not s["redeem_enabled"]: _clear(update.effective_user.id, BOT_ID); await update.bot.send_message(chat_id=update.effective_message.chat.id, text="تبدیل فعال نیست."); return
         if s["min_redeem"] > 0 and pts < s["min_redeem"]:
-            await update.effective_message.reply_text(f"حداقل: {s['min_redeem']} امتیاز."); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"حداقل: {s['min_redeem']} امتیاز."); return
         if pts % s["redeem_points"] != 0:
-            await update.effective_message.reply_text(f"مضربی از {s['redeem_points']}."); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"مضربی از {s['redeem_points']}."); return
         if pts > s["current"]:
-            await update.effective_message.reply_text("موجودی کافی نیست."); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="موجودی کافی نیست."); return
         toman = (pts // s["redeem_points"]) * s["redeem_toman"]
-        await update.effective_message.reply_text(f"🔄 {pts} امتیاز → {toman:,} تومان", reply_markup=kb.loyalty_redeem_confirm_kb(pts))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"🔄 {pts} امتیاز → {toman:,} تومان", reply_markup=kb.loyalty_redeem_confirm_kb(pts))
 
     async def _cb_loy_redeem_ok(update: Update):
         try: pts = int(update.callback_query.data.split(":", 1)[1])
@@ -767,12 +799,12 @@ async def make_user_handlers(db: Database, bot_token: str):
     # ── Wheel ───────────────────────────────────────────────────
     async def _wheel_of_fortune(update: Update, bot: Bot):
         if await asyncio.to_thread(db.get_setting, "wheel_enabled", "1") != "1":
-            await update.effective_message.reply_text("گردونه شانس غیرفعال است."); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="گردونه شانس غیرفعال است."); return
         can, rem = await asyncio.to_thread(db.can_spin_wheel, update.effective_user.id)
         if not can:
-            await update.effective_message.reply_text(f"⏳ حدود {int(rem)+1} ساعت دیگر امتحان کن."); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"⏳ حدود {int(rem)+1} ساعت دیگر امتحان کن."); return
         try: await bot.send_dice(update.effective_chat.id, emoji="🎰")
-        except: await update.effective_message.reply_text("🎡 در حال چرخش...")
+        except: await update.bot.send_message(chat_id=update.effective_message.chat.id, text="🎡 در حال چرخش...")
         await asyncio.sleep(2.5)
         await asyncio.to_thread(db.record_wheel_spin, update.effective_user.id)
         ws = await asyncio.to_thread(db.get_wheel_settings)
@@ -780,9 +812,9 @@ async def make_user_handlers(db: Database, bot_token: str):
         if won and ws["prizes"]:
             pct = secrets.choice(ws["prizes"])
             code, _ = await asyncio.to_thread(db.generate_wheel_prize_code, update.effective_user.id, pct)
-            await update.effective_message.reply_text(f"🎉 تبریک! 🎟 کد {pct}٪: `{code}`\n⏳ اعتبار: {ws['expiry_hours']} ساعت",
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"🎉 تبریک! 🎟 کد {pct}٪: `{code}`\n⏳ اعتبار: {ws['expiry_hours']} ساعت",
                                         parse_mode="Markdown")
-        else: await update.effective_message.reply_text("😔 امروز شانس با تو نبود!")
+        else: await update.bot.send_message(chat_id=update.effective_message.chat.id, text="😔 امروز شانس با تو نبود!")
 
     # ── Topup ───────────────────────────────────────────────────
     async def _cb_start_topup(update: Update):
@@ -793,18 +825,18 @@ async def make_user_handlers(db: Database, bot_token: str):
     async def _process_topup_amount(update: Update):
         t = (update.message.text or "").strip().replace(",", "")
         if not t.isdigit() or int(t) < 1000:
-            await update.effective_message.reply_text("عدد معتبر و حداقل 1000 تومان:"); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="عدد معتبر و حداقل 1000 تومان:"); return
         _set_data(update.effective_user.id, {"topup_amount": int(t)}, BOT_ID)
         _set_state(update.effective_user.id, WalletTopup.waiting_receipt.state, BOT_ID)
         card = await asyncio.to_thread(db.get_setting, "card_number")
         holder = await asyncio.to_thread(db.get_setting, "card_holder")
-        await update.effective_message.reply_text(f"مبلغ {int(t):,} ت به `{card}` به نام {holder} واریز کنید و عکس رسید را بفرستید:",
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"مبلغ {int(t):,} ت به `{card}` به نام {holder} واریز کنید و عکس رسید را بفرستید:",
                                     parse_mode="Markdown", reply_markup=kb.payment_choice_kb())
 
     async def _receive_topup_receipt(update: Update):
         uid = update.effective_user.id; data = _get_data(uid, BOT_ID)
         amt = data.get("topup_amount")
-        if not amt: await update.effective_message.reply_text("درخواست معتبر یافت نشد."); _clear(uid, BOT_ID); return
+        if not amt: await update.bot.send_message(chat_id=update.effective_message.chat.id, text="درخواست معتبر یافت نشد."); _clear(uid, BOT_ID); return
         fid, rt = _receipt_payload(update)
         if not fid: return
         tid = await asyncio.to_thread(db.create_topup, uid, amt, fid, rt or "photo")
@@ -816,17 +848,17 @@ async def make_user_handlers(db: Database, bot_token: str):
                 if sent: await asyncio.to_thread(db.set_topup_admin_message, tid, aid, sent.message_id)
             except Exception: logger.exception("Topup notif failed for %s", aid)
         _clear(uid, BOT_ID)
-        await update.effective_message.reply_text("✅ ثبت شد. منتظر تایید باشید.", reply_markup=kb.menu_for_user(db, uid))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="✅ ثبت شد. منتظر تایید باشید.", reply_markup=kb.menu_for_user(db, uid))
         await _send_inline_main_menu(update, uid, db)
 
     async def _topup_wrong(update: Update):
-        await update.effective_message.reply_text("عکس رسید را بهصورت Photo بفرستید.")
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="عکس رسید را بهصورت Photo بفرستید.")
 
     # ── Contact ─────────────────────────────────────────────────
     async def _contact_start(update: Update):
         _set_state(update.effective_user.id, ContactFlow.waiting_message.state, BOT_ID)
         ct = await asyncio.to_thread(db.get_setting, "contact_text")
-        await update.effective_message.reply_text(ct, reply_markup=kb.cancel_kb())
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=ct, reply_markup=kb.cancel_kb())
 
     async def _contact_receive(update: Update):
         u = update.effective_user
@@ -838,7 +870,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         for aid in admins:
             try: await update.bot.send_message(aid, txt, reply_markup=kb.contact_reply_kb(u.id))
             except: logger.exception("Support msg failed for %s", aid)
-        await update.effective_message.reply_text("پیام شما برای پشتیبانی ارسال شد.", reply_markup=kb.menu_for_user(db, u.id))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="پیام شما برای پشتیبانی ارسال شد.", reply_markup=kb.menu_for_user(db, u.id))
         await _send_inline_main_menu(update, u.id, db)
         _clear(u.id, BOT_ID)
 
@@ -868,7 +900,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         if _get_state(uid, BOT_ID): return
         await asyncio.to_thread(db.add_or_update_user, uid, update.effective_user.username or "", update.effective_user.first_name or "")
         w = await asyncio.to_thread(db.get_setting, "welcome_text")
-        await update.effective_message.reply_text(w, reply_markup=kb.menu_for_user(db, uid))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=w, reply_markup=kb.menu_for_user(db, uid))
         await _send_inline_main_menu(update, uid, db)
 
     # ── Build handler list ──────────────────────────────────────
@@ -992,7 +1024,7 @@ async def make_admin_handlers(db: Database, bot_token: str):
     async def _open_panel(update: Update):
         if not _admin_only(update.effective_user.id): return
         _clear(update.effective_user.id, BOT_ID)
-        await update.effective_message.reply_text("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db))
 
     async def _cb_back_panel(update: Update):
         _clear(update.effective_user.id, BOT_ID)
@@ -1050,11 +1082,11 @@ async def make_admin_handlers(db: Database, bot_token: str):
     async def _process_add_cat(update: Update):
         if not _admin_only(update.effective_user.id): return
         name = (update.message.text or "").strip()
-        if not name: await update.effective_message.reply_text("نام نمیتواند خالی باشد."); return
+        if not name: await update.bot.send_message(chat_id=update.effective_message.chat.id, text="نام نمیتواند خالی باشد."); return
         await asyncio.to_thread(db.add_category, name)
         (await asyncio.to_thread(db.log_admin_action, update.effective_user.id, "category_add", name))
         _clear(update.effective_user.id, BOT_ID)
-        await update.effective_message.reply_text("✅ اضافه شد.", reply_markup=kb.admin_category_kb(db, "products"))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="✅ اضافه شد.", reply_markup=kb.admin_category_kb(db, "products"))
 
     # --- Products ---
     async def _cb_admin_products(update: Update):
@@ -1111,49 +1143,49 @@ async def make_admin_handlers(db: Database, bot_token: str):
     async def _process_newprod_name(update: Update):
         if not _admin_only(update.effective_user.id): return
         name = (update.message.text or "").strip()
-        if not name: await update.effective_message.reply_text("نام خالی نیست."); return
+        if not name: await update.bot.send_message(chat_id=update.effective_message.chat.id, text="نام خالی نیست."); return
         d = _get_data(update.effective_user.id, BOT_ID)
         _set_data(update.effective_user.id, {**d, "newprod_name": name}, BOT_ID)
         _set_state(update.effective_user.id, "adm_newprod_price", BOT_ID)
-        await update.effective_message.reply_text("قیمت (تومان):", reply_markup=kb.admin_back_kb("adm_products"))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="قیمت (تومان):", reply_markup=kb.admin_back_kb("adm_products"))
 
     async def _process_newprod_price(update: Update):
         if not _admin_only(update.effective_user.id): return
         t = (update.message.text or "").strip()
-        if not t.isdigit(): await update.effective_message.reply_text("عدد صحیح:"); return
+        if not t.isdigit(): await update.bot.send_message(chat_id=update.effective_message.chat.id, text="عدد صحیح:"); return
         d = _get_data(update.effective_user.id, BOT_ID)
         _set_data(update.effective_user.id, {**d, "newprod_price": int(t)}, BOT_ID)
         _set_state(update.effective_user.id, "adm_newprod_desc", BOT_ID)
-        await update.effective_message.reply_text("توضیحات (یا /skip):", reply_markup=kb.admin_back_kb("adm_products"))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="توضیحات (یا /skip):", reply_markup=kb.admin_back_kb("adm_products"))
 
     async def _process_newprod_desc(update: Update):
         if not _admin_only(update.effective_user.id): return
         d = _get_data(update.effective_user.id, BOT_ID)
         _set_data(update.effective_user.id, {**d, "newprod_desc": (update.message.text or "").strip()}, BOT_ID)
         _set_state(update.effective_user.id, "adm_newprod_preview", BOT_ID)
-        await update.effective_message.reply_text("عکس پیشنمایش (Photo) یا /skip:", reply_markup=kb.admin_back_kb("adm_products"))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="عکس پیشنمایش (Photo) یا /skip:", reply_markup=kb.admin_back_kb("adm_products"))
 
     async def _process_newprod_preview(update: Update):
         if not _admin_only(update.effective_user.id): return
         if not update.message.photo:
-            await update.effective_message.reply_text("عکس را بهصورت Photo بفرستید یا /skip:"); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="عکس را بهصورت Photo بفرستید یا /skip:"); return
         d = _get_data(update.effective_user.id, BOT_ID)
         _set_data(update.effective_user.id, {**d, "newprod_preview": update.message.photo[-1].file_id}, BOT_ID)
         _set_state(update.effective_user.id, "adm_newprod_files", BOT_ID)
-        await update.effective_message.reply_text("فایلهای الگو (PDF و مشابه) — بعد از پایان «تمام شد»:", reply_markup=kb.files_upload_done_kb())
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="فایلهای الگو (PDF و مشابه) — بعد از پایان «تمام شد»:", reply_markup=kb.files_upload_done_kb())
 
     async def _process_newprod_files(update: Update):
         if not _admin_only(update.effective_user.id): return
         fname = update.message.document.file_name or ""
         if not cfg.is_allowed_product_filename(fname):
             allowed = "، ".join(e.upper().lstrip(".") for e in cfg.ALLOWED_PRODUCT_FILE_EXTENSIONS)
-            await update.effective_message.reply_text(f"⛔️ پسوند مجاز نیست: {fname.rsplit('.',1)[-1]}\n{allowed}")
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"⛔️ پسوند مجاز نیست: {fname.rsplit('.',1)[-1]}\n{allowed}")
             return
         d = _get_data(update.effective_user.id, BOT_ID)
         fs = list(d.get("newprod_files") or [])
         fs.append(update.message.document.file_id)
         _set_data(update.effective_user.id, {**d, "newprod_files": fs}, BOT_ID)
-        await update.effective_message.reply_text(f"📎 فایل {len(fs)} ثبت شد.")
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"📎 فایل {len(fs)} ثبت شد.")
 
     async def _cb_newprod_files_done(update: Update):
         if not _senior_admin_only(update.effective_user.id): return await _deny(update, "⛔️.")
@@ -1218,13 +1250,13 @@ async def make_admin_handlers(db: Database, bot_token: str):
         fname = update.message.document.file_name or ""
         if not cfg.is_allowed_product_filename(fname):
             allowed = "، ".join(e.upper().lstrip(".") for e in cfg.ALLOWED_PRODUCT_FILE_EXTENSIONS)
-            await update.effective_message.reply_text(f"⛔️ {fname.rsplit('.',1)[-1]} مجاز نیست.\n{allowed}")
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"⛔️ {fname.rsplit('.',1)[-1]} مجاز نیست.\n{allowed}")
             return
         d = _get_data(update.effective_user.id, BOT_ID)
         fs = list(d.get("files") or [])
         fs.append(update.message.document.file_id)
         _set_data(update.effective_user.id, {**d, "files": fs}, BOT_ID)
-        await update.effective_message.reply_text(f"📎 {len(fs)} ثبت شد.")
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"📎 {len(fs)} ثبت شد.")
 
     async def _cb_prod_files_done(update: Update):
         if not _senior_admin_only(update.effective_user.id): return await _deny(update, "⛔️.")
@@ -1262,7 +1294,7 @@ async def make_admin_handlers(db: Database, bot_token: str):
             rt = order.get("receipt_type") or "photo"
             await _send_receipt(bot, update.effective_user.id, order["receipt_file_id"], rt, cap, kb.order_review_kb(oid))
         else:
-            await update.callback_query.reply_text(cap, reply_markup=kb.order_review_kb(oid))
+            await update.callback_query.bot.send_message(chat_id=update.effective_message.chat.id, text=cap, reply_markup=kb.order_review_kb(oid))
         await update.callback_query.answer()
 
     async def _cb_order_approve(update: Update, bot: Bot):
@@ -1345,7 +1377,7 @@ async def make_admin_handlers(db: Database, bot_token: str):
             rt = tu.get("receipt_type") or "photo"
             await _send_receipt(bot, update.effective_user.id, tu["receipt_file_id"], rt, cap, kb.topup_review_kb(tid))
         else:
-            await update.callback_query.reply_text(cap, reply_markup=kb.topup_review_kb(tid))
+            await update.callback_query.bot.send_message(chat_id=update.effective_message.chat.id, text=cap, reply_markup=kb.topup_review_kb(tid))
         await update.callback_query.answer()
 
     async def _cb_topup_approve(update: Update, bot: Bot):
@@ -1427,33 +1459,33 @@ async def make_admin_handlers(db: Database, bot_token: str):
         if not _senior_admin_only(update.effective_user.id): return
         code = (update.message.text or "").strip()
         if await asyncio.to_thread(db.get_discount_code, code):
-            await update.effective_message.reply_text("این کد وجود دارد. نام دیگر:"); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="این کد وجود دارد. نام دیگر:"); return
         _set_data(update.effective_user.id, {"disc_code": code}, BOT_ID)
         _set_state(update.effective_user.id, "adm_disc_tv", BOT_ID)
-        await update.effective_message.reply_text("فرمت: `percent 20` یا `fixed 50000`", parse_mode="Markdown")
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="فرمت: `percent 20` یا `fixed 50000`", parse_mode="Markdown")
 
     async def _process_disc_tv(update: Update):
         if not _senior_admin_only(update.effective_user.id): return
         parts = (update.message.text or "").strip().split()
         if len(parts) != 2 or parts[0].lower() not in ("percent", "fixed") or not parts[1].isdigit():
-            await update.effective_message.reply_text("فرمت: `percent 20` یا `fixed 50000`"); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="فرمت: `percent 20` یا `fixed 50000`"); return
         kind, val = parts[0].lower(), int(parts[1])
         d = _get_data(update.effective_user.id, BOT_ID)
         if kind == "percent": d["disc_pct"] = val; d["disc_fix"] = None
         else: d["disc_pct"] = None; d["disc_fix"] = val
         _set_data(update.effective_user.id, d, BOT_ID)
         _set_state(update.effective_user.id, "adm_disc_mu", BOT_ID)
-        await update.effective_message.reply_text("سقف استفاده (0=نامحدود):")
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="سقف استفاده (0=نامحدود):")
 
     async def _process_disc_mu(update: Update):
         if not _senior_admin_only(update.effective_user.id): return
         t = (update.message.text or "").strip()
-        if not t.isdigit(): await update.effective_message.reply_text("عدد:"); return
+        if not t.isdigit(): await update.bot.send_message(chat_id=update.effective_message.chat.id, text="عدد:"); return
         d = _get_data(update.effective_user.id, BOT_ID)
         await asyncio.to_thread(db.create_discount_code, d["disc_code"], percent=d.get("disc_pct"), fixed_amount=d.get("disc_fix"), max_uses=int(t))
         (await asyncio.to_thread(db.log_admin_action, update.effective_user.id, "discount_add", d["disc_code"]))
         _clear(update.effective_user.id, BOT_ID)
-        await update.effective_message.reply_text(f"✅ کد «{d['disc_code']}» ساخته شد.", reply_markup=kb.discount_codes_kb(await asyncio.to_thread(db.list_discount_codes)))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"✅ کد «{d['disc_code']}» ساخته شد.", reply_markup=kb.discount_codes_kb(await asyncio.to_thread(db.list_discount_codes)))
 
     # --- Force join ---
     async def _cb_forcejoin_menu(update: Update):
@@ -1486,11 +1518,11 @@ async def make_admin_handlers(db: Database, bot_token: str):
             mem = await bot.get_chat_member(ch, bot.id)
             if mem.status not in ("administrator", "creator"): raise ValueError
         except:
-            await update.effective_message.reply_text("⛔️ دسترسی ندارم. ربات باید ادمین کانال باشد.", parse_mode="Markdown",
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="⛔️ دسترسی ندارم. ربات باید ادمین کانال باشد.", parse_mode="Markdown",
                                          reply_markup=kb.admin_back_kb("adm_forcejoin_menu")); return
         await asyncio.to_thread(db.set_setting, "force_join_channel", ch)
         _clear(update.effective_user.id, BOT_ID)
-        await update.effective_message.reply_text(f"✅ کانال «{chat.title}» ثبت شد.", reply_markup=kb.admin_forcejoin_menu_kb(db))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"✅ کانال «{chat.title}» ثبت شد.", reply_markup=kb.admin_forcejoin_menu_kb(db))
 
     # --- Referral settings ---
     async def _cb_ref_settings(update: Update):
@@ -1514,10 +1546,10 @@ async def make_admin_handlers(db: Database, bot_token: str):
     async def _process_ref_percent(update: Update):
         if not _senior_admin_only(update.effective_user.id): return
         t = (update.message.text or "").strip()
-        if not t.isdigit() or not (0 <= int(t) <= 100): await update.effective_message.reply_text("0-100:"); return
+        if not t.isdigit() or not (0 <= int(t) <= 100): await update.bot.send_message(chat_id=update.effective_message.chat.id, text="0-100:"); return
         await asyncio.to_thread(db.set_setting, "referral_percent", t)
         _clear(update.effective_user.id, BOT_ID)
-        await update.effective_message.reply_text(f"✅ {t}٪ تنظیم شد.", reply_markup=kb.referral_settings_kb(db))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"✅ {t}٪ تنظیم شد.", reply_markup=kb.referral_settings_kb(db))
 
     async def _cb_ref_comm_max_edit(update: Update):
         if not _senior_admin_only(update.effective_user.id): return await _deny(update, "⛔️.")
@@ -1528,10 +1560,10 @@ async def make_admin_handlers(db: Database, bot_token: str):
     async def _process_ref_comm_max(update: Update):
         if not _senior_admin_only(update.effective_user.id): return
         t = (update.message.text or "").strip()
-        if not t.isdigit(): await update.effective_message.reply_text("عدد:"); return
+        if not t.isdigit(): await update.bot.send_message(chat_id=update.effective_message.chat.id, text="عدد:"); return
         await asyncio.to_thread(db.set_setting, "referral_commission_max_count", t)
         _clear(update.effective_user.id, BOT_ID)
-        await update.effective_message.reply_text(f"✅ {t if t=='0' else t+' نفر'}.", reply_markup=kb.referral_settings_kb(db))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"✅ {t if t=='0' else t+' نفر'}.", reply_markup=kb.referral_settings_kb(db))
 
     async def _cb_ref_fc_toggle(update: Update):
         if not _senior_admin_only(update.effective_user.id): return await _deny(update, "⛔️.")
@@ -1552,10 +1584,10 @@ async def make_admin_handlers(db: Database, bot_token: str):
     async def _process_ref_fc_thresh(update: Update):
         if not _senior_admin_only(update.effective_user.id): return
         t = (update.message.text or "").strip()
-        if not t.isdigit() or int(t) < 1: await update.effective_message.reply_text("عدد ≥1:"); return
+        if not t.isdigit() or int(t) < 1: await update.bot.send_message(chat_id=update.effective_message.chat.id, text="عدد ≥1:"); return
         await asyncio.to_thread(db.set_setting, "referral_free_config_threshold", t)
         _clear(update.effective_user.id, BOT_ID)
-        await update.effective_message.reply_text(f"✅ با دعوت {t} نفر الگوی رایگان.", reply_markup=kb.referral_settings_kb(db))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"✅ با دعوت {t} نفر الگوی رایگان.", reply_markup=kb.referral_settings_kb(db))
 
     async def _cb_ref_fc_product(update: Update):
         if not _senior_admin_only(update.effective_user.id): return await _deny(update, "⛔️.")
@@ -1591,10 +1623,10 @@ async def make_admin_handlers(db: Database, bot_token: str):
     async def _process_ref_ib_amt(update: Update):
         if not _senior_admin_only(update.effective_user.id): return
         t = (update.message.text or "").strip()
-        if not t.isdigit() or int(t) < 0: await update.effective_message.reply_text("عدد ≥0:"); return
+        if not t.isdigit() or int(t) < 0: await update.bot.send_message(chat_id=update.effective_message.chat.id, text="عدد ≥0:"); return
         await asyncio.to_thread(db.set_setting, "referral_invite_bonus_amount", t)
         _clear(update.effective_user.id, BOT_ID)
-        await update.effective_message.reply_text(f"✅ {int(t):,} تومان.", reply_markup=kb.referral_settings_kb(db))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"✅ {int(t):,} تومان.", reply_markup=kb.referral_settings_kb(db))
 
     async def _cb_ref_ib_max_edit(update: Update):
         if not _senior_admin_only(update.effective_user.id): return await _deny(update, "⛔️.")
@@ -1605,10 +1637,10 @@ async def make_admin_handlers(db: Database, bot_token: str):
     async def _process_ref_ib_max(update: Update):
         if not _senior_admin_only(update.effective_user.id): return
         t = (update.message.text or "").strip()
-        if not t.isdigit(): await update.effective_message.reply_text("عدد:"); return
+        if not t.isdigit(): await update.bot.send_message(chat_id=update.effective_message.chat.id, text="عدد:"); return
         await asyncio.to_thread(db.set_setting, "referral_invite_bonus_max_count", t)
         _clear(update.effective_user.id, BOT_ID)
-        await update.effective_message.reply_text(f"✅ {t if t=='0' else t+' نفر'}.", reply_markup=kb.referral_settings_kb(db))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"✅ {t if t=='0' else t+' نفر'}.", reply_markup=kb.referral_settings_kb(db))
 
     # --- Wheel settings ---
     async def _cb_wheel_settings(update: Update):
@@ -1632,10 +1664,10 @@ async def make_admin_handlers(db: Database, bot_token: str):
     async def _process_wheel_percent(update: Update):
         if not _senior_admin_only(update.effective_user.id): return
         t = (update.message.text or "").strip()
-        if not t.isdigit() or not (0 <= int(t) <= 100): await update.effective_message.reply_text("0-100:"); return
+        if not t.isdigit() or not (0 <= int(t) <= 100): await update.bot.send_message(chat_id=update.effective_message.chat.id, text="0-100:"); return
         await asyncio.to_thread(db.set_setting, "wheel_win_percent", t)
         _clear(update.effective_user.id, BOT_ID)
-        await update.effective_message.reply_text(f"✅ {t}٪.", reply_markup=kb.wheel_settings_kb(db))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"✅ {t}٪.", reply_markup=kb.wheel_settings_kb(db))
 
     async def _cb_wheel_edit_prizes(update: Update):
         if not _senior_admin_only(update.effective_user.id): return await _deny(update, "⛔️.")
@@ -1647,10 +1679,10 @@ async def make_admin_handlers(db: Database, bot_token: str):
         if not _senior_admin_only(update.effective_user.id): return
         parts = [p.strip() for p in (update.message.text or "").split(",")]
         if not all(p.isdigit() and 0 < int(p) <= 100 for p in parts) or not parts:
-            await update.effective_message.reply_text("مثال: 10,20,30,50"); return
+            await update.bot.send_message(chat_id=update.effective_message.chat.id, text="مثال: 10,20,30,50"); return
         await asyncio.to_thread(db.set_wheel_prizes, [int(p) for p in parts])
         _clear(update.effective_user.id, BOT_ID)
-        await update.effective_message.reply_text("✅ لیست جوایز بهروزرسانی شد.", reply_markup=kb.wheel_settings_kb(db))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="✅ لیست جوایز بهروزرسانی شد.", reply_markup=kb.wheel_settings_kb(db))
 
     async def _cb_wheel_edit_expiry(update: Update):
         if not _senior_admin_only(update.effective_user.id): return await _deny(update, "⛔️.")
@@ -1661,10 +1693,10 @@ async def make_admin_handlers(db: Database, bot_token: str):
     async def _process_wheel_expiry(update: Update):
         if not _senior_admin_only(update.effective_user.id): return
         t = (update.message.text or "").strip()
-        if not t.isdigit() or int(t) <= 0: await update.effective_message.reply_text("عدد ≥1:"); return
+        if not t.isdigit() or int(t) <= 0: await update.bot.send_message(chat_id=update.effective_message.chat.id, text="عدد ≥1:"); return
         await asyncio.to_thread(db.set_setting, "wheel_code_expiry_hours", t)
         _clear(update.effective_user.id, BOT_ID)
-        await update.effective_message.reply_text(f"✅ {t} ساعت.", reply_markup=kb.wheel_settings_kb(db))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"✅ {t} ساعت.", reply_markup=kb.wheel_settings_kb(db))
 
     async def _cb_wheel_edit_cooldown(update: Update):
         if not _senior_admin_only(update.effective_user.id): return await _deny(update, "⛔️.")
@@ -1675,25 +1707,25 @@ async def make_admin_handlers(db: Database, bot_token: str):
     async def _process_wheel_cooldown(update: Update):
         if not _senior_admin_only(update.effective_user.id): return
         t = (update.message.text or "").strip()
-        if not t.isdigit() or int(t) <= 0: await update.effective_message.reply_text("عدد ≥1:"); return
+        if not t.isdigit() or int(t) <= 0: await update.bot.send_message(chat_id=update.effective_message.chat.id, text="عدد ≥1:"); return
         await asyncio.to_thread(db.set_setting, "wheel_cooldown_hours", t)
         _clear(update.effective_user.id, BOT_ID)
-        await update.effective_message.reply_text(f"✅ {t} ساعت.", reply_markup=kb.wheel_settings_kb(db))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text=f"✅ {t} ساعت.", reply_markup=kb.wheel_settings_kb(db))
 
     # --- Admin panel: /admin and /cancel commands ---
     async def _cmd_admin(update: Update):
         uid = update.effective_user.id
         if not _admin_only(uid): return
         _clear(uid, BOT_ID)
-        await update.effective_message.reply_text("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db))
 
     async def _cmd_cancel(update: Update):
         uid = update.effective_user.id
         if not (_admin_only(uid) or uid == int(cfg.OWNER_ID)): return
         cur = _get_state(uid, BOT_ID)
         _clear(uid, BOT_ID)
-        await update.effective_message.reply_text("❌ عملیات لغو شد." if cur else "❌ عملیاتی در جریان نبود.")
-        await update.effective_message.reply_text("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db))
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="❌ عملیات لغو شد." if cur else "❌ عملیاتی در جریان نبود.")
+        await update.bot.send_message(chat_id=update.effective_message.chat.id, text="🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db))
 
     # ── Assemble admin handler list ──
     H = [
