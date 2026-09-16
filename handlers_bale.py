@@ -268,7 +268,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         await update.callback_query.answer()
 
     async def _cb_category(update, context):
-        cat_id = int(update.callback_query.data.split(":", 1)[1])
+        cat_id = int(update.callback_query.data.split(":", 2)[1])
         prods = await asyncio.to_thread(db.get_products, cat_id)
         if not prods:
             await update.callback_query.answer("محصولی در این دستهبندی موجود نیست.", show_alert=True)
@@ -277,7 +277,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         await update.callback_query.answer()
 
     async def _cb_product(update, context):
-        try: pid = int(update.callback_query.data.split(":", 1)[1])
+        try: pid = int(update.callback_query.data.split(":", 2)[1])
         except: await update.callback_query.answer("❌ نامعتبر.", show_alert=True); return
         prod = await asyncio.to_thread(db.get_product, pid)
         if not prod:
@@ -297,7 +297,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         await update.callback_query.answer()
 
     async def _cb_enter_code(update, context):
-        try: pid = int(update.callback_query.data.split(":", 1)[1])
+        try: pid = int(update.callback_query.data.split(":", 2)[1])
         except: await update.callback_query.answer("❌ نامعتبر.", show_alert=True); return
         _set_data(update.effective_user.id, {"discount_product_id": pid}, BOT_ID)
         _set_state(update.effective_user.id, DiscountEntry.waiting_code.state, BOT_ID)
@@ -326,7 +326,7 @@ async def make_user_handlers(db: Database, bot_token: str):
 
     # ── Checkout flow ───────────────────────────────────────────
     async def _cb_buy_start(update, context):
-        try: pid = int(update.callback_query.data.split(":", 1)[1])
+        try: pid = int(update.callback_query.data.split(":", 2)[1])
         except: await update.callback_query.answer("❌ نامعتبر.", show_alert=True); return
         prod = await asyncio.to_thread(db.get_product, pid)
         if not prod: await update.callback_query.answer("الگو موجود نیست.", show_alert=True); return
@@ -336,7 +336,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         sm = await asyncio.to_thread(cart_svc.cart_summary, db, update.effective_user.id)
         if sm["count"] == 1 and not sm["has_physical"]:
             await _run_checkout(update, bot); return
-        await _show_cart(update)
+        await _show_cart(update, context)
 
     async def _show_cart(update, context):
         sm = await asyncio.to_thread(cart_svc.cart_summary, db, update.effective_user.id)
@@ -409,33 +409,33 @@ async def make_user_handlers(db: Database, bot_token: str):
             await asyncio.to_thread(cart_svc.update_quantity, db, update.effective_user.id, iid, nq)
         except CartError as e:
             await update.callback_query.answer(e.message, show_alert=True); return
-        await _show_cart(update)
+        await _show_cart(update, context)
 
     async def _cb_cart_del(update, context):
-        try: iid = int(update.callback_query.data.split(":", 1)[1])
+        try: iid = int(update.callback_query.data.split(":", 2)[1])
         except: await update.callback_query.answer("❌ نامعتبر.", show_alert=True); return
         await asyncio.to_thread(cart_svc.remove_from_cart, db, update.effective_user.id, iid)
-        await _show_cart(update)
+        await _show_cart(update, context)
 
     async def _cb_cart_clear(update, context):
         await asyncio.to_thread(cart_svc.clear_cart, db, update.effective_user.id)
-        await _show_cart(update)
+        await _show_cart(update, context)
 
     async def _cb_cart_show(update, context):
-        await _show_cart(update)
+        await _show_cart(update, context)
 
     async def _cb_cart_checkout(update, context):
         await _run_checkout(update, bot)
 
     async def _cb_cart_ship(update, context):
-        try: sid = int(update.callback_query.data.split(":", 1)[1])
+        try: sid = int(update.callback_query.data.split(":", 2)[1])
         except: await update.callback_query.answer("❌ نامعتبر.", show_alert=True); return
         d = _get_data(update.effective_user.id, BOT_ID); d["cart_ship_id"] = sid
         _set_data(update.effective_user.id, d, BOT_ID)
         await _run_checkout(update, bot)
 
     async def _cb_cart_addr(update, context):
-        try: aid = int(update.callback_query.data.split(":", 1)[1])
+        try: aid = int(update.callback_query.data.split(":", 2)[1])
         except: await update.callback_query.answer("❌ نامعتبر.", show_alert=True); return
         d = _get_data(update.effective_user.id, BOT_ID); d["cart_address_id"] = aid
         _set_data(update.effective_user.id, d, BOT_ID)
@@ -593,7 +593,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         await update.callback_query.answer()
 
     async def _cb_mo_view(update, context):
-        cid = update.callback_query.data.split(":", 1)[1]
+        cid = update.callback_query.data.split(":", 2)[1]
         o = _get_owned_order(update.effective_user.id, cid)
         if not o or o.get("user_deleted"):
             await update.callback_query.answer("یافت نشد.", show_alert=True)
@@ -602,7 +602,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         await _edit_text(update, context, _my_order_text(o), reply_markup=kb.my_order_item_kb(cid, True))
 
     async def _cb_mo_resend(update, context):
-        cid = update.callback_query.data.split(":", 1)[1]
+        cid = update.callback_query.data.split(":", 2)[1]
         o = _get_owned_order(update.effective_user.id, cid)
         if not o: await update.callback_query.answer("یافت نشد.", show_alert=True); return
         if o["status"] != "approved" or not o.get("file_ids"):
@@ -629,7 +629,7 @@ async def make_user_handlers(db: Database, bot_token: str):
             except: pass
 
     async def _cb_mo_del_ask(update, context):
-        cid = update.callback_query.data.split(":", 1)[1]
+        cid = update.callback_query.data.split(":", 2)[1]
         o = _get_owned_order(update.effective_user.id, cid)
         if not o or o.get("user_deleted"):
             await update.callback_query.answer("یافت نشد.", show_alert=True)
@@ -639,7 +639,7 @@ async def make_user_handlers(db: Database, bot_token: str):
                         reply_markup=kb.my_order_delete_confirm_kb(cid))
 
     async def _cb_mo_del_ok(update, context):
-        cid = update.callback_query.data.split(":", 1)[1]
+        cid = update.callback_query.data.split(":", 2)[1]
         uid = update.effective_user.id
         try: oid = int(cid)
         except: await update.callback_query.answer("نامعتبر.", show_alert=True); return
@@ -705,7 +705,7 @@ async def make_user_handlers(db: Database, bot_token: str):
 
     async def _cb_loy_hist(update, context):
         _clear(update.effective_user.id, BOT_ID)
-        try: pg = max(int(update.callback_query.data.split(":", 1)[1]), 0)
+        try: pg = max(int(update.callback_query.data.split(":", 2)[1]), 0)
         except: pg = 0
         pp = 5
         rows, tot = await asyncio.to_thread(db.get_loyalty_history, update.effective_user.id, pp, pg * pp)
@@ -785,7 +785,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         await context.bot.send_message(chat_id=update.effective_message.chat.id, text=f"🔄 {pts} امتیاز → {toman:,} تومان", reply_markup=kb.loyalty_redeem_confirm_kb(pts))
 
     async def _cb_loy_redeem_ok(update, context):
-        try: pts = int(update.callback_query.data.split(":", 1)[1])
+        try: pts = int(update.callback_query.data.split(":", 2)[1])
         except: _clear(update.effective_user.id, BOT_ID); await update.callback_query.answer("نامعتبر.", show_alert=True); return
         try: result = await asyncio.to_thread(loyalty.redeem, db, update.effective_user.id, pts)
         except LoyaltyError as e: await update.callback_query.answer(str(e), show_alert=True); return
@@ -877,7 +877,7 @@ async def make_user_handlers(db: Database, bot_token: str):
     # ── mm: inline menu bridge ──────────────────────────────────
     async def _cb_mm(update, context):
         await update.callback_query.answer()
-        key = update.callback_query.data.split(":", 1)[1]
+        key = update.callback_query.data.split(":", 2)[1]
         uid = update.effective_user.id
         class FakeU:
             effective_user = type('U', (), {"id": uid, "username": "", "first_name": ""})()
@@ -1037,7 +1037,7 @@ async def make_admin_handlers(db: Database, bot_token: str):
     async def _cb_admin_cat(update, context):
         if not _admin_only(update.effective_user.id): return
         _clear(update.effective_user.id, BOT_ID)
-        ck = update.callback_query.data.split(":", 1)[1]
+        ck = update.callback_query.data.split(":", 2)[1]
         title = kb.admin_category_label(ck)
         await _replace_view(update, f"{title}:", reply_markup=kb.admin_category_kb(db, ck))
         await update.callback_query.answer()
@@ -1097,7 +1097,7 @@ async def make_admin_handlers(db: Database, bot_token: str):
 
     async def _cb_prod_cat(update, context):
         if not _senior_admin_only(update.effective_user.id): return await _deny(update, "⛔️.")
-        cid = int(update.callback_query.data.split(":", 1)[1])
+        cid = int(update.callback_query.data.split(":", 2)[1])
         prods = await asyncio.to_thread(db.get_products, cid)
         await _safe_edit(update, "📦 محصولات:", reply_markup=kb.admin_products_list_kb(db, prods))
         await update.callback_query.answer()
@@ -1134,7 +1134,7 @@ async def make_admin_handlers(db: Database, bot_token: str):
 
     async def _cb_pick_newprod_cat(update, context):
         if not _senior_admin_only(update.effective_user.id): return await _deny(update, "⛔️.")
-        cid = int(update.callback_query.data.split(":", 1)[1])
+        cid = int(update.callback_query.data.split(":", 2)[1])
         _set_data(update.effective_user.id, {"newprod_cat": cid}, BOT_ID)
         _set_state(update.effective_user.id, "adm_newprod_name", BOT_ID)
         await _safe_edit(update, "نام محصول:", reply_markup=kb.admin_back_kb("adm_products"))
@@ -1596,7 +1596,7 @@ async def make_admin_handlers(db: Database, bot_token: str):
 
     async def _cb_ref_fc_setprod(update, context):
         if not _senior_admin_only(update.effective_user.id): return await _deny(update, "⛔️.")
-        try: pid = int(update.callback_query.data.split(":", 1)[1])
+        try: pid = int(update.callback_query.data.split(":", 2)[1])
         except: await _deny(update, "❌."); return
         prod = await asyncio.to_thread(db.get_product, pid)
         if not prod: await _deny(update, "یافت نشد."); return
