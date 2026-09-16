@@ -335,7 +335,7 @@ async def make_user_handlers(db: Database, bot_token: str):
             await update.callback_query.answer(e.message, show_alert=True); return
         sm = await asyncio.to_thread(cart_svc.cart_summary, db, update.effective_user.id)
         if sm["count"] == 1 and not sm["has_physical"]:
-            await _run_checkout(update, bot); return
+            await _run_checkout(update, context); return
         await _show_cart(update, context)
 
     async def _show_cart(update, context):
@@ -425,21 +425,21 @@ async def make_user_handlers(db: Database, bot_token: str):
         await _show_cart(update, context)
 
     async def _cb_cart_checkout(update, context):
-        await _run_checkout(update, bot)
+        await _run_checkout(update, context)
 
     async def _cb_cart_ship(update, context):
         try: sid = int(update.callback_query.data.split(":", 2)[1])
         except: await update.callback_query.answer("❌ نامعتبر.", show_alert=True); return
         d = _get_data(update.effective_user.id, BOT_ID); d["cart_ship_id"] = sid
         _set_data(update.effective_user.id, d, BOT_ID)
-        await _run_checkout(update, bot)
+        await _run_checkout(update, context)
 
     async def _cb_cart_addr(update, context):
         try: aid = int(update.callback_query.data.split(":", 2)[1])
         except: await update.callback_query.answer("❌ نامعتبر.", show_alert=True); return
         d = _get_data(update.effective_user.id, BOT_ID); d["cart_address_id"] = aid
         _set_data(update.effective_user.id, d, BOT_ID)
-        await _run_checkout(update, bot)
+        await _run_checkout(update, context)
 
     async def _cb_cart_addr_new(update, context):
         _set_state(update.effective_user.id, CartFlow.waiting_address.state, BOT_ID)
