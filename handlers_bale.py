@@ -108,38 +108,38 @@ async def _answer(cb: Update, text: str = "", show_alert: bool = False):
 def _msg(u: Update):
     return u.effective_message if u.effective_message else getattr(getattr(u, "callback_query", None), "message", None)
 
-async def _send(u: Update, text: str, **kwargs):
+async def _send(u, context, text: str, **kwargs):
     """Send a text message — works for both regular messages and callback-query contexts."""
-    chat_id = u.effective_chat.id if u.effective_chat else (u.callback_query.chat.id if u.callback_query else None)
+    chat_id = u.effective_chat.id if u.effective_chat else (u.callback_query.message.chat.id if u.callback_query else None)
     if not chat_id: return
     kwargs["chat_id"] = chat_id
-    await u.context.bot.send_message(**kwargs)
+    await context.bot.send_message(**kwargs)
 
-async def _edit_text(u: Update, text: str, reply_markup=None, parse_mode=None):
+async def _edit_text(u, context, text: str, reply_markup=None, parse_mode=None):
     """Try edit_message_text; fall back to send_message."""
     if u.callback_query and getattr(u.callback_query, "message", None):
-        kwargs = {"text": text, "chat_id": u.callback_query.chat.id,
+        kwargs = {"text": text, "chat_id": u.callback_query.message.chat.id,
                   "message_id": u.callback_query.message.message_id}
         if reply_markup: kwargs["reply_markup"] = reply_markup
         if parse_mode: kwargs["parse_mode"] = parse_mode
         try:
-            await u.bot.edit_message_text(**kwargs)
+            await context.bot.edit_message_text(**kwargs)
         except Exception as e:
             if "not modified" in str(e).lower(): return
             del kwargs["message_id"]
-            await u.context.bot.send_message(**kwargs)
+            await context.bot.send_message(**kwargs)
     elif u.effective_message:
         kwargs = {"chat_id": u.effective_message.chat.id, "text": text}
         if reply_markup: kwargs["reply_markup"] = reply_markup
         if parse_mode: kwargs["parse_mode"] = parse_mode
-        await u.context.bot.send_message(**kwargs)
+        await context.bot.send_message(**kwargs)
 
-async def _send_inline_main_menu(u: Update, uid: int, db: Database):
+async def _send_inline_main_menu(u, context, uid: int, db: Database):
     inline_kb = await asyncio.to_thread(kb.inline_menu_for_user, db, uid)
     if inline_kb is not None:
         msg = u.callback_query.message if u.callback_query else u.effective_message
         if msg:
-            await u.context.bot.send_message(chat_id=u.effective_chat.id, text="📋 منو:", reply_markup=inline_kb)
+            await context.bot.send_message(chat_id=u.effective_chat.id, text="📋 منو:", reply_markup=inline_kb)
 
 
 def _receipt_payload(u: Update):
@@ -201,7 +201,7 @@ async def make_user_handlers(db: Database, bot_token: str):
                                 except Exception: pass
         welcome = await asyncio.to_thread(db.get_setting, "welcome_text")
         await context.bot.send_message(chat_id=update.effective_message.chat.id, text=welcome, reply_markup=kb.menu_for_user(db, uid))
-        await _send_inline_main_menu(update, uid, db)
+        await _send_inline_main_menu(update, context, uid, db)
         if reg_points > 0:
             try: await context.bot.send_message(chat_id=update.effective_message.chat.id, text=f"🎁 {reg_points} امتیاز خوشآمدگویی!")
             except Exception: pass
@@ -252,19 +252,19 @@ async def make_user_handlers(db: Database, bot_token: str):
 
     async def _show_categories_from_cb(update, context):
         cats = await asyncio.to_thread(lambda: db.get_categories(active_only=True))
-        await _edit_text(update, "📂 دستهبندیها:", reply_markup=kb.categories_kb(db, cats))
+        await _edit_text(update, context, "📂 دستهبندیها:", reply_markup=kb.categories_kb(db, cats))
         await update.callback_query.answer()
 
     async def _cb_back_main(update, context):
         uid = update.effective_user.id
-        await _edit_text(update, await asyncio.to_thread(db.get_setting, "welcome_text"),
+        await _edit_text(update, context, await asyncio.to_thread(db.get_setting, "welcome_text"),
                         reply_markup=kb.menu_for_user(db, uid))
-        await _send_inline_main_menu(update, uid, db)
+        await _send_inline_main_menu(update, context, uid, db)
         await update.callback_query.answer()
 
     async def _cb_back_categories(update, context):
         cats = await asyncio.to_thread(lambda: db.get_categories(active_only=True))
-        await _edit_text(update, "📂 دستهبندیها:", reply_markup=kb.categories_kb(db, cats))
+        await _edit_text(update, context, "📂 دستهبندیها:", reply_markup=kb.categories_kb(db, cats))
         await update.callback_query.answer()
 
     async def _cb_category(update, context):
@@ -273,7 +273,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         if not prods:
             await update.callback_query.answer("محصولی در این دستهبندی موجود نیست.", show_alert=True)
             return
-        await _edit_text(update, "📦 محصولات:", reply_markup=kb.products_kb(db, cat_id, prods))
+        await _edit_text(update, context, "📦 محصولات:", reply_markup=kb.products_kb(db, cat_id, prods))
         await update.callback_query.answer()
 
     async def _cb_product(update, context):
@@ -288,9 +288,9 @@ async def make_user_handlers(db: Database, bot_token: str):
         txt.append("✅ فایل الگو موجود است" if hf else "⛔️ فعلاً فاقد فایل الگو است.")
         if wc > 0: txt.append(f"👛 موجودی کیف پول: {wc:,} تومان")
         if not hf:
-            await _edit_text(update, "\n".join(txt))
+            await _edit_text(update, context, "\n".join(txt))
             await update.callback_query.answer(); return
-        await _edit_text(update, "\n".join(txt), reply_markup=kb.product_confirm_kb(pid))
+        await _edit_text(update, context, "\n".join(txt), reply_markup=kb.product_confirm_kb(pid))
         await update.callback_query.answer()
 
     async def _cb_noop(update, context):
@@ -301,7 +301,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         except: await update.callback_query.answer("❌ نامعتبر.", show_alert=True); return
         _set_data(update.effective_user.id, {"discount_product_id": pid}, BOT_ID)
         _set_state(update.effective_user.id, DiscountEntry.waiting_code.state, BOT_ID)
-        await _edit_text(update, "🎟 کد تخفیف را ارسال کنید:", reply_markup=kb.cancel_kb())
+        await _edit_text(update, context, "🎟 کد تخفیف را ارسال کنید:", reply_markup=kb.cancel_kb())
         await update.callback_query.answer()
 
     async def _process_disc_code(update, context):
@@ -341,7 +341,7 @@ async def make_user_handlers(db: Database, bot_token: str):
     async def _show_cart(update, context):
         sm = await asyncio.to_thread(cart_svc.cart_summary, db, update.effective_user.id)
         if not sm["items"]:
-            await _edit_text(update, "🛒 سبد خرید شما خالی است."); await update.callback_query.answer(); return
+            await _edit_text(update, context, "🛒 سبد خرید شما خالی است."); await update.callback_query.answer(); return
         lines = ["🛒 سبد خرید:\n"]
         for it in sm["items"]:
             n = it["product_name"]
@@ -349,7 +349,7 @@ async def make_user_handlers(db: Database, bot_token: str):
             unit = it.get("variant_price") or it["product_price"]
             lines.append(f"• {n} × {it['quantity']} = {int(unit)*int(it['quantity']):,} ت")
         lines.append(f"\n💰 جمع: {sm.get('total',0):,} تومان")
-        await _edit_text(update, "\n".join(lines), reply_markup=kb.cart_menu_kb(sm))
+        await _edit_text(update, context, "\n".join(lines), reply_markup=kb.cart_menu_kb(sm))
         await update.callback_query.answer()
 
     async def _run_checkout(update, context):
@@ -365,25 +365,25 @@ async def make_user_handlers(db: Database, bot_token: str):
                 oid = e.data.get("previous_order_id")
                 if oid:
                     mk = InlineKeyboardMarkup([[InlineKeyboardButton("📥 دریافت محصول", callback_data=f"mo_resend:{oid}")]])
-                    await _edit_text(update, "⚠️ قبلاً سفارش داده‌اید.\n\nبرای دریافت روی دکمه زیر بزنید:", reply_markup=mk)
+                    await _edit_text(update, context, "⚠️ قبلاً سفارش داده‌اید.\n\nبرای دریافت روی دکمه زیر بزنید:", reply_markup=mk)
                 else: await update.callback_query.answer("قبلاً سفارش داده‌اید.", show_alert=True)
                 return
             if e.code == "shipping_required":
                 ms = await asyncio.to_thread(db.list_shipping_methods, True)
-                if ms: await _edit_text(update, "📦 روش ارسال را انتخاب کنید:", reply_markup=kb.shipping_methods_kb(ms))
-                else: await _edit_text(update, "📦 لطفاً با پشتیبانی تماس بگیرید.")
+                if ms: await _edit_text(update, context, "📦 روش ارسال را انتخاب کنید:", reply_markup=kb.shipping_methods_kb(ms))
+                else: await _edit_text(update, context, "📦 لطفاً با پشتیبانی تماس بگیرید.")
                 return
             if e.code == "address_required":
                 addrs = await asyncio.to_thread(db.list_addresses, uid)
                 txt = "📍 آدرس گیرنده را انتخاب یا ثبت کنید:"
                 if not addrs: txt = "📍 لطفاً آدرس گیرنده را ثبت کنید:"
-                await _edit_text(update, txt, reply_markup=kb.address_choices_kb(addrs)); return
+                await _edit_text(update, context, txt, reply_markup=kb.address_choices_kb(addrs)); return
             if e.code == "cart_empty": await update.callback_query.answer("سبد خالی است.", show_alert=True); return
             if isinstance(e, (InventoryError, CatalogError, WalletError)):
                 await update.callback_query.answer(e.message, show_alert=True); return
             if isinstance(e, DiscountError) or e.code == "discount_exhausted":
                 await update.callback_query.answer("کد تخفیف نامعتبر است.", show_alert=True); return
-            await _edit_text(update, "❌ خطایی رخ داد."); return
+            await _edit_text(update, context, "❌ خطایی رخ داد."); return
         # Deliver digital files
         for it in result.items:
             if it.product_type != "digital": continue
@@ -392,9 +392,9 @@ async def make_user_handlers(db: Database, bot_token: str):
                 try: await deliver_pattern_to_user(bot, uid, it.product_name, [f["file_id"] for f in fs], 0, result.order_id)
                 except: logger.exception("Digital delivery failed for #%s", result.order_id)
         sm = await asyncio.to_thread(cart_svc.cart_summary, db, uid)
-        await _edit_text(update, "✅ سفارش ثبت شد! پس از تایید ادمین، فایل الگو ارسال میشود.",
+        await _edit_text(update, context, "✅ سفارش ثبت شد! پس از تایید ادمین، فایل الگو ارسال میشود.",
                         reply_markup=kb.cart_menu_kb(sm))
-        await _send_inline_main_menu(update, uid, db)
+        await _send_inline_main_menu(update, context, uid, db)
 
     async def _cb_cart_qty(update, context):
         try: op, iid_s = update.callback_query.data.split(":", 1); iid = int(iid_s)
@@ -443,7 +443,7 @@ async def make_user_handlers(db: Database, bot_token: str):
 
     async def _cb_cart_addr_new(update, context):
         _set_state(update.effective_user.id, CartFlow.waiting_address.state, BOT_ID)
-        await _edit_text(update, "📍 آدرس گیرنده (استان، شهر، نشانی کامل، کد پستی) را ارسال کنید:", reply_markup=kb.cancel_kb())
+        await _edit_text(update, context, "📍 آدرس گیرنده (استان، شهر، نشانی کامل، کد پستی) را ارسال کنید:", reply_markup=kb.cancel_kb())
         await update.callback_query.answer()
 
     async def _process_cart_addr(update, context):
@@ -465,8 +465,8 @@ async def make_user_handlers(db: Database, bot_token: str):
             except Exception: pass
         _clear(update.effective_user.id, BOT_ID)
         uid = update.effective_user.id
-        await _edit_text(update, "❌ لغو شد.", reply_markup=kb.menu_for_user(db, uid))
-        await _send_inline_main_menu(update, uid, db)
+        await _edit_text(update, context, "❌ لغو شد.", reply_markup=kb.menu_for_user(db, uid))
+        await _send_inline_main_menu(update, context, uid, db)
         await update.callback_query.answer()
 
     # ── Receipt handlers ────────────────────────────────────────
@@ -496,7 +496,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         _clear(uid, BOT_ID)
         await context.bot.send_message(chat_id=update.effective_message.chat.id, text="✅ رسید ارسال شد. پس از تایید ادمین، فایل الگو ارسال میشود.",
                                     reply_markup=kb.menu_for_user(db, uid))
-        await _send_inline_main_menu(update, uid, db)
+        await _send_inline_main_menu(update, context, uid, db)
 
     async def _receive_receipt_wrong(update, context):
         await context.bot.send_message(chat_id=update.effective_message.chat.id, text="لطفاً عکس رسید را بهصورت Photo بفرستید.")
@@ -516,7 +516,7 @@ async def make_user_handlers(db: Database, bot_token: str):
                 logger.exception("Fallback receipt failed for #%s", order["id"])
                 await context.bot.send_message(chat_id=update.effective_message.chat.id, text="⚠️ خطایی رخ داد. دوباره تلاش کنید."); return
             await context.bot.send_message(chat_id=update.effective_message.chat.id, text="✅ رسید ارسال شد.", reply_markup=kb.menu_for_user(db, uid))
-            await _send_inline_main_menu(update, uid, db); return
+            await _send_inline_main_menu(update, context, uid, db); return
         try: topup = await asyncio.to_thread(db.get_latest_pending_topup_awaiting_receipt, uid)
         except Exception: topup = None
         if topup:
@@ -533,11 +533,11 @@ async def make_user_handlers(db: Database, bot_token: str):
                 logger.exception("Fallback topup receipt failed for #%s", topup["id"])
                 await context.bot.send_message(chat_id=update.effective_message.chat.id, text="⚠️ خطایی رخ داد."); return
             await context.bot.send_message(chat_id=update.effective_message.chat.id, text="✅ شارژ کیف پول ثبت شد.", reply_markup=kb.menu_for_user(db, uid))
-            await _send_inline_main_menu(update, uid, db); return
+            await _send_inline_main_menu(update, context, uid, db); return
         logger.warning("Photo/doc without state for user %s", uid)
         await context.bot.send_message(chat_id=update.effective_message.chat.id, text="❌ رسید ثبت نشد. لطفاً از منوی اصلی مسیر خرید/شارژ را طی کنید.",
                                     reply_markup=kb.menu_for_user(db, uid))
-        await _send_inline_main_menu(update, uid, db)
+        await _send_inline_main_menu(update, context, uid, db)
 
     # ── Test config ─────────────────────────────────────────────
     async def _get_test_config(update, context):
@@ -599,7 +599,7 @@ async def make_user_handlers(db: Database, bot_token: str):
             await update.callback_query.answer("یافت نشد.", show_alert=True)
             await _show_my_orders_list(update, update.effective_user.id, edit=True); return
         await update.callback_query.answer()
-        await _edit_text(update, _my_order_text(o), reply_markup=kb.my_order_item_kb(cid, True))
+        await _edit_text(update, context, _my_order_text(o), reply_markup=kb.my_order_item_kb(cid, True))
 
     async def _cb_mo_resend(update, context):
         cid = update.callback_query.data.split(":", 1)[1]
@@ -635,7 +635,7 @@ async def make_user_handlers(db: Database, bot_token: str):
             await update.callback_query.answer("یافت نشد.", show_alert=True)
             await _show_my_orders_list(update, update.effective_user.id, edit=True); return
         await update.callback_query.answer()
-        await _edit_text(update, "⚠️ آیا مطمئن هستید؟ این عمل غیرقابل بازگشت است.",
+        await _edit_text(update, context, "⚠️ آیا مطمئن هستید؟ این عمل غیرقابل بازگشت است.",
                         reply_markup=kb.my_order_delete_confirm_kb(cid))
 
     async def _cb_mo_del_ok(update, context):
@@ -722,7 +722,7 @@ async def make_user_handlers(db: Database, bot_token: str):
             try: dt = to_jalali_str(r["created_at"])
             except: dt = "-"
             L.append(f"{al}\n{tx}\n📅 {dt} — موجودی: {r['balance_after']}")
-        await _edit_text(update, "\n".join(L), kb.loyalty_history_kb(pg, pg > 0, (pg+1)*pp < tot))
+        await _edit_text(update, context, "\n".join(L), kb.loyalty_history_kb(pg, pg > 0, (pg+1)*pp < tot))
         await update.callback_query.answer()
 
     async def _cb_loy_back(update, context):
@@ -732,7 +732,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         s = await asyncio.to_thread(loyalty.get_summary, db, update.effective_user.id)
         T = ["🎁 <b>باشگاه مشتریان</b>", "",
              f"⭐ امتیاز: {s['current']}", f"🏆 سطح: {s['tier']['name'] if s.get('tier') else '—'}"]
-        await _edit_text(update, "\n".join(T), kb.loyalty_menu_kb())
+        await _edit_text(update, context, "\n".join(T), kb.loyalty_menu_kb())
         await update.callback_query.answer()
 
     async def _cb_loy_rules(update, context):
@@ -756,7 +756,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         L += ["", f"🔄 هر {rp} امتیاز = {rt:,} تومان"] if rp > 0 and rt > 0 else ["", "🔄 تبدیل فعال نیست."]
         if mr > 0: L.append(f"حداقل تبدیل: {mr}")
         L.append("امتیازها پس از تایید سفارش اعطا میشوند.")
-        await _edit_text(update, "\n".join(L), kb.loyalty_rules_kb())
+        await _edit_text(update, context, "\n".join(L), kb.loyalty_rules_kb())
         await update.callback_query.answer()
 
     async def _cb_loy_redeem(update, context):
@@ -792,7 +792,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         except Exception:
             logger.exception("Loyalty redeem error"); await update.callback_query.answer("خطا.", show_alert=True); return
         _clear(update.effective_user.id, BOT_ID)
-        await _edit_text(update, f"✅ {result['points']} امتیاز → {result['toman']:,} تومان.⭐ موجودی: {result['balance_after']}",
+        await _edit_text(update, context, f"✅ {result['points']} امتیاز → {result['toman']:,} تومان.⭐ موجودی: {result['balance_after']}",
                         kb.loyalty_menu_kb())
         await update.callback_query.answer()
 
@@ -819,7 +819,7 @@ async def make_user_handlers(db: Database, bot_token: str):
     # ── Topup ───────────────────────────────────────────────────
     async def _cb_start_topup(update, context):
         _set_state(update.effective_user.id, WalletTopup.waiting_amount.state, BOT_ID)
-        await _edit_text(update, "💰 مبلغ شارژ (تومان، حداقل 1000):", reply_markup=kb.cancel_kb())
+        await _edit_text(update, context, "💰 مبلغ شارژ (تومان، حداقل 1000):", reply_markup=kb.cancel_kb())
         await update.callback_query.answer()
 
     async def _process_topup_amount(update, context):
@@ -849,7 +849,7 @@ async def make_user_handlers(db: Database, bot_token: str):
             except Exception: logger.exception("Topup notif failed for %s", aid)
         _clear(uid, BOT_ID)
         await context.bot.send_message(chat_id=update.effective_message.chat.id, text="✅ ثبت شد. منتظر تایید باشید.", reply_markup=kb.menu_for_user(db, uid))
-        await _send_inline_main_menu(update, uid, db)
+        await _send_inline_main_menu(update, context, uid, db)
 
     async def _topup_wrong(update, context):
         await context.bot.send_message(chat_id=update.effective_message.chat.id, text="عکس رسید را بهصورت Photo بفرستید.")
@@ -871,7 +871,7 @@ async def make_user_handlers(db: Database, bot_token: str):
             try: await context.bot.send_message(aid, txt, reply_markup=kb.contact_reply_kb(u.id))
             except: logger.exception("Support msg failed for %s", aid)
         await context.bot.send_message(chat_id=update.effective_message.chat.id, text="پیام شما برای پشتیبانی ارسال شد.", reply_markup=kb.menu_for_user(db, u.id))
-        await _send_inline_main_menu(update, u.id, db)
+        await _send_inline_main_menu(update, context, u.id, db)
         _clear(u.id, BOT_ID)
 
     # ── mm: inline menu bridge ──────────────────────────────────
@@ -901,7 +901,7 @@ async def make_user_handlers(db: Database, bot_token: str):
         await asyncio.to_thread(db.add_or_update_user, uid, update.effective_user.username or "", update.effective_user.first_name or "")
         w = await asyncio.to_thread(db.get_setting, "welcome_text")
         await context.bot.send_message(chat_id=update.effective_message.chat.id, text=w, reply_markup=kb.menu_for_user(db, uid))
-        await _send_inline_main_menu(update, uid, db)
+        await _send_inline_main_menu(update, context, uid, db)
 
     # ── Build handler list ──────────────────────────────────────
     btn_buy = await asyncio.to_thread(db.get_setting, "btn_buy")
