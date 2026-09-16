@@ -389,7 +389,7 @@ async def make_user_handlers(db: Database, bot_token: str):
             if it.product_type != "digital": continue
             fs = await asyncio.to_thread(db.get_product_files, it.product_id)
             if fs:
-                try: await deliver_pattern_to_user(context.bot, uid, it.product_name, [f["file_id"] for f in fs], 0, result.order_id)
+                try: await deliver_pattern_to_user(Bot(token=cfg.BOT_TOKEN), uid, it.product_name, [f["file_id"] for f in fs], 0, result.order_id)
                 except: logger.exception("Digital delivery failed for #%s", result.order_id)
         sm = await asyncio.to_thread(cart_svc.cart_summary, db, uid)
         await _edit_text(update, context, "✅ سفارش ثبت شد! پس از تایید ادمین، فایل الگو ارسال میشود.",
@@ -1324,7 +1324,7 @@ async def make_admin_handlers(db: Database, bot_token: str):
         try:
             ln = f"\n🎁 {awarded} امتیاز باشگاه مشتریان" if awarded > 0 else ""
             await context.bot.send_message(order["user_id"], f"✅ خرید شما تایید شد!\n🧵 {pn}{ln}")
-            await deliver_pattern_to_user(context.bot, order["user_id"], pn, [f["file_id"] for f in files],
+            await deliver_pattern_to_user(Bot(token=cfg.BOT_TOKEN), order["user_id"], pn, [f["file_id"] for f in files],
                                            final_price=order.get("final_price"), order_id=oid)
             await _notify_inline(context.bot, order["user_id"])
         except: pass
